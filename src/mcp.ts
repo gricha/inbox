@@ -202,6 +202,7 @@ function overviewLines(o: Overview): string {
     }
   }
   for (const e of o.config_errors) lines.push(`config error ${e.path}: ${e.message}`);
+  if (o.update?.available) lines.push(`update: Inbox ${o.update.latest} is out (this is ${o.update.current}), in the window's sidebar`);
   return lines.join("\n") + "\n" + json(o);
 }
 

@@ -622,3 +622,11 @@ export function desktopEntry(exec: string, args: string[]): string {
     "",
   ].join("\n");
 }
+
+// electron-updater replaces an AppImage or the Windows installer's install in place; the macOS build is ad hoc signed,
+// which Squirrel.Mac refuses, and a tar.gz or zip has nothing to run: those get the release page.
+export function selfUpdates(platform: string, env: NodeJS.ProcessEnv, installed: boolean): boolean {
+  if (platform === "linux") return !!env.APPIMAGE;
+  if (platform === "win32") return installed;
+  return false;
+}

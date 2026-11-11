@@ -92,11 +92,13 @@ import type {
   Stack,
   Status,
   Until,
+  UpdateView,
   Work,
 } from "./types.ts";
 import { byPart, isCoordinator, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
+import { RELEASES, Updates, type AppUpdater } from "./updates.ts";
 import {
   catchAllOf,
   migrateBotAsk,
@@ -270,6 +272,7 @@ export interface DeskOptions {
   mcpUrl?: string; // its /mcp, which a Codex run is given as the desk's own MCP server
   sessions?: Roots; // where the Sessions source reads; tests point it at fixtures
   open?: (url: string) => Effect.Effect<void, CommandError>; // opens a session's link on this computer; tests record it
+  app?: AppUpdater; // the packaged app running this desk: what a newer release is checked against, and its install
 }
 
 // Agents' hand-offs (desk_add) of an item, by the seq of the pin each made.
@@ -368,6 +371,7 @@ export class Desk {
   automations: Automations;
   urgency: Urgency; // the Inbox's sections and order: criteria and scores
   jobs: Jobs; // the work Claude owes the owner
+  updates: Updates; // a newer Inbox than the packaged app running this desk
 
   loaded: LoadedConfig | null = null;
   configText = "";
@@ -437,6 +441,17 @@ export class Desk {
     this.opener = opts.open ?? openLink;
     this.automations = new Automations(this);
     this.urgency = new Urgency(this);
+    this.updates = new Updates({
+      latest: () => this.gh.api.latestRelease(`${RELEASES.owner}/${RELEASES.repo}`),
+      app: opts.app ?? null,
+      runner: this.runner,
+      log: (m) => {
+        this.log(m);
+      },
+      changed: () => {
+        this.changed();
+      },
+    });
   }
 
   // Sync state across connectors: busy if any is, the first error, the oldest finished pass.
@@ -517,6 +532,7 @@ export class Desk {
     this.coordinator.start();
     this.sessions.start();
     this.jobs.start();
+    this.updates.start();
   }
 
   // Kills a judge call in progress.
@@ -532,6 +548,7 @@ export class Desk {
     this.automations.stop();
     this.urgency.stop();
     this.jobs.stop();
+    this.updates.stop();
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
@@ -1585,6 +1602,7 @@ export class Desk {
         agent: this.settings["agent.coordinator"],
         ai_agent: agentName(this.settings["agent.harness"]),
         rate_limit: this.gh.api.rateLimit(),
+        update: this.updates.view(),
       };
     });
   }
@@ -3654,6 +3672,11 @@ export class Desk {
       yield* this.reloadConfig(true);
       return { ok: true, errors: [], warnings };
     });
+  }
+
+  // The packaged app downloads the newer release and restarts into it, where it can (UpdateView.install).
+  update(): Effect.Effect<UpdateView, Conflict> {
+    return this.updates.install();
   }
 
   // The tray's and the dock's count: an agent's question waiting on you counts as now.

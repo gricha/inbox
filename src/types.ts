@@ -632,6 +632,18 @@ export interface Overview {
   ai_agent: "Claude" | "Codex"; // who sorts and reviews (agent.harness), as the window names it
   rate_limit: { remaining: number; reset_at: string } | null;
   sentry?: { dsn: string; release: string | undefined } | null; // where the UI reports its errors: absent or null, nowhere
+  update?: UpdateView | null; // absent or null: no packaged app runs this desk (a checkout, desk serve), so nothing to update
+}
+
+// The packaged app's version against Inbox's latest GitHub Release.
+export interface UpdateView {
+  current: string;
+  latest: string | null; // null until a check found a release
+  url: string | null; // the latest release's page, where its builds are
+  available: boolean; // latest is newer than current
+  install: boolean; // the app downloads and restarts into it itself (POST /api/update); otherwise url is where to get it
+  installing: boolean;
+  error: string | null; // why the last install failed; install is false after one
 }
 
 // A source of items and events: GitHub today.

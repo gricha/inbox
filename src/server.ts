@@ -38,13 +38,14 @@ import { createMcpServer } from "./mcp.ts";
 import { instrument, logLine } from "./sentry.ts";
 import { openUrl } from "./notify.ts";
 import { readOmarchy, watchOmarchy } from "./omarchy.ts";
+import type { AppUpdater } from "./updates.ts";
 import { Remote, readTailnet, serveOff, serveOn } from "./remote.ts";
 import { dropHostSession, fetchPr, generateReview, loggedIn } from "./review.ts";
 import { isSecret } from "./settings.ts";
 import { FIELDS } from "./signals.ts";
 import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt, type RemoteView } from "./types.ts";
 
-const VERSION = "0.1.0";
+const VERSION = (JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
 export const DEFAULT_PORT = 47823;
 const DIST = fileURLToPath(new URL("../web/dist/", import.meta.url));
 const TYPES: Record<string, string> = {
@@ -797,6 +798,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   const mcpUrl = `http://localhost:${port}/mcp`;
   app.get("/api/agents", (c) => respond(c, desk.agentStatus(mcpUrl), { log, read: true }));
   app.post("/api/agents/connect", (c) => respond(c, desk.connectAgent(mcpUrl), { log }));
+  app.post("/api/update", (c) => respond(c, desk.update(), { log }));
   app.get("/api/status", (c) =>
     respond(
       c,
@@ -981,6 +983,7 @@ type ServeOptions = {
   log?: (msg: string) => void;
   writer?: GitHubWriter; // a stand-in for live checks that must not write to GitHub
   tailscale?: boolean; // desk serve --tailscale: serve over Tailscale whatever the setting says
+  app?: AppUpdater; // the packaged app runs this desk: it checks for a newer Inbox
 };
 type Served = { url: string; desk: Desk; close(): Promise<void> };
 
@@ -1108,6 +1111,7 @@ export const startDesk = Effect.fnUntraced(function* (
     review: { fetchPr, generate: generateReview, loggedIn },
     writer: opts.writer ?? createWriter({ log }),
     mcpUrl: `http://localhost:${port}/mcp`,
+    app: opts.app,
   });
   const remote = new Remote(desk.store);
   const app = createApp(desk, port, remote);

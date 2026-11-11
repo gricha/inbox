@@ -87,6 +87,8 @@ export interface GitHub {
   // GitHub's suggestions first, then users, then teams
   reviewers(repo: string, number: number, q: string): Effect.Effect<Reviewer[], GitHubReadError>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
+  // A repo's latest published release (not a draft or prerelease); null when it has none.
+  latestRelease(repo: string): Effect.Effect<{ tag: string; url: string } | null, GitHubReadError>;
 }
 
 type RawSaid = { id: string; author: Actor | null; body: string; createdAt: string; url: string };
@@ -448,6 +450,21 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     return first ?? head(new Headers(), false);
   });
 
+  const latestRelease = (repo: string): Effect.Effect<{ tag: string; url: string } | null, GitHubReadError> =>
+    client.get(`/repos/${repo}/releases/latest`).pipe(
+      Effect.flatMap((r) =>
+        decode(() => {
+          const d = r.data as { tag_name: string; html_url: string };
+          if (typeof d.tag_name !== "string" || typeof d.html_url !== "string") throw new Error("no tag_name or html_url");
+          return { tag: d.tag_name, url: d.html_url };
+        }),
+      ),
+      Effect.catchIf(
+        (e) => e._tag === "GitHubHttpError" && e.status === 404,
+        () => Effect.succeed(null),
+      ),
+    );
+
   return {
     viewer: () => client.query<{ viewer: { login: string } }>(VIEWER).pipe(Effect.flatMap((d) => decode(() => d.viewer.login))),
     search,
@@ -461,5 +478,6 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     lookup,
     reviewers,
     rateLimit: () => client.rateLimit(),
+    latestRelease,
   };
 }

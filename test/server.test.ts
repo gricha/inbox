@@ -104,6 +104,14 @@ test("rejects foreign Host and Origin", async () => {
   t.cleanup();
 });
 
+test("a desk no packaged app runs says no update, and Update is a Conflict", async () => {
+  const t = await setup();
+  assert.equal((await t.json("/api/overview")).update, null);
+  const res = await t.req("/api/update", { method: "POST" });
+  assert.deepEqual([res.status, await res.json()], [409, { error: "Inbox is up to date", tag: "Conflict" }]);
+  t.cleanup();
+});
+
 test("an /api path the desk doesn't route is a NotFound, and a window-only delete a Forbidden, both through respond", async () => {
   const t = await setup();
   const res = await t.req("/api/nope", { method: "POST" });

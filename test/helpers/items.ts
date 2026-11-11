@@ -212,4 +212,8 @@ export class FakeGitHub implements GitHub {
   rateLimit() {
     return null;
   }
+
+  latestRelease(): Effect.Effect<{ tag: string; url: string } | null, GitHubReadError> {
+    return Effect.succeed(null);
+  }
 }

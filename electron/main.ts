@@ -20,11 +20,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Cause, Effect, Exit, Fiber, Result } from "effect";
-import { BadRequest, Forbidden, messageOf, type FsError } from "../src/errors.ts";
+import { BadRequest, Forbidden, messageOf, Upstream, type FsError } from "../src/errors.ts";
+import { readToken } from "../src/github/client.ts";
 import { deskHome, settleHome } from "../src/home.ts";
 import { report } from "../src/sentry.ts";
 import { DEFAULT_PORT, startServer } from "../src/server.ts";
 import { readSettings, settingsPath } from "../src/settings.ts";
+import { RELEASES } from "../src/updates.ts";
 import type { Card, FocusView, SettingsView, SourceStatus } from "../src/types.ts";
 import {
   appRunner,
@@ -65,6 +67,7 @@ import {
   request,
   restoreBounds,
   saveBounds,
+  selfUpdates,
   SHELL_PATH_COMMAND,
   sourceDir,
   themeColors,
@@ -403,7 +406,10 @@ function connect(): Effect.Effect<boolean> {
       }
       log(`starting a desk on ${deskUrl}`);
       const started = yield* Effect.result(
-        Effect.tryPromise({ try: () => startServer({ port, home: settled, notify, log }), catch: (cause) => new DeskFailed({ cause }) }),
+        Effect.tryPromise({
+          try: () => startServer({ port, home: settled, notify, log, app: app.isPackaged ? updater() : undefined }),
+          catch: (cause) => new DeskFailed({ cause }),
+        }),
       );
       if (Result.isSuccess(started)) {
         server = started.success;
@@ -651,6 +657,58 @@ function showPage(text: string): void {
       ),
     ),
   );
+}
+
+// ---------------------------------------------------------------- updates
+
+// What the desk checks a newer release against, and the install where electron-updater can do one (selfUpdates).
+function updater(): { version: string; install?: () => Effect.Effect<void, Upstream> } {
+  const nsis = fs.existsSync(path.join(path.dirname(process.execPath), `Uninstall ${app.getName()}.exe`));
+  return { version: app.getVersion(), install: selfUpdates(process.platform, process.env, nsis) ? installUpdate : undefined };
+}
+
+// The latest release, with the owner's token since the repo is private: downloaded, then the app quits into it.
+function installUpdate(): Effect.Effect<void, Upstream> {
+  const failed = (what: string) => (cause: unknown) => new Upstream({ message: `${what}: ${messageOf(cause)}`, cause });
+  return Effect.gen(function* () {
+    const token = yield* readToken().pipe(Effect.mapError(failed("no GitHub token")));
+    const { autoUpdater } = (yield* Effect.tryPromise({ try: () => import("electron-updater"), catch: failed("loading the updater") }))
+      .default;
+    autoUpdater.logger = { info: log, warn: log, error: log };
+    autoUpdater.autoDownload = false;
+    autoUpdater.autoInstallOnAppQuit = false;
+    autoUpdater.setFeedURL({ provider: "github", owner: RELEASES.owner, repo: RELEASES.repo, private: true, token });
+    // Its failures are also emitted as "error", which throws with no listener; the install's are only emitted.
+    let refused: unknown = null;
+    const onError = (e: unknown) => {
+      refused = e;
+    };
+    autoUpdater.on("error", onError);
+    yield* Effect.gen(function* () {
+      const found = yield* Effect.tryPromise({ try: () => autoUpdater.checkForUpdates(), catch: failed("checking the release") }).pipe(
+        Effect.filterOrFail(
+          (r): r is NonNullable<typeof r> => !!r?.isUpdateAvailable,
+          () => new Upstream({ message: "the latest release has no newer build for this computer" }),
+        ),
+      );
+      yield* Effect.tryPromise({ try: () => autoUpdater.downloadUpdate(), catch: failed("downloading the update") });
+      let appImage = process.env.APPIMAGE;
+      autoUpdater.once("appimage-filename-updated", (p: string) => {
+        appImage = p;
+      });
+      log(`installing Inbox ${found.updateInfo.version}`);
+      // The Windows installer starts the new build itself; an AppImage started now would lose the single-instance lock to this one.
+      autoUpdater.quitAndInstall(true, !linux);
+      if (refused) yield* Effect.fail(failed("installing the update")(refused));
+      if (linux && appImage) app.relaunch({ execPath: appImage, args: [] });
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          autoUpdater.off("error", onError);
+        }),
+      ),
+    );
+  });
 }
 
 // A link the window was asked to open, in the browser.
