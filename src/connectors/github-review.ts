@@ -1,9 +1,9 @@
-// The AI review's default instructions, the GitHub plugin's review skill: one section per part of the answer, by a stable
+// The AI review's default instructions, the GitHub plugin's review skill: one section per part of the answer (and one on anchoring), by a stable
 // id the owner's ~/.inbox/review.md can replace (`## <id>`) or switch off (`off: <id>, …`). The schema, caps, fence and
 // checker live in src/review.ts; this is only what the reviewer is asked to write.
 
 // Bumped when the default instructions change, so a review says which it was written with.
-export const REVIEW_SKILL_VERSION = "2";
+export const REVIEW_SKILL_VERSION = "3";
 
 export interface SkillContext {
   me: string; // the owner's login
@@ -92,33 +92,35 @@ const SECTIONS: readonly { id: string; text: (c: SkillContext) => string }[] = [
         : `- since: an empty string.`,
   },
   {
+    id: "anchors",
+    text: () =>
+      `Anchoring (concerns, look, interfaces, improvements and notes): each diff line starts with its number: n12 is line 12 of the new file (added "+" or unchanged), o11 is line 11 of the old file (removed "-"). path: exactly as after "file:". side "new" with an n number; side "old" with an o number only for a removal with nothing added. line: that number. quote: that line of the diff, copied exactly, without its number or sign. Anchor on the first line of the change it's about.`,
+  },
+  {
     id: "concerns",
     text: (c) =>
-      `- concerns: defects or risky behaviour changes you'd bet on: code in this diff that does the wrong thing for a concrete input or caller.${c.mine ? ` Write them for the author: what a reviewer would stop on, worth fixing before asking for review.` : ""} No style; no "add tests" unless a specific path this diff adds is untested and that is what makes it risky. Each one:` +
-      ` body, two to four sentences: what goes wrong, when (a concrete input, caller or path through this code), and what would fix it;` +
-      ` path, side and line: where it is, anchored as notes are (below); quote: the line or lines of the diff that show it, copied exactly, without the n12/o11 number or the +/- sign.` +
+      `- concerns: defects or risky behaviour changes you'd bet on: code in this diff that does the wrong thing for a concrete input or caller.${c.mine ? ` Write them for the author: what a reviewer would stop on, worth fixing before asking for review.` : ""} No style; no "add tests" unless a specific path this diff adds is untested and that is what makes it risky. Each: body, two to four sentences: what goes wrong, when (a concrete input, caller or path through this code), and what would fix it; anchored (path, side, line, quote: the line or lines that show it).` +
       ` The desk shows each concern on its line in the code, so don't also write it as a note.`,
   },
   {
     id: "look",
     text: (c) =>
-      `- look: the places ${c.me} must read even if they read nothing else: where the change's correctness hinges (the new invariant, the boundary check, the migration step). Each: path, side, line (its first line), end (its last, at most 15 lines on, in the same hunk), quote (the first line, copied exactly), why (at most twelve words: what to verify there). Not a concern again.`,
+      `- look: the places ${c.me} must read even if they read nothing else: where the change's correctness hinges (the new invariant, the boundary check, the migration step). Each: anchored on its first line, end (its last line, at most 15 lines on, in the same hunk), why (at most twelve words: what to verify there). Not a concern again.`,
   },
   {
     id: "interfaces",
     text: () =>
-      `- interfaces: what this PR adds, changes or removes that other code, services, users, stored data or the PRs above it rely on: exported functions and types, HTTP routes, schemas and migrations, events and wire formats, config keys, CLI flags, permissions. Not internal helpers. Each: name, kind, change, breaking (true only when an existing caller or stored data stops working as before), impact (one sentence: who depends on it, a stack member above by its title included, and what changes for them), and where it is (path, side, line, quote).`,
+      `- interfaces: what this PR adds, changes or removes that other code, services, users, stored data or the PRs above it rely on: exported functions and types, HTTP routes, schemas and migrations, events and wire formats, config keys, CLI flags, permissions. Not internal helpers. Each: name; kind (function, type, endpoint, schema, config, event, cli, permission or other); change (added, changed or removed); breaking (true only when an existing caller or stored data stops working as before); impact (one sentence: who depends on it, a stack member above by its title included, and what changes for them); anchored where it is.`,
   },
   {
     id: "improvements",
     text: () =>
-      `- improvements: apart from concerns: a change that makes this PR clearly better and that its author could make in this PR (a simpler shape, a guard on a path the diff adds, a name that misleads). Not style, not taste, not another PR's work. Each: body (one or two sentences: what and why), anchored like a concern.`,
+      `- improvements: apart from concerns: a change that makes this PR clearly better and that its author could make in this PR (a simpler shape, a guard on a path the diff adds, a name that misleads). Not style, not taste, not another PR's work. Each: body (one or two sentences: what and why), anchored.`,
   },
   {
     id: "notes",
     text: (c) =>
-      `- notes: short notes, written for ${c.me} as the reviewer, within the in-code budget: context on the hunks worth explaining, one or two sentences each, about the change this PR makes there: what's different now and why it matters (a behaviour that changed, a caller it affects, an assumption it relies on). Never describe what a function or the code does in general, and never restate the diff. Not line-by-line commentary: skip imports, renames, formatting, tests that just mirror the code, and generated files.\n` +
-      `  quote: the line of the diff the note is about, copied exactly, without its number or sign. Anchor each note on the first line of the change it explains. Diff lines start with their line number: n12 is line 12 of the new file (added "+" or unchanged), o11 is line 11 of the old file (removed "-"). Use side "new" with an n number; use side "old" with an o number only for a removal with nothing added. path is exactly as after "file:". look, interfaces and improvements anchor the same way.`,
+      `- notes: short notes, written for ${c.me} as the reviewer, within the in-code budget: context on the hunks worth explaining, one or two sentences each, about the change this PR makes there: what's different now and why it matters (a behaviour that changed, a caller it affects, an assumption it relies on). Never describe what a function or the code does in general, and never restate the diff. Not line-by-line commentary: skip imports, renames, formatting, tests that just mirror the code, and generated files. Each: body, anchored.`,
   },
   {
     id: "chunks",

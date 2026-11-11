@@ -1,6 +1,6 @@
 # Where Inbox is going
 
-Inbox is the owner's control center for mundane engineering work, and a partner for Claude Code, Codex or whatever agent harness they use. Most of what reaches an engineer is noise; the desk's job is to show only what needs them, sorted by priority, and to let agents handle the rest.
+Inbox is the owner's control center for routine engineering work, and a partner for whatever agent they use (Claude Code, Codex, OpenCode). Most of what reaches an engineer is noise. The desk shows only what needs them, in priority order, and lets agents handle the rest.
 
 ## The model
 
@@ -11,24 +11,23 @@ connectors ──events──▶ event log ──▶ judge ──▶ feed items 
    └──────────────────── actions (approve, comment, push) ◀───────────────────────┘
 ```
 
-- **Connectors** are data accessors. GitHub is the first; Linear, Slack and Sentry can follow. A connector turns its source into a continuous stream of events (review requested, someone else approved, CI failed, new comment, mention, merged) and snapshots of the items they concern.
-- **The event log** keeps every event. The UI shows an item's recent activity; the coordinator reads it each tick.
-- **The judge** decides what reaches the feed: structured rules per connector first (cheap, deterministic: "only repos X, Y, Z or direct references"), then the agent for the gray zone, guided by a prose policy the owner writes by talking to an agent.
-- **The feed** is one list sorted by priority. Items resolve on their own when the world resolves them (someone else approved, merged, closed, no longer requested) and come back if that stops being true.
-- **Lanes**: Review (other people's PRs, each arriving with an AI summary, concerns and notes on the changes) and Merging (the owner's own PRs they've handed off; the coordinator keeps CI green, handles members' comments and merges them, and hands back only what needs the owner).
-- **The coordinator** is one background Claude Code session the desk starts, keeps running and wakes with news on PRs in Merging, with the desk's MCP tools and skill; the owner watches it on claude.ai or with `claude attach`. It gets handed-off PRs merged, and maintains the policy and config when asked in prose.
-- **Review in the desk**: Linear-style inline PR review with Pierre's `@pierre/diffs`, AI notes on the changed code, one click to approve.
+- **Connectors** turn a source into a stream of events (review requested, approved, CI failed, new comment, mention, merged) plus snapshots of the items they concern. GitHub is the first; Linear, Slack and Sentry can follow.
+- **The event log** keeps every event. The UI shows an item's recent activity from it; the coordinator reads it on each wake.
+- **The judge** decides what reaches the feed. Structured rules run first (cheap and exact). The agent handles the gray zone, guided by a prose policy the owner writes.
+- **The feed** is one list in priority order. Items resolve on their own when the world resolves them (approved by someone else, merged, closed, no longer requested), and come back if that stops being true.
+- **Merging** holds the owner's PRs they've handed off. The coordinator keeps CI green, handles members' comments, merges, and hands back only what needs the owner.
+- **The coordinator** is one background agent session the desk starts and wakes with news, using the desk's MCP tools and skill. It also edits the policy and config when asked in prose.
+- **Review in the desk**: inline PR review (with `@pierre/diffs`), AI notes on the changed code, one click to approve.
 
-## Decisions (defaults; the owner can change any of them later)
+## Decisions
 
-1. **Events without webhooks.** GitHub webhooks need a public URL and admin rights. The GitHub connector polls the notifications API (cheap, about every 60 s, `If-Modified-Since`, honours `X-Poll-Interval`) to learn what changed, refreshes those items, and derives events by comparing snapshots. A periodic search pass reconciles. A webhook relay can plug into the same event log later.
-2. **Writing to GitHub.** The desk writes only on the owner's click: approve, and Ready for review on their own draft, through one module with an allowlist, each logged. The coordinator is the owner's own Claude Code: it pushes to and merges the owner's PRs it was handed, pushes to the owner's own open PR when they ask it for a change from the desk, never pushes to anyone else's, and never posts comments or replies as them.
-3. **The coordinator.** The owner's own Claude Code, started by the desk as a background session (`claude --bg`) and woken only by events: a hand-off, CI finishing, a review or comment, a conflict. No timers or loops in it; the desk only checks every 5 minutes that it's still running. Claude's daemon runs it, so the desk restarting leaves it alone.
-4. **AI cost.** Structured rules run first, so only items that would reach the owner get an AI summary and review. Results are cached per head commit, and generation runs a couple at a time.
+Defaults; the owner can change any of them.
 
-## Slices
+1. **Events without webhooks.** Webhooks need a public URL and admin rights. The GitHub connector polls the notifications API (about every 60 s, `If-Modified-Since`, honouring `X-Poll-Interval`), refreshes what changed, and derives events by comparing snapshots. A periodic search reconciles. A webhook relay could feed the same event log later.
+2. **Writing to GitHub only on a click.** The desk writes only when the owner clicks, through one module with an allowlist, and logs each write. The coordinator is the owner's own agent: it pushes to and merges PRs it was handed, and pushes to the owner's own PR when asked from the desk. It never pushes to anyone else's PR and never posts as the owner.
+3. **The coordinator is woken, not looping.** The desk wakes it on events only: a hand-off, CI finishing, a review or comment, a conflict, an ask. The desk checks every 5 minutes that it's still running. On Claude Code, its daemon runs the session, so a desk restart leaves it alone.
+4. **AI cost.** Rules run first, so only items that could reach the owner get an AI review. Reviews are cached per head commit and run a couple at a time.
 
-1. Connector interface and event log; GitHub sync on top of them (notifications + reconcile); auto-resolve.
-2. Prose policy and the judge; the coordinator session, able to edit policy and config.
-3. PR review view: Pierre diffs, AI summary, concerns and notes on changes, approve.
-4. Merging, and the coordinator getting handed-off PRs merged.
+## Next
+
+A small core with every source as a plugin: [plugins.md](plugins.md).

@@ -172,3 +172,9 @@ test("the prompt asks for risk first and, for your own PR, concerns written for 
   assert.match(p, /Write them for the author/);
   assert.match(p, /- verdict: what me should do next with their own PR/);
 });
+
+test("switching notes off keeps how to anchor a comment on a line, which concerns, look and the rest need too", () => {
+  const t = skillText({ me: "me", mine: false, since: null, stacked: false }, readOwnSkill("off: notes"));
+  assert.match(t, /- notes: always an empty list\./);
+  assert.match(t, /n12 is line 12 of the new file/);
+});

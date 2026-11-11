@@ -1,8 +1,24 @@
 # API
 
-The desk server is the one process that owns your queue. The desktop app runs it, or `desk serve` does. While it runs, everything below is on `http://localhost:47823` (`DESK_PORT` changes the port): the web UI, a JSON API, a server-sent events stream, and an MCP endpoint for agents. The CLI, `desk mcp` and the web UI are all clients of it.
+The desk server is the one process that owns your queue. The desktop app runs it, or `desk serve` does. It serves on `http://localhost:47823` (`DESK_PORT` changes the port):
 
-Types named here are in [src/types.ts](../src/types.ts), which is the source of truth.
+- the web UI,
+- a JSON API ([HTTP routes](#http-routes)),
+- a server-sent events stream ([Events](#events)),
+- an MCP endpoint at `/mcp` for agents ([MCP tools](#mcp-tools)).
+
+The CLI, `desk mcp` and the web UI are all clients of it. Types live in [src/types.ts](../src/types.ts), the source of truth.
+
+## Contents
+
+- **Reference:** [Connect an agent](#connect-an-agent) · [MCP tools](#mcp-tools) · [HTTP routes](#http-routes) · [Main types](#main-types) · [Events](#events)
+- **Agents and models:** [Your own agent](#your-own-agent) · [The decision model](#the-decision-model-openrouter)
+- **Reviews:** [The AI review](#the-ai-review) · [What reviewers said](#what-reviewers-said)
+- **Sorting:** [Rules: built in and your own](#rules-built-in-and-your-own) · [The policy and the judge](#the-policy-and-the-judge) · [Your areas](#your-areas) · [Urgency](#urgency)
+- **Working for you:** [The coordinator](#the-coordinator) · [Asks](#asks) · [Sessions](#sessions) · [Automations](#automations)
+- **Items:** [Stacks](#stacks) · [Dependencies](#dependencies) · [Adding](#adding) · [Resolved](#resolved) · [Opened for you](#opened-for-you)
+- **Your PRs:** [Merging](#merging) · [Ready for review](#ready-for-review) · [Nobody's asked to review it](#nobodys-asked-to-review-it) · [The More menu](#the-more-menu)
+- [Security model](#security-model)
 
 ## Connect an agent
 
@@ -10,7 +26,9 @@ Agents reach the queue over MCP. The desk serves it at `/mcp` whenever it runs, 
 
 ### Your agent (Settings → Agent)
 
-The agent the desk works with is a setting, `agent.harness`: `claude-code` (the default), `codex` or `opencode`, which every agent run follows (Your own agent, below). Connect and its status follow the setting (`driverOf` in `src/agents.ts`; `desk connect codex` or `desk connect opencode` still gives that agent the desk's tools and skill). While Claude Code lacks the desk's MCP tools or the Inbox skill ([skills/inbox/SKILL.md](../skills/inbox/SKILL.md)), Settings → Agent says so in a row under the agent's name, and its **Connect Claude Code** button does what's missing (`POST /api/agents/connect`; **Update the skill** when only the skill is out of date); while another skill or MCP server of yours has the name `inbox`, the row says which, and where it points, before you press; when both are there, it shows nothing. There's nothing to pick: every agent the desk runs is your own Claude Code. If you also work in Codex, the CLI gives it the same tools. From a terminal:
+`agent.harness` picks your agent: `claude-code` (the default), `codex` or `opencode`. Every agent run the desk makes follows it ([Your own agent](#your-own-agent)), and so does Connect (`driverOf()` in `src/agents.ts`).
+
+Settings → Agent shows a row when your agent lacks the desk's MCP tools or the Inbox skill ([skills/inbox/SKILL.md](../skills/inbox/SKILL.md)). **Connect &lt;agent&gt;** installs what's missing (`POST /api/agents/connect`); **Update the skill** shows when only the skill is out of date. When both are in place the row is gone. From a terminal:
 
 ```bash
 desk connect                   # what Claude Code is missing, and the commands that fix it
@@ -19,606 +37,576 @@ desk connect codex             # Codex instead
 desk connect opencode          # or OpenCode
 ```
 
-Connecting copies the skill (and refreshes a copy that differs from the repo's), then registers the MCP server if it isn't registered yet, then lets go of what it installed before the rename to Inbox: the `review-desk` server (`claude mcp remove --scope user review-desk`, `codex mcp remove review-desk`) when it's this desk's (another tool's `review-desk` stays, and one at another desk's port is left for that desk: a desk started on a scratch port against your home never points `inbox` at itself) and the skill's copy in `skills/review-desk/`, when that folder holds only the skill's own `SKILL.md`, named `review-desk` (anything else there is yours, and stays), saying each in the desk's log (`desk connect --apply` prints them). After that the owner's desk keeps it current: each time it starts (the app's own desk, or `desk serve` on its home as it is now: `~/.inbox`, `~/.review-desk` until that moves, or a link to either), and whenever the repo's `SKILL.md` changes while it runs, it refreshes each agent's installed copy that differs from the repo's, and does the same renaming for an agent connected before it (registering `inbox` first), and logs what it did; one agent's CLI failing (missing from the desk's PATH, say) is logged and tried again on the next start, and doesn't hold up the other agent's. It never installs a missing one, and a desk on any other `DESK_HOME` (a scratch desk, tests) leaves them alone:
-
 | Agent       | Registered when                                                | Registers with                                                                  | Skill                                      |
 | ----------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------ |
 | Claude Code | `~/.claude.json`'s `mcpServers["inbox"]` is the desk's         | `claude mcp add --transport http --scope user inbox http://localhost:47823/mcp` | `~/.claude/skills/inbox/SKILL.md`          |
 | Codex       | `~/.codex/config.toml`'s `[mcp_servers.inbox]` is the desk's   | `codex mcp add inbox --url http://localhost:47823/mcp`                          | `~/.agents/skills/inbox/SKILL.md`          |
 | OpenCode    | `~/.config/opencode/opencode.json`'s `mcp.inbox` is the desk's | `opencode mcp add inbox --url http://localhost:47823/mcp`                       | `~/.config/opencode/skills/inbox/SKILL.md` |
 
-`--scope user` makes Claude Code's entry available in every project. `claude mcp list` then shows `inbox: http://localhost:47823/mcp (HTTP) - ✔ Connected` while the desk runs, and a failed connection while it doesn't. The desk's means its `/mcp` on the desk's port (`localhost`, `127.0.0.1` or `[::1]`) or a stdio `desk mcp` (`bin/desk`, `bin/desk.cmd`, or node on the desk's own `src/cli.ts`) aimed at the desk's port (its entry's `DESK_PORT`, else the desk's own, else 47823; a helpdesk's `… mcp` isn't the desk's), and until it's renamed a `review-desk` that is the desk's counts too. `inbox` is a common name, so a server of yours by that name, or a skill of yours in `skills/inbox/` (one whose front matter isn't `name: inbox` with the desk's `desk_list` and `desk_item` tools in it; a `zendesk_search` isn't one), is never counted as the desk's, written over or removed: Settings and `desk connect` say it's taken (`needs: "taken"`, and `taken` says what holds it and where it points: `claude has another MCP server named inbox (http://localhost:47823/mcp), not this desk at http://localhost:47905/mcp: …` for your desk's own from before it moved port), and Connect refuses with those words and runs nothing until you rename or move yours, and the renaming leaves the desk's `review-desk` server or skill copy as it is, saying why in the log. If you added a stdio `inbox` before, it already counts as registered; to switch it to HTTP, run `claude mcp remove inbox -s user`, then Connect again (an older stdio `review-desk` is renamed to an HTTP `inbox` like any `review-desk`). Codex reads user skills from `~/.agents/skills` ([Codex skills](https://developers.openai.com/codex/skills)).
+`--scope user` makes Claude Code's entry work in every project; `claude mcp list` then shows `inbox: http://localhost:47823/mcp (HTTP) - ✔ Connected` while the desk runs. Codex reads user skills from `~/.agents/skills` ([Codex skills](https://developers.openai.com/codex/skills)).
 
-### Your own agent
+**What Connect does**, in order, logging each step (`desk connect --apply` prints them):
 
-Settings → Agent (`agent.harness`) picks who sorts and reviews: Claude Code (the default), Codex or OpenCode. The tool-less calls go through one seam, `askAgent()` in `src/review.ts`: the judge, the AI review and its check, the read of what reviewers said and an automation's question. They follow the setting from their next call, and choosing another agent retries at once what failed on the last. Your agent (the coordinator) and an automation's agent run (`decide: "agent"`) follow it too, on Codex as below (The coordinator, Automations): `codex exec`, and for your agent `codex exec resume`, with what of Claude Code's allow and deny lists Codex can hold; on OpenCode `opencode run`, and for your agent `opencode run --session`. The window and the settings' words name the chosen agent ("Sort my desk with Codex", "OpenCode is reviewing it"; `agentName()`, `agentDefs()` in `src/settings.ts`, `Overview.ai_agent`).
+1. Copies the skill, or refreshes a copy that differs from the repo's.
+2. Registers the MCP server if it isn't registered.
+3. Removes the old `review-desk` install: the `review-desk` MCP server when it's this desk's (`claude mcp remove --scope user review-desk`, `codex mcp remove review-desk`), and `skills/review-desk/` when it holds only the skill's own `SKILL.md`. Anything else there is yours and stays. A `review-desk` server at another desk's port is left for that desk.
 
-With OpenCode, each call is your `opencode` from PATH on your own providers and logins (`DESK_OPENCODE` only points tests at a fake): `opencode run --format json --pure --agent inbox-desk --title Inbox` (a new session's title keeps opencode from asking your small model for one, a second call carrying the prompt to another model), the prompt on stdin with the answer's JSON Schema after it (`opencode run` takes no schema), in `~/.inbox/agent`. The fence is the config the desk passes in `OPENCODE_CONFIG_CONTENT`, which OpenCode merges last over yours (and over an `OPENCODE_CONFIG_CONTENT` of your own, kept under it): its own agent, `inbox-desk`, whose permissions deny `*` and each permission OpenCode knows by name (`read`, `edit`, `bash`, `webfetch`, `task`, `skill`, …), so they come after your global rules and win; `mcp.<name>.enabled: false` for each of your MCP servers that `opencode debug config --pure` lists enabled (kept 5 minutes; one that can't be read refuses the call, as Codex's list does, in OpenCode's words); and `share: "disabled"`. `--pure` leaves out external plugins, which run code in the process whatever the permissions say. There's no `--model`: the agent has none, so your default model runs it. Its answer is its last text part; its events name no model, so its reviews say `opencode`. A tool-less call's session is deleted after it's read (`opencode session delete <id>`), as Claude Code keeps none. An `error` event with status 401 (or a message saying a login) pauses the desk in OpenCode's words (``OpenCode isn't logged in. Run `opencode auth login` in a terminal.``), 429 or 402 (credits run out) holds what asked, and anything else keeps its words. The login check is `opencode auth list`: logged in when it counts a stored credential or a provider's key set in the environment. A provider OpenCode can't load (no key at all) fails with OpenCode's own "Unexpected server error", which the desk can't tell from any other.
+**Keeping it current.** The owner's desk (home `~/.inbox`, `~/.review-desk` until that moves, or a link to either) refreshes each agent's installed skill when it starts and whenever the repo's `SKILL.md` changes, and does the same `review-desk` cleanup. It never installs a missing one. One agent's CLI failing (say, not on the desk's PATH) is logged, retried on the next start, and doesn't hold up the others. A desk on any other `DESK_HOME` (a scratch desk, tests) leaves agents alone.
 
-With Codex, each call is your `codex` from PATH on your own login (`DESK_CODEX` only points tests at a fake): `codex exec --json --sandbox read-only --ephemeral --skip-git-repo-check -C ~/.inbox/agent`, then `--disable` for `shell_tool`, `unified_exec`, `apps`, `plugins`, `browser_use`, `browser_use_external`, `in_app_browser`, `computer_use`, `image_generation`, `view_image`, `multi_agent`, `hooks` and `memories`, `-c web_search="disabled"`, `-c mcp_servers.<name>.enabled=false` for each of your MCP servers, `-c approval_policy="never"`, `--output-schema <file> -o <file> -`, the prompt on stdin. Codex has no "no tools" switch: this turns off everything that can run, reach out or act, and the read-only sandbox refuses a write. None of your MCP servers load: an override of the whole `mcp_servers` table merges with yours, so the desk asks `codex <the same --disable flags> mcp list --json` first (kept 5 minutes, and asked again when you choose another agent) and turns off each one listed enabled by name (a name a bare TOML key can't hold is quoted); `--disable plugins` already drops the servers plugins bring. A list that fails or can't be read refuses the call (`CodexServersUnknown`, "Couldn't confirm Codex's MCP servers are off, so it didn't run: …"), held like a logged-out agent, so a Codex call never runs with a server reachable. There's no `--model`, `--profile` or `--ignore-user-config`, so your model and the rest of your `config.toml` stay yours. The login check is `codex login status`, or, when that says no, a provider of yours that `config.toml` chooses (`model_provider`, as for OpenRouter) whose `env_key` is set in the desk's environment, which `codex login status` doesn't count. The schema and the last message go through two files in `~/.inbox/agent/`, removed after the run however it ends. The last message is the answer; with none, the turn's failure is the error: a login it needs pauses the desk as Claude Code's does, in Codex's words (``Codex isn't logged in. Run `codex login` in a terminal.``), a usage or rate limit holds what asked without spending a try, and anything else keeps its words. Codex's events name no model, so its reviews say `codex`.
+**What counts as the desk's entry:** its `/mcp` on the desk's port (`localhost`, `127.0.0.1` or `[::1]`), or a stdio `desk mcp` (`bin/desk`, `bin/desk.cmd`, or node on the desk's `src/cli.ts`) aimed at the desk's port (its `DESK_PORT`, else the desk's, else 47823). A stdio `inbox` you added already counts; to switch it to HTTP, run `claude mcp remove inbox -s user` and Connect again.
 
-With Claude Code, every agent the desk runs (the AI review, the judge and Claude's read of what reviewers said) is the `claude` CLI from your PATH under your own login (there's no setting for it: `DESK_CLAUDE` only points tests and QA at a fake), with your own model, effort and plugins: the desk passes no `--model`, no `--agents` or `--system-prompt`, no `--bare`, and sets no `ANTHROPIC_API_KEY` (one in the desk's own environment would reach them, as it would your own `claude -p`). What it does take away is reach: every run has `--strict-mcp-config`, so none of your MCP servers (Slack, Linear, GitHub, …) load, only the desk's own where a run has one. The AI review and the judge have no tools at all, so your settings bring only your model, effort and plugins. Each run is a process group of its own (taskkill `/T` on Windows), so stopping it stops what it started too (hooks, test runners); the desk stops every one when it closes (SIGTERM, SIGKILL 2 s later) and waits for them before it exits, so a restart under `node --watch` leaves none behind.
-
-One thing the desk can ask that isn't your agent, and only once you give it a key: the decision model, below.
-
-### The decision model (OpenRouter)
-
-An automation's question (`decide: "ask"`) is answered by your agent (Claude or Codex) unless `agent.decision_key` is set (Settings → Agent → More; an OpenRouter key). With one, each item is one request to OpenRouter's Decisions API (`src/decisions.ts`: `POST https://openrouter.ai/api/alpha/decisions`, `Authorization: Bearer <key>`, body `{ model, state, questions }` and nothing else; plain `fetch`, 30 s, four at once), to `agent.decision_model` (default `typesafe/jev-1.14`, pinned: OpenRouter's guide says each release's probabilities differ, and the desk acts on a fixed one). `state` is `{ note, item }`: the item's lines as the judge's prompt words it, under a note that calls it untrusted text, less the AI review's first sentence and the directories it touches (`Automations.lines(id, happened, true)`), which a decision about the item doesn't need. That is what leaves your computer, to OpenRouter and the model's provider, and nothing else of the item: its `owner/repo#number`, title and labels; who opened it (a bot's PR, for whom), whether it's a draft, how long ago it was opened and others were last active; a PR's size (+/− and files), CI, review decision and its base when stacked; when you last pushed to your own; its unresolved threads and who had the last word; what blocks it, what it needs that closed and what it blocks; how you were asked (by name, through a team, as CODEOWNERS, by whom), how often you review its author, whether it's your repo; who else is asked (people and teams); others' reviews (who approved, asked for changes, commented); the first 280 characters of its description; where it is on your desk (its bucket, board and why); and on an event's run what just happened ("CI went from green to red; dana commented"). The key's help in Settings says so in short. `questions` is one question, `decision`, whose `instructions` are the automation's instruction word for word: a `noul` (yes or no) when the automation may do one thing, its `criteria` saying what yes means; else a `choice` whose options are its `can` verbs and `leave`. The answer is read from `answers.decision`, strictly: a `noul`'s probability of yes, or a `choice`'s pick with its `probabilities[pick]`; the desk acts only at 0.8 or above (`SURE`), and a `leave`, a `refusal`, a pick with no probability or one below that leaves the item as it is. A decision model writes no prose, so the item's why is "the decision model's answer (91% sure)", or for a yes-or-no the instruction's first line and how sure it was. A missing or mistyped answer and any other 4xx are `DecisionModelError`, the run's error; 401, 402, 429, a 5xx and no answer at all (unreachable, or nothing in 30 s) are `DecisionModelDown` ("OpenRouter refused the decision model's key (401). Check it in Settings → Agent.", "OpenRouter's decision model failed: … (HTTP 500)."), which holds the run as a logged-out Claude does: not spent, nothing in it acted on (one item's failure holds the whole run), its events kept, asked again in 30 minutes, or at once when you save another key or model. With no key nothing in the desk calls OpenRouter. The key is a `secret` setting: kept in its own file, `<home>/secrets.json` (`secretsPath()`), never in `settings.json`, which people keep in a dotfiles repo through a link: written `0600` through a fresh temporary file and a rename, refused (a problem on `secrets.json`, nothing written) while it's a link or can't be read, and merged into the settings when they're read; a key found in `settings.json` moves there once when the desk starts (`Desk.migrateSecrets()`). Only the desk's own page sets or clears it: `PUT /api/settings` naming a secret setting from any other client (an agent, the CLI, curl) is 403 `Forbidden`, as approve is. An automation's agent run is denied reading it (`--disallowedTools Read(//<home>/secrets.json)`, and the same rule in its folder's deny list). It's sent only in that header, cut from any error text, never logged, and never sent back by `GET /api/settings`, `PUT /api/settings` or `desk settings`, where a set one reads `••••••••` (`SECRET_SET`; sending that back changes nothing, `""` or a reset clears it).
-
-### The AI review
-
-The same agent writes each PR's AI review: a verdict, a risk level, a summary (a short paragraph: what changes, how and why), concerns (each what goes wrong, when, and what would fix it), short notes anchored to lines of the diff, and a ranking of the diff's hunks. A comment is only worth showing if it's true, so each concern and note quotes the code it's about: `parseReview()` drops one whose quote isn't code in that file's diff (`backed()`: every line of the quote is in a line of the diff, ignoring whitespace, a copied n12/o11 number or +/- sign, and one has a letter or digit), then a second, separate run (`buildCheckPrompt()`, the same isolation, no tools) gets what the writer saw (the description, the diff, the since-your-review diff) and those comments with the code each quotes, and says for each whether the PR bears it out; only what it says holds is kept (an unclear one isn't; a check that fails fails the review, to be tried again). Then the caps (6 concerns, 12 notes counting them) and the ranking apply to what's left, each concern also a note on its line. `dropped` counts what the quote check and the second run took out, and the log says it. Claude Code runs as `claude -p --json-schema … --tools "" --strict-mcp-config --no-session-persistence` (`claude` from your PATH), and the review says which model wrote it, as Claude Code reports it (`modelUsage`); it gets the prompt on stdin in `~/.inbox/agent/`, an empty directory the AI review, the judge and Claude's read of what reviewers said share (Claude Code keeps a `~/.claude/projects` entry per directory, so the desk has one), with the PR text fenced as untrusted. When someone pushed since your last review (`me.pushed_since_review`), the prompt also carries the diff from the commit you reviewed to the head (`compare/<commit>...<head>`), and the review adds `since`: one sentence on what changed since you looked and whether it settles the concerns, which the card shows as its gist ("Since your review: …"). Reviews are kept per head commit. With `review.auto_ai` on (the default) the desk writes them in the background for open PRs in Now and Today, other people's and your own (drafts too; not while handed off for merge), each in its stack's context (the stack, bottom first, is in its prompt),, `review.at_once` at a time (eight by default; Settings → GitHub → More), in the queue's order (Now, then Today from the top, so the cards on screen are ready first), and for any PR whose review you open. Such a PR reaches the queue (`/api/queue`, `/api/focus`, the tray's count, MCP's `desk_list`, `desk ls` and the new-item notification) once its first review is written: until then `Desk.awaitsAi()` keeps it off, counted in `reviewing` (and `ItemDetail.held`), paused reviews included: only AI reviews turned off, or this commit's review out of tries, lets one through unreviewed. Once a PR has been on the queue (kv `shown:<id>`, set as the notifications pass sees it, and by your pin, restore or unmute) it isn't held again: a pause ending, a restart or a push leaves it where it is, and one with a review keeps its place while a new one is written for new commits (its pre-flight says stale). The notification for one comes when it reaches the queue; on a desk's first pass, held ones count as already there. Each review is a job in the desk's ledger of [Claude's work](architecture.md#claudes-work-srcjobsts), which outlives a restart: a failed try (in its words, or a run past 15 minutes, which the loop stops) is tried again 2, then 10 minutes later, before anything new, and after three it's failed for that commit until you ask (Try again, Ask Claude for one, `desk brief`); opening it or a sync doesn't start it again meanwhile, and with `review.auto_ai` off a failed try is failed at once. Two failures in a row on different PRs (an expired login fails every PR) pause these reviews nobody asked for, for 30 minutes: the queue says so once (`paused`; when the cause is the login, which stops the judge too, it says Claude is paused, as it does when the judge fails on it first), the review view says so on a PR that wasn't tried, asking with Ask Claude for one or Try again in the review (or `desk brief`) still runs, and a success or a change to `review.auto_ai` resumes them; a settings change also retries the PRs that failed. One call that works after a login failure (an AI review or the judge) retries everything else that failed on the login, without waiting out its backoff. A `claude -p` 401 reads as ``Claude Code isn't logged in. Run `claude auth login` in a terminal.``, and the log keeps Claude's own words (`401 OAuth access token has expired`).
-
-The ranking says which chunks are worth your attention and in what order. The prompt numbers every hunk `h1`, `h2`, … across the files in order (before its `@@` line; a lockfile's hunks keep their numbers but aren't shown, and the "since your review" diff has none), and Claude answers `chunks`: at most 20 hunk ids in the order to read them (most worth first, looks before skims; on a re-review, what changed since you looked first), each with a level (`look` or `skim`) and a few words why. Everything it leaves out is not worth reviewing (imports, renames, formatting, generated files, lockfiles, snapshots, tests that mirror the code). The desk keeps Claude's order and only ids the prompt showed, each once; a hunk Claude wrote a note on but left out joins the end as a skim (with no why), so leaving a hunk out by a slip can't bury what Claude itself flagged. It stores the ranking with the review (`chunks`: the ids with their paths, the hunks left out for length as `unread`, the total). A file's diff past 20 KB is cut inside the hunk that crosses it: that hunk's start is shown and counts as read, and the hunks after it are unread. `GET /api/review/:id` turns it into `order`: the chunks to read, ranked, then the unread ones (with why: the PR or their file was too long), then the hunks Claude left out (`skipped`, level `skip`), then what the desk itself folds away by file with why (lockfiles and generated files, files with no text diff), each hunk with its own patch, level, rank, why and the notes that sit on it, and `order.notes`, the notes in that reading order. Only the desk's own calls are folded: Claude's answer comes from a diff anyone can write, so what it leaves out stays in view, marked Skip. Clients render hunks from `order`; `files[].patch` repeats the same text for today's review UI and goes once that reads `order`. A review from before ranking, one for an older commit, or a ranking whose ids no longer name the same files keeps today's order: every hunk file by file (`ranked: false`). Ranking adds about 20 output tokens a chunk, so even a full list costs little: measured on 2026-11-02 on honojs/hono#5547 (5 files, 14 hunks, +63 −16), the whole review took 90 s and 7,133 output tokens (4,338 of them thinking), and its 7 ranked chunks were 0.5 KB of the 4.9 KB answer.
-
-The same answer also carries `steps`, a walk-through: two to eight parts of the change in the order that makes it easiest to understand (where the change starts, then what builds on it, its callers, then wiring and tests), not the order of importance, each a title, a sentence or two, what to check there, and the hunk ids it covers, from any files. No extra call, and the checker doesn't see them. `parseSteps()` keeps only ids the prompt showed, each hunk in the first step naming it, drops a step left with no hunks or no title, keeps at most 8 and cuts the title at 60 characters, the body at 300 and the check at 200; fewer than two steps, or steps covering under half of the ranked hunks, keep no walk-through (`guide`), and the log line says how many steps covered how many hunks, or "no walk-through". `order.steps` holds the steps with the same hunks the ranked view has (level, why and notes come along), and `order.beyond` every hunk of `chunks`, `unread` and `skipped` no step covers, file by file, so steps, `beyond` and `rest` hold every hunk once. A stale review, one written before steps, or steps whose ids no longer name the same files have neither. The step text is untrusted like the rest, and no second call checks it: it's drawn as text, and it only orders and heads; it never folds a hunk.
-
-Opening a PR (`GET /api/review/:id`) asks for its AI review and has Claude read what waits on you; `?ahead=1`, the UI's prefetch of the row you rest on, starts neither. After each sync the desk fetches the main page's PRs' diffs and conversations ahead, three at a time, so opening one doesn't wait on GitHub; both are kept (the diff per head commit, the conversation until the PR updates), so a sync refetches only what changed.
-
-The review also carries its PR's checks one by one (`ReviewView.checks`, `src/checks.ts`), for the sidebar's Checks: every check run and commit status on its head commit, each with its name (untrusted), its state as one of five words (`failing`, `cancelled`, `running`, `passing`, `skipped`), `optional` (the base branch requires other checks and not this one, so failing it doesn't hold the merge back) and its page (`url`: a check run's on GitHub, a commit status's wherever its sender pointed it; https only, else `""`). The desk orders them, what's wrong first and then by name, and writes their one line: "CI passing · 14 checks", "2 failing, 1 running of 14 checks", "1 failing (not required) of 14 checks"; `failing` says a check that counts is failing, which is when the window draws the line red. They're a GitHub read of their own (`PR_CHECKS`: `statusCheckRollup.contexts`, 100 a page, one point), asked only when a review is opened or fetched ahead, never by a sync or the diffs it fetches ahead, and kept until a sync next reads that PR again (by its `detail_at`: within 3 minutes for your own PR, 30 for someone else's, or when GitHub says it changed), so the list is never older than the facts' "CI passing". A commit nothing ran on has `checks: null`; a fetch GitHub refuses is `checks_error`, in its words, and is asked again on the next open.
-
-Beside them the review says who reviews the PR and where each stands (`ReviewView.reviewers`, `standings()` in `src/stage.ts`), from what a sync already holds: its one line ("Approved by marco · waiting on sam and @backend", "Changes requested by kofi", "Nobody's asked"), `changes` when someone asks for changes (the window draws the line amber), and each person or team with one standing, who holds it first: `changes requested`, `asked`, `approved`, `commented`. `verdicts()` decides the first and third as the stage does (a collaborator's approval, anyone's change request, the PR's author's own reviews aside); who's still asked waits, as `@slug` for a team; anyone else who reviewed commented; bots are left out, and you are "you". `ReviewView.merge` is one line when something stands in an open PR's merge ("Merge conflict with main", from `mergeable`, which the desk asks only of your own PRs), else `null`. The review's recent events stay in `activity`, which the window no longer lists (a resolved PR's head line still reads them).
-
-### What reviewers said
-
-A PR's review view carries its conversations (`ReviewView.conversation`, `src/conversation.ts`): every review thread (resolved or not, outdated or not, its file and line, each comment with its author and time), the comments on the PR and the reviews' bodies (bots' comments on the PR, which are status reports, and empty review bodies are left out). The desk reads them once a sync sees the PR updated. One rule says which wait on you: a person other than you had the last word, on your PR after your last word there; on someone else's PR, in a thread you're in or in a comment that @mentions you. Bots never wait on you, and neither does a thread your push answered: GitHub marks it outdated, and the push that did (the commit after the last one the thread applied to) is yours and came after their last word. A force-push counts; when it took that commit away, your latest push (the head commit, if it's yours) stands in. A reply on a thread that was already outdated still waits on you. The same rule, on what a sync knows of your PR (each thread's last comment, the PR's comments), gives the main page's row the call to action "Reply" when that's all it needs: open, not in Merging, not a draft, CI not failing, no conflict, no changes requested and not approved and green.
-
-Claude reads each one waiting on you, like the judge: `claude -p --json-schema … --tools "" --strict-mcp-config --no-session-persistence` in `~/.inbox/agent/`, the PR's title, description, latest commits and the conversations (with the code a thread is on) fenced with a random tag as untrusted text it must never take instructions from. Up to 10 a call, one PR at a time, in the background: when you open a review, and after a sync for the rows that say Reply. For each it gives a one-line gist of what they want, its take ("Valid concern: …", "A nit: …", "Already addressed: …", "Only you can answer: …", "Nothing to do: …"), kept per conversation until a newer comment arrives (`take:<pr>` in the store). A failure shows in the view and isn't retried on that PR for 10 minutes.
-
-You answer in the review: the reply box starts with Claude's suggestion, and Reply (or ⌘↩) posts it on GitHub, as you, through `POST /api/review/:id/reply`. It's one of the desk's GitHub writes ([Security model](#security-model)). A thread's `side` (`new`, or `old` for a removed line numbered in the old file; `null` for comments and reviews on the PR) places it on its line in the diff; your own comment on a line goes through `POST /api/review/:id/inline`.
-
-### Rules: built in and your own
-
-A board's rules (`config.toml`, `parseConfig()` in `src/config.ts`) are the owner's and, when it names a set with `builtin`, its plugin's. A plugin declares its sets in its file (`Connector.rules`, GitHub's in `src/connectors/github-rules.ts`: `review`, `mine`, `mentions`, `issues` (mentions plus your own issues) and `collaborators`, `BuiltInRules` in `src/types.ts`: a name and its rules, each with a stable `id`). They're the code's, read on every load, so a release that changes one changes where items land on every desk whose board names the set, with nothing written to its `config.toml`; one dropped from code is gone (a reference to its id is then a config error). The file holds only the owner's part:
-
-```toml
-[[boards]]
-id = "acme-review"
-# … queries, filter, caps, default as before
-builtin = "review"                 # GitHub's rules for PRs to review
-off = ["your-repo"]                # switched off
-rules = [
-  { when = "'ml' in item.labels", bucket = "now", why = "ML" },                    # yours: before GitHub's
-  { id = "bot-pr", when = "author.bot", bucket = "fyi", why = "bot PR" },         # yours, in place of GitHub's bot-pr
-  { after = "stacked", when = "pr.ci == 'pending'", bucket = "later", why = "CI running" },  # yours, right after stacked
-]
-```
-
-The order (`resolveRules()`): the owner's rules without `id` or `after`, as written; then the set's, each but those in `off`, or the owner's rule with its `id` in its place, followed by the owner's with `after` naming it, as written. An override is the whole rule as written (`hard`, `final` and `nocap` too), not a patch. Errors: a `builtin` its source doesn't have, an `off`, `id` or `after` naming no rule of the set, an `id` that's also in `off`, two of the owner's with one `id`, `id` with `after`, any of them on a board without `builtin`. A board without `builtin` is the owner's alone, as before. The resolved rules (`BoardConfig.rules`) are what everything downstream reads; each keeps `id` (the set's rule, or the owner's in its place) and `own` (the owner's: its index in the file's `rules`, which a compile error names). `GET /api/config`'s `builtins` lists, per board that names a set, each of its rules as it stands (`on`, `yours` with `path` to the owner's override); `PUT /api/config/builtin` switches one (`switchBuiltIn()` rewrites the board's one-line `off` and saves as `PUT /api/config` does); `desk_config get` lists them under the file.
-
-A config written before this had GitHub's rules copied onto each board. `migrateBuiltIns()` runs once (kv `builtins_migrated`, last of `Desk.migrateRules()`, with `config.toml.bak`): a board whose rules match one set in order for at least half of it (the longest common run, `common()`) names the set; of its rules, those equal to the set's go, one that differs from the set's between the same neighbours in its `when` or its `why` becomes an override with that `id`, the rest keep their place with `after` (or first), and what the set has that the board didn't goes in `off`. Comments in a rewritten `rules` list move above it. It writes nothing unless every board's resolved rules come out exactly as they were, and leaves a board whose rules are `[[boards.rules]]` tables, or that's mostly the owner's, as it is.
-
-### The policy and the judge
-
-Claude triages everything that reaches the desk. Rules come first: they're cheap and say exactly what they do. A placement, a matching rule's bucket and why or the board's `default` when none matched, is Claude's hint, and holds until Claude answers; a rule's `bucket = "judge"` is a hint of the board default. A rule with `hard = true` is a floor: what it matches never sorts below the rule's bucket, or Today for a Now rule, whatever Claude answers (below it, the floor holds with the rule's why), and neither the quiet rule (`queue.quiet_days`) nor caps move it lower; Now's cap still sends the overflow to Today. The first-run config makes the rules for a review asked of you by name hard, so those always reach your desk: a person's ask (bucket now, so Claude picks Now or Today) and one a bot added (bucket today; Junior adds asks for people). A config written before hard rules existed gets the person's rule (`me.requested_direct && !me.requested_by_bot`, bucket now, as the first run wrote it with `nocap = true`) made hard once, and one written before the bot's rule gets it once, right after that hard rule, both with one `config.toml.bak`. A rule with `final = true` isn't Claude's to sort: what it matches stays in the rule's bucket, with no judge step (your pin's floor still lifts it, and `bucket = "judge"` can't be final). Your pin is a floor too: what you pinned stays in Today or above, with or without Claude. A pin the old desk-run coordinator made isn't, and nor is a `desk_add` from the coordinator (`from` "Inbox coordinator", or "Review Desk coordinator", its name before the rename to Inbox): Claude sees it ("pinned by the coordinator") and sorts by your policy. A pin or unpin sorts the item again. Resolution still applies: a PR that's merged, closed or approved by someone else (`github.resolve_on_others_approval`) leaves the desk. The policy, `~/.inbox/policy.md`, is prose you write in Settings → Agent → Your policy, or by asking an agent with the desk's tools (`desk_policy`), or in any editor; the desk re-reads it when it changes. While it's empty a built-in starter policy (`DEFAULT_POLICY` in `src/judge.ts`, "less is more") is in effect, so Claude sorts from the first sync; `desk_policy get` and Settings → Agent → Your policy say so.
-
-The judge sends those items to the same agent as the AI review, with the same isolation: `claude -p --json-schema … --tools "" --strict-mcp-config --no-session-persistence`, the prompt on stdin in `~/.inbox/agent/`, the policy and the items fenced with a random tag. The prompt asks what you should do with each item (now: a person is blocked on you today, one or two at most, never CI on your own PR; today: a person is waiting on you, or it's yours to finish, approved and green; later: yours, but nobody is blocked; fyi: someone else has it or nobody needs you, kept off your page; hide: automated noise): Claude answers now, today, later, fyi or hide; only rules fill blocked (the schema leaves it out, and an answer of it is dropped), so the prompt names it only as a hint or a floor, says less is more and to sort away what it's unsure of, and gives each item its facts and its hint. When the policy's lines disagree, a line that sorts an item away for who made it or its state (bots, drafts, stacked PRs, someone else asked by name, a teammate reviewing) beats one that promotes it for what it touches, and being asked by name, a pin and a hard rule's floor beat both; what counts most is how you were asked, whether you usually review the author, and whether it builds on what you're building, while a directory you've worked in is weak evidence on its own. The facts, a line each: who opened it and when (a bot's PR opened for a person says so, "PR by sentry-junior (bot) for Michelle Tran", or "their own PR, opened through sentry-junior" when it's via you); size, CI and review state, and "stacked on <base>" when its base isn't the repo's default branch; on your own PR, how long ago you pushed and its unresolved threads with who had the last word ("cursor (bot)"); how you were asked (by name and by whom, or via which team, and whether CODEOWNERS), whether you're a usual reviewer of the author (`author.close`) and who else was asked; others' standing reviews ("approved by erin; commented frank", leaving out bots and you); for someone else's PR, how many of its files are in your areas and the directories it touches, yours marked "theirs" (see "Your areas"); the AI's pre-flight review when there is one, its call, risk and first sentence ("of an earlier commit" when it is); and the description's first 280 characters. Above the items, inside the fence, come who you are (your name and teams, the five authors whose PRs you engage with most, and the titles of your 20 latest PRs, from the context) and your areas in each repo the batch's PRs are in. The hint is where the rules would put it, on which board, and why; under a hard rule its floor ("a hard rule keeps it in today or above"), and on a pinned item who pinned it (yours: "which keeps it in today or above"). Each item gets back a bucket and a few words of why, which replace the hint's (an empty why keeps the rule's). Then the quiet rule and caps apply as usual, down to a hard rule's floor.
-
-- Up to 20 items per call, one call at a time, at most `policy.max_per_hour` items an hour (default 300, on your own login; only calls that answered count). Never-answered items go first, then those in Now or Today (by Claude's earlier answer, else the rules), then the latest activity. Sorting again what Claude already answered uses at most half the hour, so new items always have room. `policy.judge` (default on) turns it off: then the rules' placements stand.
-- Answers are kept per item, with what the judge read of it that can change (`judgeKey`: others' latest activity, bots left out; its state, draft, commit, whether CI is red, review decision, mergeability, title, labels, review requests and people's reviews; once they arrive, its files and an AI review of its commit) and the hash of the policy in effect. A bot's comment or a CI rerun asks nothing. An item that changed keeps its old answer until the new one lands, and so does every item when the policy changes: Claude sorts them all again, never-answered ones first (writing the starter out as your own changes nothing). An item the reply leaves out stays where the rules put it until it changes, and its card says "Claude gave no answer".
-- Until an item has an answer, or if the call fails, it sits where the rules put it. A failure (a 401 from an expired `claude` login, a timeout) shows in Settings → Agent under Your policy and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on (once you've run `claude auth login`, say), or changing the agent settings, tries again now; desk.log keeps Claude's own words.
-- The rule trace (`desk_item`, `desk show`, the item's detail) ends with the judge's step: `Claude: today, <why>` (with "an earlier answer; sorting it again" while a fresh one is due), or `Claude: not sorted yet, so where the rules put it`. A hard rule's step says its floor (`hard rule: never below today`). A card says who placed it in its facts: "sorted by Claude" (within a hard rule's floor too), "placed by a hard rule" (when the floor held, or until Claude answers), "kept up by its pin" (when a pin's floor held), "not sorted by Claude yet", or "Claude gave no answer".
-
-### Your areas
-
-What tells a CODEOWNERS ping that touches your code from one that doesn't. Every item carries `body`, the first 600 characters of its description with whitespace collapsed (untrusted GitHub text), and a PR carries `paths`, its first 50 changed files (`changed_files` counts all); items stored before the desk asked lack them, which means unknown. Your areas are the directories you work in, per repo: the directory of each changed file, up to four levels (`src/seer/automation/autofix/`), from your PRs created or merged in the last 90 days (3 points per PR) and the PRs you reviewed (1 point), once per PR, leaving out PRs of more than 100 files (codemods, renames), top directories alone (`src/`, `tests/`), and directories under 3 points or under a tenth of your heaviest in that repo, the top 40 per repo. They're fetched on the first sync and then daily, on their own (`areas` and `areas_at` in the context, kv `context`); a failed fetch keeps the last ones and tries again in about an hour.
-
-Rules read them as `pr.my_area_files` (how many of the PR's paths are in your areas there, -1 while either is unknown) and `pr.my_area` (at least one), and the paths themselves as `pr.paths` (the first 50, empty while unknown), so a rule can say a PR touches an area whatever its title says: `any(pr.paths, 'src/sentry/seer/*')`, where `*` is any run of characters, `/` included, so a directory covers everything under it. The first-run config hints a CODEOWNERS ping into Later when `pr.my_area` and FYI otherwise; neither is hard, so Claude has the last word. The judge's prompt reads them through `src/areas.ts`:
-
-```ts
-areasFor(ctx: Context | null, repo: string): { dir: string; weight: number }[]; // your areas there, heaviest first; [] if none or unknown
-touched(item: Item, ctx: Context | null): { dir: string; files: number; mine: boolean }[] | null; // the PR's directories, yours first, then by files ("/" for top-level files); null while unknown
-areaFiles(item: Item, ctx: Context | null): number; // pr.my_area_files
-```
-
-as "in their areas: 2 of 5 files; touches src/sentry/auth/ (2, theirs), static/app/views/ (3)". An answer remembers whether the PR's files were known and which commit's AI review it saw, so an item Claude sorted before its files were fetched, or before its AI review of the current commit landed, is sorted again (its earlier answer holds meanwhile).
-
-### The coordinator
-
-One background Claude Code session the desk starts and wakes (`src/coordinator.ts`, README → Coordinator), and the skill's "Coordinator" section is what it does on a wake. On the first hand-off or ask (or `POST /api/coordinator/wake`, Start it now or Wake it in Merging) the desk runs `claude --bg --name "Inbox coordinator" --remote-control "Inbox coordinator" "<role line> <news>"` in `<home>/coordinator`, after adding any rule of its deny list missing from its `.claude/settings.json` (the owner's own settings there stay), and keeps the id it prints (kv `coordinator_bg`, with its claude.ai link from `claude logs` and `mode`, the permission mode it started with: `bypass` or `default`; a record without one is `default`, and one the desk picked up from its folder without seeing it start is `unknown`, so its next launch sets the mode). With `agent.coordinator_bypass` on (the default), the start adds `--permission-mode bypassPermissions`: no permission prompts, while the deny list still holds (deny rules apply in every mode). A session keeps its mode across `claude --resume` with no flags; when the setting and `mode` differ, the next launch (a delivery, the no-prompt resume at a check, or right away when the setting changes; a busy one waits until it's idle, one waiting on a permission prompt switches at once and is told to look at Merging) resumes with `--name`, `--remote-control` (in case a copy doesn't keep them) and `--permission-mode bypassPermissions` or `--permission-mode default`, so claude starts a copy with the history in that mode, and the desk keeps the copy's id and the new mode (the original stays in `claude agents`, stopped); later wakes resume the copy with no flags. A session `claude agents` lists under the coordinator's name from before the rename to Inbox, "Review Desk coordinator", goes on the same way, as one copy with `--name` and `--remote-control` "Inbox coordinator", at its next launch. Claude Code refuses bypass for `--bg` until it's been accepted once (`claude --dangerously-skip-permissions`), or when a managed `disableBypassPermissionsMode` forbids it; that refusal is `error` like any other, and turning the setting off resumes the old session as it was. From then on it keeps it running: when the desk starts (`Desk.start()`), every 5 minutes and when `agent.coordinator` is turned on, `claude agents --json --all` picks up that session, and one that stopped or crashed is resumed with `claude --resume <sessionId> --bg` and no prompt, which starts no turn. With no session and nothing to deliver, it creates none. After that, a hand-off and, on a PR in Merging, CI finishing (`ci` to green or red), a review, a comment or a conflict queue one entry per PR; a minute after the first, the desk delivers them as one line of ids, URLs and kinds (never PR text). It reads `claude agents --json --all`: busy (or in a shell, or waiting on a permission), it keeps them and looks again a minute later; they're kept in kv `coordinator_news` until a start or resume succeeds, so a desk restart or a failed start leaves them for the next wake or desk start; idle and running, `claude stop <id>` then `claude --resume <sessionId> --bg "<news>"` (with no other flag, so claude continues that session, same id and history, instead of starting a copy); stopped, just the resume; gone (`claude rm`), a fresh start (it picks up only a running session from its folder, never one a switch left stopped). A session from another folder, as the old home's is once `~/.review-desk` has moved to `~/.inbox` (whether or not the link the move leaves there still opens it), can't be resumed (claude resumes a session only from its own folder): `find()` stops it (`claude stop`) and forgets it, and the next wake starts a fresh one, as the first start did. A folder Claude Code hasn't trusted, nor one above it, is refused in claude's words (``<folder> is not a trusted directory. Run `claude` there once and accept the trust dialog, then retry.``), which Merging shows as `error`; the desk doesn't mark folders trusted. Merging's line is `coordinator` in `InflightView`: on, its id (null until started), link, and `error`: what claude said when it last couldn't start or resume it (kv `coordinator_error`, cleared once a run succeeds), shown in red in Merging, with one notification when it first fails. News on a merged or closed PR doesn't wake it, and a second Wake it while one runs adds nothing. Claude's daemon runs the session, not the desk, so the desk's agent cleanup (`stopAll`) and a restart under `node --watch` leave it running. `agent.coordinator` off stops it and nothing wakes it; on again resumes it once the stopped process has exited. It's the owner's own Claude Code, with their MCP servers, tools and permissions, and the desk's tools through the user-scope `inbox` server (Settings → Agent → Connect Claude Code). On a wake it reads the PRs handed off for merge (`desk_merging`) and the events since its last wake (`desk_events`), works in a git worktree of the owner's clone to fix CI, address members' review comments and, once it's otherwise ready, rebase it on a conflict, pushes to the PR's own branch (`--force-with-lease` after a rebase), merges with `gh pr merge` once it's approved, green and conflict-free, notes what it did (`desk_note`, shown on the PR's row in Merging), and hands back what it can't finish (`desk_hand_back`). It never posts comments or replies as the owner.
-
-On Codex (`agent.harness` = `codex`, `Coordinator.runOwn()`), there's no background daemon: the desk runs each turn as its child. The first delivery runs `codex exec --json <sandbox> -C <home>/coordinator --skip-git-repo-check <off> <mcp> "<role line> <news>"` there and keeps the thread id of its first event (`thread.started`) in kv `coordinator_codex` (`{ id }`, beside Claude Code's `coordinator_bg`, so switching agents keeps each one's and the next wake goes to the chosen agent's, starting one if it has none); later ones run `codex exec resume --json <sandbox> --skip-git-repo-check <off> <mcp> <id> "<message>"` in that folder. `<sandbox>` is `--dangerously-bypass-approvals-and-sandbox` with `agent.coordinator_bypass` on, else `--sandbox workspace-write` (a resume takes no `--sandbox`: `-c sandbox_mode="workspace-write"`), `-c sandbox_workspace_write.network_access=true`, `-c approval_policy="never"`; `<off>` is `--disable` for `apps`, `plugins`, `browser_use`, `browser_use_external`, `in_app_browser` and `computer_use`; `<mcp>` turns each of your MCP servers off by name (as the tool-less call does) but the desk's, `-c mcp_servers.inbox.url="<the desk's /mcp>"` and `enabled=true` (`inbox_desk` when your `inbox` is another server). The run that starts a turn ends once codex names its thread, delivering what it took (news and asks dropped, asks' jobs begun); the turn goes on, `status` `busy` until it exits (an hour at most), then `idle`, and its failure (a `turn.failed` or `error` event, else stderr) is `error` in codex's words, a login one Codex's (``Codex isn't logged in. Run `codex login` in a terminal.``); what queued meanwhile goes as its next turn. One that exits before naming a thread fails the run, and what it was to deliver stays queued. `url` is null (no Remote Control), and the 5-minute look and the 10-second watch don't ask Codex anything. Codex has no deny list: before each start or wake the desk writes `<home>/coordinator/.codex/rules/inbox.rules`, the deny list's rules that are a command's leading words (`gh pr comment`, `gh pr review`, `gh pr ready`, `gh pr edit`, `gh issue comment`, `gh api`, `git push --force`, `git push -f`, `gh pr close|reopen|create`, `gh issue close|reopen|create|edit`) as `prefix_rule(…, decision = "forbidden")`; the ones matching a flag after the branch (`git push * -f*`, `* --force`, `* +*`) have no Codex form, since Codex rules match a command's leading words only. Codex reads a project's `.codex/rules` only when `~/.codex/config.toml` (`$CODEX_HOME`) trusts that very folder, and `-c` can't, so a folder it doesn't trust is `CodexUntrusted` and nothing runs ("Codex reads your agent's deny rules only in a folder you trust, so it didn't start: add `[projects."<folder>"]` with `trust_level = "trusted"` to <config>"). What holds on Codex: no MCP server but the desk's, those rules, and, with bypass off, the sandbox (it writes only in its folder and temp dirs, never a `.git` or `.codex`, which leaves pushing to your clones to bypass). What doesn't: the rules a prefix can't say, a denied command inside another (`echo "$(gh api …)"`, backticks: a rule sees only the command's leading words, and the e2e harness saw one run so), and with bypass on, any sandbox.
-
-On OpenCode (`Coordinator.runOwn()`), the same: each turn is the desk's child, `opencode run --format json --pure --agent inbox-desk --title "Inbox coordinator" "<role line> <news>"` in `<home>/coordinator` first, its session id (on every event) kept in kv `coordinator_opencode`, then `opencode run … --session <id> "<message>"`, with `--auto` when `agent.coordinator_bypass` is on (what your config says to ask about is approved; off, nobody is there to answer, so it's refused). Its config holds the desk's MCP server as the tool-less call's does (yours off but the desk's, `mcp.inbox` with the desk's `/mcp`, `inbox_desk` when your `inbox` is another server) and the deny list as `inbox-desk`'s bash rules, each `"gh pr comment *": "deny"` and so on: OpenCode matches the whole command, each part of a chain, so the flag-after-the-branch rules hold here too. OpenCode has no sandbox: what holds is no MCP server but the desk's and the deny list (it reads a `$(…)` inside a command too, but not a command run by `bash -c`, which gets past it); with bypass off, what your config asks about. A failure is an `error` event's words (its status first), a 401 OpenCode's login words.
-
-An ask (`POST /api/ask`, Ask your agent in the window) doesn't wait for the batch: the desk keeps it (kv `asks`, the latest 200), queues one line, `My ask <id>, about <whose> <item id> (<url>)<state>, <where>: "<your words>" Answer it with desk_answer.` (your words flattened onto it, while the desk keeps your paragraphs), in kv `coordinator_asks`, and delivers it as soon as a run in progress is done, the same way as news (busy, it waits; not started, it starts it), ahead of any news in the same message. `agent.coordinator` off refuses it, and one that isn't started and won't start is a 502, with the ask dropped. `desk_answer` stores the answer on the ask, bumps the views and, on its first answer, notifies with its first paragraph (`notify.enabled`, outside `notify.quiet`).
-
-Everything in the line but your words is the desk's own, never PR text (`askLine()`, from `askAbout()`), and each part comes only when you were on one. `<whose>` is `my PR`, `someone else's PR` or `the issue`: yours (`me.author`: you opened it, or a bot opened it for you, [Opened for you](#opened-for-you)), or in Merging, where only your own hand-off puts a PR; a bot's "via" line alone never makes it yours, and without GitHub context every PR reads someone else's. `<state>` is `, not handed off` or `, in Merging` on your open PR, `, merged` or `, closed`, `, read only: don't push to it or post on it` on someone else's, and `, not on the desk now, read only: …` on an item that left the desk. `<where>` is `on the thread <url>`, or the lines by number and side, with `(desk_ask <id> says where)`:
-
-- `My ask 9c1e2f3a, about my PR acme/web#3 (https://github.com/acme/web/pull/3), not handed off, on the thread https://github.com/acme/web/pull/3#discussion_r9: "confirm it's addressed" Answer it with desk_answer.`
-- `My ask 9c1e2f3a, about someone else's PR acme/api#4127 (https://github.com/acme/api/pull/4127), read only: don't push to it or post on it, on lines 20-23 of its diff (desk_ask 9c1e2f3a says where): "why is the budget only checked between batches?" Answer it with desk_answer.`
-- `My ask 9c1e2f3a, about my PR acme/web#3 (https://github.com/acme/web/pull/3), in Merging, on Claude's note at line 23 of its diff (desk_ask 9c1e2f3a says where): "is this right?" Answer it with desk_answer.`
-- `My ask 9c1e2f3a, about the issue acme/api#9 (https://github.com/acme/api/issues/9): "…" Answer it with desk_answer.`
-- `My ask 9c1e2f3a, about acme/api#4127, not on the desk now, read only: don't push to it or post on it: "…" Answer it with desk_answer.`
-- With no item, the line is only your words: `My ask 9c1e2f3a: "…" Answer it with desk_answer.`
-
-Removed lines read `removed lines 17-18`, and a range across sides `removed line 17 to line 23`. The file's name never goes in the line: `desk_ask` (`GET /api/asks/:id`) gives it fenced, with a shell-quoted `file_arg`. `Wake it` re-sends the ask with the item's state now (handed off since, merged since, or off the desk). Each ask is a job in [Claude's work](architecture.md#claudes-work-srcjobsts), running from when the coordinator is handed it until `desk_answer`: one it stopped without answering (idle or stopped, not working on anything, no run in flight, not about to be told it again) goes to it again 5 and then 15 minutes after it last went, and 30 minutes after the third it's failed ("your agent stopped without answering it, 3 times"); an answered ask still waiting to go is dropped from `coordinator_asks`, so it's never asked twice.
-
-Lines (`lines: { path, line, side, start?, head, note? }` on `POST /api/ask`) need a PR; an ask is on a thread or on lines, not both. Each of these is a 400, and nothing is kept or sent: "need lines: { path, line, side: new|old, start?: { line, side }, head, note? }" (a malformed one), "lines are on a PR's diff: send its item_id", "lines are on a PR's diff" (an issue), "an ask is on a thread or on lines, not both", "lines need head: the 40-character commit they were read at", and "lines need path: a file name with no control characters" (empty, over 1,000 characters, or with a control, line-separator, bidi or other invisible character).
-
-### Sessions
-
-The second source (`src/connectors/sessions.ts`, docs/plugins.md): your own Claude Code and Codex sessions on this computer that are blocked on you or stalled, rows on the Inbox after agents' questions. On by default (it only reads, and does nothing on a computer without `claude`), off with `sessions.enabled` in its own Settings part, Sessions, with `sessions.ask` (the model's read, below) and `sessions.quiet_minutes` (25) beside it; it comes with no automations. It's read only and polls every 30 seconds, only while the desk runs, never writing to `~/.claude`, `~/.codex` or the desktop app's folder:
-
-- `claude agents --json --all` (every live session and the background ones; a pass whose list can't be read changes nothing, since no process could be told alive), then the last 64 KB of each one's transcript (`~/.claude/projects/*/<session id>.jsonl`), the desktop app's records (`~/Library/Application Support/Claude-3p` and `Claude`, `claude-code-sessions/*/*/local_*.json`: `postTurnSummary`, `priorErrorMark`), a terminal's transcript written in the last day that's in no list (its process is gone; not a background one you removed, which `~/.claude/jobs/*/state.json` names) and Codex's `state_5.sqlite` (opened read only and immutable: your unarchived `cli` and `vscode` threads from the last 3 days, never `codex exec` or sub-agents) with each rollout's last 64 KB. Any shape it doesn't know gives no item; nothing it reads is kept but a one-line excerpt (160 characters) in memory. `DESK_CLAUDE_HOME`, `DESK_CODEX_HOME` and `DESK_CLAUDE_APP` point it elsewhere (the tests do).
-- **Blocked**, read off what the session shows: waiting on a permission prompt (with its tool), input, a sandbox request, a worker or a dialog; an unanswered AskUserQuestion or ExitPlanMode; a turn ended on `authentication_failed` (login expired) or billing; a background session's `state: blocked`; the desktop app's own `postTurnSummary.status_category: blocked`.
-- **Stalled**: a turn ended on a rate limit (until `quotaLimits.resetsAt` when it says), `overloaded` or a 5xx; a background session's `state: failed`; a turn left open with no process (unless you stopped it, or interrupted it); the desktop app's error mark after its last turn; and, weakly, busy with nothing written for `sessions.quiet_minutes`, unless it's retrying or a subagent is at work. Codex keeps no errors or approvals in its rollouts, so a Codex turn started and idle 25 minutes is all it can say. OpenCode's sessions aren't read: with OpenCode chosen, this source still lists only Claude Code's and Codex's, and its model's read runs on OpenCode.
-- **Blocking or directional**: a turn that ended normally asking something, in a terminal that's still open (or Codex's `task_complete`), goes to your chosen agent (`askAgent()`, tool-less, the message's last 2 KB, at most 3 a pass), once per session and last event, unless `sessions.ask` is off (then none reaches the Inbox); a directional question ("Want me to also…?") never reaches the Inbox. The desktop app's and background sessions' own reads stand instead.
-- Left out: the coordinator (`Inbox coordinator`) and anything working under the desk's home (the judge, reviews, automations).
-- Actions per kind (`actions`): a background session with no process **Kick**; a terminal's whose process is gone **Resume in background** (both `POST /api/sessions/:id/kick`); a background one that runs **Copy attach command**; the desktop app's and Codex's **Open** (`POST /api/sessions/:id/open`); a terminal's that runs, none. Done hides it until the session moves on (a later event), snooze takes a time, mute and undo work as on any item, all through `POST /api/act`.
-
-```ts
-interface SessionCard {
-  id: string; // "session:<its id>"
-  session_id: string; // Claude Code's session id, or Codex's thread id
-  kind: "cli" | "background" | "desktop" | "codex";
-  name: string;
-  cwd: string;
-  branch: string | null;
-  state: "blocked" | "stalled";
-  reason: string; // "needs permission: Bash", "asked a question", "rate limited until 14:05", "stopped mid-turn", "login expired"
-  since: string;
-  excerpt: string; // one line
-  resets_at: string | null;
-  alive: boolean;
-  actions: ("kick" | "resume" | "attach" | "open")[];
-  open_url: string | null;
-  attach: string | null;
-  status: "active" | "done" | "snoozed" | "muted";
-  snooze_until: string | null;
-}
-```
-
-### Automations
-
-The owner's instructions on a schedule (`src/automations.ts`, README → Automations), kept in kv `automations` (`Automation[]`) with their runs in kv `automation_runs` (the last 10 each). Every minute and when the desk starts, each one that's on, whose schedule parses and that isn't running runs once if its latest due time (`dueAt`) is after both its `updated_at` and its last run's `at` (a run the desk stopped in the middle of is closed with an error when it starts, and doesn't count, so it runs again). A run: `claude -p --output-format json --permission-mode dontAsk --allowedTools <Read, Grep, Glob, WebSearch, WebFetch, gh's issue/pr list and view, pr diff and checks, search, run and release list and view, repo view, and the desk's read tools> --disallowedTools Read(//<home>/secrets.json) --json-schema <{ summary, items: [{ ref, why }] }>` in `<home>/automations`, after adding any missing rule of its deny list to that folder's `.claude/settings.json` (the coordinator's, plus `Write`, `Edit`, `NotebookEdit`, `git push` and `git commit`, `gh`'s merge, issue transfer/delete/lock/pin, label, release writes, workflow, run rerun/cancel, repo writes, secret and variable, and `mcp__inbox__desk_<act|add|undo|config|policy|note|hand_back|answer|inquire|inquiry|automations>`, and the same under `mcp__review-desk__`, the server's name before the rename, which an agent connected then keeps until the desk renames it; the read tools are allowed under both names too; and reading `<home>/secrets.json`), so it uses those and what the owner's settings allow, never asks, and is refused the rest. stdin carries the instruction, the read-only rules and its last good run's time and the items the desk took from it (never one it couldn't or refused: that ref is the run's own text). 20 minutes at most. An answer with no summary is a failed run. Each of the first 20 items goes through `Desk.push()`: `hold()` (resolve, else fetch read only, as `desk_add`), kv `pushed:<id>` = `{ automation, name, why }`, and then `resolved` if it's resolved, `left` if it isn't active or is in Merging, `kept` if it's pinned or already in Now or Today, else pinned with the undo log's agent `automation:<id>` and its pre-review started: `added`; one it can't hold is `failed`, kept as written on one short line. Like your own pin, an automation's keeps it in Today or above, and where that pin is what puts it there (or on the Added board), its placement's why is `<name>: <its why>`. `done`, `snooze`, `mute` and `inflight` end an automation's pin (undo restores it), and the new-item notification skips what an automation pinned. The run is stored (`AutomationRun`, with the session id from claude's envelope); deleting the automation stops its run in progress, which then adds and stores nothing. It notifies (`notify.enabled`, outside `notify.quiet`) when it put any on your desk, couldn't do something, or failed.
-
-Built in and your own. A plugin comes with automations of its own, declared in its file (`Connector.automations`, GitHub's in `src/connectors/github-automations.ts`, `BuiltInAutomation` in `src/types.ts`: a stable id, a name, one line of `help`, whether it's `on` by default, and the definition below). `Automations.all()` lists yours, then theirs as `<plugin>.<id>` (`github.pick-reviewer`) with `plugin` and `help` set, `by` "you", so every rule below holds for them alike: the schedule, events, `when`, `decide`, `can`, the floors, pins and hand-backs, the why in its name, the undo log's `automation:<id>`. Their definition is the code's, read each time, so a release that changes one just takes effect and one dropped from code is gone; kv `automations_builtin` keeps only the owner's switch per id (`{ on, at }`, `at` its `updated_at`; none: as it comes, `updated_at` ""). `PUT /api/automations/:id` and `DELETE` refuse one (400), `PUT /api/automations/:id/on` switches it only from the desk's own page (403 otherwise), and `desk_automations` lists it marked built in and can't change or switch it. On a fresh desk, an event one that's on reads the log from the start, since `Desk.start()` starts automations before the first sync, and a scheduled one waits for that sync. Copy to your automations in the window is a `PUT` of a new id with its definition, `on: false`.
-
-An automation starts on its `schedule`, as above, or on `events` (never both: its `schedule` is then `""`): a list of the event log's kinds (`ACTIVITY_KINDS` in `src/types.ts`, what `GET /api/activity` and `desk_events` list; all of them are accepted). Kv `automation_seen` keeps, per automation, the event log's `seq` it has read up to, set to the log's end when it's saved with events (unless it was on with events already) and kept there while it's off, so what happened before it watched isn't its news. `Automations.pump()`, called when a sync pass ends (`Desk.synced()`, after the pass's own blocked and unblocked events and before its new-item notification, so a rule that clears what the pass brought has done so before the desk would tell you; a question's or an agent's run ends later, and may come after it) and when one of its runs ends, reads the events after that `seq` (`batch()`): those of its kinds, by item, up to 20 items, the rest waiting for the run after. `new` and `resolved` on an item this automation itself put on the desk (its latest pin is the automation's) aren't its news: its `add` fetched the item, which logs it new. The items the desk still holds and its check passes (whatever their state: an event's item may be merged or done) are one run (`trigger: "event"`), handed to it as below with a `what happened: …` line each ("CI went from green to red; dana commented"); when none pass, nothing runs, no model is called, no run is kept, and it reads on. One automation never runs twice at once: what lands during its run, a Run now included, waits for the next, which starts when that run ends. A finished run, failed or not, moves its `seq` to its batch's end (each automation's read afresh in `pump()`, since a rule's run, with no async step, ends inside it and starts the pump again); a run the desk stopped in doesn't, so the first pass after the next start runs it again. An event's run that failed (Claude logged out, a check it can't read) waits 30 minutes before the next, as a held one does (its failed run says why; it isn't `waiting`, which is a question's model that couldn't answer), and its failure is notified once, not on every run after.
-
-An automation's `when` is its check: an expression in the rules' language (`src/expr.ts`, the fields of `GET /api/fields`), compiled when it's saved (400 `when: …` otherwise) and asked by the desk, per item, before anything else. A scheduled run (or a Run now) of one with a check is about the open items on the desk that pass it (`Automations.passing()`: on a board, not done, snoozed, muted, resolved or in Merging; one it can't work out for an item doesn't pass), latest activity first. With none, nothing runs and no model is called: the run is recorded with the summary "Nothing on your desk passed its check, so nothing ran.", so a schedule's due time is spent. Otherwise the run is handed the first 20 (its summary says when more passed), each as the judge's prompt words an item (`describe()` in `src/judge.ts`) with where it is on the desk, between `<items-<random>>` tags after the line that calls everything between them untrusted text from GitHub. A check the desk can no longer read (a field it names is gone) fails the run. One without a check runs as above.
-
-How it decides what to do with those items is its `decide` (`WAYS`), cheapest first; absent, `agent`, the run above. `rule`: no model is called; every item its check passed gets its fixed action, `rule`: `{ do, why, until? }` (`do` one of its `can`; `until` a snooze's, in words that mean the same every time: `1h`, `2d`, `tomorrow`, `monday`, `activity`, `ci`, `push`, `approved`, `ready`, `conflict`), and it has no instruction (`prompt` is `""`). `ask`: one call with no tools, the judge's mechanism (`askClaude`: `--tools "" --strict-mcp-config --no-session-persistence`, in `<home>/agent`), over up to 20 of the items: the prompt carries the instruction between `<instruction-<random>>` tags, what each of its `can` does, and the items fenced as above; its `--json-schema` answer is `{ items: [{ ref, do, why, until? }] }` (with `agent.decision_key` set, the decision model answers instead, a request an item: The decision model, above), an item it leaves out stays as it is, an answer about an item it wasn't asked about (or a second one for an item) is dropped, and the run's summary is the desk's ("Asked Claude about 3 items; it left 1 as it is."). On its schedule an ask asks only about what's new to it: kv `automation_asked` keeps, per automation, who it last asked (a hash of what it does and the model) and each item's `sortKey()` (less the pin) as it was asked about, and an item it was asked about that hasn't changed since is left out ("It had asked about 3 more, unchanged since."; with nothing left, nothing runs and no model is called); Run now, an event's run, an edit or another model asks about all of them. An item a sync took off the desk while the decision model was asked about the others is skipped, and the summary names it. A rule or an ask is about items, so on a schedule it needs `when` (400 otherwise), and a Run now of one with only events records that there's nothing to run it on. No agent is told what a rule's or an ask's last run added, so for their `add` the desk remembers: `pushed:<id>.once[<automation id>]` is the item's `sortKey()` (less the pin) when that automation added it, and `Desk.push()` adds an item once for what it is, also one you'd marked done (restored, as `desk_add` restores one, in the same undo step as its pin; a snoozed, muted or Merging one is `left`, as for an agent's run), then answers `left` while the key is the same: after Done or Unpin it's back only once the item changes. A scheduled rule whose action is `add` is asked of the open items you marked done as well as those on your desk, since nothing else would bring one back. When an ask's model can't answer now (`agentDown()`: Claude Code not logged in, at its limit, or not installed; or the decision model's `DecisionModelDown`), the run is held, not spent: it's dropped from `automation_runs`, its events stay unread, `AutomationView.waiting` says why and when it asks again (30 minutes; `automations.held`, in memory), a notification says so once, and neither its schedule nor its events start it before then (saving the automation, or another key or model, ends the wait at once); an agent's run that fails the same way is a failed run, as before.
-
-On Codex (`Automations.byCodex()`), the run is `codex exec --json --sandbox read-only --skip-git-repo-check -C <home>/automations`, the tool-less call's `--disable` flags (no shell: Codex can't allow `gh`'s reads alone, since an allowing rule runs a command outside the sandbox, and the read-only sandbox can read `secrets.json`), `-c web_search="disabled"`, each of your MCP servers off by name but the desk's, given as `-c mcp_servers.inbox.url="<the desk's /mcp>"`, `enabled=true` and `enabled_tools=["desk_list","desk_item","desk_overview","desk_events","desk_brief","desk_merging"]` (`inbox_desk` when your `inbox` is another server), `-c approval_policy="never"`, `--output-schema <file> -o <file> -`, the prompt (with a line saying it has only those tools) on stdin. Codex connects to MCP servers itself, outside the sandbox, so the desk's localhost `/mcp` is reachable though the sandbox has no network. Its session is kept (no `--ephemeral`): `session` is the thread from its first event and `agent` is `codex`, so the run's Copy resume command is `codex resume <id>`. A login or a limit fails the run in codex's words, as Claude Code's does. The schema `--output-schema` is given is put in strict mode's shape first (`strictSchema()`: each object closed, each property required, so the automation's optional `until` comes back empty when it doesn't snooze), since Codex sends it on to the model's API as it is and OpenAI refuses any other with `invalid_json_schema`. On OpenCode (`opencodeRun()`), the run is the tool-less call's in `<home>/automations` with the desk's MCP server added (as your agent's), and `inbox-desk`'s permissions deny everything but those six read tools (`<server>_desk_list` … `allow`); its session is kept, `agent` is `opencode`, and Copy resume command is `opencode --session <id>` there.
-
-What an automation may do with an item is its `can` (`Verb[]`: `add`, `today`, `later`, `fyi`, `hide`, `snooze`, `done`, `mute`; absent, `add` alone, and then its run is told and answers exactly as above, whatever else an item says). With more, the run's `--json-schema` gives each item `do` (one of its `can`) and `until`, its prompt says what each of those does, and each item goes through `Automations.apply()`, against the automation as it is then: one deleted or turned off during its run, a `do` the desk doesn't know, or one outside its `can` now (you may have narrowed it since the run started) is `refused` with the reason and nothing happens to the item. `add` is `Desk.push()`, as above. `today`, `later`, `fyi` and `hide` are `Desk.sort()`: kv `sorted:<id>` = `{ automation, name, bucket, why, key, at }`, `key` being `sortKey()` of the item then (the judge's `judgeKey()`, less the PR's files and its AI review, which the desk brings later and aren't the item changing); while it still is, `compute()` gives `classify()` that sort in place of Claude's answer (a `JudgeStep` with `by`, the automation's name), with the judge on or off, so a hard rule's floor, a `final` rule and your pin bind it exactly as they bind Claude (the item is then `held`, its error saying which), caps and quiet days apply after it, the placement's why is `<name>: <its why>`, the card's `placed_by` is `automation` and its trace's last step reads `automation <name>: fyi, <why>`. It holds only while its automation is on and its `can` still has that bucket (else the item is where your rules and Claude put it), and ends when the item changes (the key: `Desk.dropStaleSorts()`, when a sync pass ends, deletes it, so the item turning back into what it was doesn't bring it back), when you act on the item (any `act()` but `seen`), or when the automation is deleted; a sort by an automation that's off answers `held` ("it's off, so what it sorts doesn't hold"); a resolved item is `resolved`, one that isn't active or is in Merging `left`, one on no board `failed`, and its own sort of the item as it still is `kept`, with its first why. A sort, like the three below, is only for what the desk holds: it fetches nothing, and a ref the desk doesn't hold is `failed`. Never `now` (a pin and a hard Now rule both stop at Today, so only a rule's own bucket or Claude's answer puts an item first) and never `blocked` (only rules fill it). `snooze` (with `until`, in `desk_act`'s words; tomorrow without), `done` and `mute` are `Desk.clear()`: the desk's own `act()`, in the action log with the agent `automation:<id>`, so `POST /api/undo` and `desk_act undo` take it back; kv `acted:<id>` = `{ name, why, seq }` is the card's why (`<name>: <its why>`) while that action is the item's latest and stands; one that isn't active or is in Merging is `left`, a resolved one `resolved`, and what holds an item for you as it holds a sort is `held`, nothing done, its error saying which: what the desk raised for you (`Snapshot.needs`: "your agent handed it back to you", "it's your ready PR nobody's asked to review"), your own pin ("your pin keeps it on your desk"; an automation's pin doesn't hold it) or a hard rule ("a hard rule keeps it in Now"). `GET /api/automations` gives each run `did` ("put 2 on your desk, sorted 3 to FYI, snoozed 1") and `didnt` ("couldn't add 1, refused 2"), and `outcomeText()` in `src/types.ts` words one item's outcome ("Sorted to FYI", "Snoozed until CI passes", "Not allowed") for the window and `desk_automations`. What it sorts into Today counts as on your desk in its notification, and the new-item notification skips it; what it sorts away, snoozes, marks done or mutes notifies nothing.
-
-### Urgency
-
-The Inbox's sections, Urgent, Standard and FYI, and their order come from `src/urgency.ts`. It works on what the rules (and Claude, and automations' sorts) placed in now, today, later or fyi: those buckets stay the rules' view (`QueueView.sections`, the rule trace, `desk_list`), and `QueueView.inbox` is what the window draws.
-
-**Criteria** (Settings → Urgency, `desk_criteria`, `/api/criteria`): yes-or-no questions about an item, stored like automations (yours in kv `criteria`, `Criterion` in `src/types.ts`; a plugin's in its file, `Connector.criteria`, GitHub's in `src/connectors/github-criteria.ts`, switched in kv `criteria_builtin`). Each has an id, a name, an optional `when` (the rules' language, `src/expr.ts`: free and exact, compiled when it's saved) and an optional `ask` (a question for a model, asked only of the items whose `when` passes), at least one of them, and `urgent`: a yes puts the item in Urgent whatever its score. A criterion only orders the Inbox and never acts on an item, so one an agent saves is on as it's saved (`by: "an agent"`); any local client may save or delete yours, and only the window switches one (403 otherwise). GitHub comes with rule-only ones, no model, so a fresh desk sections from its first sync: Asked by name (`me.requested_direct`), Waiting on your reply (`me.owes_reply`, or someone pushed after your review), and three urgent ones: Ready to merge (yours, approved or in a repo that needs no review, green, not a draft, not stacked or waiting on another PR, and nothing waits on it: one press merges it), Your PR others wait on (yours, other PRs need it merged first, and it's ready to merge or waits on your reply) and Handed back (`me.handed_back`). An urgent yes brings even an item the rules or Claude hid onto the Inbox, so no sort keeps it out of Urgent.
-
-**Outcomes**: a `when` alone is asked every time the desk computes its view. A question's answer is kept per item (kv `said:<id>`, by criterion) under a key of the item (its `sortKey()`, less the pin) and the question (`when` and `ask`), so a model is asked again only when either changes; until then the item keeps its earlier answer (no, before the first). Questions go in the background, before scores: on the decision model when `agent.decision_key` is set (one request an item, a `noul` per question, yes at 0.8 or above), else in one tool-less call of 20 items on your agent (`askAgent()`), the questions in your words, the items fenced as the judge's are. A model that can't answer (`agentDown()`, `DecisionModelDown`, or any other failure) holds every question and score for 30 minutes (`Urgency.held`, said in Settings → Urgency), and the Inbox uses what it has; another key, model or agent, the agent working again, or saving a criterion asks at once.
-
-**Score**: each Inbox item gets one, 0 to 10. The scorer is given the item as the judge's `describe()` words it, where the rules placed it and why (its bucket, while buckets last), and every criterion's outcome as yes or no by name; it answers a score and a one-line why. It runs on the decision model when its key is set (a `choice` of 0 to 10; the score is the probabilities' mean, and there's no why), else on your agent, 20 items a call, one call at a time, after the judge has answered for the item. Kept in kv `score:<id>` under a key of the item, its placement, the outcomes and the scorer, held while the item stays in the bucket it was scored in. With `agent.score` off (Settings → Agent), or no score yet, the desk's own: the bucket's (now 7, today 6, later 3, fyi 1) plus one a yes, at most 10.
-
-**Sections** (`sectionOf()`): Urgent for an urgent yes or a hand-back (`snap.needs`); else FYI for what was sorted to fyi; else Urgent at `queue.urgent_at` (8) or above, FYI at `queue.fyi_at` (3) or below, Standard between. A review asked of you by name and your pin are never below Standard. Agents' questions and the sessions that need you lead Urgent (the window draws them there). Each section is by score, then the desk's order (`byPart()` of now and today, then later, then fyi). Each card carries `section`, `score` and `reason`, the row's quiet why: a hand-back's words, else the urgent yeses' names, else an automation's why (its pin or sort), else the score's why, else the yeses' names, else the rules' why.
-
-**The dataset**: every answer the desk takes, a criterion's and a score's, is a line of `<home>/labels.jsonl`: `{ kind, at, by, item, input, … }` with what the model was given (the item's lines, its placement, the outcomes) and what it said (`yes` and `p`; `score`, `why` and the decision model's `probabilities`). It's what a cheaper model is distilled from later; the desk only appends to it.
-
-### Claude Code over stdio (fallback)
-
-For a client that only speaks stdio, `desk mcp` serves the same tools on stdin/stdout and calls the HTTP API of the running desk:
-
-```bash
-claude mcp add --scope user inbox -- ~/code/review-desk/bin/desk mcp
-```
+**When the name is taken.** `inbox` is a common name. An MCP server of yours named `inbox`, or a skill in `skills/inbox/` that isn't the desk's (its front matter isn't `name: inbox` with `desk_list` and `desk_item` in it), is never counted, overwritten or removed. Settings and `desk connect` report `needs: "taken"`, and `taken` says what holds the name and where it points. Connect refuses and runs nothing until you rename or move yours.
 
 ### Any MCP client
 
-- Streamable HTTP at `http://localhost:47823/mcp`. No auth, no session (stateless: no `Mcp-Session-Id`), `POST` only; `GET` and `DELETE` answer `405` because there is no server-initiated stream and no session to end.
-- From another machine, while the desk serves over Tailscale (README → Use it from another machine): `https://<tailnet name>/mcp` with `Authorization: Bearer <token>`, the token `desk connect <address> --code` or `desk pair --print` gives that machine; the same tools, answering as they do locally.
-- Or stdio: command `desk mcp` (the absolute path to `bin/desk` if it isn't on PATH; `bin/desk.cmd` on Windows), with `DESK_PORT` set if the desk isn't on 47823, or `--url https://<tailnet name>` (or `DESK_URL`) and `DESK_TOKEN` for a desk on another machine: the token is sent only over https.
+- **Streamable HTTP** at `http://localhost:47823/mcp`. No auth and no session (no `Mcp-Session-Id`), `POST` only; `GET` and `DELETE` answer 405.
+- **From another machine**, while the desk serves over Tailscale (README → Use it from another machine): `https://<tailnet name>/mcp` with `Authorization: Bearer <token>`. `desk connect <address> --code` or `desk pair --print` gives that machine its token.
+- **stdio**: run `desk mcp` (the absolute path to `bin/desk` if it isn't on PATH; `bin/desk.cmd` on Windows). It serves the same tools and calls the running desk's HTTP API. Set `DESK_PORT` if the desk isn't on 47823, or `--url https://<tailnet name>` (or `DESK_URL`) with `DESK_TOKEN` for a desk on another machine; the token is only sent over https.
+
+  ```bash
+  claude mcp add --scope user inbox -- ~/code/review-desk/bin/desk mcp
+  ```
+
 - The old HTTP+SSE transport (2024-11-05) isn't served; use stdio for clients that only have that.
 
 ## MCP tools
 
-The same tools over HTTP and stdio. Results are text; most end with a JSON block for parsing. Errors come back as a tool result with `isError: true` and the API's message, e.g. `no item "nope#1" on the desk`, or `"sentry#1" matches 2 items — candidates: getsentry/sentry#1, other/sentry#1`. Over stdio, a desk that isn't running gives `desk is not running — start it with: desk serve`.
+The same tools over HTTP and stdio. Results are text, and most end with a JSON block. Errors come back as a tool result with `isError: true` and the API's message (`no item "nope#1" on the desk`, or `"sentry#1" matches 2 items — candidates: …`). Over stdio, a desk that isn't running gives `desk is not running — start it with: desk serve`. No tool writes to GitHub.
 
-`ref` is `owner/repo#123`, `repo#123` when unique, a GitHub URL, or an item's link from the desk: its permalink `inbox://item/owner/repo/123` (Copy link) or the desk's own `http://localhost:<port>/#/review/<id>` or `#/item/<id>`. A page's link (`inbox://blocked`), an agent's question's (`inbox://question/<id>`) or one that names no item is refused in words (`src/links.ts`, read by `Desk.resolve()`, `hold()` and `itemId()`), and so is the CLI's `<ref>` and the routes' `id`. A question's link is `desk_inquiry`'s to read, in place of its `id`: it gives the answer as below and then the question itself (who asked, the question, its context, options and links, the item it's about and its link; fenced as an agent's text), so a session the user pastes it to can talk about it, and it doesn't count as picking the answer up, which only the id does.
+**`ref`** is any of:
 
-| Tool               | Arguments                                                                                                                                                                             | Returns                                                                                                                                                                                                                                                                                                                                                                                                                |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `desk_overview`    | none                                                                                                                                                                                  | Counts per space and board, Focus totals, sync status and config errors; JSON `Overview`. Read only                                                                                                                                                                                                                                                                                                                    |
-| `desk_list`        | `board?` (board id; omit or `"focus"` for Focus), `buckets?` (`now` `today` `blocked` `later` `fyi` `hide` `cleared`; default now, today), `limit?` (1–200, default 25)               | One line per card (bucket, id, title, why, and "stack 3/20" with the PRs a stack's one line stands for); JSON of the cards (`id bucket title why author url chips status new pinned boards stack`). Focus only holds now and today, a stack once. Read only                                                                                                                                                            | Sessions that need the user lead Focus (`session:<id>`, state, name, reason; JSON `SessionCard`). |
-| `desk_item`        | `ref`                                                                                                                                                                                 | Facts, bucket and why on each board, the rule trace, its stack bottom first (state, CI, review, where each sits), the AI review's verdict, summary and concerns if there is one, and the review hand-off prompt; its link in the desk (`in the desk: inbox://item/…`) under its URL, to give the owner; JSON `{ card, placements, state }`. Read only                                                                  | A `session:<id>`: its `SessionCard`.                                                              |
-| `desk_act`         | `ref`, `action` (`done` `snooze` `mute` `unmute` `pin` `unpin` `restore`), `until?` (snooze only, default `tomorrow`; or until it happens: one of the card's `wake_on`)               | What changed and the undo `seq`; JSON `{ ok, state: ItemState, undo_seq }`. Local only                                                                                                                                                                                                                                                                                                                                 | . On a session: done, snooze (to a time), mute, unmute, restore; no tool kicks or opens one       |
-| `desk_add`         | `ref` (`owner/repo#123`, a GitHub URL or its `inbox://` link; `repo#123` only for an item the desk holds), `why` (one line, ≤300), `from` (your task, ≤60)                            | `added <id> to the user's desk, pinned`, whether its AI review is being written or ready, and the undo `seq`, then the item as `desk_item` describes it. Local only: [Adding](#adding)                                                                                                                                                                                                                                 |
-| `desk_undo`        | `seq?` (positive integer; default the latest action from anyone: UI, CLI or agent). Not a hand-off for merge, nor a Back to desk (yours to undo)                                      | `undid <action> on <id>`                                                                                                                                                                                                                                                                                                                                                                                               |
-| `desk_brief`       | `ref`                                                                                                                                                                                 | The PR's AI review: look, skim or skip, risk, summary, concerns and notes on the changes; JSON `AiReview`. Usually written already for PRs in Now and Today; otherwise a model call through `agent.driver` (a minute or two). Cached per commit                                                                                                                                                                        |
-| `desk_doc`         | `doc?`, `path?` or `ref?` (one)                                                                                                                                                       | A review document (docs/review-format.md) kept and rendered: `POST /api/docs` for `doc` or the .json at `path`, `POST /api/review/:id/doc` for `ref`. Answers with the page's file, the document's, its `inbox://doc/<id>` link, its browser address, and what was left out. With the desk down (`doc` or `path`), it renders the page into the desk's home itself                                                     |
-| `desk_sync`        | none                                                                                                                                                                                  | `sync started`                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `desk_events`      | `after?` (seq, default 0), `wait?` (seconds, 0–60, default 0), `limit?` (1–500, default 100), `item?` (a ref)                                                                         | One line per event (`#seq at item kind by actor data`), oldest first, and `last_seq` to pass as `after` next; JSON `ActivityPage`. With `wait` it returns as soon as one lands. Read only                                                                                                                                                                                                                              |
-| `desk_merging`     | none                                                                                                                                                                                  | One line per PR in Merging (the owner's, handed off for merge): id, title, CI with its failing checks, reviews, unresolved threads, mergeable, its base (stacked on another PR or not), what blocks it ("blocked by sentry#129460, which waits on …: it can't merge before that one does"), the repo's merge method, the last note; titles and notes fenced; JSON of the rows (`InflightRow` less its card). Read only |
-| `desk_hand_back`   | `ref`, `why` (one line, up to 300 characters)                                                                                                                                         | The PR leaves Merging for the top of the queue with "handed back: <why>", and the owner is notified; writes nothing to GitHub. Only on the owner's open PR in Merging. Local only                                                                                                                                                                                                                                      |
-| `desk_policy`      | `action` (`get` `set`), `text?` and `base?` (set: the whole new policy, and the hash from get)                                                                                        | get: the policy in effect fenced (the starter while policy.md is empty, and it says so), its hash and the judge's status; JSON `{ hash, starter, judge }`. set: saves it; a stale `base` is an error (get it again and redo the edit)                                                                                                                                                                                  |
-| `desk_config`      | `action` (`get` `preview` `save`), `text?` (preview, save: the whole new config.toml), `base?` (save: the hash from get)                                                              | get: config.toml fenced, its hash and errors, then each board's built-in rules by id (off, or the owner's in its place). preview: errors, counts per board before → after, and the items that would move (titles fenced); nothing is saved. save: only valid text, and a stale `base` is an error                                                                                                                      |
-| `desk_note`        | `ref`, `text` (one line, up to 300 characters)                                                                                                                                        | `noted on <ref>`: the PR's status line in Merging, shown on its row with its age; only the latest shows. Only on the owner's open PR in Merging. Local only                                                                                                                                                                                                                                                            |
-| `desk_answer`      | `ask_id` (from the wake message), `text` (up to 6,000 characters, in paragraphs, the answer first)                                                                                    | `answered ask <id>`: the coordinator's answer to the owner's ask, shown in their chat with it in the desk, and the owner is notified. Local only                                                                                                                                                                                                                                                                       |
-| `desk_ask`         | `ask_id` (from a wake that says `desk_ask <id> says where`)                                                                                                                           | Where the owner's ask is: their words, labelled as theirs; whose the item is and its state; the thread, or the lines (side, numbers, the commit read, the PR's head now); and `Push: yes` only on their own open PR, in Merging or not, else `Push: no` and why. The file, its shell-quoted `file_arg`, the base and the branch are fenced. Local only                                                                 |
-| `desk_inquire`     | `question`, `context` (200–6000 characters), `options?` (up to 6 `{ answer, next }`), `links?` (up to 12 `{ label, url }`), `item?`, `from` (who asks, as the user knows the session) | `asked as inquiry <id>`: a question for the user in their desk, a row on their main page that opens as its own page, and a notification; beside the chat, not instead of it. Its description says when to ask and what the page needs: what the agent is doing and found, what the choice turns on and its pick, what each answer leads to, and a link to everything it mentions. Call `desk_inquiry` for the answer   |
-| `desk_inquiry`     | `id?` (or a question's link from the desk), `wait?` (seconds, 0–60)                                                                                                                   | The user's answer, "no answer yet", or that they dismissed it (decide yourself). With `wait` it returns as soon as they answer. Giving the answer tells the desk it was picked up (`POST /api/inquiries/:id/read`), all it changes. With no `id`: the answers nobody has picked up yet (who asked, the question, its id; fenced), reading none, so a session that stopped waiting finds its own                        |
-| `desk_criteria`    | `action` (`list`, `set`, `delete`), `id?`, `name?`, `when?`, `ask?`, `urgent?` (Urgency, above)                                                                                       |
-| `desk_automations` | `action` (`list`, `set`, `run`), `id?`, `name?`, `schedule?`, `events?`, `prompt?`, `when?`, `decide?`, `rule?`, `can?`                                                               | list: each automation, a plugin's marked built in with its one line, with what starts it, its check, how it decides, what it may do, on or off (and whether it's an agent's draft), next run, and its last 3 runs (summary fenced as untrusted, what came of each item). set: drafts or changes one, whole each time; it stays off until the owner turns it on in Settings → Automations. run: one that's on, now      |
+- `owner/repo#123`, or `repo#123` when unique;
+- a GitHub URL;
+- the item's desk link: `inbox://item/owner/repo/123` (Copy link), or `http://localhost:<port>/#/review/<id>` or `#/item/<id>`.
 
-`until`: `1h`, `3h`, `2d` (any positive hours or days), `tomorrow` (09:00 local; before 05:00 it means this morning), `monday` (next Monday 09:00), `activity` (until someone else acts), `YYYY-MM-DD` (09:00 that day), or a future ISO time.
+A page's link (`inbox://blocked`), a question's link (`inbox://question/<id>`) or anything that names no item is refused in words (`src/links.ts`). The same holds for the CLI's `<ref>` and the routes' `id`.
+
+| Tool               | Arguments                                                                                                                                                     | Returns                                                                                                                                                                                                                                                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `desk_overview`    | none                                                                                                                                                          | Counts per space and board, Focus totals, sync status, config errors; JSON `Overview`. Read only                                                                                                                                                                                                                                                   |
+| `desk_list`        | `board?` (omit or `"focus"` for Focus), `buckets?` (`now` `today` `blocked` `later` `fyi` `hide` `cleared`; default now, today), `limit?` (1–200, default 25) | One line per card: bucket, id, title, why, and "stack 3/20" with the PRs it stands for. Focus holds only now and today, a stack once, led by the sessions that need you (`session:<id>`). JSON of the cards. Read only                                                                                                                             |
+| `desk_item`        | `ref`                                                                                                                                                         | Facts, bucket and why per board, the rule trace, its stack, the AI review's verdict, summary and concerns, the hand-off prompt, and its `inbox://` link to give the owner; JSON `{ card, placements, state }`. A `session:<id>` gives its `SessionCard`. Read only                                                                                 |
+| `desk_act`         | `ref`, `action` (`done` `snooze` `mute` `unmute` `pin` `unpin` `restore`), `until?` (snooze only; default `tomorrow`, or one of the card's `wake_on`)         | What changed and the undo `seq`; JSON `{ ok, state, undo_seq }`. On a session: done, snooze to a time, mute, unmute, restore                                                                                                                                                                                                                       |
+| `desk_add`         | `ref` (`repo#123` only for an item the desk holds), `why` (one line, ≤300), `from` (your task, ≤60)                                                           | Adds and pins it ([Adding](#adding)): `added <id> to the user's desk, pinned`, its AI review's state, the undo `seq`, then the item as `desk_item` gives it                                                                                                                                                                                        |
+| `desk_undo`        | `seq?` (default: the latest action from anyone)                                                                                                               | `undid <action> on <id>`. Can't undo a hand-off for merge or a Back to desk (the owner's to undo)                                                                                                                                                                                                                                                  |
+| `desk_brief`       | `ref`                                                                                                                                                         | The PR's AI review: verdict, risk, summary, concerns and notes; JSON `AiReview`. Cached per commit; usually ready for PRs in Now and Today, otherwise a call to your agent (a minute or two)                                                                                                                                                       |
+| `desk_doc`         | one of `doc?`, `path?`, `ref?`                                                                                                                                | Keeps and renders a review document ([review-format.md](review-format.md)): `POST /api/docs` for `doc` or the .json at `path`, `POST /api/review/:id/doc` for `ref`. Answers with the page's file, its `inbox://doc/<id>` link, its browser address and what was left out. With the desk down, renders `doc` or `path` into the desk's home itself |
+| `desk_sync`        | none                                                                                                                                                          | `sync started`                                                                                                                                                                                                                                                                                                                                     |
+| `desk_events`      | `after?` (seq, default 0), `wait?` (0–60 s), `limit?` (1–500, default 100), `item?` (a ref)                                                                   | One line per event (`#seq at item kind by actor data`), oldest first, and `last_seq` for the next `after`; JSON `ActivityPage`. With `wait` it returns as soon as one lands. Read only                                                                                                                                                             |
+| `desk_merging`     | none                                                                                                                                                          | One line per PR in Merging: CI and failing checks, reviews, unresolved threads, mergeable, base, what blocks it, the repo's merge method, "no review needed" where so, the last note. Titles and notes fenced; JSON of the rows. Read only                                                                                                         |
+| `desk_hand_back`   | `ref`, `why` (one line, ≤300)                                                                                                                                 | The PR leaves Merging for the top of the queue as "handed back: <why>"; the owner is notified. Only on the owner's open PR in Merging                                                                                                                                                                                                              |
+| `desk_note`        | `ref`, `text` (one line, ≤300)                                                                                                                                | `noted on <ref>`: the PR's status line on its row in Merging, with its age; only the latest shows. Only on the owner's open PR in Merging                                                                                                                                                                                                          |
+| `desk_policy`      | `action` (`get` `set`), `text?`, `base?` (set: the whole policy, and the hash from get)                                                                       | get: the policy in effect (fenced; says when it's the starter), its hash, the judge's status. set: saves; a stale `base` is an error                                                                                                                                                                                                               |
+| `desk_config`      | `action` (`get` `preview` `save`), `text?` (the whole config.toml), `base?` (save)                                                                            | get: config.toml fenced, its hash and errors, each board's built-in rules by id. preview: errors, counts per board before → after, items that would move; saves nothing. save: valid text only; a stale `base` is an error                                                                                                                         |
+| `desk_answer`      | `ask_id` (from the wake message), `text` (≤6,000, paragraphs, answer first)                                                                                   | `answered ask <id>`: the coordinator's answer to the owner's ask, shown in their chat; the owner is notified                                                                                                                                                                                                                                       |
+| `desk_ask`         | `ask_id` (from a wake that says `desk_ask <id> says where`)                                                                                                   | Where the owner's ask is: their words, whose the item is and its state, the thread or the lines (side, numbers, commit read, head now), and `Push: yes` only on their own open PR (else `Push: no` and why). File name, `file_arg`, base and branch are fenced                                                                                     |
+| `desk_inquire`     | `question`, `context` (200–6,000), `options?` (≤6 `{ answer, next }`), `links?` (≤12 `{ label, url }`), `item?`, `from`                                       | `asked as inquiry <id>`: a question for the owner, a row on their main page with its own page, and a notification. Beside the chat, not instead of it. Its description says when to ask and what the page needs. Poll `desk_inquiry` for the answer                                                                                                |
+| `desk_inquiry`     | `id?` (or the question's `inbox://question/<id>` link), `wait?` (0–60 s)                                                                                      | The answer, "no answer yet", or that it was dismissed. Giving the answer by `id` marks it picked up (`POST /api/inquiries/:id/read`). By link it also shows the question itself (fenced) and doesn't count as a pickup. With no `id`: the answers nobody has picked up yet, picking none up                                                        |
+| `desk_criteria`    | `action` (`list` `set` `delete`), `id?`, `name?`, `when?`, `ask?`, `urgent?`                                                                                  | list: each criterion, on or off, and how many Inbox items it says yes to; a plugin's marked built in. set: saves one, whole, on at once. delete: removes one of the owner's ([Urgency](#urgency))                                                                                                                                                  |
+| `desk_automations` | `action` (`list` `set` `run`), `id?`, `name?`, `schedule?`, `events?`, `prompt?`, `when?`, `decide?`, `rule?`, `can?`                                         | list: each automation (a plugin's marked built in), what starts it, its check, how it decides, what it may do, on or off, next run, last 3 runs (summaries fenced). set: drafts or changes one, whole; it stays off until the owner turns it on. run: runs one that's on, now ([Automations](#automations))                                        |
+
+`until` (snooze): `1h`, `3h`, `2d` (any positive hours or days), `tomorrow` (09:00 local; before 05:00 it means this morning), `monday` (next Monday 09:00), `activity` (until someone else acts), `YYYY-MM-DD` (09:00 that day), a future ISO time, or one of the card's `wake_on` (`ci`, `push`, `approved`, `ready`, `conflict`).
 
 ## HTTP routes
 
-JSON in and out. Errors are `{ error: string, candidates?: string[] }` with a 4xx or 5xx status: 400 for a bad request, 404 for an unknown board, item or route, 409 for an ambiguous short ref (with `candidates`). Routes marked ✓ answer 503 until the first load finishes; if config.toml has errors from the start, those that read the queue (overview, queue, focus, boards, item, act, review, status) keep answering 503 and `/api/config` works so you can fix it. Errors in a later edit keep the last good config running.
+JSON in and out. Errors are `{ error: string, candidates?: string[] }`:
 
-| Method      | Path                         | Request                                                       | Response                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | 503 while starting |
-| ----------- | ---------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| GET         | `/health`                    |                                                               | `{ ok: true, version: string }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |                    |
-| GET         | `/api/overview`              |                                                               | `Overview`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | ✓                  |
-| GET         | `/api/queue`                 |                                                               | `QueueView`: every item once, at its best placement (the UI's main surface)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | ✓                  |
-| GET         | `/api/focus`                 |                                                               | `FocusView`: the queue's now and today, each in the desk's order (what Claude handed back, close looks, then the rest; someone else's red PR and "skip it" last); never a PR in Merging                                                                                                                                                                                                                                                                                                                                                                                         | ✓                  |
-| GET         | `/api/boards/:id`            |                                                               | `BoardView`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | ✓                  |
-| GET         | `/api/item`                  | `?id=<ref>` (encode `#` as `%23`)                             | `ItemDetail`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | ✓                  |
-| POST        | `/api/act`                   | `{ id: string, action: Action, until?: string }`              | `{ ok: true, state: ItemState, undo_seq: number }` (`seen` and `undo` return `undo_seq: 0`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | ✓                  |
-| POST        | `/api/add`                   | `{ id: string, why?: string, from?: string }` (as `desk_add`) | `{ ok: true, item: ItemDetail, undo_seq: number }`: on your desk, pinned ([Adding](#adding)); 400 for a ref it can't read, or a short one the desk doesn't hold; 404 when GitHub has no such PR or issue; 502 when fetching it failed                                                                                                                                                                                                                                                                                                                                           | ✓                  |
-| POST        | `/api/undo`                  | `{ seq?: number }` (default: the latest action, any client's) | `{ ok: true, id: string, action: Action }`; 409 if a later action on the same item must be undone first, or for a hand-off or Back to desk not from the desk's own page                                                                                                                                                                                                                                                                                                                                                                                                         | ✓                  |
-| GET         | `/api/review/:id`            | `:id` is `owner%2Frepo%23123` (or `owner/repo%23123`)         | `ReviewView`: the PR's facts, its changed files, the order to read its hunks in, the AI review, its checks one by one, whether you can approve, and what reviewers said (`conversation`, [below](#what-reviewers-said)); 400 for an issue. Opening it asks for the AI review when `review.auto_ai` is on and there's none for this commit                                                                                                                                                                                                                                       | ✓                  |
-| POST        | `/api/review/:id/ai`         | `{ force?: boolean }`                                         | `{ ok: true, ai: AiReview }`: the one for this commit unless `force`; joins a run already going; 502 with the reason if the agent fails                                                                                                                                                                                                                                                                                                                                                                                                                                         | ✓                  |
-| POST        | `/api/review/:id/doc`        |                                                               | `{ ok: true } & DocSaved`: the PR's AI review as a review document, the one it names (`AiReview.doc`) or written now; 409 when it has no AI review or no diff                                                                                                                                                                                                                                                                                                                                                                                                                   | ✓                  |
-| POST        | `/api/review/:id/approve`    | `{ head_oid: string, body?: string }`                         | `{ ok: true, url: string }`: approves the PR on GitHub at `head_oid`, the commit the view showed (below), then refreshes that PR (it resolves as `you approved` within seconds) and runs a full sync; 403 unless it's the desk's own page (`Sec-Fetch-Site: same-origin` and its `Origin`); 409 for your own PR, a closed one, one you approved at this commit, or new commits since; 502 with GitHub's reason                                                                                                                                                                  | ✓                  |
-| POST        | `/api/review/:id/reply`      | `{ id: string, body: string }`                                | `{ ok: true, url: string }`: posts your reply to one of the PR's conversations on GitHub, as you: a review thread's reply, or a comment on the PR for a comment or a review. 403 unless it's the desk's own page, as for approve; 404 for a conversation that isn't this PR's; 409 for a closed PR; 502 with GitHub's reason                                                                                                                                                                                                                                                    | ✓                  |
-| POST        | `/api/review/:id/ready`      |                                                               | `{ ok: true, done }`: marks your own open draft ready for review on GitHub (Ready for review), then asks `{ users?, teams? }` (node ids from `/api/reviewers/:id`) to review it; logs each and reads the PR again before it answers. `done`: it left your desk; `false` when nobody's asked to review it (below), so it stays for Add reviewers; 403 unless it's the desk's own page, as for approve; 400 unless they're lists of ids; 409 unless it's your own open draft; 502 with GitHub's reason ("Marked it ready, but …" when only the request failed)                    | ✓                  |
-| POST        | `/api/review/:id/reviewers`  | `{ users?, teams? }` (node ids from `/api/reviewers/:id`)     | `{ ok: true }`: asks them to review your open PR that isn't a draft (Ask reviewers in its review, offered when nobody's asked to review it), logs it and refreshes the PR; your part is done, so it leaves your desk until someone reviews. 403 unless it's the desk's own page; 400 when nobody's picked or they aren't lists of node ids; 409 for a draft (Ready for review asks them) or someone else's PR; 502 with GitHub's reason                                                                                                                                         | ✓                  |
-| GET         | `/api/reviewers/:id`         | `q?`                                                          | `Reviewer[]`: who you can ask to review your own PR (`id login name team suggested`): GitHub's suggestions matching `q` first, then people with access and the owner org's teams, never you; 409 unless it's your PR. Read only                                                                                                                                                                                                                                                                                                                                                 |                    |
-| POST        | `/api/github`                | `{ id, action, head_oid?, body? }`                            | `{ ok: true, url }`: the More menu's GitHub write (`action`: `close`, `draft`, `merge`, `reopen`, `request_changes` with `body`), logged, and the item refreshed before it answers; 403 unless it's the desk's own page, as for approve; 409 unless the item's card offers it now (`actions`), or for new commits since `head_oid` on a merge or a change request; 502 with GitHub's reason                                                                                                                                                                                     | ✓                  |
-| POST        | `/api/sync`                  |                                                               | `{ ok: true }` (starts a sync now)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |                    |
-| POST        | `/api/update`                |                                                               | `UpdateView`: the packaged app downloads the newer release and restarts into it (Overview's `update.install`); 409 when there is none or the app can't install it itself                                                                                                                                                                                                                                                                                                                                                                                                        |                    |
-| GET         | `/api/config`                |                                                               | `ConfigDoc`: `{ path, text, hash, errors, warnings?, hard, builtins }`; `hard`: the hard and final rules (board, with its space when two share a name; bucket, when, why with fields as "someone", and `final`); `builtins`: per board with `builtin`, its plugin's rules (`BuiltInBoard`: id, when, bucket, why, `on`, `yours`)                                                                                                                                                                                                                                                | ✓                  |
-| POST        | `/api/config/preview`        | `{ text: string }`                                            | `PreviewResult`: errors, and per board the new counts and which items would move                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | ✓                  |
-| PUT         | `/api/config`                | `{ text: string, base?: string }`                             | `{ ok: boolean, errors: ConfigError[], warnings: ConfigError[] }`; saves only if valid, and never with a settings section (`poll_seconds`, `[signals]`, `[notify]`, `[handoff]`, `[analyze]`: they live in Settings); 409 if the file changed since `base` (the text you started from, or its `hash`)                                                                                                                                                                                                                                                                           | ✓                  |
-| PUT         | `/api/config/builtin`        | `{ board, rule, on: boolean, base?: string }`                 | as `PUT /api/config`: switches one of the board's built-in rules by its `off` list; 400 when its `off` spans lines (edit the file)                                                                                                                                                                                                                                                                                                                                                                                                                                              | ✓                  |
-| GET         | `/api/policy`                |                                                               | `PolicyDoc`: `{ path, text, starter, hash, judge: JudgeStatus }`; `text` is `""` until you write one, and `starter` is in effect meanwhile                                                                                                                                                                                                                                                                                                                                                                                                                                      |                    |
-| PUT         | `/api/policy`                | `{ text: string, base?: string }`                             | `{ ok: true, hash: string }`; writes `policy.md`; 409 if it changed since `base` (the `hash` you read); 400 over 20,000 characters                                                                                                                                                                                                                                                                                                                                                                                                                                              |                    |
-| GET         | `/api/fields`                |                                                               | `FieldDoc[]`: every field rules can use                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |                    |
-| GET         | `/api/settings`              |                                                               | `SettingsView`: schema, effective values, what's overridden, GitHub status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |                    |
-| PUT         | `/api/settings`              | `{ set?: Record<string, SettingValue>, reset?: string[] }`    | `{ ok: boolean, errors: ConfigError[], settings: SettingsView }`; writes nothing if any value is invalid                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |                    |
-| GET         | `/api/agents`                |                                                               | `AgentStatus` for Claude Code: `{ driver, mcp: { connected, command }, skill: { state: "installed" \| "outdated" \| "missing" \| "taken", path, command }, needs: "connect" \| "update" \| "taken" \| null, taken: what holds the name inbox, in Connect's 409's words, or null, connect: [commands Connect runs] }`                                                                                                                                                                                                                                                            |                    |
-| POST        | `/api/agents/connect`        |                                                               | `AgentStatus` after installing the skill and registering the MCP server; 502 with the command to run yourself if the agent's CLI fails or isn't on PATH; 409 when another skill has `skills/inbox/` or another MCP server is named `inbox`, saying which to move and where it points (`taken`)                                                                                                                                                                                                                                                                                  |                    |
-| GET         | `/api/status`                |                                                               | `{ now: number, today: number, new: number, text: string }`; `text` is e.g. `desk 7 +3` (7 in the queue, 3 new), `""` when 0/0                                                                                                                                                                                                                                                                                                                                                                                                                                                  | ✓                  |
-| GET         | `/api/inflight`              |                                                               | `InflightView`: your PRs in Merging, open ones first (latest activity on top), then any that merged or closed in the last 3 days; `work`, Claude's work: its jobs running, then queued, then failed (`Job` and the PR's title, the ask's words, or for an answer nobody picked up its question and `from`)                                                                                                                                                                                                                                                                      | ✓                  |
-| POST        | `/api/inflight/:id/note`     | `{ text: string }`                                            | `{ ok: true, text: string }` (`desk_note`), flattened to one line; 409 unless it's your open PR in Merging; 400 when empty                                                                                                                                                                                                                                                                                                                                                                                                                                                      | ✓                  |
-| POST        | `/api/inflight/:id/handback` | `{ why: string }`                                             | `{ ok: true, reason: string }` (`desk_hand_back`), flattened to one line: the PR leaves Merging for the top of the queue; 409 unless it's your open PR in Merging                                                                                                                                                                                                                                                                                                                                                                                                               | ✓                  |
-| POST        | `/api/coordinator/wake`      |                                                               | `{ ok: true }`: starts the coordinator, or has it look at Merging now (Start it now or Wake it in Merging); 409 while `agent.coordinator` is off                                                                                                                                                                                                                                                                                                                                                                                                                                | ✓                  |
-| POST        | `/api/ask`                   | `{ text, item_id?, thread_id?, thread_url?, lines? }`         | `{ ok: true, ask: Ask }`: your words to the coordinator (Ask your agent), in paragraphs, up to 2,000 characters (more is a 400), kept and sent to it at once with the item's id and URL, whose it is, and the thread's URL or the lines' numbers, never the file's name (bad lines: 400s above); 403 unless it's the desk's own page, as for approve; 409 while `agent.coordinator` is off; 502 when it didn't start                                                                                                                                                            | ✓                  |
-| GET         | `/api/asks`                  |                                                               | `AsksView`: `{ on, asks }`, whether the coordinator is on and your asks, oldest first, with its answers                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |                    |
-| POST        | `/api/asks/:id/answer`       | `{ text: string }`                                            | `{ ok: true, ask: Ask }` (`desk_answer`): the coordinator's answer, kept in paragraphs (newlines and tabs kept, control, bidi and zero-width characters dropped, at most one blank line in a row); over 6,000 characters is a 400, never cut; the first answer notifies you with its first paragraph, outside code, as one line, and a later one replaces it silently; 404 for an unknown ask                                                                                                                                                                                   |                    |
-| GET         | `/api/asks/:id`              |                                                               | `AskPlace` (`desk_ask`): the ask; `about` (whose it is in the desk's words, in Merging or not, its state; null for an ask about nothing or an item that left the desk); the PR's `head` at the last sync and its `base` branch; and `push`, `{ repo, branch }` only for your own open PR, in Merging or not, else null. Local, so agents may read it; 404 for an unknown ask                                                                                                                                                                                                    | ✓                  |
-| POST        | `/api/docs`                  | a review document (docs/review-format.md)                     | `{ ok: true } & DocSaved` (`desk_doc`): read as the desk reads its own AI review, kept as `<home>/docs/<id>.json` and its page `<id>.html`; `dropped` lists what was left out; 400 with why for one it can't read                                                                                                                                                                                                                                                                                                                                                               |                    |
-| GET         | `/api/docs/:id`              |                                                               | the document as kept; 404 for an unknown id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |                    |
-| GET         | `/api/docs/:id/html`         |                                                               | its page: one HTML file, no script, nothing fetched; its CSP lets only the desk's own window frame it (`#/doc/<id>`)                                                                                                                                                                                                                                                                                                                                                                                                                                                            |                    |
-| POST        | `/api/inquiries`             | `{ question, from, context, options?, links?, item? }`        | `{ ok: true, inquiry: Inquiry }` (`desk_inquire`): an agent's question for you, a row on the main page and its own page, and a notification. 400, saying what's missing, unless: question and from are one line (300, 60); context has 200 to 6000 characters (paragraphs kept); at most 6 options, each `{ answer, next }` (80, 400: what the agent does if you pick it); at most 12 links, each `{ label, url }` with an https URL (what the desktop app's window opens); and an `item` or at least one link. Text over a limit is refused, never cut; bidi marks are dropped |                    |
-| GET         | `/api/inquiries/unread`      |                                                               | `Inquiry[]` (`desk_inquiry` with no id): your answers nobody has picked up yet (`answer.read_at` null), in the order they were asked; listing them picks none up                                                                                                                                                                                                                                                                                                                                                                                                                |                    |
-| GET         | `/api/inquiries/:id`         |                                                               | `InquiryView` (`desk_inquiry`, and the question's page): the `Inquiry` with `card`, its item's card wherever the desk shows it (the queue, Merging, a stack; null when the desk doesn't hold it), and `answer: { text, at, dismissed, read_at? }` once you answered or dismissed it (`read_at`: when whoever asked first read it, null until then; absent on a dismissal and on an answer from before the desk kept it); reading it here isn't a pickup; 404 for an unknown one                                                                                                 |                    |
-| POST        | `/api/inquiries/:id/read`    |                                                               | `{ ok: true, inquiry }` (`desk_inquiry`, as it gives the asking session your answer): stamps `answer.read_at` the first time and ends its job in Claude's work; nothing changes for a question still open, a dismissal or a later read; 404 for an unknown one                                                                                                                                                                                                                                                                                                                  |                    |
-| POST        | `/api/inquiries/:id/answer`  | `{ text }` or `{ dismiss: true }`                             | `{ ok: true, inquiry }`: your answer; it leaves the main page and is owed to whoever asked until they read it (an `answer` job in Claude's work; unread after 30 minutes, one notification; a dismissal owes nothing). One the coordinator asked (`from` "Inbox coordinator", or its old "Review Desk coordinator") wakes it with your answer, which is its read, or that you dismissed it, since it ends its turn once it asks. 403 unless it's the desk's own page (an agent can't answer its own question); 400 for an empty one; 409 if already answered                    | ✓                  |
-| GET         | `/api/sessions/:id`          |                                                               | `SessionCard` (`desk_item`): a session that needs you now, by its ref `session:<id>`; 404 once it doesn't                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |                    |
-| POST        | `/api/sessions/:id/kick`     |                                                               | `{ ok: true, args, note }`: Kick, or Resume in background. It reads `claude agents --json --all` again and refuses (409) while the process runs, before the rate limit resets, or for a kind it isn't for; then the coordinator's `halt()` and `claude --resume <id> --bg "Continue where you left off."` in the session's folder; in the action log. 403 unless it's the desk's own page                                                                                                                                                                                       | ✓                  |
-| POST        | `/api/sessions/:id/open`     |                                                               | `{ ok: true, url }`: opens its `claude://claude.ai/epitaxy/<local id>` or `codex://threads/<id>` on the desk's computer; 409 with no link. 403 unless it's the desk's own page                                                                                                                                                                                                                                                                                                                                                                                                  | ✓                  |
-| GET         | `/api/automations`           |                                                               | `AutomationView[]`: each with `next_at` (while it's on), `running`, and its last 10 runs, newest first                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |                    |
-| PUT         | `/api/automations/:id`       | `AutomationBody` (below): `{ name, prompt, schedule, … }`     | `{ ok: true, automation }`: creates or changes it, whole each time (id: lowercase letters, digits and -, up to 40; schedule as `daily 09:00`, `weekdays 09:00`, `mon,thu 17:30`, or `events`, the event log's kinds, not both; instruction up to 8000, none for a rule; `when` an expression; `decide` and a rule's `rule`; `can`, add alone when left out; 400 otherwise). From the desk's own page it's yours, `on` as sent (a new one on); from anything else it's an agent's: a new one, or one an agent changed anything of but `on`, is off, whatever `on` says           | ✓ (`on`)           |
-| PUT         | `/api/automations/:id/on`    | `{ on }`                                                      | `{ ok: true, automation }`: switches one a plugin comes with (`github.<id>`) on or off; 403 unless it's the desk's own page, 404 for one of yours (its switch is its PUT)                                                                                                                                                                                                                                                                                                                                                                                                       | ✓                  |
-| DELETE      | `/api/automations/:id`       |                                                               | `{ ok: true }`; 403 unless it's the desk's own page                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | ✓                  |
-| POST        | `/api/automations/:id/run`   |                                                               | `{ ok: true, running }`: runs it now, in the background; 409 for one that's off unless it's the desk's own page                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | ✓ (when off)       |
-| GET         | `/api/criteria`              |                                                               | `CriteriaView`: each criterion with `yes` (Inbox items it says yes to) and `waiting`, `held`, `scored`                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| PUT         | `/api/criteria/:id`          | `{ name, when?, ask?, urgent?, on? }`                         | `{ ok: true, criterion }`: saves yours, whole; an agent's is on (`on` is the window's)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| PUT         | `/api/criteria/:id/on`       | `{ on }`                                                      | `{ ok: true, criterion }`: switches yours or a plugin's; 403 unless it's the desk's own page                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| DELETE      | `/api/criteria/:id`          |                                                               | `{ ok: true }`; 400 for a plugin's                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| POST        | `/api/review/:id/comment`    | `{ body }`                                                    | `{ ok: true, url }`: your comment on the PR (Comment in its review) or the issue (Comment on it opened in place) (`addComment`), a GitHub write like approve; it's done, off your desk until someone else acts. 403 unless it's the desk's own page; 400 for an empty one; 409 for a closed or merged one; 502 with GitHub's reason                                                                                                                                                                                                                                             | ✓                  |
-| POST        | `/api/review/:id/inline`     | `{ path, line, side, start?, body, head_oid }`                | `{ ok: true, url }`: your comment on a line of the diff (`+` by its number), a GitHub write like approve: `addPullRequestReview(event: COMMENT)` with one thread on `side` `new` (RIGHT) or `old` (LEFT), `start` for a range, pinned to `head_oid`, the commit the diff showed; not done. 403 unless it's the desk's own page; 400 for a bad line or an empty body; 409 for a closed PR; 502 with GitHub's reason                                                                                                                                                              | ✓                  |
-| GET         | `/api/activity`              | `?after=<seq>&limit=<n>&item=<ref>&wait=<seconds>`            | `ActivityPage`: `{ events, last_seq }`, the event log after `after`, oldest first. A long-poll: with `wait` (up to 60) it answers as soon as an event lands; below                                                                                                                                                                                                                                                                                                                                                                                                              |                    |
-| GET         | `/api/events`                |                                                               | Server-sent events, below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |                    |
-| POST        | `/mcp`                       | MCP JSON-RPC (Streamable HTTP)                                | JSON-RPC responses as an SSE stream; 202 for notifications                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |                    |
-| GET         | `/api/remote`                |                                                               | `RemoteView`: `{ on, text, url, login, devices: Device[] }`, Settings → This device's Tailscale rows                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |                    |
-| POST        | `/api/pair/code`             |                                                               | `{ code, expires_at, url, pair_url }` (`desk pair`): this machine only; 409 while the desk isn't served over Tailscale. A new code replaces the last                                                                                                                                                                                                                                                                                                                                                                                                                            |                    |
-| POST        | `/api/pair/token`            | `{ name? }`                                                   | `{ url, token, device }` (`desk pair --print`): a device token, this machine only; 409 while it isn't served                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |                    |
-| POST        | `/api/pair`                  | `{ code, kind?: "browser" \| "device", name? }`               | Another device only: the code for `{ ok, token, device }`, or for a browser the session cookie and `{ ok, device }`; 403 for a code that's wrong, used or expired (any try burns it); 429 past five tries a minute                                                                                                                                                                                                                                                                                                                                                              |                    |
-| DELETE      | `/api/devices/:id`           |                                                               | `{ ok: true }`: revoked at once; the desk's own page only (Settings → This device)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |                    |
-| GET         | `/skill`                     |                                                               | `skills/inbox/SKILL.md` as text; from another device, with the desk's tailnet address for `localhost:47823`                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |                    |
-| GET         | `/pair`                      |                                                               | Another device only: the page a pairing link opens, which trades the code in its `#` for a session and goes to the Inbox                                                                                                                                                                                                                                                                                                                                                                                                                                                        |                    |
-| GET, DELETE | `/mcp`                       |                                                               | 405, `Allow: POST`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |                    |
-| GET         | anything else                |                                                               | The web UI from `web/dist` (unknown paths get `index.html`); from a checkout (`DESK_UI_ORIGIN`), the app's Vite server passed through, with its hot-reload WebSocket, or 503 with a page that retries while it starts; a path starting `/api` or `/health` is the desk's 404, as Vite would send it back                                                                                                                                                                                                                                                                        |                    |
+- 400: a bad request.
+- 404: an unknown board, item or route.
+- 409: an ambiguous short ref (with `candidates`), or an action the item's state doesn't allow.
+- 502: GitHub or your agent refused; the error has its reason.
 
-`Action` is `done`, `snooze`, `mute`, `unmute`, `pin`, `unpin`, `restore`, `inflight` (your own open PR goes to [Merging](#merging): Hand off for merge), `takeback` (out of Merging: Back to desk), `seen` (marks it looked at; not undoable) or `undo` (undoes the latest action on that item). `until` is as for `desk_act`.
+**503 while starting.** Routes marked ✓ answer 503 until the first load finishes. If config.toml has errors from the start, the routes that read the queue keep answering 503, and `/api/config` works so you can fix it. Errors in a later edit keep the last good config running.
+
+**Own page only** means the route answers 403 unless the request comes from the desk's own window (`Sec-Fetch-Site: same-origin` and the desk's `Origin`; see [Security model](#security-model)). Agents, the CLI and curl get 403.
+
+### Queue and items
+
+| Method | Path              | What it does                                                                                                                                                                                                | 503 |
+| ------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| GET    | `/health`         | `{ ok: true, version }`                                                                                                                                                                                     |     |
+| GET    | `/api/overview`   | `Overview`                                                                                                                                                                                                  | ✓   |
+| GET    | `/api/queue`      | `QueueView`: every item once, at its best placement. The window's main source                                                                                                                               | ✓   |
+| GET    | `/api/focus`      | `FocusView`: the queue's now and today in the desk's order; never a PR in Merging                                                                                                                           | ✓   |
+| GET    | `/api/boards/:id` | `BoardView`                                                                                                                                                                                                 | ✓   |
+| GET    | `/api/item`       | `?id=<ref>` (encode `#` as `%23`) → `ItemDetail`                                                                                                                                                            | ✓   |
+| POST   | `/api/act`        | `{ id, action, until? }` → `{ ok, state: ItemState, undo_seq }`. `seen` and `undo` give `undo_seq: 0`. `inflight` is own page only                                                                          | ✓   |
+| POST   | `/api/add`        | `{ id, why?, from? }` → `{ ok, item: ItemDetail, undo_seq }`: on your desk, pinned ([Adding](#adding)). 400 for a ref it can't read or a short one it doesn't hold; 404 when GitHub has no such PR or issue | ✓   |
+| POST   | `/api/undo`       | `{ seq? }` (default: the latest action, any client's) → `{ ok, id, action }`. 409 if a later action on the item must be undone first, or for a hand-off or Back to desk not from the own page               | ✓   |
+| POST   | `/api/sync`       | Starts a sync now                                                                                                                                                                                           |     |
+| GET    | `/api/status`     | `{ now, today, new, text }`; `text` is e.g. `desk 7 +3` (7 in the queue, 3 new), `""` when 0/0                                                                                                              | ✓   |
+| GET    | `/api/fields`     | `FieldDoc[]`: every field rules can use                                                                                                                                                                     |     |
+
+`Action` is one of:
+
+- `done`, `snooze`, `mute`, `unmute`, `pin`, `unpin`, `restore`;
+- `inflight`: Hand off for merge, your own open PR into [Merging](#merging);
+- `takeback`: Back to desk, out of Merging;
+- `seen`: marks it looked at; not undoable;
+- `undo`: undoes the latest action on that item.
+
+`until` is as for `desk_act` ([MCP tools](#mcp-tools)).
+
+### Reviews and GitHub writes
+
+Every write here is own page only, logged, and answers 502 with GitHub's reason when GitHub refuses. `:id` is `owner%2Frepo%23123` (or `owner/repo%23123`).
+
+| Method | Path                        | What it does                                                                                                                                                                                                                                                                                         | 503 |
+| ------ | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| GET    | `/api/review/:id`           | `ReviewView`; 400 for an issue. Opening it asks for the AI review (with `review.auto_ai`, when this commit has none) and has your agent read what waits on you; `?ahead=1`, the window's prefetch, starts neither                                                                                    | ✓   |
+| POST   | `/api/review/:id/ai`        | `{ force? }` → `{ ok, ai: AiReview }`: this commit's review unless `force`; joins a run already going                                                                                                                                                                                                | ✓   |
+| POST   | `/api/review/:id/doc`       | `{ ok } & DocSaved`: the AI review as a review document (the one `AiReview.doc` names, or written now). 409 with no AI review or no diff                                                                                                                                                             | ✓   |
+| POST   | `/api/review/:id/approve`   | `{ head_oid, body? }` → `{ ok, url }`: approves at `head_oid`, the commit the view showed, then refreshes the PR and runs a full sync. 409 for your own PR, a closed one, one you approved at this commit, or new commits since                                                                      | ✓   |
+| POST   | `/api/review/:id/reply`     | `{ id, body }` → `{ ok, url }`: your reply to one of the PR's conversations, as you ([What reviewers said](#what-reviewers-said)). 404 for a conversation that isn't this PR's; 409 for a closed PR                                                                                                  | ✓   |
+| POST   | `/api/review/:id/comment`   | `{ body }` → `{ ok, url }`: your comment on the PR or issue. It's done, off your desk until someone else acts. 400 when empty; 409 when closed or merged                                                                                                                                             | ✓   |
+| POST   | `/api/review/:id/inline`    | `{ path, line, side, start?, body, head_oid }` → `{ ok, url }`: a comment on a line of the diff, on `side` `new` (RIGHT) or `old` (LEFT), `start` for a range, pinned to `head_oid`. Not done. 400 for a bad line or empty body; 409 for a closed PR                                                 | ✓   |
+| POST   | `/api/review/:id/ready`     | `{ users?, teams? }` (node ids) → `{ ok, done }`: marks your open draft ready, then asks those reviewers ([Ready for review](#ready-for-review)). 400 unless lists of ids; 409 unless your own open draft; 502 "Marked it ready, but …" when only the request failed                                 | ✓   |
+| POST   | `/api/review/:id/reviewers` | `{ users?, teams? }` → `{ ok }`: asks them to review your open non-draft PR; it leaves your desk until someone reviews. 400 when nobody's picked; 409 for a draft or someone else's PR                                                                                                               | ✓   |
+| GET    | `/api/reviewers/:id`        | `?q=` → `Reviewer[]` (`id login name team suggested`): GitHub's suggestions matching `q` first, then people with access and the org's teams, never you. 409 unless it's your PR. Read only                                                                                                           |     |
+| POST   | `/api/github`               | `{ id, action, head_oid?, body? }` → `{ ok, url }`: a [More menu](#the-more-menu) write (`close`, `draft`, `ready`, `merge`, `reopen`, `request_changes` with `body`); refreshes the item first. 409 unless the card offers it now, or for new commits since `head_oid` on a merge or change request | ✓   |
+
+### Settings, rules and policy
+
+| Method | Path                  | What it does                                                                                                                                                                                                                                              | 503 |
+| ------ | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| GET    | `/api/config`         | `ConfigDoc`: `{ path, text, hash, errors, warnings?, hard, builtins }`. `hard`: the hard and final rules. `builtins`: per board that names a set, each built-in rule with `on` and `yours` ([Rules](#rules-built-in-and-your-own))                        | ✓   |
+| POST   | `/api/config/preview` | `{ text }` → `PreviewResult`: errors, and per board the new counts and which items would move                                                                                                                                                             | ✓   |
+| PUT    | `/api/config`         | `{ text, base? }` → `{ ok, errors, warnings }`. Saves only valid text, and never with a settings section (`poll_seconds`, `[signals]`, `[notify]`, `[handoff]`, `[analyze]`: those live in Settings). 409 if the file changed since `base` (text or hash) | ✓   |
+| PUT    | `/api/config/builtin` | `{ board, rule, on, base? }`: switches one built-in rule through the board's `off` list; answers as `PUT /api/config`. 400 when `off` spans lines                                                                                                         | ✓   |
+| GET    | `/api/policy`         | `PolicyDoc`; `text` is `""` until you write one, and `starter` is in effect meanwhile                                                                                                                                                                     |     |
+| PUT    | `/api/policy`         | `{ text, base? }` → `{ ok, hash }`: writes `policy.md`. 409 if it changed since `base`; 400 over 20,000 characters                                                                                                                                        |     |
+| GET    | `/api/settings`       | `SettingsView`: schema, effective values, what's overridden, GitHub status                                                                                                                                                                                |     |
+| PUT    | `/api/settings`       | `{ set?, reset? }` → `{ ok, errors, settings }`; writes nothing if any value is invalid. Setting a secret (`agent.decision_key`) is own page only                                                                                                         |     |
+| GET    | `/api/agents`         | `AgentStatus` for your agent: `{ driver, mcp: { connected, command }, skill: { state, path, command }, needs, taken, connect }`. `skill.state` is `installed`, `outdated`, `missing` or `taken`; `needs` is `connect`, `update`, `taken` or null          |     |
+| POST   | `/api/agents/connect` | `AgentStatus` after installing the skill and registering the MCP server. 409 when the name is taken (`taken` says what holds it); 502 with the command to run yourself when the agent's CLI fails or isn't on PATH                                        |     |
+| POST   | `/api/update`         | `UpdateView`: the packaged app downloads the newer release and restarts into it. 409 when there's none or the app can't install it itself                                                                                                                 |     |
+| GET    | `/api/omarchy`        | The theme Omarchy has on; null off Omarchy                                                                                                                                                                                                                |     |
+
+### Merging, the coordinator and asks
+
+| Method | Path                         | What it does                                                                                                                                                                                                                | 503 |
+| ------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| GET    | `/api/inflight`              | `InflightView`: your PRs in Merging (open first, latest activity on top, then merged or closed in the last 3 days), the coordinator's state, and Claude's work                                                              | ✓   |
+| POST   | `/api/inflight/:id/note`     | `{ text }` → `{ ok, text }` (`desk_note`), flattened to one line. 400 when empty; 409 unless your open PR in Merging                                                                                                        | ✓   |
+| POST   | `/api/inflight/:id/handback` | `{ why }` → `{ ok, reason }` (`desk_hand_back`): the PR leaves Merging for the top of the queue. 409 unless your open PR in Merging                                                                                         | ✓   |
+| POST   | `/api/coordinator/wake`      | Starts the coordinator, or has it look at Merging now (Start it now, Wake it). 409 while `agent.coordinator` is off                                                                                                         | ✓   |
+| POST   | `/api/ask`                   | `{ text, item_id?, thread_id?, thread_url?, lines? }` → `{ ok, ask }`: your words to the coordinator ([Asks](#asks)), up to 2,000 characters. Own page only. 409 while `agent.coordinator` is off; 502 when it didn't start | ✓   |
+| GET    | `/api/asks`                  | `{ on, asks, coordinator }`: whether it's on, your asks oldest first with their answers, and what it's doing                                                                                                                |     |
+| GET    | `/api/asks/:id`              | `AskPlace` (`desk_ask`): where the ask is. Agents may read it. 404 for an unknown ask                                                                                                                                       | ✓   |
+| POST   | `/api/asks/:id/answer`       | `{ text }` → `{ ok, ask }` (`desk_answer`). Paragraphs kept; control, bidi and zero-width characters dropped; at most one blank line in a row. 400 over 6,000 characters (never cut); 404 for an unknown ask                |     |
+
+### Agents' questions
+
+| Method | Path                        | What it does                                                                                                                                                                                                        | 503 |
+| ------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| POST   | `/api/inquiries`            | `{ question, from, context, options?, links?, item? }` → `{ ok, inquiry }` (`desk_inquire`). Limits below; 400 says what's missing                                                                                  |     |
+| GET    | `/api/inquiries/unread`     | `Inquiry[]`: answers nobody has picked up yet (`answer.read_at` null), in the order asked. Listing picks none up                                                                                                    |     |
+| GET    | `/api/inquiries/:id`        | `InquiryView` (the question's page): the `Inquiry`, its item's `card` (null when the desk doesn't hold it), and `answer: { text, at, dismissed, read_at? }` once answered or dismissed. Reading here isn't a pickup |     |
+| POST   | `/api/inquiries/:id/read`   | `{ ok, inquiry }`: stamps `answer.read_at` the first time and ends its job in Claude's work. No change for an open question, a dismissal or a later read                                                            |     |
+| POST   | `/api/inquiries/:id/answer` | `{ text }` or `{ dismiss: true }` → `{ ok, inquiry }`. Own page only (an agent can't answer its own question). 400 when empty; 409 if already answered                                                              | ✓   |
+
+A question's limits: `question` one line (300), `from` one line (60), `context` 200 to 6,000 characters (paragraphs kept), at most 6 `options` (`answer` 80, `next` 400: what the agent does if you pick it), at most 12 `links` with https URLs, and an `item` or at least one link. Text over a limit is refused, never cut; bidi marks are dropped.
+
+After you answer, the question leaves the main page and is owed to whoever asked until they read it: an `answer` job in Claude's work, with one notification if it's unread after 30 minutes. A dismissal owes nothing. A question the coordinator asked (`from` "Inbox coordinator") wakes it with your answer, which counts as its read.
+
+### Sessions, automations and criteria
+
+| Method | Path                       | What it does                                                                                                                                                                                          | 503          |
+| ------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| GET    | `/api/sessions/:id`        | `SessionCard` of a session that needs you now; 404 once it doesn't ([Sessions](#sessions))                                                                                                            |              |
+| POST   | `/api/sessions/:id/kick`   | `{ ok, args, note }`: Kick or Resume in background. Own page only. 409 while its process runs, before its rate limit resets, or for a kind it isn't for                                               | ✓            |
+| POST   | `/api/sessions/:id/open`   | `{ ok, url }`: opens its `claude://` or `codex://` link on the desk's computer. Own page only; 409 with no link                                                                                       | ✓            |
+| GET    | `/api/automations`         | `AutomationView[]` ([Automations](#automations))                                                                                                                                                      |              |
+| PUT    | `/api/automations/:id`     | `AutomationBody` → `{ ok, automation }`: creates or replaces one of yours. From the own page `on` is as sent; from anything else a new or changed automation is off. 400 for a plugin's or a bad body | ✓ (`on`)     |
+| PUT    | `/api/automations/:id/on`  | `{ on }` → `{ ok, automation }`: switches a plugin's (`github.<id>`). Own page only; 404 for one of yours (its switch is its PUT)                                                                     | ✓            |
+| DELETE | `/api/automations/:id`     | Own page only; 400 for a plugin's                                                                                                                                                                     | ✓            |
+| POST   | `/api/automations/:id/run` | `{ ok, running }`: runs it now, in the background. 409 for one that's off unless from the own page                                                                                                    | ✓ (when off) |
+| GET    | `/api/criteria`            | `CriteriaView`: each criterion with `yes` (the Inbox items it says yes to), and `waiting`, `held`, `scored` ([Urgency](#urgency))                                                                     |              |
+| PUT    | `/api/criteria/:id`        | `{ name, when?, ask?, urgent?, on? }` → `{ ok, criterion }`: saves yours, whole. An agent's is on (`on` is the window's to set)                                                                       |              |
+| PUT    | `/api/criteria/:id/on`     | `{ on }` → `{ ok, criterion }`: switches yours or a plugin's. Own page only                                                                                                                           |              |
+| DELETE | `/api/criteria/:id`        | 400 for a plugin's                                                                                                                                                                                    |              |
+
+`PUT /api/automations/:id` checks: id is lowercase letters, digits and `-`, up to 40; `schedule` like `daily 09:00`, `weekdays 09:00`, `mon,thu 17:30`, or `events` instead, not both; an instruction up to 8,000 characters (none for a rule); `when` compiles; `decide` and a rule's `rule`; `can` (add alone when left out).
+
+### Documents, events and the rest
+
+| Method      | Path                 | What it does                                                                                                                                                                                                                                                     |
+| ----------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST        | `/api/docs`          | A review document ([review-format.md](review-format.md)) → `{ ok } & DocSaved` (`desk_doc`): read as the desk reads its own AI review, kept as `<home>/docs/<id>.json` and `<id>.html`. `dropped` lists what was left out; 400 with why                          |
+| GET         | `/api/docs/:id`      | The document as kept                                                                                                                                                                                                                                             |
+| GET         | `/api/docs/:id/html` | Its page: one HTML file, no script, nothing fetched. Its CSP lets only the desk's own window frame it (`#/doc/<id>`)                                                                                                                                             |
+| GET         | `/api/activity`      | `?after=&limit=&item=&wait=` → `ActivityPage`, a long-poll ([The event log](#the-event-log))                                                                                                                                                                     |
+| GET         | `/api/events`        | Server-sent events ([Events](#events))                                                                                                                                                                                                                           |
+| POST        | `/mcp`               | MCP JSON-RPC (Streamable HTTP): responses as an SSE stream; 202 for notifications                                                                                                                                                                                |
+| GET, DELETE | `/mcp`               | 405, `Allow: POST`                                                                                                                                                                                                                                               |
+| GET         | `/api/remote`        | `RemoteView`: `{ on, text, url, login, devices }`, Settings → This device's Tailscale rows                                                                                                                                                                       |
+| POST        | `/api/pair/code`     | `{ code, expires_at, url, pair_url }` (`desk pair`). This machine only; 409 while not served over Tailscale. A new code replaces the last                                                                                                                        |
+| POST        | `/api/pair/token`    | `{ name? }` → `{ url, token, device }` (`desk pair --print`). This machine only; 409 while not served                                                                                                                                                            |
+| POST        | `/api/pair`          | `{ code, kind?: "browser" \| "device", name? }`. Another device only: the code for `{ ok, token, device }`, or for a browser the session cookie and `{ ok, device }`. 403 for a wrong, used or expired code; 429 past five tries a minute                        |
+| DELETE      | `/api/devices/:id`   | Revokes a device at once. Own page only                                                                                                                                                                                                                          |
+| GET         | `/pair`              | Another device only: the page a pairing link opens. It trades the code in its `#` for a session and goes to the Inbox                                                                                                                                            |
+| GET         | `/skill`             | `skills/inbox/SKILL.md` as text; from another device, with the desk's tailnet address in place of `localhost:47823`                                                                                                                                              |
+| GET         | anything else        | The web UI from `web/dist` (unknown paths get `index.html`). From a checkout (`DESK_UI_ORIGIN`), the app's Vite server passed through with its hot-reload WebSocket, or a 503 page that retries while it starts. `/api…` and `/health…` paths get the desk's 404 |
 
 ### Main types
 
+Trimmed from [src/types.ts](../src/types.ts); the file is the source of truth. Text from GitHub or an agent (titles, why's from agents, summaries, notes, answers) is untrusted.
+
 ```ts
+type Bucket = "now" | "today" | "blocked" | "later" | "fyi" | "hide";
+type Until = "ci" | "push" | "approved" | "ready" | "conflict"; // what a snooze can wait on
+type GitHubAction = "close" | "draft" | "ready" | "merge" | "reopen" | "request_changes";
+
 interface Card {
   id: string; // "owner/repo#123"
   kind: "pr" | "issue";
   repo: string;
   number: number;
-  title: string; // untrusted GitHub text
+  title: string; // untrusted
   url: string;
   author: string;
   author_bot: boolean;
-  bucket: "now" | "today" | "blocked" | "later" | "fyi" | "hide";
-  why: string; // the hard rule's reason, Claude's, or the rule's until Claude answers, e.g. "vaind asked you directly"
-  demoted?: string; // over a board's cap: "3 from PRs to review are urgent already" (now to today), "the Inbox has 6 from PRs to review already" (today to later)
+  by: string; // who the row says it's from: "you", the person a bot opened it for, else its author
+  stage?: "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "handed back" | "merged" | "closed";
+  bucket: Bucket;
+  why: string; // e.g. "vaind asked you directly"
+  handoff?: { why: string; from: string }; // an agent added it (desk_add); gone once you act on it
+  demoted?: string; // over a cap: "3 from PRs to review are urgent already"
   board: string;
   boards: string[]; // every board it's on
-  chips: string[]; // short facts: "issue", "draft", "CI red", "conflict", "changes requested", "approved", "3 unresolved", "+120 −30"
+  chips: string[]; // "draft", "CI red", "conflict", "3 unresolved", "+120 −30", …
   ci: "green" | "red" | "pending" | "none";
   review: "approved" | "changes_requested" | "required" | "none";
   draft: boolean;
   created_at: string;
   updated_at: string;
   activity_at: string; // latest activity by someone else
-  waiting_since: string;
+  waiting_since: string; // request time if requested, else created_at
   new: boolean; // activity since you last looked
   pinned: boolean;
   status: "active" | "done" | "snoozed" | "muted";
   snooze_until: string | null;
-  snooze_when: "ci" | "push" | "approved" | "ready" | "conflict" | null; // snoozed until it happens instead of a time
-  wake_on?: ("ci" | "push" | "approved" | "ready" | "conflict")[]; // what a snooze can wait on now (the snooze menu's 6 on)
-  done_at?: string; // while it's done: when (you marked it done, or acted on it in the desk); the Archive's time
-  verdict: "look" | "skim" | "skip" | null; // from the AI review of the current commit
-  preflight?: Preflight; // Now and Today cards only
-  handed_back?: boolean; // your PR, back from Merging because the coordinator can't get it merged: at the top of the queue, its why says why
-  talk?: true; // a PR people said something on (a review thread, a person's comment, a review that commented or asked for changes): its review keeps the conversation's line while it loads
-  cta?: "ready" | "reply" | "reviewers" | "merge"; // the row's one call to action: "ready" is Ready for review (a) on your own open draft, whatever its CI; "reviewers" is Add reviewers on your ready PR nobody's asked to review (a opens its review to pick them); "merge" is Merge (a) on your PR whose `actions` offer merge: approved or needing no review, green, mergeable, not stacked, merged at the head the desk read with its repo's method; "reply" on your own PR whose only action is answering someone (also on its review's card: its first reply box is focused), ahead of Merge
-  actions?: GitHubAction[]; // the More menu's GitHub writes the desk allows now ("close", "draft", "merge", "reopen", "request_changes"); absent when none
-  resolved: string | null; // why it needs nobody now: "merged", "closed", "you approved", "approved by alice", "no longer requested"
-  resolved_at: string | null; // when it resolved (its last update when GitHub doesn't say); null while it's open
-  inflight: boolean; // your open PR, in Merging
-  group?: "back" | "review" | "other" | "mine"; // a Now or Today card's part of the main page, in this order: your PR back to you (handed back, or ready and nobody's asked to review it); someone else's PR waiting on your review (requested or pushed since your review, not a draft); any other issue or PR not yours; your PR. Desk.top() sorts Now and Today each by it (byPart); the window draws no heading for it, only that order
-  placed_by?: "hard" | "pin" | "claude" | "pending" | "unanswered"; // a hard rule, a pin's floor, Claude, the rules until Claude answers, or since it gave no answer; unset with the judge off and in Merging
-  stack?: StackRef; // an open PR whose line has two or more open PRs (Stacks, below)
-  stage?: "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "handed back" | "merged" | "closed"; // a PR's; "blocked" in place of approved or waiting for review while another PR blocks it; "handed back" in place of any on your PR the coordinator handed back
-  blocker?: { id: string; ref: string; waits: string }; // an open PR blocked by another (Dependencies, below): the item id at the end of the chain, as pr.blocker says it ("sentry#129460 (through api#2)"), and what that one waits on
-  needs?: string[]; // a blocked PR's open PRs it needs merged first directly, as repo#number (pr.blocked_by)
-  depth?: number; // on Blocked: how deep in its chain the row hangs, 0 for a chain's first rows
-  blocks?: string[]; // open PRs that need this one merged first, directly or not, as repo#number
+  snooze_when: Until | null; // snoozed until this happens
+  wake_on?: Until[]; // what a snooze can wait on now
+  done_at?: string; // while done: when
+  verdict: "look" | "skim" | "skip" | null; // the current commit's AI review
+  preflight?: Preflight; // Now and Today only
+  handed_back?: boolean; // your PR back on top; its why says why
+  cta?: "ready" | "reply" | "reviewers" | "merge"; // the row's one call to action
+  review_optional?: true; // your PR's repo needs no review: Hand off for merge beside Add reviewers
+  talk?: true; // people said something on it
+  actions?: GitHubAction[]; // the More menu's writes allowed now
+  resolved: string | null; // "merged", "approved by alice", …; null while open
+  resolved_at: string | null;
+  inflight: boolean; // your PR, in Merging
+  group?: "back" | "review" | "other" | "mine"; // a Now or Today card's part of the main page's order
+  placed_by?: "hard" | "pin" | "claude" | "automation" | "pending" | "unanswered";
+  team_ask?: string; // asked only of your team: "CODEOWNERS ping to @ml-team"
+  stack?: StackRef; // an open PR whose line has two or more open PRs
+  blocker?: { id: string; ref: string; waits: string }; // the PR at the end of its blocking chain
+  needs?: string[]; // open PRs it needs merged first, directly
+  depth?: number; // on Blocked: how deep in its chain the row hangs
+  blocks?: string[]; // open PRs that need this one merged first
+  section?: "urgent" | "standard" | "fyi"; // on the Inbox
+  score?: number; // on the Inbox: 0 to 10
+  reason?: string; // on the Inbox: the row's quiet why
+  quick?: string; // someone else's PR that's quick to review: "low risk, 24 lines"
 }
 
-// The AI review of a card's head, for skimming. The other fields come from the latest review, for an older head unless ready.
+// The AI review of a card's head, for skimming.
 interface Preflight {
-  state: "ready" | "stale" | "running" | "queued" | "paused" | "off" | "failed" | "none"; // stale: a new one is coming; off: review.auto_ai is off; failed: a try on its head failed and none runs; none: an issue or your PR
+  state: "ready" | "stale" | "running" | "queued" | "paused" | "off" | "failed" | "none";
   verdict?: "look" | "skim" | "skip";
   risk?: "low" | "medium" | "high";
   summary?: string;
+  since?: string; // a re-review's gist
   concerns?: string[]; // at most 2
   notes?: number;
 }
 
 interface QueueView {
-  inquiries: Inquiry[]; // agents' questions waiting on your answer, oldest first: the main page's first rows
-  sessions: SessionCard[]; // the sessions that need you (Sessions, above), with your triage on them; the active ones follow the questions
-  sections: { now: Card[]; today: Card[]; blocked: Card[]; later: Card[]; fyi: Card[] }; // blocked: what your rules put in Blocked, and your PRs in Merging that another PR blocks, as a forest (blockedOrder() in src/deps.ts): a chain (rows joined by what they need, through PRs not listed too) at a time, by its longest wait; in it each PR before the PRs that need it, hung under the last of them listed (depth), older waits first; the template's "blocked by …, which …" reads "needs <the PRs it needs directly>" ("in Merging · needs …"), and a chain says once what its blocker waits on, on the blocker's own row when it's listed, else on the first row it blocks ("needs sentry#129460, which waits on …"; "needs api#5; sentry#129460 waits on …" when that's not a direct need); a rule's own why stays as written; waiting_since: since it was blocked (kv blocked), or your PR's latest ask
+  inquiries: Inquiry[]; // agents' questions for you, oldest first
+  sessions: SessionCard[]; // sessions that need you
+  sections: { now: Card[]; today: Card[]; blocked: Card[]; later: Card[]; fyi: Card[] }; // the rules' view
+  reviewing: number; // PRs held until their first AI review is written
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
-  resolved: Card[]; // the world dealt with it (see Resolved, below); newest first
-  cards: number; // queue.cards: the queue is one list, now's cards then today's (each the weightiest first); it shows this many, the rest behind one line; 0 = all
-  paused: { who: "claude" | "ai"; why: string } | null; // said once, as a bubble at the window's edge: claude, when the AI review or the judge can't log in; ai, when AI reviews nobody asked for keep failing otherwise
-  reviewing: number; // someone else's PRs that would be in Now or Today, held until Claude's first review of them is written
-  stacks: Record<string, Stack>; // by stack id: each stack a card here carries (Stacks, below); current is the card sections list it by, else its first card
-  inbox: { urgent: Card[]; standard: Card[]; fyi: Card[] }; // the Inbox the window draws (Urgency, above): each card with section, score and reason
+  resolved: Card[]; // newest first (see Resolved)
+  cards: number; // queue.cards: how many show before "more"; 0 = all
+  paused: { who: "claude" | "ai"; why: string } | null; // shown once, as a bubble
+  stacks: Record<string, Stack>; // each stack a card here carries
+  inbox: { urgent: Card[]; standard: Card[]; fyi: Card[] }; // what the window draws (see Urgency)
 }
-// BoardView is the same for one board, plus board: BoardSummary & { queries: string[] }, without resolved items, and no stacks: a board lists every PR.
-// FocusView is { sections: { now: Card[]; today: Card[] }, reviewing, cards, paused }; resolved items are never in it; a stack is one card, as in the queue.
+// FocusView: { sessions, sections: { now, today }, reviewing, cards, paused }; never resolved items.
+// BoardView: { board: BoardSummary & { queries }, sections, hidden, cleared }; every PR, no stacks.
 
 interface Overview {
   me: string;
   synced_at: string | null;
   syncing: boolean;
   sync_error: string | null;
-  config_errors: { path: string; message: string }[];
-  connectors: { id: string; name: string; status: "ok" | "syncing" | "paused" | "error"; synced_at: string | null; error: string | null }[]; // GitHub today
-  spaces: { id: string; name: string; boards: BoardSummary[] }[]; // BoardSummary: id, name, space, counts per bucket + cleared, new, error?
-  focus: { now: number; today: number; new: number };
+  config_errors: ConfigError[];
+  connectors: { id: string; name: string; status: "ok" | "syncing" | "paused" | "error"; synced_at: string | null; error: string | null }[];
+  spaces: { id: string; name: string; boards: BoardSummary[] }[]; // counts per bucket, cleared, new, error?
+  focus: { now: number; today: number; new: number; asks: number; sessions: number };
   inflight: { total: number }; // your open PRs in Merging
-  agent: boolean; // your agent (agent.coordinator) is on: the window draws its Ask your agent entries
+  agent: boolean; // agent.coordinator is on: the window shows Ask your agent
+  ai_agent: AgentName; // who sorts and reviews (agent.harness)
   rate_limit: { remaining: number; reset_at: string } | null;
-  sentry?: { dsn: string; release: string | undefined } | null; // the UI's Sentry; null when `desk serve` didn't start Sentry (DESK_SENTRY=0, or the app's in-process desk)
+  sentry?: { dsn: string; release: string | undefined } | null; // the UI's Sentry; null: none
+  update?: UpdateView | null; // null: no packaged app runs this desk
+}
+
+interface UpdateView {
+  current: string;
+  latest: string | null;
+  url: string | null; // the release's page
+  available: boolean;
+  install: boolean; // the app can install it itself (POST /api/update)
+  installing: boolean;
+  error: string | null; // why the last install failed
 }
 
 interface Placement {
   board: string;
-  bucket: Bucket; // after the judge, quiet and caps
-  rule_bucket: Bucket; // before quiet and caps
-  rule: number | null; // the matched rule, null = the board default
+  bucket: Bucket; // after caps
+  rule_bucket: Bucket; // before caps, after the judge
+  rule: number | null; // matched rule index; null = the board default
   why: string;
   demoted?: string;
   trace: TraceStep[];
-  hard?: boolean; // a hard rule matched it
-  floor?: Bucket; // ...so it never sorts below this (Today for a Now rule)
-  judge?: { bucket: Bucket | null; why: string; pending: boolean }; // while the judge is on; bucket null: where the rules put it
-  hint?: { bucket: Bucket; why: string }; // with judge: where the rules put it
+  hard?: boolean; // a hard rule matched
+  floor?: Bucket; // it never sorts below this (hard rule or pin)
+  judge?: JudgeStep; // while the judge is on
+  hint?: { bucket: Bucket; why: string }; // where the rules put it
 }
 
 interface PolicyDoc {
   path: string;
-  text: string; // policy.md; empty means the starter is in effect
-  starter: string; // the built-in starter policy
-  hash: string; // of the policy in effect; pass it back as `base`
-  judge: JudgeStatus; // state off | idle | running | error, off_reason, waiting, judged, spent and max_per_hour this hour, last_at, error, retry_at
+  text: string; // empty: the starter is in use
+  starter: string;
+  hash: string; // pass back as `base`
+  judge: JudgeStatus; // off | idle | running | error, this hour's counts, retry_at
 }
 
 interface ItemDetail {
   card: Card;
   item: Item; // the normalized GitHub item
   signals: Signals; // every field rules can read
-  placements: Placement[]; // per board: bucket, rule, why, and the rule trace
-  state: ItemState; // done_at, snooze_until, snooze_on_activity, snooze_when, muted, pinned, seen_at
+  placements: Placement[]; // per board
+  state: ItemState;
   handoff_prompt: string;
   ai: AiReview | null;
-  ai_stale: boolean; // new commits since the AI review
+  ai_stale: boolean; // new commits since
   generating: boolean;
-  activity: ActivityEvent[]; // the item's last 8 events, newest first
-  stack: Stack | null; // its stack, with it current
+  held: boolean; // kept off the queue until its first AI review
+  activity: ActivityEvent[]; // latest first
+  stack: Stack | null;
 }
 
 interface ReviewView {
   card: Card;
   item: Item;
   handoff_prompt: string;
-  files: { path: string; previous_path: string | null; status: string; additions: number; deletions: number; patch: string | null }[]; // patch: today's UI renders it; new clients render order's hunks
-  diff_head: string; // the commit the diff's own files are at (their contents_url ref): what an inline comment pins to
-  files_error: string | null; // the diff couldn't be fetched
-  order: ReviewOrder; // every hunk once, in the order to read them (below)
+  files: { path: string; previous_path: string | null; status: string; additions: number; deletions: number; patch: string | null }[];
+  diff_head: string; // the commit the diff is at: what an inline comment pins to
+  files_error: string | null;
+  order: ReviewOrder; // every hunk once, in reading order
   ai: AiReview | null; // the latest, even if stale
   ai_stale: boolean;
-  ai_error: string | null; // the last failed attempt on this commit, or why AI reviews are paused
-  generating: boolean; // its job is running: exactly when the window says Claude is reviewing it
-  ai_job: Job | null; // its AI review's job in Claude's work: running, or for this commit (its tries, when it tries again)
-  approve: { ok: boolean; reason: string | null }; // reason: why not, e.g. "it's your PR"
-  activity: ActivityEvent[]; // the PR's last 8 events, newest first
-  stack: Stack | null; // its stack, with it current: the sidebar's chain, and the PRs above and below it
-  checks: Checks | null; // its head commit's checks; null: none ran, or they couldn't be fetched
-  checks_error: string | null; // they couldn't be fetched
-  reviewers: { line: string; changes: boolean; list: { who: string; state: "changes requested" | "asked" | "approved" | "commented" }[] }; // who reviews it and where each stands
-  merge: string | null; // what stands in its merge's way, in one line ("Merge conflict with main"); null: nothing, or the desk doesn't know
+  ai_error: string | null; // last failure on this commit, or why reviews are paused
+  generating: boolean;
+  ai_job: Job | null; // its job in Claude's work
+  approve: { ok: boolean; reason: string | null }; // reason: why not
+  activity: ActivityEvent[]; // the last 8, newest first
+  stack: Stack | null;
+  checks: Checks | null; // null: none ran, or the fetch failed
+  checks_error: string | null;
+  reviewers: { line: string; changes: boolean; list: { who: string; state: "changes requested" | "asked" | "approved" | "commented" }[] };
+  merge: string | null; // what blocks the merge: "Merge conflict with main"
+  conversation: Conversation[]; // those waiting on you first
+  conversation_error: string | null;
+  reading: boolean; // your agent is reading the ones waiting on you
+  reading_error: string | null;
+  asks: Ask[]; // yours to the coordinator about it
+}
+
+interface Conversation {
+  id: string; // what a reply goes to
+  kind: "thread" | "comment" | "review";
+  path: string | null; // a thread's file
+  line: number | null;
+  side: "new" | "old" | null; // old: a removed line, numbered in the old file
+  outdated: boolean;
+  resolved: boolean;
+  state: ReviewState | null; // a review's
+  comments: { id: string; author: string; bot: boolean; body: string; at: string; url: string }[]; // oldest first
+  waiting_on_you: boolean;
+  url: string;
+  take: Take | null; // your agent's read; only when waiting on you
 }
 
 interface Checks {
-  line: string; // all of them in one line: "CI passing · 14 checks", "2 failing of 14 checks", "3 running of 14 checks"
-  failing: boolean; // a check that counts is failing: the line is red, as "CI failing" is
-  list: { name: string; state: "failing" | "cancelled" | "running" | "passing" | "skipped"; optional: boolean; url: string }[]; // what's wrong first, then by name
+  line: string; // "CI passing · 14 checks", "2 failing of 14 checks"
+  failing: boolean; // a required check fails: drawn red
+  list: { name: string; state: "failing" | "cancelled" | "running" | "passing" | "skipped"; optional: boolean; url: string }[];
 }
 
 interface AiReview {
   verdict: "look" | "skim" | "skip";
   risk: "low" | "medium" | "high";
   summary: string;
-  concerns: string[];
-  notes: { path: string; line: number; side: "new" | "old"; body: string }[]; // line 0: about the whole file
+  since?: string; // a re-review: what changed since your review
+  concerns: string[]; // each also a note on its line
+  notes: { path: string; line: number; side: "new" | "old"; body: string }[]; // line 0: the whole file
+  dropped?: number; // what the checks took out
   chunks?: {
-    // absent on reviews written before ranking, or when Claude gave no list
-    ranked: { id: string; path: string; level: "look" | "skim"; why: string }[]; // Claude's order (at most 20), then hunks it noted but didn't rank, as skims
-    unread: string[]; // hunks left out of the prompt because the PR, or their file, was too long to read whole
-    total: number; // hunks in the diff
+    ranked: { id: string; path: string; level: "look" | "skim"; why: string }[];
+    unread: string[]; // hunks too long to send
+    total: number;
   };
   guide?: {
-    // absent on reviews written before it, and when Claude wrote no walk-through worth keeping
-    steps: { title: string; body: string; check: string; hunks: { id: string; path: string }[] }[];
+    steps: { title: string; body: string; check: string; note?: string; diagram?: string; hunks: { id: string; path: string }[] }[];
   };
+  // The review document's parts (review-format.md); absent on older reviews.
+  risk_reasons?: { factor: RiskFactor; why: string }[];
+  intent?: { goal: string; fit: "matches" | "partial" | "differs" | "undescribed"; gap: string; stack: string };
+  look?: ReviewLook[];
+  interfaces?: ReviewInterface[];
+  improvements?: ReviewNote[];
+  diagrams?: ReviewDiagram[];
+  skill?: string; // hash of the review instructions used
+  doc?: string; // its review document's id
+  refused?: string[]; // diagrams the grammar refused
   head_oid: string; // the commit it read
-  model: string; // as Claude Code reports it ("claude-opus-5[1m]"), else "claude-code"
+  model: string; // as the agent reports it ("claude-opus-5[1m]"), else "claude-code", "codex", "opencode"
   at: string;
 }
 
-// The desk's reading order for GET /api/review/:id: clients render it as is, without sorting or ranking anything.
+// The reading order: clients render it as is.
 interface ReviewOrder {
-  ranked: boolean; // false: no ranking for this commit (none yet, written before ranking, or a newer push): chunks is every hunk, file by file
-  chunks: ReviewHunk[]; // read these, in this order: Claude's (most worth first; a re-review, what changed since you looked first), then hunks it noted but didn't rank
-  unread: ReviewHunk[]; // Claude didn't see these (the PR or their file was too long to read whole), file by file
-  skipped: ReviewHunk[]; // Claude saw these and left them out (level "skip"), file by file
-  rest: { path: string; file: number; why: string; hunks: ReviewHunk[]; notes: number[] }[]; // folded, by file; why: "lockfile or generated", "no text diff: binary or too large", "renamed without changes"; notes: a file's own when it has no hunks
-  notes: number[]; // indices into ai.notes in reading order; empty when the review is for an older commit
-  steps?: { title: string; body: string; check: string; hunks: ReviewHunk[] }[]; // the walk-through, when this commit's review has one; its hunks are the same ones chunks, unread and skipped hold
-  beyond?: ReviewHunk[]; // with steps: the hunks of chunks, unread and skipped no step covers, file by file
+  ranked: boolean; // false: no ranking for this commit; chunks is every hunk, file by file
+  chunks: ReviewHunk[]; // read these, in this order
+  unread: ReviewHunk[]; // too long for the agent to see
+  skipped: ReviewHunk[]; // the agent left them out
+  rest: { path: string; file: number; why: string; hunks: ReviewHunk[]; notes: number[] }[]; // folded by the desk
+  notes: number[]; // ai.notes in reading order; empty for an older commit
+  steps?: { title: string; body: string; check: string; hunks: ReviewHunk[] }[]; // the walk-through
+  beyond?: ReviewHunk[]; // with steps: hunks no step covers
 }
 
 interface ReviewHunk {
-  id: string; // h1, h2, … across the files in order, as the AI review's prompt numbers them
+  id: string; // h1, h2, … as the prompt numbered them
   path: string;
   file: number; // index in files
   header: string; // its @@ line
-  patch: string; // its own lines, the @@ line first: render it on its own
+  patch: string; // its own lines, @@ first
   additions: number;
   deletions: number;
   level: "look" | "skim" | "skip" | "unread" | null; // null: no ranking
-  rank: number | null; // 1 = read it first; look and skim only
-  why: string | null; // look and skim: Claude's few words ("" on a hunk it noted but didn't rank); unread: "the PR was too long to read whole" or "its file was too long to read whole"
-  notes: number[]; // indices into ai.notes to show with it; the file's own notes (line 0) ride on its first hunk in the order
+  rank: number | null; // 1 = first; look and skim only
+  why: string | null;
+  notes: number[]; // ai.notes to show with it
+  looks?: number[]; // ai.look entries starting here
 }
 
 interface ActivityEvent {
-  seq: number; // increasing; pass the last one you saw as `after`
-  at: string; // when it happened if GitHub says (a review, a comment, a merge), else when the desk noticed
-  source: string; // the connector: "github"
-  item_id: string; // "owner/repo#123"
-  kind: ActivityKind; // below
+  seq: number; // increasing
+  at: string; // when it happened, else when the desk noticed
+  source: string; // "github"
+  item_id: string;
+  kind: ActivityKind; // see The event log
   actor: string; // login, "" if unknown
   data: Record<string, string | boolean>;
 }
 
 interface ActivityPage {
   events: ActivityEvent[]; // oldest first
-  last_seq: number; // the last event's seq, or the log's latest when there are none: the next call's `after`
+  last_seq: number; // the next call's `after`
+}
+
+interface InflightView {
+  rows: InflightRow[]; // a stack's rows together, bottom first
+  stacks: Record<string, Stack>;
+  coordinator: CoordinatorView;
+  work: Work[]; // Claude's work: running, queued, failed
 }
 
 interface InflightRow {
   card: Card;
   state: "open" | "merged" | "closed";
   base: string;
-  stacked: boolean; // its base isn't the repo's default branch: it sits on another PR
-  merge_method: "MERGE" | "SQUASH" | "REBASE" | null; // the repo's default for you, when the desk knows it
+  stacked: boolean; // based on another PR
+  review_optional: boolean; // merges once CI passes
+  merge_method: "MERGE" | "SQUASH" | "REBASE" | null;
   ci: "green" | "red" | "pending" | "none";
   failing: string[]; // failing check names
-  approved_by: string[]; // collaborators only (OWNER, MEMBER, COLLABORATOR): the coordinator merges on it
-  changes_by: string[]; // changes requested by
-  waiting_on: string[]; // asked and not heard from; teams as @slug
+  approved_by: string[]; // collaborators only
+  changes_by: string[];
+  waiting_on: string[]; // asked, not heard from; teams as @slug
   threads_unresolved: number;
   mergeable: "clean" | "conflict" | "unknown";
   draft: boolean;
-  rebase: boolean; // the desk gave it to the coordinator only to rebase: ready to merge but conflicts; it leaves once mergeable
-  blocked_by: { ref: string; waits: string } | null; // another PR must merge first: pr.blocker and pr.blocker_waits
-  requires_closed: string[]; // PRs it needs that were closed without merging (pr.requires_closed): it can't merge as its description says
-  waits_on: string | null; // the first thing between it and a merge: "rebasing", "waits on sentry#129460 to merge first", "needs sentry#5, closed without merging", "waits on a CI fix", "waits on a review from dana", "ready to merge"; null once merged or closed
-  note: { text: string; at: string } | null; // the coordinator's latest desk_note; untrusted, an agent wrote it
+  rebase: boolean; // only here to be rebased
+  blocked_by: { ref: string; waits: string } | null;
+  requires_closed: string[]; // PRs it needs that closed unmerged
+  waits_on: string | null; // "waits on CI", "ready to merge"; null once merged or closed
+  note: { text: string; at: string } | null; // the coordinator's latest; untrusted
 }
-// InflightView is { rows: InflightRow[]; stacks: Record<string, Stack>; coordinator: CoordinatorView }, and CoordinatorView is
-// { on: boolean; id: string | null; url: string | null; error: string | null; status; queued: boolean } (its claude.ai link;
-// why it can't run; what `claude agents` last said it's doing: "busy" | "shell" | "waiting" (a permission prompt) | "idle" |
-// "stopped" | null, looked at every 10 s while one of your asks waits on its answer; your ask not handed over yet).
-// GET /api/asks is { on, asks: Ask[], coordinator: CoordinatorView }, so a waiting ask can say what it's doing. An Ask is
-// { id, at, text, item_id, thread_id, thread_url, lines?: AskLines | null, answer }; lines is absent on asks kept before it.
 
-// Lines of a PR's diff an ask is about, at the commit they were read in: picked with + (or a drag), or the AI note you were on.
+interface CoordinatorView {
+  on: boolean;
+  id: string | null; // null until started
+  url: string | null; // its Remote Control page
+  error: string | null; // why it last couldn't start or resume
+  status: "busy" | "shell" | "waiting" | "idle" | "stopped" | null; // checked every 10 s while an ask waits
+  queued: string[]; // your asks not handed over yet
+}
+
+interface Ask {
+  id: string;
+  at: string;
+  text: string; // your words
+  item_id: string | null;
+  thread_id: string | null;
+  thread_url: string | null;
+  lines?: AskLines | null;
+  answer: { text: string; at: string } | null; // untrusted
+}
+
 interface AskLines {
-  path: string; // PR text: it never goes in the wake line, and desk_ask fences it
+  path: string; // untrusted: never in the wake line
   line: number;
-  side: "new" | "old"; // old = a removed line, numbered in the base
+  side: "new" | "old";
   start?: { line: number; side: "new" | "old" };
   head: string; // the 40-character commit
-  note?: boolean; // Claude's AI note there (] [), not lines you picked
+  note?: boolean; // the AI note there, not lines you picked
 }
 
-// What an ask is about, in the desk's words: never PR text.
-interface AskAbout {
-  url: string;
-  whose: "mine" | "theirs" | "issue"; // me.author (yours, or a bot's opened for you: Opened for you), or in Merging
-  merging: boolean;
-  state: "open" | "closed" | "merged";
-}
-
-// GET /api/asks/:id (desk_ask)
 interface AskPlace {
   ask: Ask;
-  about: AskAbout | null; // null: about nothing, or the item left the desk
-  head: string | null; // the PR's head at the desk's last sync
-  base: string | null; // the PR's base branch: removed lines are numbered there
-  push: { repo: string; branch: string } | null; // only your own open PR's branch, in Merging or not
+  about: { url: string; whose: "mine" | "theirs" | "issue"; merging: boolean; state: "open" | "closed" | "merged" } | null;
+  head: string | null; // the PR's head at the last sync
+  base: string | null; // removed lines are numbered there
+  push: { repo: string; branch: string } | null; // only your own open PR
 }
-// A stack's rows are together, bottom first, where its first row would be; stacks has each of them, its first row current.
 
-// Where a card's PR sits in its stack, counting what's still to land: "3/20".
 interface StackRef {
-  id: string; // the stack: its bottom PR's id
-  pos: number; // this PR's place among the open PRs of its line, 1 = the lowest open one; merged ones below don't count
-  size: number; // the open PRs in that line
-  folded?: string[]; // on the one card a queue view lists for the stack: its other members it stands for, bottom first
+  id: string; // the bottom PR's id
+  pos: number; // 1 = the lowest open PR of its line
+  size: number; // open PRs in the line
+  folded?: string[]; // on the one card listed for a stack: the members it stands for
 }
 
 interface Stack {
-  id: string; // its bottom PR's id
+  id: string;
   repo: string;
-  base: string; // the branch under the bottom PR: the default branch, or one no PR the desk knows heads
-  line: StackMember[]; // bottom first, through the current PR; above a fork, the branch with open PRs, then the longest, then the oldest
-  forks: StackMember[]; // the other branches at a fork, bottom first; each member's parent says where it branches off
+  base: string; // the branch under the bottom PR
+  line: StackMember[]; // bottom first
+  forks: StackMember[]; // other branches at a fork
   current: string; // the PR the view is about
-  up: string | null; // the next open PR above the current one on the line
-  down: string | null; // and below it
+  up: string | null;
+  down: string | null;
 }
 
 interface StackMember {
@@ -631,10 +619,30 @@ interface StackMember {
   draft: boolean;
   ci: "green" | "red" | "pending" | "none";
   review: "approved" | "changes_requested" | "required" | "none";
-  parent: string | null; // the member it's based on; null at the bottom
+  parent: string | null;
   current: boolean;
-  bucket: Bucket | null; // where the queue has it; null off the queue (merged, closed, cleared, in Merging, on no board)
-  why: string; // its card's why ("merged" for a merged one); "" when the desk has none
+  bucket: Bucket | null; // null off the queue
+  why: string;
+}
+
+interface SessionCard {
+  id: string; // "session:<its id>"
+  session_id: string; // Claude Code's session id, or Codex's thread id
+  kind: "cli" | "background" | "desktop" | "codex";
+  name: string;
+  cwd: string;
+  branch: string | null;
+  state: "blocked" | "stalled";
+  reason: string; // "needs permission: Bash", "rate limited until 14:05"
+  since: string;
+  excerpt: string; // one line
+  resets_at: string | null;
+  alive: boolean; // its process runs
+  actions: ("kick" | "resume" | "attach" | "open")[];
+  open_url: string | null;
+  attach: string | null; // the command attach copies
+  status: "active" | "done" | "snoozed" | "muted";
+  snooze_until: string | null;
 }
 
 type Verb = "add" | "today" | "later" | "fyi" | "hide" | "snooze" | "done" | "mute";
@@ -642,22 +650,24 @@ type Verb = "add" | "today" | "later" | "fyi" | "hide" | "snooze" | "done" | "mu
 interface Automation {
   id: string; // a slug: "warden-issues"
   name: string;
-  schedule: string; // "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly": local time; "" with events
-  events?: ActivityKind[]; // instead: it runs when one of these lands on an item
-  prompt: string; // the instruction, in your words; "" for a rule
-  when?: string; // its check, in the rules' language: only the items that pass it are handed on
-  decide?: "rule" | "ask"; // how it decides; absent: agent
-  rule?: { do: Verb; until?: string; why: string }; // with decide rule: its fixed action
-  can?: Verb[]; // what it may do with an item; absent: add only
+  schedule: string; // "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly"; "" with events
+  events?: ActivityKind[]; // runs when one lands on an item
+  prompt: string; // the instruction; "" for a rule
+  when?: string; // its check, in the rules' language
+  decide?: "rule" | "ask"; // absent: agent
+  rule?: { do: Verb; until?: string; why: string }; // decide rule's fixed action
+  can?: Verb[]; // absent: add only
   on: boolean;
-  by: "you" | "an agent"; // who last changed what it does
+  by: "you" | "an agent"; // who last changed it
   updated_at: string;
+  plugin?: string; // a plugin's ("github"): you only switch it
+  help?: string; // a plugin's one line
 }
 
-// PUT /api/automations/:id: the whole automation; what's left out is its default
-interface AutomationBody {
+// PUT /api/automations/:id: the whole automation; what's left out is its default.
+type AutomationBody = {
   name: string;
-  schedule?: string; // or events
+  schedule?: string;
   events?: ActivityKind[];
   prompt?: string; // required but for a rule
   when?: string;
@@ -665,7 +675,7 @@ interface AutomationBody {
   rule?: { do: Verb; until?: string; why: string };
   can?: Verb[];
   on?: boolean;
-}
+};
 
 interface AutomationRun {
   id: string;
@@ -674,113 +684,49 @@ interface AutomationRun {
   at: string;
   done_at: string | null; // null while it runs
   error: string | null;
-  summary: string; // the agent's: untrusted
+  summary: string; // untrusted
   items: AutomationItem[];
-  session: string | null; // the run's Claude Code session
+  session: string | null; // the agent session, to resume
+  agent?: "codex" | "opencode";
 }
 
 interface AutomationItem {
   item_id: string;
   why: string;
-  do?: Verb; // what the run said to do with it; absent: add
-  until?: string; // a snooze's, as the run said it
-  // did: the desk did `do`; held: its sort is kept, but a hard rule, a final rule or your pin holds it; refused: outside its `can`
+  do?: Verb; // absent: add
+  until?: string;
   outcome: "added" | "did" | "kept" | "left" | "resolved" | "held" | "refused" | "failed";
   error?: string;
 }
 
 interface AutomationView extends Automation {
-  trigger: string; // what starts it, in words: "Mon and Thu at 17:30" (as written when it can't be read), or "When CI changes or someone comments"
-  next_at: string | null; // a schedule's
+  trigger: string; // "Mon and Thu at 17:30", "When CI changes or someone comments"
+  next_at: string | null;
   running: boolean;
-  waiting: { why: string; until: string } | null; // an ask whose model can't answer now: why, and when it asks again
-  runs: (AutomationRun & { did: string; didnt: string })[]; // newest first, the last 10, each with what it did and couldn't, in words
+  waiting: { why: string; until: string } | null; // an ask whose model can't answer now
+  runs: (AutomationRun & { did: string; didnt: string })[]; // the last 10, newest first
 }
 ```
-
-## Stacks
-
-A stack is PRs in one repo, each based on the head branch of the one below it, the bottom one on the default branch (or on a branch no PR heads). The desk works them out on every snapshot from the PRs it holds (`src/stacks.ts`, pure), whoever wrote them; nothing about a stack is stored.
-
-- **Links.** A PR's parent is the PR whose head branch is its base, from the repo itself (a fork's branch of the same name isn't it): an open one first, then merged, then closed. A PR GitHub moved to the default branch when the PR below it merged (its latest base change, `Item.retargeted`) keeps that merged PR as its parent.
-- **Forks and dead branches.** A PR with two PRs on its branch forks the stack. A line goes bottom to top through a PR and, above it at each fork, takes the branch with open PRs, then the longest, then the oldest PR's; `Stack.forks` has the rest. A closed PR with nothing open or merged above it is in no stack; one with open PRs above it stays, closed.
-- **Counting.** `StackRef.pos`/`size` count the open PRs of the PR's line, what's still to land, so merged PRs below don't move "3/20"; the chain still lists them. A PR has a ref when it's open and its line has two or more open PRs: two open PRs forking off a merged one aren't stacked on each other, so neither has a ref and each is its own card (the chain still shows the other branch).
-- **One line per stack.** `GET /api/queue` and `/api/focus` list a stack once: of its members with a card in Now, Today, Later and FYI, the one in the most urgent section stands for it, the lowest in the stack on a tie (then the main line before a fork); the others leave the sections and are named on that card's `stack.folded`, bottom first. Boards, hidden, cleared and resolved list every PR. `QueueView.stacks` has the chain of every stack a card in the view carries: current is the card the sections list it by, or the first card of a stack with none there (all cleared, say). `oneLinePerStack()` is the rule. Desktop notifications go per PR, not per line: a member newly in Now is news even while a lower one stands for its stack, and isn't again when it comes to stand for it.
-- **Merging.** `GET /api/inflight` keeps a stack's rows together, bottom first.
-- **What the desk fetches.** Each sync, for the stacks of PRs on the boards, read only and at most 120 probes a pass, each asked again only after 30 minutes: the PR heading the branch a bottom PR is based on (or was, before GitHub moved it), open PRs based on an open PR's branch, and the stack's members no board lists that are open as of a fetch over 30 minutes ago. Probes for a stack or a PR based on another's branch go first; those that only look for a stack above a PR on the default branch get what's left after 40 are kept for later rounds, and the rest wait for the next pass. Three rounds a pass, so a chain a few PRs deep fills in at once; one repo's probes are one query, three repos at a time. What it fetches is stored without events: context for a stack, not news, so the coordinator doesn't wake for it and the notifications feed treats it as an item the desk doesn't hold. Once a board lists it, it's fetched again and its events since the desk last logged any are logged (`new` if it never did). Any stored member opens in the review view. Members of a listed PR's stack aren't pruned with the items no search returned for 14 days. PRs stored before the desk asked for `head_ref`, `default_branch`, `retargeted` and `requires` are refetched, 40 a pass.
-
-## Dependencies
-
-A PR needs another merged first when it's stacked on it (Stacks, above) or its description says so: "Requires", "Depends on", "Stacked on", "Builds on", "Blocked by", "Needs" or "Merge this after", then a link or a ref (`owner/repo#N`, `#N`), a checklist under "blocked on:" included (checked items are done). `requiresOf()` in `src/deps.ts` reads the whole markdown description into `Item.requires` (at most 10, the case as written) in linear time on any body; quotes, code, comments, `<details>` and "once X lands", "Follow-up to", "Merge this before X" don't count. `dependencies()` follows those PRs through the ones the desk holds to the end of the chain, for every open PR, and `Desk.compute()` fills them in as fields rules read: `pr.requires`, `pr.blocked`, `pr.blocked_by`, `pr.blocker` (the open PR at the end of the chain, "(through …)" when it isn't a direct need), `pr.blocker_waits` (that PR's `pr.waits`, or "is in Merging"), `pr.blocker_mine` (an open PR in its chain waits on you: a review asked of you or your team, your reply, or your own PR's next step outside Merging; for a rule of yours on other people's PRs, where the template has none; your own PRs' rule doesn't read it, since one of yours behind it can't merge either way), `pr.blocks`, `pr.requires_closed`, beside `pr.waits`, `pr.waiting_on` and `me.owes_reply`. Who else is on a PR is three more: `pr.reviewers` (who has reviewed it: approved, asked for changes or commented; you, its author and bots left out), `pr.people_requested` (people asked by name, you and bots left out) and `pr.teams_requested` (teams asked, as slugs, yours included), so a rule can sort a team's ask away once someone's on it or someone else is named (`len(pr.reviewers) > 0 || len(pr.people_requested) > 0`), and a ping to many teams at once (`len(pr.teams_requested) >= 4`). How long a PR has waited for a review is two more, in weekday hours (`weekdayHours()` in `src/signals.ts`): every hour of Monday to Friday in the desk's time zone counts, nights too, and none of Saturday's or Sunday's, so 24 is one workday and a PR ready at Friday 17:00 has waited 15 by Monday 08:00, not 63; holidays count as any weekday, and a weekday a clock change shortens counts 23. `pr.ready_weekday_hours` is those since its latest Ready for review (`Item.ready_at`, its latest `ReadyForReviewEvent`, read with the PR's details), or since it was opened if it never was a draft; -1 for a draft, an issue, once it's merged or closed, and on a PR stored before the desk read when, until its next refresh. `pr.asked_weekday_hours` is those since the latest request to someone in `pr.people_requested` (still asked: GitHub drops a request once they review), or since it went ready if that's later (a request made while it was a draft, or one older than the 20 request events the desk reads); -1 when nobody is asked by name (a team's request, a bot's and your own don't count) and whenever `pr.ready_weekday_hours` is. With the three above, a rule or an automation can say your PR has been ready a workday with nobody asked by name and no review, whatever teams CODEOWNERS asked (`me.author && !item.draft && pr.ready_weekday_hours >= 24 && len(pr.people_requested) == 0 && len(pr.reviewers) == 0`), or that someone asked by name two workdays ago still hasn't reviewed (`me.author && !item.draft && pr.asked_weekday_hours >= 48 && len(pr.reviewers) == 0`); nothing reads them yet. Only a PR in the same org as the one that needs it counts, so a description can't pick a blocker elsewhere (another org's ref stays in `pr.requires`, in full, and is never fetched); refs the desk doesn't hold, and issues, never block; an edge that closes a loop is dropped, so a PR inside a loop is never blocked by it, and one outside that needs a member is blocked by the first it reaches. A PR it needs merging counts as news on it: a done or an "until activity" snooze ends then. A stored PR another one needs isn't pruned and is refreshed every 10 minutes while open (at most 20 a pass, the longest unfetched first), and the desk follows at most 20 refs from each listed PR, nearest first: a description's author picks what it names. One the desk doesn't hold is fetched by number with the stack probes, read only and stored quietly, at most 20 a pass (not for a bot's own PR), so it blocks like any other; a number that's no PR it can read (an issue, gone, no access) isn't asked again for a day (kv `dep_misses`).
-
-The first-run template's blocked rules are `final`, and only on My PRs: Blocked is for your own PRs, so the boards of other people's PRs (PRs to review, Mentions, Close collaborators) have no rule for it, and a blocked PR there goes where their other rules put it (a review asked of you by name is in Now, its stage "blocked"; `pr.blocked` and `pr.blocker_mine` stay fields a rule of yours can use). First on My PRs is `pr.blocked && pr.review != 'changes_requested' && !me.owes_reply`, so a change request or a reply you owe stays yours. A root that blocks others and owes a reply goes to Today ("blocks getsentry#22982 and getsentry#22983; it waits on your reply to markstory, then …"), one closed without merging too ("needs sentry#1, closed without merging"), and your PRs waiting on reviewers go to Blocked ("waits on a review from sam, @backend and 1 more"), with a merge conflict too ("waits on a review from cvxluo, and a merge conflict fix"): a conflict is only a signal until it's approved, when your agent rebases it, and red CI is the one thing that keeps such a PR out (it has its own rule). A config with the earlier rule, which left a conflicted one out, gets today's once (`migrateWaitsConflict`, backup in `config.toml.bak`).
-
-## Adding
-
-`desk_add` (`POST /api/add`, `desk add <ref>`) is "add X to my review" from any session. A PR or issue the desk doesn't hold is fetched read only (`GitHub.lookup`, then the usual details query) and stored with its events, a `new` first, so the notifications feed follows it from then on; one it holds, a stack's member stored quietly included, is used as it is. Either way it's pinned, and one done, snoozed or muted comes back too (logged as one `pin`: the returned `undo_seq` undoes both), and for a PR the desk then starts what opening its review would: its diff and conversations fetched, Claude's read of what waits on you, and its AI review (with `review.auto_ai`, on someone else's PR with none for this commit), queued with the background ones, `review.at_once` at a time, so an agent adding many doesn't start a `claude` for each. Your pins that no board places, whether added or dropped by a board's search or filter, sit on a board of their own, `added` (why "you added it", Today by default): Claude sorts them like anything else and your pin's floor keeps them in Today or above. They don't notify; you put them there. A `desk_add` with `from` exactly "Inbox coordinator" (or "Review Desk coordinator", its name before the rename) is the coordinator's opinion, not your pin: no floor, so Claude sorts it by your policy (and a rule's Blocked keeps it there); one no board places is on `added` too, with its why. While a pinned item is open and no search returns it, each sync refreshes it (every 3 minutes, as no search says when it changed), probes its stack, and keeps it from the 14-day prune; once it's merged or closed it resolves and goes like anything else. A `why` (one plain line) and `from` are the card's `handoff` (`{ why, from }`), shown in the review's header and the opened item ("From seer write gate: …") and given to agents in `desk_item`; they're kept in kv `added:<id>` by the seq of the pin that add made, and shown while that pin is the item's latest and you haven't acted on the item since (any later action in the log: done, snooze, mute, a pin of yours; undoing it brings the hand-off back). The card's `why` stays whatever placed it. `desk_add` requires both; `desk add <ref> [why] --from <task>` and the HTTP route take them optionally. Nothing is written to GitHub, so agents may call it.
-
-## Resolved
-
-An item is resolved when the world has dealt with it. It's worked out from every snapshot, never stored, so it comes back on its own when the reason stops holding (asked again, reopened). Resolved items leave Now, Today, Later and FYI (and don't count against caps) for `QueueView.resolved`, with the reason as their `why`; done, snooze, mute and pin are kept as they were. The reasons, in order:
-
-- `merged`, `closed`: any item.
-- `you approved`: a PR you or your team were asked to review whose latest verdict from you approves, while GitHub no longer asks you and nobody asked you or your team again after that approval. Asked again (a re-request), new commits from someone else, or someone else acting after your latest action (`me.new_activity`: a reply, a review, an @mention), it stops being yours: someone else's approval resolves it as `approved by <login>`, anything else brings it back to wherever its rules put it (new commits: Later, "new commits since your review"; a mention: Today on Mentions). Your own changes request or a dismissed approval doesn't count. It doesn't depend on `github.resolve_on_others_approval` or on more reviews being required: your part is done.
-- `approved by <login>`: a PR you or your team were asked to review that someone else (not you, not a bot) approved after the ask, while that's still their latest verdict. Not while your own latest review requests changes, nor while GitHub still says more reviews are required (another approval, or a code owner's). `github.resolve_on_others_approval`: `always` (default), `team_only` (only when the ask went to a team), `never`.
-- `no longer requested`: you or your team were asked, the ask is gone, and you never reviewed.
-
-Your own PRs and issues only resolve by merging or closing. An item that drops out of every search gets one refresh so the desk learns which it was; if it's resolved it stays on its boards (past their filters) for 3 days, under Resolved. So does one that resolved in the last 3 days, by a time the resolution itself gives, but is still in a search its board's filter would now drop it from (you approved it: `reviewed-by:@me` still lists it); `no longer requested` has no such time, so it doesn't.
-
-## Opened for you
-
-A PR an agent's bot opened for you is yours wherever the desk decides "mine" (`me.author`): your PRs' boards and rules, its stage and who it's from ("you"), Ready for review, Add reviewers, Reply, the More menu's writes on your PR, Hand off for merge and Merging, the coordinator's "my PR" and the branch it may push, nudges, and the AI review it skips as yours. `requesterOf()` in `src/github/behalf.ts` reads who a PR's markdown description names when the desk reads its details (`Item.requester`, `"@login"` or a name, `""` when none or when two lines disagree), and `onBehalf()` decides, in `analyze()` and in the connector (which then reads it as deeply, and as often, as your own). No model is asked. It takes all of:
-
-- **A bot opened it**: a GitHub App (`[bot]`, GraphQL's `Bot`), or a login under Settings → GitHub → Also treat as bots (`github.bots`), which is how another agent's account counts. A person's PR is only ever its author's, whatever it says.
-- **It names you** in a line the agent writes, as a whole line or Junior's block, never a mention in passing:
-
-| Agent                                   | What it writes                                                                                                                                   | Counts when                                                                                                                                                                     |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Junior (`sentry-junior`)                | `<!-- junior-request-attribution:start -->` `via @gricha.` `<!-- …:end -->` (older: `Requested by …`; asked by two: `via @a, **b**.`, the first) | you're assigned too, as Junior assigns whoever asked                                                                                                                            |
-| Junior, no GitHub login linked          | `via **greg.pstrucha**.` in that block                                                                                                           | the name is your GitHub profile name or one in Settings → GitHub → Names agents use for you (`github.my_names`), compared by letters alone (`greg.pstrucha` is "Greg Pstrucha") |
-| Devin (`devin-ai-integration`)          | `Requested by: @gricha`                                                                                                                          | you're assigned too, as Devin assigns whoever asked                                                                                                                             |
-| Any bot                                 | a line of its own: `via @gricha.`, `Requested by @gricha`, `On behalf of @gricha`, maybe in `_` or `*`                                           | you're assigned too                                                                                                                                                             |
-| GitHub Copilot coding agent (`Copilot`) | nothing                                                                                                                                          | you're its PR's only person assigned, as Copilot assigns whoever asked it                                                                                                       |
-
-Why each is safe: a description is anyone's with write access to edit, and so is an assignee, so the desk takes a login only when both say it (an edit to one alone makes nothing yours), a name only when it's your profile name or one you gave, Copilot's assignee only alone, and never a person's PR. A PR that names you and doesn't assign you stays someone else's, as does one whose `via` line (`author.via`, still who a bot's PR shows it's from) names you. Not recognized, for want of a marker that names a GitHub account: Claude's GitHub app (`claude[bot]`: "Generated with Claude Code"; its Slack runs write `_Requested by **Name** · Slack thread_` on a line with more), Codex (`chatgpt-codex-connector[bot]`: nothing), Cursor (`cursor[bot]`: its links, and `Co-authored-by` naming itself), Junior's automation runs (`via [automation …]`), and `Co-authored-by` trailers, which the desk doesn't read during sync and which say who wrote a commit, not who asked. Matching your GitHub name ("Greg Pstrucha") isn't safe either: anyone may share it.
-
-The first-run My PRs board lists them too (`assignee:@me -author:@me`, the Mentions board's search, so no extra one, with `filter = "me.author"`); a config with the board as first written gets that once (`migrateOnBehalf`, backup in `config.toml.bak`). A name-only one no search assigns you needs a query of yours, as `"greg.pstrucha" in:body author:app/sentry-junior`.
-
-## Merging
-
-Your own open PR, once you're done with it: Hand off for merge, on the open item or in its review, hands it off for merge (`POST /api/act` with `inflight`, only from the desk's own page, as for approve: 403 otherwise; `inflight_at` in `ItemState`), and the coordinator ([above](#the-coordinator)) gets it merged. A draft answers 409: Ready for review is yours, so it would wait on you in Merging (Ready for review first). The window offers Hand off for merge only on a PR through its review (`review` `approved` or `none`: `handsOff()` in `web/src/view.ts`), and, in a repo that needs no review, beside Add reviewers too ([below](#nobodys-asked-to-review-it)); the API takes one that still waits on its review, as the coordinator's tests and a PR whose approval a push dismissed need. Back to desk brings it back to your desk (`takeback`); undo (the toast's Undo, the API's undo, from the desk's own page) reverses either, and handing it off again starts afresh, without the last note or hand-back. Done on your own PR is plain done, as on anything else. Neither writes to GitHub. A hand-off leaves Now, Today and the sorted-away groups (and focus, the status line and `desk_list`) for the Merging tab (`GET /api/inflight`): each row says what it waits on (`waits_on`, the desk's call: another PR to merge first, one it needs closed without merging, red CI, a conflict, changes requested, CI running ("can merge once CI passes: no review needed" in a repo that needs none, `review_optional` on the row), unresolved threads, a review (never in a repo that needs none), the PR below it in a stack, else "ready to merge") and the coordinator's latest note with its age. Merged and closed ones stay for 3 days. While it's there the coordinator has it: done, snooze and mute answer 409 (Back to desk first; a hand-off clears an earlier one, and undo brings that back), and the judge doesn't place it.
-
-- **Rebasing.** On its own: after each sync (`Desk.rebaseConflicts()`), your own PR in Now or Today that's otherwise ready to merge (approved by GitHub's review decision, not a draft, CI not red: GitHub runs no `pull_request` CI on a conflicting PR) and conflicting goes to Merging, while `agent.coordinator` is on and only once this desk has started a coordinator (kv `coordinator_bg`), with `rebase` (when) on its Merging record and one news entry for the coordinator: `ready to merge but conflicts: rebase it onto its base, …, don't merge it; …`. Its row says "rebasing" (`rebase: true`). When GitHub shows it mergeable (or it merges or closes), or `agent.coordinator` is off, the desk takes it out of Merging and drops the record, so it goes back to where the rules put it. A PR with a Merging record isn't sent: one handed back stays handed back until it's mergeable, and Back to desk leaves `back` (when) on the record, so it stays yours until you hand it off. A merge conflict alone is no rule's and notifies nobody (the first-run rule that put one on your desk is removed once, as written, with a `config.toml.bak`).
-- **Handing back.** When the coordinator can't realistically get it merged (`desk_hand_back`: a redesign, a product decision, a reviewer who needs your answer, CI it can't fix, no local clone), the PR leaves Merging for your desk, at the top of the queue with "handed back: <reason>" as its why, until you deal with it (done, or Hand off for merge again), and you're notified. A hand-back writes nothing to GitHub. A hand-back of a PR your rules keep in Blocked because another PR blocks it waits there; once that PR merges it tops the queue as "unblocked: X merged · handed back: …" and notifies. Done on it drops the hand-back; the PR comes back by your rules when it unblocks. A PR another PR blocks isn't sent to rebase, nor handed back for nobody asked to review it, and the desk wakes the coordinator with "unblocked: X merged" when one in Merging unblocks (`Desk.trackBlocked()`), or with "needs X, closed without merging" (`closed`: `pr.requires_closed`, joined) when what blocked it closed instead.
-
-### Ready for review
-
-Your own open draft carries one call to action on its row and in its review: Ready for review (`cta: "ready"` on its card, set by the desk), whatever its CI says: getting CI green is the coordinator's once it's ready, so the desk doesn't hold this back. The More menu offers it too (`ready`). Ready for review sends `markPullRequestReadyForReview` (`POST /api/review/:id/ready`), then, in its review, `requestReviews` for the reviewers you picked above the button (GitHub's suggested reviewers sit on the line, a click each, from `GET /api/reviewers/:id` with no query; the box searches it as you type, GitHub's suggestions first; those already asked show and stay), logs each and refreshes the PR. Once someone's asked to review it (who you picked, or who was asked while it was a draft) your part is done: it leaves your desk until someone else acts, as after any write (`done: true`). With nobody asked to review it (`pr.unasked` as it reads once it's ready: bots' requests and reviews aside), or when GitHub refuses the request, it isn't done (`done: false`): it stays on your desk, where [Add reviewers](#nobodys-asked-to-review-it) is its call to action and, 10 minutes on, puts it on top. It's one of the desk's GitHub writes ([Security model](#security-model)).
-
-### Nobody's asked to review it
-
-Your open PR that isn't a draft, that nobody is asked to review and that nobody but bots and you has reviewed (`pr.unasked`, a field rules can use too: a request for a bot, such as Copilot's, or for someone under `github.bots` doesn't count as asked, nor does their review; a request GitHub hides from you, a team you can't see, does count), waits on nothing but you asking someone. Its call to action is Add reviewers (`cta: "reviewers"`, ahead of Reply, and answering a comment doesn't make it done) from the start, as a hand-off refuses it. Once nothing has touched it for 10 minutes (a workflow or CODEOWNERS asks within moments of a PR opening or going ready), while a board lists it and it isn't quiet as Later counts it (no update in `queue.quiet_days`, unless pinned), the desk also puts it back on top of your desk as it does a hand-back: Now, `handed_back`, its why "nobody's asked to review it: add reviewers", in the main page's Back to you part. On a bot's PR opened for you, your own review doesn't count as someone's. Add reviewers opens its review with the Reviewers box focused and GitHub's suggestions beside it, and Ask reviewers there asks who you picked (`POST /api/review/:id/reviewers`), after which it's done until someone reviews. A request (CODEOWNERS' when you mark it ready included) or a person's review clears it. Ready for review from the desk with nobody asked leaves it here rather than done, so a PR you marked ready and asked nobody about comes back this way instead of waiting in the Archive. A hand-off refuses it (409: the coordinator would wait on nothing), Hand off for merge isn't offered on it, and one in Merging that becomes so (a request taken back) is handed back by the desk on the next sync with the same why, logged as the desk's (`desk`) rather than an agent's.
-
-None of that holds back a PR whose repo needs no review (`pr.review_optional`: GitHub gives no review decision, `review: "none"`, on a PR based on the default branch, as for a repo with no branch protection or ruleset asking for one; a stacked PR's base never asks for one, so it doesn't count). Add reviewers stays its call to action, with Hand off for merge beside it (`review_optional: true` on your card; Ask reviewers stays the filled button in its review), a hand-off takes it, the desk doesn't hand it back for having nobody asked, its `pr.waits` doesn't wait on a review, Merging says it can merge once CI passes, and the coordinator's wake says so on each of its PR's lines (`NO_REVIEW` in `src/coordinator.ts`: merging it on green CI is expected and low stakes, no review to ask for or wait on), as `desk_merging` does ("no review needed"). A draft is Ready for review first, as anywhere.
-
-### More (.)
-
-The typical GitHub actions are offered here; the window shows two of them, Close (a review's More and a row's right-click menu) and Request changes (a review's More). The desk decides which an item offers (`Desk.actions()`, `actions` on its card) and refuses any other with 409. A click sends it. A PR you opened, or one a bot opened for you ([Opened for you](#opened-for-you)), can be closed, converted to a draft or, a draft, marked ready for review (as its call to action does) and merged now, without the coordinator (only when it's approved, CI is green, it isn't stacked on another PR, GitHub says it's mergeable and the repo's merge method is known; `mergePullRequest` with `expectedHeadOid` set to the head the desk judged ready); your closed PR reopened; an open issue you opened or are assigned closed; and someone else's open PR gets Request changes (in its review only: what you write is the review's body, sent with the button or ⌘↵, pinned to the commit you read; `head_oid` is required). A PR in Merging offers none (Back to desk first). The toast's Undo, while a close's or a draft's toast is up, reopens it or marks it ready again; the others have no undo. From a row, a close or a merge leaves the list at once, as Done does. Each goes through `POST /api/github`, a GitHub write like approve ([Security model](#security-model)). A review's approve, merge and Request changes stay pinned to the commit it opened at, so a push you haven't reopened it for is refused (409). After a close, draft, merge or reopen the item offers nothing more until a read shows the change, so a refresh that failed can't offer the same write again.
 
 ## Events
 
 `GET /api/events` is a server-sent events stream:
 
-- `event: update` with `data: {"rev": n}`, once on connect and again after any change: a sync landing, a triage action or undo, a config, settings or policy save, an AI review starting or finishing, a judge call starting or finishing, an approval, a draft marked ready, a note or a hand-back arriving, a hand-off or Back to desk. Refetch what you show.
-- `event: notify` with `data: {"title", "body"}`, only with `?notify=1`: the desktop app attached to a desk it doesn't run in-process asks for these, and while one listens the desk shows no notification of its own. The desk notifies (`Desk.notifyNew()`, after a sync, a judge answer or a hand-back) for a new item on the queue once Claude or a hard rule placed it (not while Claude hasn't sorted it, nor what your own pin put there, nor what you added, nor your own draft), a hand-back included; each once, outside `notify.quiet`.
-- `: ping` comment lines every 25 s to keep the connection open.
+- `event: update`, `data: {"rev": n}`: once on connect, then after any change (a sync, a triage action or undo, a config, settings or policy save, an AI review or judge call starting or finishing, an approval, a draft marked ready, a note, a hand-back, a hand-off or Back to desk). Refetch what you show.
+- `event: notify`, `data: {"title", "body"}`: only with `?notify=1`. The desktop app asks for these when it attaches to a desk it doesn't run in-process; while one listens, the desk shows no notification of its own.
+- `event: omarchy`: the Omarchy theme changed (the same value as `GET /api/omarchy`).
+- `: ping` comment lines every 25 s keep the connection open.
+
+**What notifies** (`Desk.notifyNew()`, after a sync, a judge answer or a hand-back): a new item on the queue once Claude or a hard rule placed it, and a hand-back. Each once, outside `notify.quiet`. Not: an item Claude hasn't sorted yet, what your own pin put there, what you added, your own draft. Other notifications (an automation's run, an agent's question, an ask's answer) are described where they happen.
 
 ### The event log
 
-`GET /api/activity` (and the `desk_events` tool) reads the event log: what happened to items on the desk, derived by comparing each fresh snapshot of an item with the last one. Follow it by passing `last_seq` back as `after`; with `wait=60` the request holds until something happens, so a loop of calls is event-driven. `item` narrows it to one item (an exact `owner/repo#123` works after the item has left the desk). Bad numbers are a 400; an unknown short ref is a 404.
+`GET /api/activity` (and `desk_events`) reads the event log: what happened to items on the desk, found by comparing each fresh snapshot of an item with the last one.
+
+- Follow it by passing `last_seq` back as `after`.
+- With `wait=60` the request holds until something happens, so a loop of calls is event-driven.
+- `item` narrows it to one item; an exact `owner/repo#123` works after the item left the desk.
+- Bad numbers are a 400; an unknown short ref is a 404.
 
 | `kind`             | When                                                                    | `actor`             | `data`                                                 |
 | ------------------ | ----------------------------------------------------------------------- | ------------------- | ------------------------------------------------------ |
@@ -802,15 +748,913 @@ The typical GitHub actions are offered here; the window shows two of them, Close
 | `blocked`          | your PR a board lists or Merging has became blocked by another PR       |                     | `by` (`pr.blocker`)                                    |
 | `unblocked`        | it stopped being blocked                                                |                     | `was`, `merged` (the PR that merged, or ""), `closed`  |
 
-How GitHub changes reach the log: the notifications API is polled about every 60 s (`If-Modified-Since`, honouring `X-Poll-Interval`; read only, nothing is marked read). A notification about an item on the desk refreshes that item at once; one about an item the desk doesn't have yet, for a review request, mention, team mention, assignment or your own item, starts a full pass early. The full pass (every board's searches, then details for what changed) still runs every `github.poll_seconds`, and a rate limit pauses both.
+**How GitHub changes reach the log.** The notifications API is polled about every 60 s (`If-Modified-Since`, honouring `X-Poll-Interval`; read only, nothing is marked read).
+
+- A notification about an item on the desk refreshes that item at once.
+- One about an item the desk doesn't hold (a review request, mention, team mention, assignment or your own item) starts a full pass early.
+- The full pass (every board's searches, then details for what changed) still runs every `github.poll_seconds`. A rate limit pauses both.
+
+## Agents and models
+
+### Your own agent
+
+Settings → Agent (`agent.harness`) picks who sorts and reviews: Claude Code (the default), Codex or OpenCode. It is always your own CLI from PATH, on your own login, model and config. The desk passes no model and sets no API key. (`DESK_CLAUDE`, `DESK_CODEX` and `DESK_OPENCODE` only point tests at fakes.)
+
+There are two kinds of runs:
+
+- **Tool-less calls**, through one seam, `askAgent()` in `src/review.ts`: the judge, the AI review and its check, the read of what reviewers said, an automation's question, Urgency's criteria and scores, and a session's read. They run in `~/.inbox/agent/`, an empty directory, with the input fenced as untrusted.
+- **Runs with tools**: your agent, [the coordinator](#the-coordinator), and an automation's agent run (`decide: "agent"`). Each has its own fences, described there.
+
+Choosing another agent applies from the next call and retries at once what failed on the last. The window names the chosen agent ("Sort my desk with Codex", "OpenCode is reviewing it"; `agentName()`, `agentDefs()` in `src/settings.ts`, `Overview.ai_agent`).
+
+The only model the desk calls that isn't your agent is [the decision model](#the-decision-model-openrouter), and only once you give it a key.
+
+#### Claude Code
+
+- **Command:** `claude -p --json-schema … --tools "" --strict-mcp-config --no-session-persistence`, prompt on stdin.
+- **Yours:** no `--model`, `--agents`, `--system-prompt` or `--bare`, and no `ANTHROPIC_API_KEY` set (one in the desk's own environment would reach it, as it would your own `claude -p`). Your model, effort and plugins apply.
+- **Fenced:** no tools, and `--strict-mcp-config` loads none of your MCP servers (Slack, Linear, GitHub, …).
+- **Stopping:** each run is its own process group (`taskkill /T` on Windows), so stopping it stops what it started. When the desk closes it stops every run (SIGTERM, SIGKILL 2 s later) and waits for them, so a restart under `node --watch` leaves none behind.
+- **Logged out:** a 401 reads ``Claude Code isn't logged in. Run `claude auth login` in a terminal.``; desk.log keeps Claude's own words.
+- **Model:** a review records the model Claude Code reports (`modelUsage`).
+
+#### Codex
+
+- **Command:** `codex exec --json --sandbox read-only --ephemeral --skip-git-repo-check -C ~/.inbox/agent`, then:
+  - `--disable` for `shell_tool`, `unified_exec`, `apps`, `plugins`, `browser_use`, `browser_use_external`, `in_app_browser`, `computer_use`, `image_generation`, `view_image`, `multi_agent`, `hooks` and `memories`;
+  - `-c web_search="disabled"`, `-c approval_policy="never"`;
+  - `-c mcp_servers.<name>.enabled=false` for each of your MCP servers;
+  - `--output-schema <file> -o <file> -`, prompt on stdin.
+- **Fenced:** Codex has no "no tools" switch, so this turns off everything that can run, reach out or act, and the read-only sandbox refuses writes.
+- **MCP servers off:** overriding the whole `mcp_servers` table would merge with yours, so the desk first asks `codex <the same --disable flags> mcp list --json` (kept 5 minutes, asked again when you switch agents) and turns each enabled one off by name. `--disable plugins` drops plugins' servers. If the list fails, the call doesn't run: `CodexServersUnknown` ("Couldn't confirm Codex's MCP servers are off, so it didn't run: …"), held like a logged-out agent.
+- **Yours:** no `--model`, `--profile` or `--ignore-user-config`; your `config.toml` stays in charge.
+- **Files:** the schema and the last message go through two files in `~/.inbox/agent/`, removed after the run.
+- **Answer:** the last message. With none, the turn's failure is the error: a login pauses the desk in Codex's words (``Codex isn't logged in. Run `codex login` in a terminal.``); a usage or rate limit holds what asked without spending a try.
+- **Login check:** `codex login status`, or a `model_provider` in `config.toml` (as for OpenRouter) whose `env_key` is set in the desk's environment.
+- **Model:** Codex's events name none, so its reviews say `codex`.
+
+#### OpenCode
+
+- **Command:** `opencode run --format json --pure --agent inbox-desk --title Inbox` in `~/.inbox/agent`. The prompt goes on stdin with the answer's JSON Schema after it (`opencode run` takes no schema). The title stops OpenCode from asking a small model to name the session.
+- **Fenced** through `OPENCODE_CONFIG_CONTENT`, which OpenCode merges last over your config (one of your own is kept under it):
+  - its own agent `inbox-desk`, whose permissions deny `*` and each permission by name (`read`, `edit`, `bash`, `webfetch`, `task`, `skill`, …), so they beat your global rules;
+  - `mcp.<name>.enabled: false` for each MCP server `opencode debug config --pure` lists enabled (kept 5 minutes; if it can't be read, the call is refused);
+  - `share: "disabled"`.
+- `--pure` leaves out external plugins, which run code in the process whatever the permissions say.
+- **Yours:** no `--model`, so your default model runs it.
+- **Answer:** the last text part. Reviews say `opencode`. The session is deleted after it's read (`opencode session delete <id>`).
+- **Errors:** status 401 (or a message about logging in) pauses the desk (``OpenCode isn't logged in. Run `opencode auth login` in a terminal.``); 429 or 402 holds what asked; anything else keeps its words. A provider with no key fails with OpenCode's "Unexpected server error", which the desk can't tell apart.
+- **Login check:** `opencode auth list` counts a stored credential or a provider key set in the environment.
+
+### The decision model (OpenRouter)
+
+With `agent.decision_key` set (Settings → Agent → More; an OpenRouter key), an automation's question (`decide: "ask"`) and [Urgency](#urgency)'s criteria and scores go to OpenRouter's Decisions API instead of your agent. With no key, nothing in the desk calls OpenRouter.
+
+**The request** (`src/decisions.ts`): one per item, `POST https://openrouter.ai/api/alpha/decisions` with `Authorization: Bearer <key>` and a body of `{ model, state, questions }`, nothing else. Plain `fetch`, 30 s timeout, four at once. `model` is `agent.decision_model`, default `typesafe/jev-1.14`, pinned because each release's probabilities differ.
+
+**What leaves your computer**, to OpenRouter and the model's provider: `state` is `{ note, item }`, the item's lines as the judge's prompt words them, under a note that calls them untrusted (`Automations.lines(id, happened, true)`). That is:
+
+- `owner/repo#number`, title, labels, the first 280 characters of the description;
+- who opened it (a bot's PR, for whom), draft or not, its age and others' last activity;
+- a PR's size, CI, review decision, its base when stacked, when you last pushed to your own;
+- unresolved threads and who had the last word; what blocks it, what it needs that closed, what it blocks;
+- how you were asked (by name, team, CODEOWNERS, by whom), how often you review the author, whether it's your repo, who else is asked, others' reviews;
+- where it is on your desk (bucket, board, why), and on an event's run what just happened ("CI went from green to red; dana commented").
+
+It leaves out the AI review's first sentence and the directories the PR touches. The key's help in Settings says this in short.
+
+**The question:** `questions` is one question, `decision`, whose `instructions` are the automation's instruction word for word. It's a `noul` (yes or no) when the automation may do one thing, with `criteria` saying what yes means; else a `choice` of its `can` verbs and `leave`.
+
+**The answer** is read strictly from `answers.decision`: a `noul`'s probability of yes, or a `choice`'s pick and `probabilities[pick]`. The desk acts only at 0.8 or above (`SURE`). A `leave`, a `refusal`, a missing probability or one below 0.8 leaves the item as it is. The item's why is "the decision model's answer (91% sure)", or for a yes-or-no the instruction's first line and how sure it was.
+
+**Failures:**
+
+- `DecisionModelError`, the run's error: a missing or mistyped answer, or any other 4xx.
+- `DecisionModelDown`: 401, 402, 429, a 5xx, or no answer (unreachable, or nothing in 30 s); e.g. "OpenRouter refused the decision model's key (401). Check it in Settings → Agent.". It holds the run like a logged-out agent: not spent, nothing in it acted on (one item's failure holds the whole run), its events kept. It asks again in 30 minutes, or at once when you save another key or model.
+
+**The key** is a `secret` setting:
+
+- Kept in `<home>/secrets.json` (`secretsPath()`), never in `settings.json`, which people keep in a dotfiles repo.
+- Written `0600` through a temporary file and a rename. Refused (nothing written) while `secrets.json` is a link or can't be read. Merged into the settings when they're read. A key found in `settings.json` moves there once at start (`Desk.migrateSecrets()`).
+- Only the desk's own page sets or clears it: `PUT /api/settings` naming a secret from any other client is 403.
+- An automation's agent run may not read it (`--disallowedTools Read(//<home>/secrets.json)` and the same deny rule in its folder).
+- Sent only in that header, cut from any error text, never logged. `GET /api/settings`, `PUT /api/settings` and `desk settings` show a set key as `••••••••` (`SECRET_SET`); sending that back changes nothing, and `""` or a reset clears it.
+
+## Reviews
+
+### The AI review
+
+Your agent writes each PR's AI review:
+
+- a verdict (`look`, `skim`, `skip`) and a risk level;
+- a summary: a short paragraph on what changes, how and why;
+- concerns: what goes wrong, when, and what would fix it;
+- notes anchored to lines of the diff;
+- a ranking of the diff's hunks, and a walk-through;
+- on a re-review, `since`.
+
+The review document parts (`risk_reasons`, `intent`, `look`, …) are in [review-format.md](review-format.md).
+
+**Only what holds up is kept.** Each concern and note quotes the code it's about.
+
+1. `parseReview()` drops one whose quote isn't in that file's diff (`backed()`: every quoted line is in a diff line, ignoring whitespace, a copied `n12`/`o11` number or `+`/`-` sign, and at least one line has a letter or digit).
+2. A second, separate run (`buildCheckPrompt()`, the same isolation, no tools) sees what the writer saw plus those comments with their quotes, and says for each whether the PR bears it out. Only what it says holds is kept; an unclear one isn't. A check that fails fails the review, to be tried again.
+3. Then the caps (6 concerns, 12 notes counting them) and the ranking apply. Each concern is also a note on its line. `dropped` counts what steps 1 and 2 took out, and the log says it.
+
+**How it runs.** As in [Your own agent](#your-own-agent), with the PR text fenced as untrusted. All tool-less calls share `~/.inbox/agent/`, because Claude Code keeps a `~/.claude/projects` entry per directory.
+
+**Re-reviews.** When someone pushed since your last review (`me.pushed_since_review`), the prompt also carries the diff from the commit you reviewed to the head (`compare/<commit>...<head>`). The review then adds `since`: one sentence on what changed since you looked and whether it settles the concerns. The card shows it as its gist ("Since your review: …").
+
+**When reviews are written.** Reviews are kept per head commit. With `review.auto_ai` on (the default), the desk writes them in the background:
+
+- for open PRs in Now and Today, other people's and your own, drafts included, but not while handed off for merge;
+- each with its stack in the prompt, bottom first;
+- `review.at_once` at a time (8 by default; Settings → GitHub → More);
+- in queue order, so the cards on screen are ready first.
+
+It also writes one for any PR whose review you open.
+
+**Held until reviewed.** Such a PR reaches the queue (`/api/queue`, `/api/focus`, the tray, `desk_list`, `desk ls`, the new-item notification) only once its first review is written. Until then `Desk.awaitsAi()` keeps it off, counted in `reviewing` (and `ItemDetail.held`), paused reviews included. Only AI reviews turned off, or this commit's review out of tries, lets one through unreviewed. Once a PR has been on the queue (kv `shown:<id>`, also set by your pin, restore or unmute) it isn't held again: a pause, a restart or a push leaves it where it is, and a new review is written while it keeps its place (its preflight says `stale`). Its notification comes when it reaches the queue; on a desk's first pass, held ones count as already there.
+
+**Failures and retries.** Each review is a job in the ledger of [Claude's work](architecture.md#claudes-work-srcjobsts), which outlives a restart.
+
+- A failed try (in the agent's words, or a run past 15 minutes, which the loop stops) is retried 2 and then 10 minutes later, before anything new.
+- After three it's failed for that commit until you ask (Try again, Ask Claude for one, `desk brief`). Opening it or a sync doesn't restart it. With `review.auto_ai` off, a failed try is failed at once.
+- Two failures in a row on different PRs (an expired login fails every PR) pause the background reviews for 30 minutes. The queue says so once (`paused`; "Claude is paused" when the cause is the login, which stops the judge too). Asking in the review still runs one.
+- A success or a change to `review.auto_ai` resumes them; a settings change also retries the PRs that failed. One call that works after a login failure (a review or the judge) retries everything else that failed on the login at once.
+
+#### Ranking
+
+The ranking says which hunks are worth your attention, and in what order.
+
+- The prompt numbers every hunk `h1`, `h2`, … across the files in order. A lockfile's hunks keep their numbers but aren't shown; the "since your review" diff has none.
+- The agent answers `chunks`: at most 20 hunk ids in reading order (most worth first, looks before skims; on a re-review, what changed since you looked first), each with a level (`look` or `skim`) and a few words why. What it leaves out isn't worth reviewing (imports, renames, formatting, generated files, snapshots, tests that mirror the code).
+- The desk keeps its order and only ids the prompt showed, each once. A hunk the agent wrote a note on but left out joins the end as a skim, so a slip can't bury what it flagged.
+- A file's diff past 20 KB is cut inside the hunk that crosses it: that hunk's start is shown and counts as read, and the hunks after it are `unread`.
+- Ranking costs about 20 output tokens a hunk.
+
+`GET /api/review/:id` turns this into `order`, which clients render as is:
+
+1. `chunks`: the ranked hunks;
+2. `unread`: those the agent didn't see, with why (the PR or the file was too long);
+3. `skipped`: those it left out (level `skip`, still in view: the agent's answer comes from a diff anyone can write);
+4. `rest`: what the desk itself folds, by file with why (lockfiles and generated files, files with no text diff).
+
+Each hunk has its own patch, level, rank, why and notes; `order.notes` lists the notes in reading order. `files[].patch` repeats the same text. A review from before ranking, one for an older commit, or a ranking whose ids no longer name the same files gives `ranked: false`: every hunk, file by file.
+
+#### Walk-through
+
+The same answer carries `steps`: two to eight parts of the change in the order that makes it easiest to understand (where it starts, what builds on it, its callers, then wiring and tests). Each has a title, a sentence or two, what to check there, and the hunk ids it covers, from any files. It costs no extra call, and the checker doesn't see it.
+
+- `parseSteps()` keeps only ids the prompt showed, each hunk in the first step naming it. It drops a step with no hunks or no title, keeps at most 8, and cuts the title at 60 characters, the body at 300 and the check at 200.
+- Fewer than two steps, or steps covering under half of the ranked hunks, keep no walk-through (`guide`). The log says how many steps covered how many hunks.
+- `order.steps` holds the steps with the same hunks the ranked view has; `order.beyond` holds every hunk of `chunks`, `unread` and `skipped` no step covers. So steps, `beyond` and `rest` hold every hunk once.
+- A stale review, one written before steps, or steps whose ids no longer match have neither.
+- Step text is untrusted and unchecked: it's drawn as text, it only orders and heads, and it never folds a hunk.
+
+#### Opening a review
+
+Opening a PR (`GET /api/review/:id`) asks for its AI review and has your agent read what waits on you; `?ahead=1`, the window's prefetch of the row you rest on, starts neither. After each sync the desk fetches the main page's PRs' diffs and conversations ahead, three at a time. Both are kept (the diff per head commit, the conversation until the PR updates), so a sync refetches only what changed.
+
+**Checks** (`ReviewView.checks`, `src/checks.ts`): every check run and commit status on the head commit.
+
+- Each has a name (untrusted), a state (`failing`, `cancelled`, `running`, `passing`, `skipped`), `optional` (the base branch requires other checks but not this one) and a `url` (https only, else `""`).
+- Ordered with what's wrong first, then by name, under one line: "CI passing · 14 checks", "2 failing, 1 running of 14 checks", "1 failing (not required) of 14 checks". `failing` means a required check fails; the window draws the line red.
+- A GitHub read of its own (`PR_CHECKS`, 100 a page, one point), asked only when a review is opened or fetched ahead, never by a sync. Kept until a sync next reads that PR (within 3 minutes for your own PR, 30 for someone else's, or when GitHub says it changed), so it's never older than the facts' "CI passing".
+- A commit nothing ran on has `checks: null`. A fetch GitHub refuses is `checks_error`, asked again on the next open.
+
+**Reviewers** (`ReviewView.reviewers`, `standings()` in `src/stage.ts`), from what a sync already holds:
+
+- one line: "Approved by marco · waiting on sam and @backend", "Changes requested by kofi", "Nobody's asked";
+- `changes` when someone asks for changes (the line is amber);
+- each person or team with one standing, in this order: `changes requested`, `asked`, `approved`, `commented`. `verdicts()` decides approved and changes requested as the stage does (a collaborator's approval, anyone's change request, the author's own reviews aside). Teams show as `@slug`, bots are left out, and you are "you".
+
+**Merge line:** `ReviewView.merge` is one line when something stands in an open PR's way ("Merge conflict with main", from `mergeable`, which the desk asks only of your own PRs), else `null`.
+
+`activity` keeps the PR's recent events; a resolved PR's head line reads them.
+
+### What reviewers said
+
+A PR's review view carries its conversations (`ReviewView.conversation`, `src/conversation.ts`): every review thread (resolved or not, outdated or not, with its file, line and comments), the PR's comments and the reviews' bodies. Bots' comments on the PR (status reports) and empty review bodies are left out. The desk reads them once a sync sees the PR updated.
+
+**What waits on you.** A person other than you had the last word:
+
+- on your PR, after your last word there;
+- on someone else's PR, in a thread you're in or a comment that @mentions you.
+
+Bots never wait on you. Nor does a thread your push answered: GitHub marks it outdated, and the push that did (the commit after the last one the thread applied to) is yours and came after their last word. A force-push counts; when it took that commit away, your latest push (the head commit, if yours) stands in. A reply on a thread that was already outdated still waits on you.
+
+**Reply on the row.** The same rule, on what a sync knows of your PR, gives its row the call to action Reply when that's all it needs: open, not in Merging, not a draft, CI not failing, no conflict, no changes requested, and not approved and green (`owesReply`).
+
+**Your agent's read.** For each conversation waiting on you, your agent (tool-less, like the judge) reads the PR's title, description, latest commits and the conversations, with the code a thread is on, fenced with a random tag. Up to 10 a call, one PR at a time, in the background: when you open a review, and after a sync for rows that say Reply. For each it gives a one-line gist of what they want and its take ("Valid concern: …", "A nit: …", "Already addressed: …", "Only you can answer: …", "Nothing to do: …"). The take is kept per conversation until a newer comment arrives (`take:<pr>` in the store). A failure shows in the view and isn't retried on that PR for 10 minutes.
+
+**Answering.** The reply box starts with your agent's suggestion. Reply (or ⌘↩) posts it on GitHub as you, through `POST /api/review/:id/reply`, one of the desk's GitHub writes ([Security model](#security-model)). A thread's `side` (`new`, `old` for a removed line, `null` on the PR) places it in the diff. Your own comment on a line goes through `POST /api/review/:id/inline`.
+
+## Sorting
+
+Rules place each item first: they're cheap and say exactly what they do. Then your agent, the judge, sorts by your policy. Then [Urgency](#urgency) orders the Inbox into Urgent, Standard and FYI.
+
+### Rules: built in and your own
+
+A board's rules live in `config.toml` (`parseConfig()` in `src/config.ts`). They are yours, plus its plugin's set when the board names one with `builtin`.
+
+- A plugin declares its sets in its own file (`Connector.rules`). GitHub's are in `src/connectors/github-rules.ts`: `review`, `mine`, `mentions`, `issues` (mentions plus your own issues) and `collaborators`. Each set (`BuiltInRules`) has a name and rules, each with a stable `id`.
+- Sets are code, read on every load. A release that changes a rule changes where items land on every desk whose board names the set, with nothing written to `config.toml`. A rule dropped from code is gone, and an `id` referring to it is a config error.
+
+The file holds only your part:
+
+```toml
+[[boards]]
+id = "acme-review"
+# … queries, filter, caps, default
+builtin = "review"                 # GitHub's rules for PRs to review
+off = ["your-repo"]                # switched off
+rules = [
+  { when = "'ml' in item.labels", bucket = "now", why = "ML" },                    # yours: before GitHub's
+  { id = "bot-pr", when = "author.bot", bucket = "fyi", why = "bot PR" },         # yours, in place of GitHub's bot-pr
+  { after = "stacked", when = "pr.ci == 'pending'", bucket = "later", why = "CI running" },  # yours, right after stacked
+]
+```
+
+**Order** (`resolveRules()`):
+
+1. Your rules without `id` or `after`, as written.
+2. The set's rules, except those in `off`. A rule of yours with the same `id` takes that rule's place. Your rules with `after` naming it follow it, as written.
+
+An override is the whole rule as written (`hard`, `final` and `nocap` too), not a patch. A board without `builtin` is yours alone.
+
+**Errors:** a `builtin` the source doesn't have; an `off`, `id` or `after` naming no rule of the set; an `id` also in `off`; two of your rules with one `id`; `id` with `after`; any of these on a board without `builtin`.
+
+**Downstream**, everything reads the resolved rules (`BoardConfig.rules`). Each keeps `id` (the set's rule, or yours in its place) and `own` (yours: its index in the file's `rules`, which a compile error names).
+
+- `GET /api/config`'s `builtins` lists each board's set rules as they stand (`on`, and `yours` with `path` to your override).
+- `PUT /api/config/builtin` switches one (`switchBuiltIn()` rewrites the board's one-line `off` and saves as `PUT /api/config` does).
+- `desk_config get` lists them under the file.
+
+**Older configs** had GitHub's rules copied onto each board. `migrateBuiltIns()` runs once (kv `builtins_migrated`, with `config.toml.bak`). A board whose rules match one set in order for at least half of it names the set. Rules equal to the set's go; one that differs only in its `when` or `why` becomes an override with that `id`; the rest keep their place with `after`; what the set has that the board didn't goes in `off`. It writes nothing unless every board's resolved rules come out exactly as before, and leaves alone a board written as `[[boards.rules]]` tables or that's mostly yours.
+
+### The policy and the judge
+
+Your agent triages everything that reaches the desk, after the rules.
+
+**Placements and floors:**
+
+- A matching rule's bucket and why (or the board's `default` when none matched) is the judge's **hint**, and holds until it answers. `bucket = "judge"` hints the board default.
+- `hard = true` is a **floor**: what it matches never sorts below the rule's bucket (Today for a Now rule), whatever the judge, the quiet rule (`queue.quiet_days`) or caps say. Now's cap still sends overflow to Today. The first-run config makes the rules for a review asked of you by name hard: a person's ask (bucket now, so it lands in Now or Today) and one a bot added (bucket today; Junior adds asks for people). Configs from before hard rules get these once, with a `config.toml.bak`.
+- `final = true` takes the item away from the judge: it stays in the rule's bucket (your pin's floor still lifts it; `bucket = "judge"` can't be final).
+- **Your pin** is a floor too: Today or above. A pin from the coordinator's `desk_add` (`from` "Inbox coordinator") isn't: the judge sees "pinned by the coordinator" and sorts by your policy. A pin or unpin sorts the item again.
+- Resolution still applies: a PR that's merged, closed, or approved by someone else (`github.resolve_on_others_approval`) leaves the desk ([Resolved](#resolved)).
+
+**The policy** is prose in `~/.inbox/policy.md`. Write it in Settings → Agent → Your policy, through an agent (`desk_policy`), or in any editor; the desk re-reads it on change. While it's empty a built-in starter is in effect (`DEFAULT_POLICY` in `src/judge.ts`, "less is more"), so sorting works from the first sync. `desk_policy get` and Settings say when it's the starter.
+
+**The prompt** goes to your agent, tool-less, with the policy and items fenced with a random tag. It asks what you should do with each item:
+
+- `now`: a person is blocked on you today; one or two at most; never CI on your own PR.
+- `today`: a person is waiting on you, or it's yours to finish (approved and green).
+- `later`: yours, but nobody is blocked.
+- `fyi`: someone else has it, or nobody needs you; kept off your page.
+- `hide`: automated noise.
+
+Only rules fill `blocked`: the schema leaves it out and an answer of it is dropped. The prompt says less is more and to sort away what it's unsure of. When the policy's lines disagree, a line that sorts an item away for who made it or its state (bots, drafts, stacked PRs, someone else asked by name, a teammate reviewing) beats one that promotes it for what it touches. Being asked by name, a pin and a hard rule's floor beat both. What counts most is how you were asked, whether you usually review the author, and whether it builds on what you're building; a directory you've worked in is weak evidence on its own.
+
+Each item gets its hint (where the rules put it, on which board, why; a hard rule's floor; who pinned it) and its facts, a line each:
+
+- who opened it and when ("PR by sentry-junior (bot) for Michelle Tran");
+- size, CI, review state, and "stacked on <base>" when its base isn't the default branch;
+- on your own PR: how long ago you pushed, unresolved threads and who had the last word;
+- how you were asked (by name and by whom, via which team, CODEOWNERS), whether you usually review the author (`author.close`), who else was asked, others' standing reviews (bots and you left out);
+- for someone else's PR: how many of its files are in your areas and the directories it touches ([Your areas](#your-areas));
+- the AI review's call, risk and first sentence ("of an earlier commit" when so);
+- the description's first 280 characters.
+
+Above the items, inside the fence: who you are (name, teams, the five authors you engage with most, your 20 latest PR titles) and your areas in each repo of the batch.
+
+Each item gets back a bucket and a few words of why, which replace the hint's (an empty why keeps the rule's). Then the quiet rule and caps apply as usual, down to any floor.
+
+**Limits and caching:**
+
+- Up to 20 items per call, one call at a time, at most `policy.max_per_hour` items an hour (default 300; only calls that answered count).
+- Never-answered items go first, then those in Now or Today, then by latest activity. Re-sorting already-answered items uses at most half the hour, so new items always have room.
+- Answers are kept per item, keyed on what the judge read that can change (`judgeKey`: others' latest activity, state, draft, commit, red CI, review decision, mergeability, title, labels, review requests, people's reviews; once they arrive, its files and its commit's AI review) and on the policy's hash. A bot's comment or a CI rerun asks nothing.
+- A changed item keeps its old answer until the new one lands. So does every item when the policy changes, then all are sorted again, never-answered first. An item the reply leaves out stays where the rules put it until it changes, and its card says "Claude gave no answer".
+- `policy.judge` (default on) turns the judge off; then the rules' placements stand.
+
+**Failures.** Until an item has an answer, or if the call fails, it sits where the rules put it. A failure (an expired login, a timeout) shows in Settings → Agent under Your policy and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on, or changing the agent settings, tries again now. desk.log keeps the agent's own words.
+
+**What you see.** The rule trace (`desk_item`, `desk show`, the item's detail) ends with the judge's step: `Claude: today, <why>` (plus "an earlier answer; sorting it again" while a fresh one is due), or `Claude: not sorted yet, so where the rules put it`. A hard rule's step names its floor (`hard rule: never below today`). The card's facts say who placed it: "sorted by Claude", "placed by a hard rule", "kept up by its pin", "not sorted by Claude yet" or "Claude gave no answer".
+
+### Your areas
+
+Your areas tell a CODEOWNERS ping that touches your code from one that doesn't.
+
+**What items carry.** Every item has `body`, the first 600 characters of its description, whitespace collapsed (untrusted). A PR has `paths`, its first 50 changed files (`changed_files` counts all). Items stored before the desk asked lack them, which means unknown.
+
+**What an area is.** A directory you work in, per repo:
+
+- the directory of each changed file, up to four levels (`src/seer/automation/autofix/`);
+- from your PRs created or merged in the last 90 days (3 points each) and the PRs you reviewed (1 point), once per PR;
+- leaving out PRs of more than 100 files (codemods, renames), top-level directories alone (`src/`, `tests/`), and directories under 3 points or under a tenth of your heaviest in that repo;
+- the top 40 per repo.
+
+They're fetched on the first sync and then daily (`areas` and `areas_at` in the context, kv `context`). A failed fetch keeps the last ones and tries again in about an hour.
+
+**Rule fields:**
+
+- `pr.my_area_files`: how many of the PR's paths are in your areas there; -1 while either is unknown.
+- `pr.my_area`: at least one.
+- `pr.paths`: the first 50 paths, empty while unknown. `any(pr.paths, 'src/sentry/seer/*')` matches whatever the title says; `*` is any run of characters, `/` included.
+
+The first-run config hints a CODEOWNERS ping into Later when `pr.my_area`, FYI otherwise. Neither is hard, so the judge has the last word. The judge's prompt reads them through `src/areas.ts`:
+
+```ts
+areasFor(ctx: Context | null, repo: string): { dir: string; weight: number }[]; // heaviest first; [] if none or unknown
+touched(item: Item, ctx: Context | null): { dir: string; files: number; mine: boolean }[] | null; // yours first; null while unknown
+areaFiles(item: Item, ctx: Context | null): number; // pr.my_area_files
+```
+
+as "in their areas: 2 of 5 files; touches src/sentry/auth/ (2, theirs), static/app/views/ (3)". An answer remembers whether the PR's files were known and which commit's AI review it saw, so an item sorted before either arrived is sorted again (its earlier answer holds meanwhile).
+
+### Urgency
+
+The Inbox's sections, Urgent, Standard and FYI, and their order come from `src/urgency.ts`. It works on what the rules, the judge and automations' sorts placed in now, today, later or fyi. Those buckets stay the rules' view (`QueueView.sections`, the rule trace, `desk_list`); `QueueView.inbox` is what the window draws.
+
+**Criteria** (Settings → Urgency, `desk_criteria`, `/api/criteria`) are yes-or-no questions about an item.
+
+- Yours are in kv `criteria` (`Criterion` in `src/types.ts`). A plugin's are in its file (`Connector.criteria`; GitHub's in `src/connectors/github-criteria.ts`), switched in kv `criteria_builtin`.
+- Each has an id, a name, and at least one of: `when` (the rules' language, free and exact, compiled on save) and `ask` (a question for a model, asked only of items whose `when` passes). `urgent`: a yes puts the item in Urgent whatever its score.
+- A criterion only orders the Inbox and never acts on an item, so one an agent saves is on at once (`by: "an agent"`). Any local client may save or delete yours; only the window switches one (403 otherwise).
+- An urgent yes brings even an item the rules or the judge hid onto the Inbox.
+
+GitHub's are rule-only, so a fresh desk sections from its first sync:
+
+| Criterion              | Says yes when                                                                                                                                              | Urgent |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Asked by name          | `me.requested_direct`                                                                                                                                      |        |
+| Waiting on your reply  | `me.owes_reply`, or someone else's PR you reviewed got pushes since                                                                                        |        |
+| Ready to merge         | yours, approved or in a repo that needs no review, green, not a draft, not stacked or blocked, and no PR waits on it: one press merges it (`cta: "merge"`) | yes    |
+| Your PR others wait on | yours, other PRs need it merged first, and it's ready to merge or waits on your reply                                                                      | yes    |
+| Handed back            | `me.handed_back`                                                                                                                                           | yes    |
+
+**Outcomes.** A `when` alone is evaluated every time the desk computes its view. A question's answer is kept per item (kv `said:<id>`), keyed on the item (`sortKey()`, less the pin) and the question, so a model is asked again only when either changes; until then the item keeps its earlier answer (no, before the first). Questions go in the background, before scores:
+
+- on the decision model when `agent.decision_key` is set (one request an item, a `noul` per question, yes at 0.8 or above);
+- else one tool-less call of 20 items on your agent (`askAgent()`), the questions in your words, the items fenced.
+
+A model that can't answer holds every question and score for 30 minutes (`Urgency.held`, shown in Settings → Urgency), and the Inbox uses what it has. Another key, model or agent, the agent working again, or saving a criterion asks at once.
+
+**Score**, 0 to 10, for each Inbox item. The scorer gets the item as the judge's `describe()` words it, where the rules placed it and why, and each criterion's outcome by name; it answers a score and a one-line why.
+
+- On the decision model when its key is set: a `choice` of 0 to 10; the score is the probabilities' mean, with no why.
+- Else on your agent, 20 items a call, one call at a time, after the judge answered for the item.
+- Kept in kv `score:<id>`, keyed on the item, its placement, the outcomes and the scorer, and held while the item stays in the bucket it was scored in.
+- With `agent.score` off, or no score yet, the desk's own: the bucket's (now 7, today 6, later 3, fyi 1) plus one per yes, at most 10.
+
+**Sections** (`sectionOf()`):
+
+1. Urgent for an urgent yes or a hand-back (`snap.needs`).
+2. Else FYI for what was sorted to fyi.
+3. Else Urgent at `queue.urgent_at` (8) or above, FYI at `queue.fyi_at` (3) or below, Standard between.
+
+A review asked of you by name, and your pin, are never below Standard. Agents' questions and the sessions that need you lead Urgent. Each section is ordered by score, then the desk's order (`byPart()` of now and today, then later, then fyi).
+
+Each card carries `section`, `score` and `reason`, the row's quiet why. `reason` is the first of: a hand-back's words, the urgent yeses' names, an automation's why, the score's why, the yeses' names, the rules' why.
+
+**The dataset.** Every answer the desk takes, a criterion's or a score's, is appended to `<home>/labels.jsonl`: `{ kind, at, by, item, input, … }` with what the model was given and what it said (`yes` and `p`; `score`, `why`, the decision model's `probabilities`). It's for distilling a cheaper model later; the desk only appends to it.
+
+## Working for you
+
+### The coordinator
+
+One background agent session the desk starts and wakes (`src/coordinator.ts`, README → Coordinator); the window calls it your agent. What it does on a wake is the skill's "Coordinator" section. It's your own agent, with your MCP servers, tools and permissions, plus the desk's tools through the user-scope `inbox` server (Settings → Agent → Connect).
+
+**What it does on a wake:**
+
+- reads the PRs handed off for merge (`desk_merging`) and the events since its last wake (`desk_events`);
+- works in a git worktree of your clone: fixes CI, addresses members' review comments, and rebases on a conflict once the PR is otherwise ready;
+- pushes to the PR's own branch (`--force-with-lease` after a rebase);
+- merges with `gh pr merge` once it's approved, green and conflict-free;
+- notes what it did (`desk_note`, on the PR's row in Merging) and hands back what it can't finish (`desk_hand_back`).
+
+It never posts comments or replies as you.
+
+**What wakes it:**
+
+- a hand-off;
+- on a PR in Merging: CI finishing (green or red), a review, a comment, a conflict;
+- your [asks](#asks), and your answers to its questions;
+- `POST /api/coordinator/wake` (Start it now, Wake it in Merging).
+
+News is queued one entry per PR. A minute after the first, the desk delivers it as one line of ids, URLs and kinds of change, never PR text. Queued news stays in kv `coordinator_news` until a start or resume succeeds, so a restart or a failed start keeps it. News on a merged or closed PR doesn't wake it, and a second Wake it while one runs adds nothing.
+
+**Settings.** `agent.coordinator` off stops it, and nothing wakes it; on again resumes it once the stopped process has exited. `agent.coordinator_bypass` (default on) runs it without permission prompts.
+
+**Status** shows in Merging as `InflightView.coordinator`: on, its id (null until started), its link, and `error`, what the agent said when it last couldn't start or resume (kv `coordinator_error`, cleared once a run succeeds). The error shows in red in Merging, with one notification when it first fails.
+
+#### On Claude Code
+
+**Starting.** On the first hand-off or ask, the desk runs `claude --bg --name "Inbox coordinator" --remote-control "Inbox coordinator" "<role line> <news>"` in `<home>/coordinator`.
+
+- Before that it adds any missing rule of its deny list to the folder's `.claude/settings.json`; your own settings there stay.
+- With `agent.coordinator_bypass` on it adds `--permission-mode bypassPermissions`. Deny rules still apply in every mode.
+- It keeps the id it prints in kv `coordinator_bg`, with the claude.ai link from `claude logs` and `mode`: `bypass`, `default`, or `unknown` for a session picked up from its folder without being seen to start (a record without `mode` is `default`).
+
+**Keeping it running.** When the desk starts, every 5 minutes, and when `agent.coordinator` turns on, `claude agents --json --all` finds the session. One that stopped or crashed is resumed with `claude --resume <sessionId> --bg` and no prompt, which starts no turn. With no session and nothing to deliver, it creates none. Claude's daemon runs the session, not the desk, so the desk's agent cleanup (`stopAll`) and a restart under `node --watch` leave it running.
+
+**Delivering.** The desk reads `claude agents --json --all`:
+
+- busy, in a shell, or on a permission prompt: it keeps the news and looks again a minute later;
+- idle and running: `claude stop <id>`, then `claude --resume <sessionId> --bg "<news>"` with no other flag, so the same session continues;
+- stopped: just the resume;
+- gone (`claude rm`): a fresh start. It picks up only a running session from its folder, never one a mode switch left stopped.
+
+**Switching mode.** A session keeps its permission mode across `claude --resume`. When the setting and `mode` differ, the next launch (a delivery, the 5-minute resume, or at once when the setting changes) resumes with `--name`, `--remote-control` and `--permission-mode bypassPermissions` or `default`. Claude then starts a copy with the history in that mode; the desk keeps the copy's id and mode, and the original stays stopped in `claude agents`. A busy session waits until idle; one on a permission prompt switches at once and is told to look at Merging. A session still under the old name "Review Desk coordinator" becomes one copy named "Inbox coordinator" the same way.
+
+**Refusals**, shown as `error`:
+
+- Bypass for `--bg` until it's been accepted once (`claude --dangerously-skip-permissions`), or under a managed `disableBypassPermissionsMode`. Turning the setting off resumes the old session as it was.
+- A folder Claude Code hasn't trusted (nor one above it): ``<folder> is not a trusted directory. Run `claude` there once and accept the trust dialog, then retry.`` The desk doesn't mark folders trusted.
+- A session from another folder can't be resumed (claude resumes only from a session's own folder), for instance the old home's after `~/.review-desk` moved to `~/.inbox`. `find()` stops and forgets it, and the next wake starts a fresh one.
+
+#### On Codex
+
+There's no background daemon (`Coordinator.runOwn()`): each turn is the desk's child process.
+
+- **First turn:** `codex exec --json <sandbox> -C <home>/coordinator --skip-git-repo-check <off> <mcp> "<role line> <news>"`. The thread id from its first event (`thread.started`) goes in kv `coordinator_codex`, beside Claude Code's `coordinator_bg`, so switching agents keeps each one's session; the next wake goes to the chosen agent's, starting one if it has none.
+- **Later turns:** `codex exec resume --json <sandbox> --skip-git-repo-check <off> <mcp> <id> "<message>"` in that folder.
+- `<sandbox>`: with bypass on, `--dangerously-bypass-approvals-and-sandbox`. Off: `--sandbox workspace-write` (on a resume, `-c sandbox_mode="workspace-write"`), `-c sandbox_workspace_write.network_access=true`, `-c approval_policy="never"`.
+- `<off>`: `--disable` for `apps`, `plugins`, `browser_use`, `browser_use_external`, `in_app_browser` and `computer_use`.
+- `<mcp>`: each of your MCP servers off by name, as in the tool-less call, except the desk's: `-c mcp_servers.inbox.url="<the desk's /mcp>"` and `enabled=true` (`inbox_desk` when your `inbox` is another server).
+
+**A turn.** The run that starts a turn ends once Codex names its thread, delivering what it took (news and asks dropped from the queue, asks' jobs begun). The turn goes on with `status` `busy` until it exits (an hour at most), then `idle`. Its failure (a `turn.failed` or `error` event, else stderr) is `error` in Codex's words, a login one as ``Codex isn't logged in. Run `codex login` in a terminal.``. What queued meanwhile goes as the next turn. One that exits before naming a thread fails the run, and its news stays queued. `url` is null (no Remote Control); the 5-minute look and the 10-second watch don't ask Codex anything.
+
+**Deny rules.** Codex has no deny list. Before each start or wake the desk writes `<home>/coordinator/.codex/rules/inbox.rules`: the deny list's rules that are a command's leading words (`gh pr comment`, `gh pr review`, `gh pr ready`, `gh pr edit`, `gh issue comment`, `gh api`, `git push --force`, `git push -f`, `gh pr close|reopen|create`, `gh issue close|reopen|create|edit`) as `prefix_rule(…, decision = "forbidden")`. Rules matching a flag after the branch (`git push * -f*`, `* --force`, `* +*`) have no Codex form. Codex reads a project's `.codex/rules` only when `~/.codex/config.toml` (`$CODEX_HOME`) trusts that folder, which `-c` can't set, so an untrusted folder is `CodexUntrusted` and nothing runs ("… add `[projects."<folder>"]` with `trust_level = "trusted"` to <config>").
+
+**What holds on Codex:** no MCP server but the desk's; those rules; with bypass off, the sandbox (it writes only in its folder and temp dirs, never a `.git` or `.codex`, so pushing to your clones needs bypass). **What doesn't:** rules a prefix can't express; a denied command inside another (`echo "$(gh api …)"`, backticks; the e2e harness saw one run); with bypass on, any sandbox.
+
+#### On OpenCode
+
+The same shape as Codex (`Coordinator.runOwn()`), each turn the desk's child:
+
+- **First turn:** `opencode run --format json --pure --agent inbox-desk --title "Inbox coordinator" "<role line> <news>"` in `<home>/coordinator`. The session id (on every event) goes in kv `coordinator_opencode`.
+- **Later turns:** `opencode run … --session <id> "<message>"`.
+- `--auto` when `agent.coordinator_bypass` is on approves what your config says to ask about; off, nobody is there to answer, so it's refused.
+- Its config holds the desk's MCP server as the tool-less call's does (yours off, `mcp.inbox` at the desk's `/mcp`, `inbox_desk` when your `inbox` is another server), and the deny list as `inbox-desk`'s bash rules (`"gh pr comment *": "deny"`, …). OpenCode matches the whole command and each part of a chain, so the flag-after-the-branch rules hold here too.
+- OpenCode has no sandbox. What holds: no MCP server but the desk's, and the deny list (it reads a `$(…)` inside a command, but not a command run by `bash -c`); with bypass off, what your config asks about.
+- A failure is an `error` event's words (its status first); a 401 gets OpenCode's login words.
+
+### Asks
+
+An ask is your words to the coordinator (`POST /api/ask`, Ask your agent in the window). It doesn't wait for the news batch:
+
+- the desk keeps it (kv `asks`, the latest 200);
+- queues one line for it in kv `coordinator_asks`;
+- delivers it as soon as a run in progress is done (busy: it waits; not started: it starts it), ahead of any news in the same message.
+
+`agent.coordinator` off refuses it. One that isn't started and won't start is a 502, and the ask is dropped. `desk_answer` stores the answer on the ask, updates the views and, on its first answer, notifies you with its first paragraph (`notify.enabled`, outside `notify.quiet`).
+
+**The line:** `My ask <id>, about <whose> <item id> (<url>)<state>, <where>: "<your words>" Answer it with desk_answer.` Your words are flattened onto it; the desk keeps your paragraphs. Everything else is the desk's own words, never PR text (`askLine()`, from `askAbout()`), and each part comes only when you were on one:
+
+- `<whose>`: `my PR`, `someone else's PR` or `the issue`. Yours means `me.author` (you opened it, or a bot opened it for you: [Opened for you](#opened-for-you)) or in Merging. A bot's "via" line alone never makes it yours; without GitHub context every PR reads someone else's.
+- `<state>`: `, not handed off` or `, in Merging` on your open PR; `, merged` or `, closed`; `, read only: don't push to it or post on it` on someone else's; `, not on the desk now, read only: …` on an item that left the desk.
+- `<where>`: `on the thread <url>`, or the lines by number and side with `(desk_ask <id> says where)`. Removed lines read `removed lines 17-18`; a range across sides `removed line 17 to line 23`. The file's name never goes in the line: `desk_ask` (`GET /api/asks/:id`) gives it fenced, with a shell-quoted `file_arg`.
+
+For example:
+
+- `My ask 9c1e2f3a, about my PR acme/web#3 (https://github.com/acme/web/pull/3), not handed off, on the thread https://github.com/acme/web/pull/3#discussion_r9: "confirm it's addressed" Answer it with desk_answer.`
+- `My ask 9c1e2f3a, about someone else's PR acme/api#4127 (https://github.com/acme/api/pull/4127), read only: don't push to it or post on it, on lines 20-23 of its diff (desk_ask 9c1e2f3a says where): "why is the budget only checked between batches?" Answer it with desk_answer.`
+- With no item, only your words: `My ask 9c1e2f3a: "…" Answer it with desk_answer.`
+
+`Wake it` re-sends the ask with the item's state now (handed off since, merged since, or off the desk).
+
+**Its job.** Each ask is a job in [Claude's work](architecture.md#claudes-work-srcjobsts), from when the coordinator is handed it until `desk_answer`. One it stopped without answering (idle or stopped, nothing in flight, not about to be told again) goes to it again 5 and then 15 minutes after it last went. 30 minutes after the third it's failed ("your agent stopped without answering it, 3 times"). An answered ask still waiting to go is dropped from `coordinator_asks`, so it's never asked twice.
+
+**Lines** (`lines: { path, line, side, start?, head, note? }`) need a PR, and an ask is on a thread or on lines, not both. Each of these is a 400, and nothing is kept or sent:
+
+- "need lines: { path, line, side: new|old, start?: { line, side }, head, note? }" (malformed);
+- "lines are on a PR's diff: send its item_id";
+- "lines are on a PR's diff" (on an issue);
+- "an ask is on a thread or on lines, not both";
+- "lines need head: the 40-character commit they were read at";
+- "lines need path: a file name with no control characters" (empty, over 1,000 characters, or with a control, line-separator, bidi or other invisible character).
+
+### Sessions
+
+The second source (`src/connectors/sessions.ts`, [plugins.md](plugins.md)): your own Claude Code and Codex sessions on this computer that are blocked on you or stalled. They're rows on the Inbox after agents' questions.
+
+- On by default (it only reads, and does nothing without `claude`). Settings → Sessions: `sessions.enabled`, `sessions.ask` (the model's read, below), `sessions.quiet_minutes` (25). It comes with no automations.
+- It polls every 30 seconds while the desk runs, and never writes to `~/.claude`, `~/.codex` or the desktop app's folder.
+- OpenCode's sessions aren't read. With OpenCode chosen, the source still lists Claude Code's and Codex's, and the model's read runs on OpenCode.
+
+**What it reads:**
+
+- `claude agents --json --all`: every live session and the background ones. A pass whose list can't be read changes nothing.
+- The last 64 KB of each one's transcript (`~/.claude/projects/*/<session id>.jsonl`).
+- The desktop app's records (`~/Library/Application Support/Claude-3p` and `Claude`, `claude-code-sessions/*/*/local_*.json`: `postTurnSummary`, `priorErrorMark`).
+- A terminal transcript written in the last day that's in no list (its process is gone), unless it's a background one you removed (`~/.claude/jobs/*/state.json`).
+- Codex's `state_5.sqlite`, opened read only and immutable: your unarchived `cli` and `vscode` threads from the last 3 days (never `codex exec` or sub-agents), with each rollout's last 64 KB.
+
+Any shape it doesn't know gives no item. Nothing it reads is kept but a one-line excerpt (160 characters) in memory. `DESK_CLAUDE_HOME`, `DESK_CODEX_HOME` and `DESK_CLAUDE_APP` point it elsewhere (the tests do).
+
+**Blocked**, from what the session shows: a permission prompt (with its tool), input, a sandbox request, a worker or a dialog; an unanswered AskUserQuestion or ExitPlanMode; a turn ended on `authentication_failed` (login expired) or billing; a background session's `state: blocked`; the desktop app's `postTurnSummary.status_category: blocked`.
+
+**Stalled:** a turn ended on a rate limit (until `quotaLimits.resetsAt` when it says), `overloaded` or a 5xx; a background session's `state: failed`; a turn left open with no process (unless you stopped or interrupted it); the desktop app's error mark after its last turn; and, weakly, busy with nothing written for `sessions.quiet_minutes`, unless it's retrying or a subagent is working. Codex keeps no errors or approvals in its rollouts, so a Codex turn started and idle 25 minutes is all it can say.
+
+**Asking you something.** A turn that ended normally with a question, in a terminal still open (or Codex's `task_complete`), goes to your agent (`askAgent()`, tool-less, the message's last 2 KB, at most 3 a pass), once per session and last event. It reaches the Inbox only if it's blocking; a directional question ("Want me to also…?") never does. With `sessions.ask` off, none reaches the Inbox. The desktop app's and background sessions' own reads stand instead.
+
+**Left out:** the coordinator (`Inbox coordinator`) and anything working under the desk's home (the judge, reviews, automations).
+
+**Actions** (`SessionCard.actions`):
+
+| Session                | Action                                    |
+| ---------------------- | ----------------------------------------- |
+| background, no process | **Kick** (`POST /api/sessions/:id/kick`)  |
+| terminal, process gone | **Resume in background** (the same route) |
+| background, running    | **Copy attach command**                   |
+| desktop app, Codex     | **Open** (`POST /api/sessions/:id/open`)  |
+| terminal, running      | none                                      |
+
+Kick reads `claude agents --json --all` again, runs the coordinator's `halt()`, then `claude --resume <id> --bg "Continue where you left off."` in the session's folder, and logs it. Done hides a session until it moves on (a later event); snooze takes a time; mute and undo work as on any item, all through `POST /api/act`.
+
+### Automations
+
+Your instructions, run on a schedule or on events (`src/automations.ts`, README → Automations). They're kept in kv `automations`, with their runs in kv `automation_runs` (the last 10 each).
+
+#### Built in
+
+A plugin comes with automations of its own (`Connector.automations`, `BuiltInAutomation` in `src/types.ts`). GitHub's, in `src/connectors/github-automations.ts`:
+
+| Id                        | Name                           | What it does                                                                                      | On  |
+| ------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------- | --- |
+| `github.pick-reviewer`    | Pick a reviewer                | Your ready PR waited a workday with nobody asked by name: to your desk to pick a reviewer         | yes |
+| `github.follow-up`        | Follow up on silent reviewers  | Your PR's named reviewers have been silent two workdays: to your desk to follow up                | yes |
+| `github.team-reviewed`    | Team reviews someone else took | A team ask someone else already reviewed goes to FYI, unless it touches your areas                | yes |
+| `github.wide-ping`        | Wide team pings                | A review asked of four or more teams, not of you by name, is hidden, unless it touches your areas | yes |
+| `github.red-ci`           | Snooze while CI is red         | Your PR whose CI goes red is snoozed until CI passes                                              | no  |
+| `github.mention-question` | Questions in mentions          | When someone mentions you, a model reads it and adds it if they ask you something                 | no  |
+
+- `Automations.all()` lists yours, then a plugin's as `<plugin>.<id>` with `plugin` and `help` set and `by` "you", so everything below holds for them alike.
+- Their definition is code, read each time: a release that changes one just takes effect, and one dropped from code is gone. Kv `automations_builtin` keeps only your switch per id (`{ on, at }`).
+- `PUT` and `DELETE /api/automations/:id` refuse one (400). `PUT /api/automations/:id/on` switches it, from the own page only. `desk_automations` lists it, marked built in, and can't change or switch it.
+- Copy to your automations in the window is a `PUT` of a new id with its definition, `on: false`.
+- On a fresh desk, an event automation reads the log from the start (automations start before the first sync); a scheduled one waits for that sync.
+
+#### What starts it
+
+**A schedule.** Every minute and when the desk starts, each automation that's on, whose schedule parses and that isn't running, runs once if its latest due time (`dueAt`) is after both its `updated_at` and its last run's `at`. A run the desk stopped in the middle is closed with an error at the next start and doesn't count, so it runs again.
+
+**Events** (never both; `schedule` is then `""`): a list of event kinds (`ACTIVITY_KINDS`; see [The event log](#the-event-log)).
+
+- Kv `automation_seen` keeps the log `seq` it has read up to. It's set to the log's end when saved with events (unless it was already on with events) and stays there while off, so what happened before it watched isn't news.
+- `Automations.pump()` runs when a sync pass ends (`Desk.synced()`, after the pass's blocked and unblocked events and before its new-item notification) and when one of its runs ends.
+- `batch()` reads the events after that `seq`: those of its kinds, by item, up to 20 items; the rest wait for the next run. `new` and `resolved` on an item this automation itself added aren't news.
+- The items the desk still holds whose check passes (in any state) are one run (`trigger: "event"`), each with a `what happened: …` line ("CI went from green to red; dana commented"). When none pass, nothing runs, no model is called and no run is kept; it reads on.
+- One automation never runs twice at once: what lands during a run (Run now included) waits for the next, which starts when that one ends.
+- A finished run, failed or not, moves its `seq` to its batch's end. A run the desk stopped in doesn't, so it runs again after the next start.
+- A failed event run (agent logged out, a check it can't read) waits 30 minutes before the next, and its failure is notified once.
+
+#### The check
+
+`when` is an expression in the rules' language (`src/expr.ts`, fields from `GET /api/fields`), compiled on save (400 `when: …` otherwise) and asked per item before anything else.
+
+- A scheduled run (or Run now) with a check is about the open items on the desk that pass it (`Automations.passing()`: on a board, not done, snoozed, muted, resolved or in Merging), latest activity first. An item it can't evaluate doesn't pass.
+- None pass: nothing runs, and the run is recorded as "Nothing on your desk passed its check, so nothing ran.", so the schedule's due time is spent.
+- Otherwise the run gets the first 20 (its summary says when more passed), each as the judge's `describe()` words it with where it is on the desk, between `<items-<random>>` tags after a line calling them untrusted.
+- A check the desk can no longer read (a field it names is gone) fails the run.
+
+#### How it decides
+
+`decide` (`WAYS`), cheapest first:
+
+- **`rule`**: no model. Every item its check passed gets the fixed action `rule: { do, why, until? }`. `until` is a snooze's, in words that mean the same every time: `1h`, `2d`, `tomorrow`, `monday`, `activity`, `ci`, `push`, `approved`, `ready`, `conflict`. It has no instruction (`prompt` is `""`).
+- **`ask`**: one tool-less call over up to 20 items, the judge's mechanism, in `<home>/agent`. The prompt has the instruction between `<instruction-<random>>` tags, what each of its `can` verbs does, and the items fenced. The answer is `{ items: [{ ref, do, why, until? }] }`; with `agent.decision_key` set, [the decision model](#the-decision-model-openrouter) answers instead, one request an item. An item it leaves out stays as it is; an answer about an item it wasn't asked about, or a second one, is dropped. The summary is the desk's ("Asked Claude about 3 items; it left 1 as it is.").
+- **`agent`** (the default): a run with tools ([below](#the-agent-run)).
+
+A rule or an ask is about items, so on a schedule it needs `when` (400 otherwise). Run now of one with only events records that there's nothing to run it on.
+
+**An ask asks only about what's new to it** on a schedule. Kv `automation_asked` keeps who it last asked (a hash of what it does and the model) and each item's `sortKey()` (less the pin) as it was asked. An unchanged item is left out ("It had asked about 3 more, unchanged since."); with nothing left, nothing runs. Run now, an event run, an edit or another model asks about all of them. An item a sync took off the desk while the decision model was being asked is skipped, and the summary names it.
+
+**A rule or an ask adds once.** No agent remembers what a rule's or an ask's last run added, so the desk does: `pushed:<id>.once[<automation id>]` is the item's `sortKey()` (less the pin) when that automation added it. `Desk.push()` adds an item once for what it is, including one you'd marked done (restored, in the same undo step as its pin; snoozed, muted or in Merging is `left`). While the key is the same it answers `left`, so after Done or Unpin it's back only once the item changes. A scheduled rule whose action is `add` also checks the open items you marked done, since nothing else would bring one back.
+
+**When the model can't answer** (`agentDown()`: not logged in, at its limit, or not installed; or `DecisionModelDown`), an ask's run is held, not spent: it's dropped from `automation_runs`, its events stay unread, `AutomationView.waiting` says why and when it asks again (30 minutes; `automations.held`, in memory), one notification says so, and neither schedule nor events start it before then. Saving the automation, or another key or model, ends the wait at once. An agent run that fails the same way is a failed run.
+
+#### The agent run
+
+On Claude Code: `claude -p --output-format json --permission-mode dontAsk --allowedTools <…> --disallowedTools Read(//<home>/secrets.json) --json-schema <{ summary, items: [{ ref, why }] }>` in `<home>/automations`.
+
+- **Allowed:** Read, Grep, Glob, WebSearch, WebFetch; `gh`'s issue and pr list and view, pr diff and checks, search, run and release list and view, repo view; the desk's read tools (under `mcp__inbox__` and the old `mcp__review-desk__`).
+- **Denied**, added to the folder's `.claude/settings.json` when missing: the coordinator's deny list, plus `Write`, `Edit`, `NotebookEdit`, `git push`, `git commit`, `gh`'s merge, issue transfer/delete/lock/pin, label, release writes, workflow, run rerun/cancel, repo writes, secret and variable, the desk's writing tools (`mcp__inbox__desk_<act|add|undo|config|policy|note|hand_back|answer|inquire|inquiry|automations>`, also under `mcp__review-desk__`), and reading `<home>/secrets.json`. It never asks and is refused the rest.
+- **stdin:** the instruction, the read-only rules, its last good run's time and the items the desk took from it (never one it couldn't or refused).
+- 20 minutes at most. An answer without a summary fails the run. The run stores the session id from claude's envelope.
+
+On Codex (`Automations.byCodex()`): `codex exec --json --sandbox read-only --skip-git-repo-check -C <home>/automations`, with:
+
+- the tool-less call's `--disable` flags. No shell: Codex can't allow only `gh`'s reads (an allowing rule runs a command outside the sandbox), and the read-only sandbox can read `secrets.json`;
+- `-c web_search="disabled"`, `-c approval_policy="never"`;
+- your MCP servers off but the desk's: `-c mcp_servers.inbox.url="<the desk's /mcp>"`, `enabled=true`, `enabled_tools=["desk_list","desk_item","desk_overview","desk_events","desk_brief","desk_merging"]` (`inbox_desk` when your `inbox` is another server). Codex connects to MCP servers itself, outside the sandbox, so the desk's localhost `/mcp` is reachable though the sandbox has no network;
+- `--output-schema <file> -o <file> -`, the prompt on stdin with a line saying it has only those tools. The schema is made strict first (`strictSchema()`: each object closed, each property required, so an optional `until` comes back empty), since OpenAI refuses others with `invalid_json_schema`.
+
+Its session is kept (no `--ephemeral`): `session` is the thread and `agent` is `codex`, so Copy resume command is `codex resume <id>`. A login or a limit fails the run in Codex's words.
+
+On OpenCode (`opencodeRun()`): the tool-less call in `<home>/automations` with the desk's MCP server added, and `inbox-desk`'s permissions deny everything but those six read tools (`<server>_desk_list` … `allow`). Its session is kept, `agent` is `opencode`, and Copy resume command is `opencode --session <id>`.
+
+#### What it may do
+
+`can` lists the verbs: `add`, `today`, `later`, `fyi`, `hide`, `snooze`, `done`, `mute`. Absent, it's `add` alone, and the run answers `{ ref, why }` only. With more, the schema gives each item `do` (one of its `can`) and `until`, the prompt says what each verb does, and each item goes through `Automations.apply()` against the automation as it is then. An automation deleted or turned off during its run, a `do` the desk doesn't know, or one no longer in its `can` is `refused`, and nothing happens to the item.
+
+**`add`** is `Desk.push()`: `hold()` (resolve, else fetch read only, as `desk_add`), then kv `pushed:<id>` = `{ automation, name, why }`.
+
+- It answers `resolved` if resolved; `left` if not active or in Merging; `kept` if pinned or already in Now or Today; else it pins the item (undo log agent `automation:<id>`), starts its pre-review, and answers `added`. One it can't hold is `failed`.
+- An automation's pin, like yours, keeps the item in Today or above. Where that pin is what puts it there (or on the Added board), the placement's why is `<name>: <its why>`.
+- `done`, `snooze`, `mute` and `inflight` end an automation's pin (undo restores it). The new-item notification skips what an automation pinned.
+
+**`today`, `later`, `fyi`, `hide`** are `Desk.sort()`: kv `sorted:<id>` = `{ automation, name, bucket, why, key, at }`, with `key` the item's `sortKey()` (the judge's `judgeKey()` less the PR's files and AI review).
+
+- While the key holds, `compute()` gives `classify()` that sort in place of the judge's answer (a `JudgeStep` with `by`), whether the judge is on or off. A hard rule's floor, a `final` rule and your pin bind it as they bind the judge (then it's `held`, its error saying which). Caps and quiet days apply after it.
+- The placement's why is `<name>: <its why>`, the card's `placed_by` is `automation`, and the trace's last step reads `automation <name>: fyi, <why>`.
+- It holds only while the automation is on and its `can` still has that bucket. It ends when the item changes (`Desk.dropStaleSorts()` deletes it when a sync pass ends), when you act on the item (any `act()` but `seen`), or when the automation is deleted.
+- Answers: `held` for a sort by an automation that's off; `resolved`; `left` (not active, or in Merging); `failed` (on no board); `kept` (its own sort of the item as it still is).
+- Never `now` (a pin and a hard Now rule both stop at Today) and never `blocked` (only rules fill it).
+
+**`snooze`** (with `until` in `desk_act`'s words; tomorrow without), **`done`** and **`mute`** are `Desk.clear()`: the desk's own `act()`, in the action log with agent `automation:<id>`, so `POST /api/undo` and `desk_act undo` take it back. Kv `acted:<id>` = `{ name, why, seq }` gives the card's why (`<name>: <its why>`) while that action is the item's latest and stands.
+
+- Answers: `left` (not active, or in Merging); `resolved`; `held` when something holds the item for you, its error saying which: what the desk raised (`Snapshot.needs`: "your agent handed it back to you", "it's your ready PR nobody's asked to review"), your own pin ("your pin keeps it on your desk"; an automation's pin doesn't hold it), or a hard rule ("a hard rule keeps it in Now").
+
+Sorts and clears act only on what the desk holds. They fetch nothing, and a ref the desk doesn't hold is `failed`.
+
+#### Results
+
+Each item's `outcome`:
+
+- `added`: on your desk now.
+- `did`: the desk did `do` (a sort, a snooze, done, mute).
+- `kept`: already on your desk, or already sorted so.
+- `left`: you'd dealt with it (done, snoozed, muted, in Merging), so it stays that way.
+- `resolved`: nobody needs it now.
+- `held`: its sort is kept, but a hard rule, a final rule or your pin holds it (`error` says which).
+- `refused`: outside its `can`.
+- `failed`: the desk couldn't (`error` says why).
+
+`GET /api/automations` gives each run `did` ("put 2 on your desk, sorted 3 to FYI, snoozed 1") and `didnt` ("couldn't add 1, refused 2"). `outcomeText()` in `src/types.ts` words one item's outcome ("Sorted to FYI", "Snoozed until CI passes", "Not allowed") for the window and `desk_automations`. Deleting an automation stops its run in progress, which then adds and stores nothing.
+
+**Notifications** (`notify.enabled`, outside `notify.quiet`): when a run put any on your desk (sorting into Today counts), couldn't do something, or failed. The new-item notification skips those. What it sorts away, snoozes, marks done or mutes notifies nothing.
+
+## Items
+
+### Stacks
+
+A stack is PRs in one repo, each based on the head branch of the one below it, the bottom one on the default branch (or on a branch no PR heads). The desk works stacks out on every snapshot from the PRs it holds (`src/stacks.ts`, pure), whoever wrote them. Nothing about a stack is stored.
+
+- **Links.** A PR's parent is the PR whose head branch is its base, in the repo itself (a fork's branch of the same name isn't it): an open one first, then merged, then closed. A PR GitHub moved to the default branch when the PR below it merged (its latest base change, `Item.retargeted`) keeps that merged PR as its parent.
+- **Forks.** A PR with two PRs on its branch forks the stack. A line goes bottom to top and, at each fork above the current PR, takes the branch with open PRs, then the longest, then the oldest PR's. `Stack.forks` has the rest.
+- **Dead branches.** A closed PR with nothing open or merged above it is in no stack. One with open PRs above it stays, closed.
+- **Counting.** `StackRef.pos` and `size` count the open PRs of the line, what's still to land, so merged PRs below don't move "3/20"; the chain still lists them. A PR has a ref when it's open and its line has two or more open PRs. Two open PRs forking off a merged one aren't stacked on each other: neither has a ref, and each is its own card.
+- **One line per stack.** `GET /api/queue` and `/api/focus` list a stack once (`oneLinePerStack()`). Of its members with a card in Now, Today, Later and FYI, the one in the most urgent section stands for it (the lowest on a tie, then the main line before a fork). The others leave the sections and are named on that card's `stack.folded`, bottom first. Boards, hidden, cleared and resolved list every PR. `QueueView.stacks` has the chain of every stack a card in the view carries.
+- **Notifications** go per PR: a member newly in Now is news even while a lower one stands for its stack.
+- **Merging.** `GET /api/inflight` keeps a stack's rows together, bottom first.
+
+**What the desk fetches**, each sync, for the stacks of PRs on the boards (read only):
+
+- the PR heading the branch a bottom PR is based on (or was, before GitHub moved it);
+- open PRs based on an open PR's branch;
+- the stack's members no board lists that are open as of a fetch over 30 minutes ago.
+
+At most 120 probes a pass, each asked again only after 30 minutes. Probes for a stack, or for a PR based on another's branch, go first; probes that only look for a stack above a PR on the default branch get what's left after 40 are kept for later rounds. Three rounds a pass, so a chain a few PRs deep fills in at once; one repo's probes are one query, three repos at a time.
+
+What it fetches is stored without events: it's context, not news, so the coordinator doesn't wake for it. Once a board lists such a PR, it's fetched again and its events since the desk last logged any are logged (`new` if never). Any stored member opens in the review view. Members of a listed PR's stack aren't pruned with the items no search returned for 14 days. PRs stored before the desk asked for `head_ref`, `default_branch`, `retargeted` and `requires` are refetched, 40 a pass.
+
+### Dependencies
+
+A PR needs another merged first when it's stacked on it ([Stacks](#stacks)) or its description says so.
+
+**Description markers.** `requiresOf()` in `src/deps.ts` reads the whole markdown description into `Item.requires` (at most 10, case as written, in linear time on any body):
+
+- "Requires", "Depends on", "Stacked on", "Builds on", "Blocked by", "Needs" or "Merge this after", then a link or a ref (`owner/repo#N`, `#N`);
+- a checklist under "blocked on:" (checked items are done).
+
+Quotes, code, comments, `<details>`, "once X lands", "Follow-up to" and "Merge this before X" don't count.
+
+**Following the chain.** `dependencies()` follows those PRs through the ones the desk holds to the end of the chain, for every open PR.
+
+- Only a PR in the same org counts, so a description can't pick a blocker elsewhere. Another org's ref stays in `pr.requires`, in full, and is never fetched.
+- Refs the desk doesn't hold, and issues, never block.
+- An edge that closes a loop is dropped: a PR inside a loop isn't blocked by it, and one outside that needs a member is blocked by the first it reaches.
+- The desk follows at most 20 refs from each listed PR, nearest first (a description's author picks what it names).
+- One the desk doesn't hold is fetched by number with the stack probes, read only and stored quietly, at most 20 a pass (not for a bot's own PR). A number that isn't a PR it can read (an issue, gone, no access) isn't asked again for a day (kv `dep_misses`).
+- A stored PR another one needs isn't pruned, and is refreshed every 10 minutes while open (at most 20 a pass, the longest unfetched first).
+- A PR it needs merging counts as news on it: a done or an "until activity" snooze ends then.
+
+**Rule fields**, filled in by `Desk.compute()` (`GET /api/fields` has each one's doc):
+
+| Field                    | Meaning                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `pr.requires`            | PRs it needs merged first, in any state                                                                     |
+| `pr.blocked`             | something in its chain is still open                                                                        |
+| `pr.blocked_by`          | the open PRs it needs directly                                                                              |
+| `pr.blocker`             | the open PR at the end of the chain, "(through …)" when it isn't a direct need                              |
+| `pr.blocker_waits`       | that PR's `pr.waits`, or "is in Merging"                                                                    |
+| `pr.blocker_mine`        | an open PR in its chain waits on you (a review, your reply, your own PR's next step outside Merging)        |
+| `pr.blocks`              | open PRs that need this one merged first                                                                    |
+| `pr.requires_closed`     | PRs it needs that closed without merging                                                                    |
+| `pr.reviewers`           | who has reviewed it (approved, asked for changes, commented); you, its author and bots left out             |
+| `pr.people_requested`    | people asked by name; you and bots left out                                                                 |
+| `pr.teams_requested`     | teams asked, as slugs, yours included                                                                       |
+| `pr.ready_weekday_hours` | weekday hours since its latest Ready for review (`Item.ready_at`), or since opened if never a draft         |
+| `pr.asked_weekday_hours` | weekday hours since the latest request to someone in `pr.people_requested`, or since it went ready if later |
+
+They sit beside `pr.waits`, `pr.waiting_on` and `me.owes_reply`. Examples: a team's ask someone's already on is `len(pr.reviewers) > 0 || len(pr.people_requested) > 0`; a wide ping is `len(pr.teams_requested) >= 4`.
+
+**Weekday hours** (`weekdayHours()` in `src/signals.ts`) count every hour of Monday to Friday in the desk's time zone, nights included, and none of the weekend. 24 is one workday; a PR ready at Friday 17:00 has waited 15 by Monday 08:00. Holidays count as weekdays; a weekday a clock change shortens counts 23.
+
+- `pr.ready_weekday_hours` is -1 for a draft, an issue, a merged or closed PR, and a PR stored before the desk read `ready_at` (until its next refresh).
+- `pr.asked_weekday_hours` falls back to the ready time for a request made while a draft or older than the 20 request events the desk reads. It's -1 when nobody is asked by name (a team's request, a bot's and your own don't count) and whenever `pr.ready_weekday_hours` is.
+- GitHub's built-in automations Pick a reviewer and Follow up on silent reviewers read them ([Automations](#automations)).
+
+**The first-run Blocked rules** are `final`, and only on My PRs: Blocked is for your own PRs. Boards of other people's PRs (PRs to review, Mentions, Close collaborators) have no rule for it, so a blocked PR there goes where their other rules put it (a review asked of you by name is in Now, its stage "blocked"). On My PRs:
+
+1. `pr.blocked && pr.review != 'changes_requested' && !me.owes_reply` goes first, so a change request or a reply you owe stays yours.
+2. A root that blocks others and owes a reply goes to Today ("blocks getsentry#22982 and getsentry#22983; it waits on your reply to markstory, then …"), as does one whose need closed without merging ("needs sentry#1, closed without merging").
+3. Your PRs waiting on reviewers go to Blocked ("waits on a review from sam, @backend and 1 more"), with a merge conflict too ("waits on a review from cvxluo, and a merge conflict fix"). A conflict is only a signal until it's approved, when your agent rebases it. Red CI keeps such a PR out (it has its own rule).
+
+A config with the earlier rule, which left out a conflicted PR, gets today's once (`migrateWaitsConflict`, backup in `config.toml.bak`).
+
+### Adding
+
+`desk_add` (`POST /api/add`, `desk add <ref>`) is "add X to my review" from any session. Nothing is written to GitHub, so agents may call it.
+
+- **Fetching.** A PR or issue the desk doesn't hold is fetched read only (`GitHub.lookup`, then the usual details query) and stored with its events, `new` first, so the notifications feed follows it from then on. One it holds (a quietly stored stack member included) is used as it is.
+- **Pinning.** Either way it's pinned. One done, snoozed or muted comes back too, logged as one `pin`: the returned `undo_seq` undoes both.
+- **Pre-review.** For a PR the desk starts what opening its review would: its diff and conversations, your agent's read of what waits on you, and its AI review (with `review.auto_ai`, on someone else's PR with none for this commit). These queue with the background ones, `review.at_once` at a time, so an agent adding many doesn't start an agent run for each.
+- **The Added board.** Your pins that no board places sit on a board of their own, `added` (why "you added it", Today by default). The judge sorts them like anything else, and your pin's floor keeps them in Today or above. They don't notify; you put them there.
+- **From the coordinator.** A `desk_add` with `from` exactly "Inbox coordinator" (or "Review Desk coordinator") is the coordinator's opinion, not your pin: no floor, so the judge sorts it by your policy (and a rule's Blocked keeps it there). One no board places is on `added` too, with its why.
+- **Keeping it fresh.** While a pinned item is open and no search returns it, each sync refreshes it (every 3 minutes), probes its stack, and keeps it from the 14-day prune. Once merged or closed it resolves and goes like anything else.
+- **The hand-off.** `why` (one plain line) and `from` are the card's `handoff` (`{ why, from }`), shown in the review's header and the opened item ("From seer write gate: …") and given to agents in `desk_item`. They're kept in kv `added:<id>` by the seq of that pin, and shown while that pin is the item's latest and you haven't acted on the item since (undoing your action brings the hand-off back). The card's `why` stays whatever placed it.
+- `desk_add` requires both `why` and `from`; `desk add <ref> [why] --from <task>` and the HTTP route take them optionally.
+
+### Resolved
+
+An item is resolved when the world has dealt with it. It's worked out from every snapshot and never stored, so it comes back on its own when the reason stops holding (asked again, reopened). Resolved items leave Now, Today, Later and FYI (and don't count against caps) for `QueueView.resolved`, with the reason as their `why`. Done, snooze, mute and pin are kept as they were.
+
+The reasons, in order:
+
+- **`merged`, `closed`:** any item.
+- **`you approved`:** a PR you or your team were asked to review, whose latest verdict from you approves, while GitHub no longer asks you and nobody asked you or your team again since. It stops being yours when you're asked again, someone else pushes, or someone else acts after your latest action (`me.new_activity`: a reply, a review, an @mention). Then someone else's approval resolves it as `approved by <login>`, and anything else brings it back where its rules put it (new commits: Later, "new commits since your review"; a mention: Today on Mentions). Your own change request or a dismissed approval doesn't count. It doesn't depend on `github.resolve_on_others_approval` or on more reviews being required: your part is done.
+- **`approved by <login>`:** a PR you or your team were asked to review that someone else (not you, not a bot) approved after the ask, while that's still their latest verdict. Not while your own latest review requests changes, nor while GitHub still requires more reviews. `github.resolve_on_others_approval`: `always` (default), `team_only` (only when the ask went to a team), `never`.
+- **`no longer requested`:** you or your team were asked, the ask is gone, and you never reviewed.
+
+Your own PRs and issues only resolve by merging or closing.
+
+An item that drops out of every search gets one refresh, so the desk learns why. If it's resolved it stays on its boards (past their filters) for 3 days, under Resolved. So does one that resolved in the last 3 days, by a time the resolution itself gives, but that a search still returns while its board's filter would drop it (you approved it, and `reviewed-by:@me` still lists it). `no longer requested` has no such time, so it doesn't.
+
+### Opened for you
+
+A PR an agent's bot opened for you is yours wherever the desk decides "mine" (`me.author`): your PRs' boards and rules, its stage and who it's from ("you"), Ready for review, Add reviewers, Reply, the More menu's writes on your PR, Hand off for merge and Merging, the coordinator's "my PR" and the branch it may push, and the AI review it skips as yours.
+
+`requesterOf()` in `src/github/behalf.ts` reads who a PR's description names when the desk reads its details (`Item.requester`: `"@login"` or a name; `""` when none, or when two lines disagree). `onBehalf()` decides, in `analyze()` and in the connector, which then reads the PR as deeply and as often as your own. No model is asked. It takes all of:
+
+- **A bot opened it:** a GitHub App (`[bot]`, GraphQL's `Bot`), or a login under Settings → GitHub → Also treat as bots (`github.bots`), which is how another agent's account counts. A person's PR is only ever its author's, whatever it says.
+- **It names you** in a line the agent writes, as a whole line or Junior's block, never a mention in passing:
+
+| Agent                                   | What it writes                                                                                                                                   | Counts when                                                                                                                                                                     |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Junior (`sentry-junior`)                | `<!-- junior-request-attribution:start -->` `via @gricha.` `<!-- …:end -->` (older: `Requested by …`; asked by two: `via @a, **b**.`, the first) | you're assigned too, as Junior assigns whoever asked                                                                                                                            |
+| Junior, no GitHub login linked          | `via **greg.pstrucha**.` in that block                                                                                                           | the name is your GitHub profile name or one in Settings → GitHub → Names agents use for you (`github.my_names`), compared by letters alone (`greg.pstrucha` is "Greg Pstrucha") |
+| Devin (`devin-ai-integration`)          | `Requested by: @gricha`                                                                                                                          | you're assigned too, as Devin assigns whoever asked                                                                                                                             |
+| Any bot                                 | a line of its own: `via @gricha.`, `Requested by @gricha`, `On behalf of @gricha`, maybe in `_` or `*`                                           | you're assigned too                                                                                                                                                             |
+| GitHub Copilot coding agent (`Copilot`) | nothing                                                                                                                                          | you're its PR's only person assigned, as Copilot assigns whoever asked it                                                                                                       |
+
+**Why each is safe.** Anyone with write access can edit a description, and so an assignee. So the desk takes a login only when both say it (an edit to one alone makes nothing yours), a name only when it's your profile name or one you gave, Copilot's assignee only alone, and never a person's PR. A PR that names you but doesn't assign you stays someone else's, as does one whose `via` line (`author.via`, still who a bot's PR shows it's from) names you.
+
+**Not recognized**, for want of a marker that names a GitHub account:
+
+- Claude's GitHub app (`claude[bot]`: "Generated with Claude Code"; its Slack runs write `_Requested by **Name** · Slack thread_` on a line with more);
+- Codex (`chatgpt-codex-connector[bot]`: nothing);
+- Cursor (`cursor[bot]`: its links, and `Co-authored-by` naming itself);
+- Junior's automation runs (`via [automation …]`);
+- `Co-authored-by` trailers, which the desk doesn't read during sync and which say who wrote a commit, not who asked.
+
+Matching your GitHub name ("Greg Pstrucha") alone isn't safe either: anyone may share it.
+
+The first-run My PRs board lists them too (`assignee:@me -author:@me`, the Mentions board's search, so no extra query, with `filter = "me.author"`). A config with the board as first written gets that once (`migrateOnBehalf`, backup in `config.toml.bak`). A name-only one that no search assigns you needs a query of yours, such as `"greg.pstrucha" in:body author:app/sentry-junior`.
+
+## Your PRs
+
+### Merging
+
+Your own open PR, once you're done with it, goes to Merging with **Hand off for merge** (on the open item or in its review), and [the coordinator](#the-coordinator) gets it merged.
+
+**Handing off.** `POST /api/act` with `inflight`, own page only (403 otherwise; `inflight_at` in `ItemState`).
+
+- A draft answers 409: Ready for review is yours, so it would wait on you in Merging.
+- The window offers Hand off for merge only on a PR through its review (`review` `approved` or `none`: `handsOff()` in `web/src/view.ts`), and, in a repo that needs no review, beside Add reviewers ([below](#nobodys-asked-to-review-it)). The API also takes one still waiting on its review, as the coordinator's tests and a PR whose approval a push dismissed need.
+- **Back to desk** (`takeback`) brings it back. Undo (the toast's, or the API's from the own page) reverses either. Handing it off again starts afresh, without the last note or hand-back.
+- Neither writes to GitHub. Done on your own PR is plain done, as anywhere.
+
+**While it's there**, the coordinator has it:
+
+- It leaves Now, Today, the sorted-away groups, Focus, the status line and `desk_list` for Merging (`GET /api/inflight`).
+- Done, snooze and mute answer 409 (Back to desk first). A hand-off clears an earlier one, and undo brings that back.
+- The judge doesn't place it.
+- Each row says what it waits on (`waits_on`, the desk's call): another PR to merge first, one it needs that closed without merging, red CI, a conflict, changes requested, CI running ("can merge once CI passes: no review needed" in a repo that needs none, `review_optional` on the row), unresolved threads, a review (never in a repo that needs none), the PR below it in a stack, else "ready to merge". And the coordinator's latest note with its age.
+- Merged and closed ones stay for 3 days.
+
+**Rebasing** happens on its own. After each sync (`Desk.rebaseConflicts()`), your own PR in Now or Today that's otherwise ready to merge (approved by GitHub's review decision, not a draft, CI not red) and conflicting goes to Merging with `rebase` set and one news entry for the coordinator: `ready to merge but conflicts: rebase it onto its base, …, don't merge it; …`. (GitHub runs no `pull_request` CI on a conflicting PR.)
+
+- Only while `agent.coordinator` is on, and only once this desk has started a coordinator (kv `coordinator_bg`).
+- Its row says "rebasing" (`rebase: true`).
+- When GitHub shows it mergeable (or it merges or closes), or `agent.coordinator` turns off, the desk takes it out of Merging and drops the record, back to where the rules put it.
+- A PR with a Merging record isn't sent: one handed back stays handed back until it's mergeable, and Back to desk leaves `back` on the record, so it stays yours until you hand it off.
+- A merge conflict alone is no rule's and notifies nobody.
+
+**Handing back.** When the coordinator can't realistically get it merged (`desk_hand_back`: a redesign, a product decision, a reviewer who needs your answer, CI it can't fix, no local clone), the PR leaves Merging for the top of your queue with "handed back: <reason>" as its why, until you deal with it (done, or Hand off for merge again). You're notified. Nothing is written to GitHub.
+
+- A hand-back of a PR your rules keep in Blocked waits there. Once its blocker merges it tops the queue as "unblocked: X merged · handed back: …" and notifies. Done on it drops the hand-back; the PR comes back by your rules when it unblocks.
+- A PR another PR blocks isn't sent to rebase, nor handed back for having nobody asked to review it.
+- The desk wakes the coordinator with "unblocked: X merged" when one in Merging unblocks (`Desk.trackBlocked()`), or "needs X, closed without merging" (`closed`: `pr.requires_closed`, joined) when what blocked it closed instead.
+
+### Ready for review
+
+Your own open draft has one call to action on its row and in its review: **Ready for review** (`cta: "ready"`), whatever its CI says. Getting CI green is the coordinator's job once it's ready, so the desk doesn't hold this back. The More menu offers it too (`ready`).
+
+1. It sends `markPullRequestReadyForReview` (`POST /api/review/:id/ready`).
+2. In its review, it then sends `requestReviews` for the reviewers you picked above the button. GitHub's suggested reviewers sit on the line, a click each (`GET /api/reviewers/:id` with no query); the box searches as you type, suggestions first; those already asked show and stay.
+3. It logs each write and refreshes the PR.
+
+Once someone's asked to review it (who you picked, or who was asked while it was a draft) your part is done: it leaves your desk until someone else acts (`done: true`). With nobody asked (`pr.unasked`, bots' requests and reviews aside), or when GitHub refuses the request, it isn't done (`done: false`): it stays on your desk, where [Add reviewers](#nobodys-asked-to-review-it) is its call to action and, 10 minutes on, puts it on top. It's one of the desk's GitHub writes ([Security model](#security-model)).
+
+### Nobody's asked to review it
+
+Your open PR that isn't a draft, that nobody is asked to review, and that nobody but bots and you has reviewed (`pr.unasked`, a rule field too) waits on nothing but you asking someone.
+
+- A request for a bot (Copilot's, or anyone under `github.bots`) doesn't count as asked, nor does their review. A request GitHub hides from you (a team you can't see) does count. On a bot's PR opened for you, your own review doesn't count.
+- Its call to action is **Add reviewers** (`cta: "reviewers"`, ahead of Reply; answering a comment doesn't make it done) from the start.
+- Once nothing has touched it for 10 minutes (a workflow or CODEOWNERS asks within moments of a PR opening or going ready), while a board lists it and it isn't quiet as Later counts it (no update in `queue.quiet_days`, unless pinned), the desk puts it on top of your desk like a hand-back: Now, `handed_back`, why "nobody's asked to review it: add reviewers", in the main page's Back to you part.
+- Add reviewers opens its review with the Reviewers box focused and GitHub's suggestions beside it. Ask reviewers asks who you picked (`POST /api/review/:id/reviewers`); then it's done until someone reviews.
+- A request (CODEOWNERS' when you mark it ready included) or a person's review clears it.
+- Ready for review from the desk with nobody asked leaves it here rather than done, so it comes back this way instead of waiting in the Archive.
+- A hand-off refuses it (409: the coordinator would wait on nothing), and Hand off for merge isn't offered. One in Merging that becomes unasked (a request taken back) is handed back by the desk on the next sync with the same why, logged as the desk's (`desk`).
+
+**A repo that needs no review** (`pr.review_optional`: GitHub gives no review decision, `review: "none"`, on a PR based on the default branch, as with no branch protection or ruleset asking for one; a stacked PR's base never asks, so it doesn't count) isn't held back by any of that:
+
+- Add reviewers stays its call to action, with Hand off for merge beside it (`review_optional: true` on your card; Ask reviewers stays the filled button in its review).
+- A hand-off takes it, and the desk doesn't hand it back for having nobody asked.
+- Its `pr.waits` doesn't wait on a review, and Merging says it can merge once CI passes.
+- The coordinator's wake says so on each of its lines (`NO_REVIEW` in `src/coordinator.ts`: merging on green CI is expected and low stakes), as `desk_merging` does ("no review needed").
+- A draft is still Ready for review first.
+
+### The More menu
+
+The desk decides which GitHub actions an item offers (`Desk.actions()`, `actions` on its card) and refuses any other with 409. The window shows two of them: **Close** (a review's More and a row's right-click menu) and **Request changes** (a review's More). A click sends it, through `POST /api/github`, a GitHub write like approve ([Security model](#security-model)).
+
+| Item                                                                          | Offers                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Your open PR, or one a bot opened for you ([Opened for you](#opened-for-you)) | close; convert to draft; a draft: ready for review; merge now, without the coordinator, when approved, green, not stacked, mergeable and the repo's merge method is known (`mergePullRequest` with `expectedHeadOid` at the head the desk judged ready) |
+| Your closed PR                                                                | reopen                                                                                                                                                                                                                                                  |
+| An open issue you opened or are assigned                                      | close                                                                                                                                                                                                                                                   |
+| Someone else's open PR                                                        | request changes, in its review only: what you write is the review's body, sent with the button or ⌘↵, pinned to the commit you read (`head_oid` required)                                                                                               |
+| A PR in Merging                                                               | none (Back to desk first)                                                                                                                                                                                                                               |
+
+- The toast's Undo, while a close's or a draft's toast is up, reopens it or marks it ready again; the others have no undo.
+- From a row, a close or a merge leaves the list at once, as Done does.
+- A review's approve, merge and request changes stay pinned to the commit it opened at, so a push you haven't reopened it for is refused (409).
+- After a close, draft, merge or reopen the item offers nothing more until a read shows the change, so a failed refresh can't offer the same write again.
 
 ## Security model
 
 - **This machine only, unless you turn on Tailscale.** The server listens on `127.0.0.1`, never on other interfaces. With Use it from your other devices on, it also listens on a second, free `127.0.0.1` port that only `tailscale serve` is pointed at (`overTailnet` in `src/server.ts`, `src/remote.ts`).
-- **From another device, three checks, all needed.** A request is remote by the connection it came in on, never by a header: `tailscale serve` passes the client's own `Host` on, so a peer could send `Host: localhost`. A remote request must name this machine's tailnet name as `Host` (and `Origin`, when there is one); carry `Tailscale-User-Login` with the owner's login (`app.tailscale_login`, else the login that owns this machine in `tailscale status --json`), which `tailscale serve` sets from who sent it and strips when a client sends its own, and which it leaves off for tagged devices and Funnel; and carry a paired device's token, `Authorization: Bearer` for a machine's agents and the CLI, or the `__Host-inbox` cookie (`HttpOnly; Secure; SameSite=Strict`) for a paired browser. Without the login, or with another's: 403. Without a valid token: 401. Only `GET /pair` and the code's trade, `POST /api/pair`, skip the token, and the trade still takes the login. Codes come from this machine only (`desk pair`), one at a time, 8 characters, for 10 minutes; any try burns the code, right or wrong, and the trade takes five tries a minute from anyone. Tokens are 32 random bytes; the store keeps their sha256 with the device's name and when it was paired and last used, compares in constant time, and a revoked one fails on its next request. Neither a code nor a token is ever logged. Writes that take the desk's own page take, from another device, a paired browser's session on the tailnet origin: a bearer token never counts, whatever headers it forges. Requests on this machine are checked as below, as before; a `Tailscale-User-Login` on one changes nothing.
-- **Host and Origin checks** on every route, `/mcp` included. A request whose `Host` isn't `localhost`, `127.0.0.1` or `[::1]` gets 403, which blocks DNS rebinding. A request with an `Origin` other than the desk's own (`http://localhost:<port>`, `http://127.0.0.1:<port>`, plus the Vite dev server on 5173 or 5174, or `DESK_DEV_PORT`, when `DESK_DEV=1`, or exactly `DESK_UI_ORIGIN`, which the desktop app sets for the Vite server it runs from a checkout) gets 403, which blocks other websites. MCP clients and the CLI send no `Origin` and are allowed. A browser request that carries no `Origin` (a no-cors GET, such as an `<img>` pointing at `/api/review/5`, which would start an AI run) still says `Sec-Fetch-Site`; `/api/*` and `/mcp` refuse `cross-site` and `same-site` (another localhost port), and so does the UI passed through from a checkout's Vite server for anything but a navigation, so another site can link to the desk but not load the checkout's files; its hot-reload WebSocket takes the Host and Origin checks above, and any other Upgrade (curl `--http2`'s h2c, a socket to `/api` or `/mcp`) gets 400. A link still reaches Vite, so its `/__open-in-editor`, which opens any file in your editor, answers only its own page (`same-origin`), on Vite's port and through the desk. Responses can't be framed (`X-Frame-Options: DENY`), and neither can the Vite UI the desktop app runs from a checkout (or `npm run dev`): it sends the same headers, so a site can't frame it to click approve.
-- **No auth on this machine beyond that.** Any program running as you on this machine can read the queue and triage it, the same as with the CLI. Handing a PR off for merge, and undoing a hand-off or a Back to desk, take the desk's own page, as approve does (below): the coordinator merges what's in Merging, so an agent's shell can't put a PR there.
-- **Writes to GitHub, on your click.** The desk's GitHub API writes all go through `src/github/write.ts`, whose allowlist holds exactly these mutations: `addPullRequestReview(event: APPROVE)`, sent by `POST /api/review/:id/approve` (the review view's Approve) and pinned with `commitOID` to the commit you read (if the desk has seen a newer push, it refuses); `addPullRequestReviewThreadReply` and `addComment`, sent by `POST /api/review/:id/reply` (Reply under a conversation in a PR's review), only to one of that PR's own conversations, and `addComment` by `POST /api/review/:id/comment` (Comment in its review, or on an open issue opened in place); `addPullRequestReview(event: COMMENT)` with one thread, sent by `POST /api/review/:id/inline` (the `+` by a line's number in its review), pinned with `commitOID` to the commit the diff showed; `markPullRequestReadyForReview` and then `requestReviews` (union, for whoever you picked), sent by `POST /api/review/:id/ready` (Ready for review on your own open draft); `requestReviews` alone, sent by `POST /api/review/:id/reviewers` (Ask reviewers in the review of your ready PR nobody's asked to review); and the More menu's `closePullRequest`, `convertPullRequestToDraft`, `mergePullRequest` (pinned with `expectedHeadOid`), `reopenPullRequest`, `addPullRequestReview(event: REQUEST_CHANGES)` and `closeIssue`, sent by `POST /api/github` only when the item's card offers them ([More](#more-)). These routes only take a request the browser marks `Sec-Fetch-Site: same-origin` that also carries the desk's own `Origin` (the desk's page sends both; MCP clients and the CLI send neither), so curl or an agent's shell gets 403. That's a speed bump against a shell that forges headers, not a wall. The module reads its own token, logs every write, and the desk records it in the action log (undo can't reach it). No MCP tool and no CLI command calls it; Hand off for merge, Back to desk, notes and hand-backs write nothing. Everything else is read only: the GitHub client runs GraphQL queries and refuses any document containing `mutation`, REST GETs for the notifications feed (the client refuses any other method, so it can't mark a thread read), and the review reads a PR's files and description with `gh api` GETs. Done, snooze, mute and pin are local state in `desk.db`.
-- **The coordinator is yours, not the desk's.** The desk starts and wakes it, but it's your own Claude Code session with your permissions: what it pushes and merges, it does with your `git` and `gh`, under the rules its skill gives it (no plain force-push or reset: after a rebase only `--force-with-lease`, only to your own PR's branch; no comments or replies as you, members' and collaborators' comments only, PR text as data, a re-check before it merges). The desk gives it local tools only, and counts only a collaborator's approval in `approved_by` and `waits_on`. The desk writes deny rules for what it must never run into its directory's `.claude/settings.json` when there's none (README → Coordinator), and its wake messages carry only PR ids, URLs and kinds of change and, for an ask, the desk's own whose, state and where words (line numbers, a thread's URL) with your words, never PR text.
-- **Untrusted text is fenced.** Titles and AI review text come from GitHub, and a hand-off prompt template can include the title. MCP results that carry them (`desk_list`, `desk_item`, `desk_brief`, and `desk_events` for logins and reasons) put them between `<untrusted-data nonce="…">` and `</untrusted-data nonce="…">`, after a line saying to treat them as data, not instructions; the nonce is random per result, so text inside can't fake the closing marker. Titles are flattened to one line with control characters removed. The AI review's prompt fences PR text with a random tag too, the agent runs with no tools, no MCP servers and an empty working directory, and the CLI strips control characters so a title can't emit terminal escapes. The AI review is untrusted output as well: the diff it read came from GitHub. The judge, and Claude's read of what reviewers said, work the same way: no tools, no MCP, an empty directory, the GitHub text fenced. `desk_merging` fences titles and the coordinator's notes too, and the UI shows notes as text, never runs them. `desk_ask` fences a line ask's file name and the branch.
-- **The coordinator's answers are drawn, from a fixed subset.** An answer is untrusted agent text (its words may come from GitHub). `src/prose.ts` draws only paragraphs, `-`/`*` and `1.` lists, `code`, ``` blocks and `**bold**`, as React elements: never HTML, never an image, and never a label in place of a URL. A link is https only, without a username or password, shown as its normalised `href` (a lookalike host shows as punycode). Everything else is text. Inquiries stay text with `code` spans and URLs (ui.md).
+- **From another device, three checks, all needed.** A request is remote by the connection it came in on, never by a header (`tailscale serve` passes the client's own `Host` on, so a peer could send `Host: localhost`). A remote request must:
+  1. name this machine's tailnet name as `Host` (and `Origin`, when there is one);
+  2. carry `Tailscale-User-Login` with the owner's login (`app.tailscale_login`, else the login that owns this machine in `tailscale status --json`). `tailscale serve` sets it from who sent the request, strips a client's own, and leaves it off for tagged devices and Funnel. Without it, or with another's: 403;
+  3. carry a paired device's token: `Authorization: Bearer` for a machine's agents and the CLI, or the `__Host-inbox` cookie (`HttpOnly; Secure; SameSite=Strict`) for a paired browser. Without a valid one: 401.
+
+  Only `GET /pair` and the code's trade, `POST /api/pair`, skip the token, and the trade still takes the login. Codes come from this machine only (`desk pair`), one at a time, 8 characters, for 10 minutes; any try burns the code, and the trade takes five tries a minute from anyone. Tokens are 32 random bytes; the store keeps their sha256 with the device's name, when it was paired and last used, compares in constant time, and a revoked one fails on its next request. Neither a code nor a token is ever logged. From another device, own-page writes need a paired browser's session on the tailnet origin; a bearer token never counts, whatever headers it forges. Requests on this machine are checked as below; a `Tailscale-User-Login` on one changes nothing.
+
+- **Host and Origin checks** on every route, `/mcp` included.
+  - A `Host` other than `localhost`, `127.0.0.1` or `[::1]` gets 403, which blocks DNS rebinding.
+  - An `Origin` other than the desk's own gets 403, which blocks other websites. The desk's own is `http://localhost:<port>`, `http://127.0.0.1:<port>`, the Vite dev server on 5173 or 5174 (or `DESK_DEV_PORT`) when `DESK_DEV=1`, or exactly `DESK_UI_ORIGIN`, which the desktop app sets for the Vite server it runs from a checkout. MCP clients and the CLI send no `Origin` and are allowed.
+  - A browser request without an `Origin` (a no-cors GET, such as an `<img>` pointing at `/api/review/5`, which would start an AI run) still says `Sec-Fetch-Site`. `/api/*` and `/mcp` refuse `cross-site` and `same-site` (another localhost port). So does the UI passed through from a checkout's Vite server, for anything but a navigation, so another site can link to the desk but not load the checkout's files.
+  - The hot-reload WebSocket takes the Host and Origin checks; any other Upgrade (curl `--http2`'s h2c, a socket to `/api` or `/mcp`) gets 400. Vite's `/__open-in-editor`, which opens any file in your editor, answers only its own page (`same-origin`), on Vite's port and through the desk.
+  - Responses can't be framed (`X-Frame-Options: DENY`), including the Vite UI the desktop app runs from a checkout (or `npm run dev`), so a site can't frame it to click approve.
+- **No auth on this machine beyond that.** Any program running as you can read the queue and triage it, as with the CLI. Handing a PR off for merge, and undoing a hand-off or a Back to desk, take the desk's own page, as approve does: the coordinator merges what's in Merging, so an agent's shell can't put a PR there.
+- **Writes to GitHub, on your click.** All of the desk's GitHub writes go through `src/github/write.ts`, whose allowlist holds exactly these mutations:
+
+  | Mutation                                                                                                                                                                                                         | Sent by                                                                            |
+  | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+  | `addPullRequestReview(event: APPROVE)`, pinned with `commitOID` to the commit you read                                                                                                                           | `POST /api/review/:id/approve` (Approve)                                           |
+  | `addPullRequestReviewThreadReply`, `addComment`, only to one of that PR's own conversations                                                                                                                      | `POST /api/review/:id/reply` (Reply)                                               |
+  | `addComment`                                                                                                                                                                                                     | `POST /api/review/:id/comment` (Comment, on a PR or an open issue)                 |
+  | `addPullRequestReview(event: COMMENT)` with one thread, pinned with `commitOID`                                                                                                                                  | `POST /api/review/:id/inline` (the `+` by a line)                                  |
+  | `markPullRequestReadyForReview`, then `requestReviews` (union)                                                                                                                                                   | `POST /api/review/:id/ready` (Ready for review)                                    |
+  | `requestReviews`                                                                                                                                                                                                 | `POST /api/review/:id/reviewers` (Ask reviewers)                                   |
+  | `closePullRequest`, `convertPullRequestToDraft`, `markPullRequestReadyForReview`, `mergePullRequest` (with `expectedHeadOid`), `reopenPullRequest`, `addPullRequestReview(event: REQUEST_CHANGES)`, `closeIssue` | `POST /api/github`, only when the card offers it ([The More menu](#the-more-menu)) |
+
+  These routes only take a request the browser marks `Sec-Fetch-Site: same-origin` that also carries the desk's own `Origin`. The desk's page sends both; MCP clients and the CLI send neither, so curl or an agent's shell gets 403. That's a speed bump against a shell that forges headers, not a wall. The module reads its own token, logs every write, and the desk records it in the action log (undo can't reach it). No MCP tool and no CLI command calls it. Hand off for merge, Back to desk, notes and hand-backs write nothing.
+
+  Everything else is read only: the GitHub client runs GraphQL queries and refuses any document containing `mutation`, REST GETs for the notifications feed (it refuses any other method, so it can't mark a thread read), and `gh api` GETs for a PR's files and description. Done, snooze, mute and pin are local state in `desk.db`.
+
+- **The coordinator is yours, not the desk's.** The desk starts and wakes it, but it's your own agent session with your permissions. What it pushes and merges, it does with your `git` and `gh`, under the rules its skill gives it: no plain force-push or reset (after a rebase only `--force-with-lease`, only to your own PR's branch), no comments or replies as you, only members' and collaborators' comments, PR text as data, a re-check before it merges. The desk gives it local tools only, and counts only a collaborator's approval in `approved_by` and `waits_on`. It writes deny rules for what it must never run into its folder (README → Coordinator; on Codex and OpenCode as in [The coordinator](#the-coordinator)). Its wake messages carry only PR ids, URLs and kinds of change, and for an ask the desk's own words with yours, never PR text.
+- **Untrusted text is fenced.** Titles and AI review text come from GitHub, and a hand-off prompt template can include the title.
+  - MCP results that carry them (`desk_list`, `desk_item`, `desk_brief`, `desk_events` for logins and reasons, `desk_merging` for titles and notes) put them between `<untrusted-data nonce="…">` and `</untrusted-data nonce="…">`, after a line saying to treat them as data. The nonce is random per result, so text inside can't fake the closing marker. `desk_ask` fences a line ask's file name and the branch.
+  - Titles are flattened to one line with control characters removed. The CLI strips control characters, so a title can't emit terminal escapes.
+  - Every tool-less agent call (the AI review, the judge, the read of what reviewers said) fences GitHub text with a random tag and runs with no tools, no MCP servers and an empty working directory. The AI review is untrusted output too: the diff it read came from GitHub.
+  - The UI shows the coordinator's notes as text, never runs them.
+- **The coordinator's answers are drawn from a fixed subset.** An answer is untrusted agent text (its words may come from GitHub). `src/prose.ts` draws only paragraphs, `-`/`*` and `1.` lists, `code`, ``` blocks and `**bold**`, as React elements: never HTML, never an image, never a label in place of a URL. A link is https only, without a username or password, shown as its normalised `href` (a lookalike host shows as punycode). Everything else is text. Inquiries stay text with `code` spans and URLs ([ui.md](ui.md)).

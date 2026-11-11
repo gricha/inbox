@@ -432,7 +432,7 @@ export function createMcpServer(
   server.registerTool(
     "desk_overview",
     {
-      description: "Inbox counts per space and board, focus totals, and sync status.",
+      description: "Inbox counts per space and board, focus totals, sync status, config errors, and how many PRs are in Merging.",
       annotations: readOnly,
     },
     () => run(overviewText(api)),
@@ -572,7 +572,7 @@ export function createMcpServer(
     "desk_brief",
     {
       description:
-        "A PR's AI review, written by the user's own Claude Code (no tools) from the diff: look, skim or skip, risk, a summary, concerns and notes on the changes. Usually ready already for PRs on the queue; otherwise it costs a model call and takes a minute or two. Cached per commit.",
+        "A PR's AI review, written by the user's own agent (Claude Code, Codex or OpenCode, as Settings → Agent says; no tools) from the diff: look, skim or skip, risk, a summary, concerns and notes on the changes. Usually ready already for PRs on the queue; otherwise it costs a model call and takes a minute or two. Cached per commit.",
       inputSchema: { ref: z.string().describe(REF) },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },
@@ -640,7 +640,7 @@ export function createMcpServer(
     "desk_undo",
     {
       description:
-        "Undo a local triage action. Pass the seq that desk_act returned; without it, undoes the most recent action from anyone (UI, CLI or agent). Handing a PR off for merge and bringing it back are the user's to undo.",
+        "Undo a local triage action. Pass the seq that desk_act or desk_add returned; without it, undoes the most recent action from anyone (UI, CLI or agent). Handing a PR off for merge and bringing it back are the user's to undo.",
       inputSchema: { seq: z.number().int().positive().optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
@@ -811,7 +811,7 @@ export function createMcpServer(
     "desk_automations",
     {
       description:
-        "The owner's automations: their instructions that the desk runs on a schedule, or when something happens on an item, with their own Claude Code, read only, putting what needs them on their desk with a line on why. " +
+        "The owner's automations: their instructions that the desk runs on a schedule, or when something happens on an item, with their own agent, read only, putting what needs them on their desk with a line on why. " +
         "list: each one with its schedule, what it may do, whether it's on and its last runs (what each found and did); the ones a plugin comes with are listed too, marked built in (their ids are <plugin>.<id>: github.pick-reviewer). " +
         "set: draft a new one or change one (id, name, schedule or events, prompt, when, decide, rule, can): the whole automation each time. It stays off until the owner turns it on in Settings → Your automations, so say so. Draft one only when the owner asks for it. " +
         "A built-in one can't be set, deleted or switched by you: only the owner switches it on or off, in the window (Settings → its plugin); to change one, draft your own with its definition (set, a new id). " +
@@ -819,7 +819,7 @@ export function createMcpServer(
         '`schedule` is local time: "daily 09:00", "weekdays 09:00,13:00", "mon 09:00", "mon,thu 17:30" or "weekdays hourly" (every hour on the hour). ' +
         "`events`, in place of a schedule, are desk_events' kinds (review_requested, pushed, ci, commented, reviewed, merged, mentioned, assigned and the rest): it runs when one lands on an item, once per sync for the items they landed on, each handed to the run with what happened; never twice at once, and what lands during a run waits for the next. " +
         "`when` is an optional check in the rules' language (desk_config's fields: \"me.requested_direct && pr.ci == 'red'\"): the desk asks it first, of its events' items or, on a schedule, of each open item on the owner's desk, and hands the run only those that pass, and with none it runs nothing and calls no model. " +
-        "`decide` is how it decides what to do with those items, and the cheapest that can is the right one: rule (no model: each gets its fixed action, `rule`: { do, why, until? }; no prompt needed), ask (one model call without tools reads the items and says, per item, what to do or leaves it alone: for what the item's own facts settle), or agent (the default: a Claude Code run with read-only tools that may look further). A rule or an ask on a schedule needs `when`. " +
+        "`decide` is how it decides what to do with those items, and the cheapest that can is the right one: rule (no model: each gets its fixed action, `rule`: { do, why, until? }; no prompt needed), ask (one model call without tools reads the items and says, per item, what to do or leaves it alone: for what the item's own facts settle), or agent (the default: a run of their agent with read-only tools that may look further). A rule or an ask on a schedule needs `when`. " +
         "`can` is what the desk may do with what a run lists, and it refuses the rest: add (the default: on their desk, pinned to Today), today, later, fyi or hide (sorted there until the item changes or they act on it; their hard rules still win), snooze, done, mute (as desk_act does them; they can undo each). Ask for no more than the instruction needs. " +
         "run: run one that's on now (a built-in one too); it takes a few minutes, and its result shows in Settings.",
       inputSchema: {

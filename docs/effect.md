@@ -1,361 +1,245 @@
 # Errors are Effects
 
-Every failure the desk expects travels as a typed value in an [Effect](https://effect.website) (`effect` 4.x), not as a
-thrown exception or a rejected promise. A function that can fail says how in its type, `Effect.Effect<A, E>`, and the
-places that finally answer for a failure (an HTTP response, a CLI exit, a toast) are few and named below.
+Every failure the desk expects is a typed value in an [Effect](https://effect.website) (`effect` 4.x), never a thrown
+exception or a rejected promise. A function that can fail says how in its type, `Effect.Effect<A, E>`. A few named
+[boundaries](#boundaries) answer for what fails.
 
-Effect ships a guide for agents: `node_modules/effect/AGENTS.md` and `node_modules/effect/ai-docs/`. Read them, or the
-`.d.ts` files, for API names: Effect 4 renamed much of v3 (`Effect.catch` not `catchAll`, `Effect.result` not
-`either`, `Effect.callback` not `async`, `Effect.forkDetach` not `forkDaemon`, `Context` not `ServiceMap`). Where they
-differ from this file (Schema errors, `Context.Service`/`Layer`/`ManagedRuntime`, `Effect.log*`), this file wins: no
-services, `Data.TaggedError`, the desk's own `log`.
+For API names, read `node_modules/effect/AGENTS.md`, `node_modules/effect/ai-docs/` or the `.d.ts` files. Effect 4
+renamed much of v3: `Effect.catch` (not `catchAll`), `Effect.result` (not `either`), `Effect.callback` (not `async`),
+`Effect.forkDetach` (not `forkDaemon`), `Context` (not `ServiceMap`). Where Effect's guide differs, this file wins: no
+services (`Context.Service`, `Layer`, `ManagedRuntime`), `Data.TaggedError` not Schema errors, the desk's own `log` not
+`Effect.log*`.
 
 ## Failures and defects
 
-- A **failure** is something the desk expects and someone acts on: GitHub refused, `claude` isn't logged in, a file is
-  missing, a ref matches two PRs, the rules have errors. It's a tagged error class in the error channel, so `catchTag`
-  can recover from it and the compiler knows who still has to.
-- A **defect** is a bug or a broken invariant: a `!` that was wrong, an unknown expression node, SQLite failing under
-  the desk, the desk's home or `desk.db` failing to open. It stays untyped (a throw inside Effect code, or
-  `Effect.die`) and ends at a boundary as a logged and reported 500, a crash line or a toast. Don't promote invariants
-  into the error channel: they'd leak into every signature without anyone able to act on them. `Store` stays plain
-  synchronous code for this reason.
-- What isn't there isn't a failure: `null`, `undefined` or `Option` when absence is normal (no last action, no such
-  setting). What's collected isn't one either: `parseConfig`'s and `putSettings`' `ConfigError[]`, a view's `ai_error`
-  or `sync_error` text and `{ ok: false, errors }` answers stay data.
-- A timeout is a failure (it's stored and shown: "no answer in 6 minutes, so it was stopped"). Interruption (the desk
-  stopping, a client going away) isn't: it's never stored, shown or reported.
-- A notification never fails what sent it: `notify` and `openUrl` ignore what `execFile` refuses as well as what it
-  fails with. Deliberate change, with a test: text `execFile` refuses before starting anything (a NUL byte) now
-  does nothing too, where it threw into the coordinator's or an automation's bookkeeping.
+- **A failure is expected, and someone acts on it**: GitHub refused, `claude` isn't logged in, a file is missing, a ref
+  matches two PRs. It's a tagged error in the error channel, so `catchTag` can recover and the compiler tracks who must.
+- **A defect is a bug or a broken invariant**: a wrong `!`, an unknown expression node, SQLite failing, the home or
+  `desk.db` failing to open. It stays untyped (a `throw` inside Effect code, or `Effect.die`) and ends at a boundary as a
+  logged, reported 500, a crash line or a toast. Why: invariants in the error channel leak into every signature with
+  nobody able to act. That's why `Store` stays plain synchronous code.
+- **Absence isn't a failure.** Use `null`, `undefined` or `Option`.
+- **Collected problems are data**: `ConfigError[]` from `parseConfig`/`putSettings`, a view's `ai_error` or
+  `sync_error`, `{ ok: false, errors }` answers.
+- **A timeout is a failure** (stored and shown). **Interruption is not**: the desk stopping or a client leaving is never
+  stored, shown or reported.
+- **A notification never fails its sender**: `notify` and `openUrl` ignore whatever `execFile` refuses or fails with.
 
 ## Defining errors
 
-- Server-side errors live in `src/errors.ts`, grouped by family: the HTTP refusals, the desk's own server
-  (`ListenFailed`), the rules' expressions, files, child processes, Claude Code, the decision model (`DecisionModelDown`
-  for a key refused, out of credits or rate limited, a 5xx or no answer, which holds what asked; `DecisionModelError` for the rest), GitHub. The UI's own (the desk
-  unreachable, an API refusal) live in `web/src/api.ts`; the CLI's and MCP's client's (`DeskDown`, `DeskNoAnswer`,
-  `DeskApiError` with the desk's `tag` and `reason`) in `src/client.ts`; the CLI's `UsageError` and `CliError` in
-  `src/cli.ts`, MCP's `ToolInputError` in `src/mcp.ts`. The desktop app's own (`DeskCallFailed`, `DeskFailed`,
-  `ElectronRefused`, `NoFreePort`) live in `electron/lib.ts`, beside the `FsError` and `CommandFailed` it shares with
-  the desk. Tags are unique across families: GitHub's 403 is `GitHubHttpError` (its `status`), a write's rate limit
-  included, or `GitHubRateLimited` for a read's, never `Forbidden`.
-- `Data.TaggedError("Tag")<{ ...fields }>`. Not `Schema.TaggedError`: nothing needs decoding, and Schema costs the UI's
-  bundle about 14 KB.
-- Every error has a message the owner can read, in fixed words (tests, toasts, the CLI and the stored `*_error` fields
-  show them verbatim): pass `message`, or give the class `override get message()`. An empty message erases a stored
-  error (the coordinator's `coordinator_error`), so never leave one empty. A command whose caller has words of its own
-  keeps them: `CommandNotFound`'s `hint` is its whole message, and `CommandFailed` and `CommandTimeout` take a `summary`
-  ("codex failed: … Run it yourself: …", "launchctl bootstrap failed: …"). Deliberate changes, each with a test: a
-  `CommandFailed` whose stderr is blank says "<command> exited with <code or signal>", and a `ClaudeApiError` with no
-  words "claude failed: API error <status>" (both were empty); a stderr's tail keeps at most its last 8 KB (one long
-  line was kept whole, up to 64 MB); and a command started through cmd.exe (a Windows `claude.cmd`) is named alone in
-  what fails it (it was cmd.exe's whole line, an ask's text and a `--json-schema` included).
-- `cause` is only ever the original error object, kept as is when wrapping one: Sentry dedupes on its identity. Words
-  that aren't an error go in a field of their own (Claude's login `detail`, `CommandBadOutput`'s).
-- The not-logged-in error's whole message is `NOT_LOGGED_IN`: `retryAgents`, `paused()` and the judge match it by suffix
-  in the stored `aiErrors`, `aiPaused.why` and `judge.error`.
-- The HTTP family carries its status as a getter. `isDeskHttpError` (by class) and `errorBody` turn one into the wire's
-  `{ error, tag, candidates?, reason? }`.
+| Errors                                                                                                           | File              |
+| ---------------------------------------------------------------------------------------------------------------- | ----------------- |
+| The server's: HTTP refusals, `ListenFailed`, expressions, files, child processes, agents, decision model, GitHub | `src/errors.ts`   |
+| The UI's (desk unreachable, an API refusal)                                                                      | `web/src/api.ts`  |
+| The CLI's and MCP's client: `DeskDown`, `DeskNoAnswer`, `DeskApiError`                                           | `src/client.ts`   |
+| `UsageError`, `CliError`                                                                                         | `src/cli.ts`      |
+| `ToolInputError`                                                                                                 | `src/mcp.ts`      |
+| The desktop app's: `DeskCallFailed`, `DeskFailed`, `ElectronRefused`, `NoFreePort`                               | `electron/lib.ts` |
+
+- **Use `Data.TaggedError("Tag")<{ ...fields }>`.** Not `Schema.TaggedError`: nothing needs decoding, and Schema adds
+  about 14 KB to the UI's bundle.
+- **Tags are unique across families.** GitHub's 403 is `GitHubHttpError` with its `status`, or `GitHubRateLimited` for a
+  read's rate limit. Never `Forbidden`.
+- **Every error has a message the owner can read, in fixed words, never empty.** Why: tests, toasts, the CLI and stored
+  `*_error` fields show it verbatim, and an empty message erases a stored error. Pass `message` or override
+  `get message()`, with a fallback that's never blank (`CommandFailed` with blank stderr: "<command> exited with
+  <code>").
+- **A caller with its own words keeps them**: `CommandNotFound`'s `hint`, a `summary` on `CommandFailed` and
+  `CommandTimeout`.
+- **`cause` is only the original error object, unchanged.** Why: Sentry dedupes on its identity. Other words get their
+  own field (`detail`).
+- **The not-logged-in message is fixed text** (`NOT_LOGGED_IN`, `CODEX_NOT_LOGGED_IN`, `OPENCODE_NOT_LOGGED_IN`). Why:
+  `retryAgents`, `paused()` and the judge match it by suffix in stored errors.
+- **The HTTP family carries `status` as a getter.** `isDeskHttpError` (by class, not tag) and `errorBody` turn one into
+  [the wire](#the-wire)'s body.
 
 ### The HTTP family, site by site
 
-| Tag                 | Status | Where                                                                                                                |
-| ------------------- | ------ | -------------------------------------------------------------------------------------------------------------------- |
-| `BadRequest`        | 400    | what you sent: the routes' `need { … }`, `line`/`paragraphs`/`parseUntil`, hold's unreadable ref, automations' `set` |
-| `Unauthorized`      | 401    | a request from another device (through `tailscale serve`) with no token this desk issued, or one revoked             |
-| `Forbidden`         | 403    | the host/origin/cross-site middleware, `fromUi`, the desk-window-only routes, an agent's hand-off                    |
-| `NotFound`          | 404    | resolve's unknown or unreadable ref, a board, an ask, an inquiry, an automation, an `/api/*` route, `fromUi`'s loop  |
-| `TooManyRequests`   | 429    | the pairing trade past five tries a minute (`Remote.trade`)                                                          |
-| `AmbiguousRef`      | 409    | resolve's ref matching several items, with `candidates`                                                              |
-| `Stale`             | 409    | `putPolicy`'s and `putConfig`'s stale base, approve's and `githubAct`'s stale head                                   |
-| `Busy`              | 409    | a held `approving`/`sending` lock                                                                                    |
-| `Conflict`          | 409    | every other state that refuses: in Merging, not yours, already answered, your agent is off, no GitHub writer         |
-| `Upstream`          | 502    | a GitHub write or read the desk passes on, your agent not starting (`cause`: the original error)                     |
-| `ReviewersNotAsked` | 502    | ready for review landed, asking the reviewers didn't: nothing is rolled back                                         |
-| `Unavailable`       | 503    | `reason: "starting"` (the first sync), `reason: "config"` (the rules have errors)                                    |
+| Tag                 | Status | Raised by                                                                                                      |
+| ------------------- | ------ | -------------------------------------------------------------------------------------------------------------- |
+| `BadRequest`        | 400    | what you sent: a route's `need { … }`, an unreadable ref in `hold`, a body that isn't a JSON object (`json()`) |
+| `Unauthorized`      | 401    | another device (through `tailscale serve`) with no token this desk issued, or a revoked one                    |
+| `Forbidden`         | 403    | the host/origin/cross-site middleware, `fromUi`, the desk-window-only routes, an agent's hand-off              |
+| `NotFound`          | 404    | an unknown ref, board, ask, inquiry, automation or `/api/*` route                                              |
+| `TooManyRequests`   | 429    | pairing past five tries a minute (`Remote.trade`)                                                              |
+| `AmbiguousRef`      | 409    | a ref matching several items, with `candidates`                                                                |
+| `Stale`             | 409    | a stale base (`putPolicy`, `putConfig`) or head (`approve`, `githubAct`)                                       |
+| `Busy`              | 409    | a held `approving` or `sending` lock                                                                           |
+| `Conflict`          | 409    | any other state that refuses: in Merging, not yours, already answered, your agent is off                       |
+| `Upstream`          | 502    | a GitHub write or read the desk passes on, your agent not starting (`cause`: the original error)               |
+| `ReviewersNotAsked` | 502    | ready for review landed but asking reviewers didn't; nothing is rolled back                                    |
+| `Unavailable`       | 503    | `reason: "starting"` (the first sync) or `"config"` (the rules have errors)                                    |
 
-Recoveries: `itemId` catches `NotFound` by its tag (plus the exact-id check); `hold` catches `NotFound` and lets
-`AmbiguousRef` and `Unavailable` through; `inquiryView` turns any `DeskHttpError` into `card: null`. A file the desk
-writes or reads for a request (`replaceFile`, config.toml, policy.md, settings.json, secrets.json) fails with `FsError` in Node's
-words, which a route answers as a logged 500. A stale base (`putPolicy`, `putConfig`) or head (`approve`, `githubAct`)
-answers 409 `Stale`, and a held lock 409 `Busy`; the UI shows any of them by its words. The GitHub writes, `hold` and
-`reviewers` keep GitHub's error as `Upstream`'s `cause`, one `report()` hasn't sent, so Sentry sees each 502.
-
-Deliberate changes, each with a test: `reviewers` answers `Upstream` 502 with GitHub's words (was a 500);
-`wakeCoordinator`'s refused argument is a `BadRequest` like `ask`'s (was a 500); `focus`, an ask about an item and a
-wake that sends one again (`askAbout`) with broken rules answer `Unavailable` "config" (was a TypeError 500); a body
-that isn't a JSON object (not JSON, or JSON `null`, an array, a string, a number or a boolean) at a route that needs one
-(`json()`: `/api/act`, `/api/config/preview`, PUT `/api/config`, `/api/policy` and `/api/settings`) is a `BadRequest`
-"the body must be a JSON object" (not JSON or `null` was a 500; an array or a scalar was `/api/act`'s and
-`/api/policy`'s own `need { … }`, and a 200 at the other three, PUT `/api/settings` rewriting settings.json); every
-other route reads one as `{}` (`bodyOf`) and says what it needs; a bug in a GitHub write, in `hold`'s fetch or in
-reading a PR's conversations before a reply is a logged 500 `Internal` in its own words (it was a 502 in the write's).
-`Unavailable` and `ReviewersNotAsked` say "config has errors: <path>: <msg>; …", "desk is starting; the first sync can
-take a minute" and "Marked it ready, but GitHub didn't ask for the reviews: …". Additive, with a test: an `/api/*` path
-the desk doesn't route answers `{ error: "not found", tag: "NotFound" }` (it had no tag); the host/origin/cross-site
-middleware's 403s and `fromUi`'s 403 and 404 keep the `Forbidden` and `NotFound` tags they already had, now through
-`respond`.
+- A file read or written for a request fails with `FsError` in Node's words: a logged 500.
+- The GitHub writes, `hold` and `reviewers` keep GitHub's error as `Upstream`'s `cause`, so Sentry sees each 502.
 
 ## Writing Effect code
 
-- A function that can fail returns `Effect.Effect<A, E>`, with no requirements (`R` is `never`). Its body is
-  `Effect.gen`, or `Effect.fn("name")` / `Effect.fnUntraced` for a reusable function. In a class, a method returns
-  `Effect.gen({ self: this }, function* () { … })`, as `Desk.approve` does; no class has an `Effect.fn` field yet (one
-  that wants a span would be `readonly name = Effect.fn("Class.name")({ self: this }, function* (…) { … })`).
-- Costs: `Effect.fn` about 3.4 µs a call (it captures a stack), `Effect.gen` 0.9 µs, `Effect.fnUntraced` 0.3 µs, a
-  failure 8 µs. Fine per request; never on something called per item, per row, per rule or per store read. Pure, total
-  code stays plain functions: `compute`, `card`, `analyze`, `normalize`, `snapshot`, the view and format helpers, the
-  parsers' insides. A cheap synchronous check called per row returns a `Result`; Effect code lifts it with
-  `yield* Effect.fromResult(r)` (v4 can't `yield*` a `Result` or an `Option`).
-- Fail with `return yield* new SomeError({ … })`: the `return` tells TypeScript nothing runs after it. Never `throw` a
-  tagged error inside a generator body, a `map`/`sync` callback or a `catch:` handler: it becomes a defect, a 500 and a
-  Sentry report instead of a 409. `throw` inside Effect code is for bugs only.
-- A body with no `yield*` isn't a generator (lint's `require-yield`): use `Effect.sync`, `Effect.succeed` or a plain
-  function. `Effect.void`, not `Effect.succeed(undefined)`. An `Effect.suspend` returning either a fail or a success
-  annotates its return type. Declare `signal` in a callback or `tryPromise` only when it's used.
+- **Shape.** Return `Effect.Effect<A, E>` with `R` as `never`. The body is `Effect.gen`, or `Effect.fn("name")` /
+  `Effect.fnUntraced` for a reusable function. A class method returns `Effect.gen({ self: this }, function* () { … })`
+  (`Desk.approve`).
+- **Keep Effect off hot paths.** Per call: `Effect.fn` ~3.4 µs, `Effect.gen` 0.9 µs, `Effect.fnUntraced` 0.3 µs, a
+  failure 8 µs. Fine per request; never per item, row, rule or store read. Pure code stays plain functions (`compute`,
+  `card`, `analyze`, `normalize`, the view helpers). A cheap per-row check returns a `Result`; lift it with
+  `yield* Effect.fromResult(r)` (v4 can't `yield*` a `Result` or `Option`).
+- **Fail with `return yield* new SomeError({ … })`.** The `return` tells TypeScript nothing runs after it.
+- **Never `throw` a tagged error** in a generator, a `map`/`sync` callback or a `catch:` handler. Why: it becomes a
+  defect, a 500 and a Sentry report instead of, say, a 409.
+- **No generator without `yield*`** (lint's `require-yield`): use `Effect.sync`, `Effect.succeed` or a plain function.
+  `Effect.void`, not `Effect.succeed(undefined)`.
 - **An Effect nobody runs does nothing**, and no check catches it (TypeScript 7 can't load Effect's language service).
-  When a function's return type becomes an Effect, the same commit visits every call site (`git grep -n '\bname('`) and
-  yields or runs each one.
-- Promise APIs: `Effect.tryPromise({ try: (signal) => fetch(url, { signal }), catch: (cause) => new X({ … }) })`. Always
-  pass `catch`: the one-argument `Effect.try(fn)` / `Effect.tryPromise(fn)` fail with `UnknownError`, "An error occurred
-  in Effect.try", and those words would reach the owner. Never `Effect.promise` for something that can fail in an
-  expected way: its rejection becomes a defect.
-- Throwing synchronous APIs (fs, `JSON.parse` of what someone else wrote): `Effect.try({ try, catch })`.
-- A synchronous caller (`readSettings`, a cache made in a constructor) runs an Effect with `Effect.runSync` only while
-  it has no async step: over a `tryPromise` or `callback` it throws `AsyncFiberError` when it runs, so an Effect a sync
-  caller runs stays on the fs sync APIs.
-- Child processes and emitters: `Effect.callback((resume) => { …; return cleanup })`. The cleanup runs only when the
-  fiber is interrupted (a timeout, the desk stopping), and interruption waits for it. So the `close` handler itself
-  clears the child's timer and listeners, then calls `resume` once; the cleanup kills the group through `children.ts`'s
-  `kill` and waits for `close` (bounded by SIGKILL after the grace period), so an interrupted run has exited before its
-  fiber ends. A child's own timeout stays an unref'd `setTimeout` inside the callback. `children.ts` tracks every child,
-  so `desk.close()` reaches whole process groups. Deliberate change, with a test: connecting an agent (Settings →
-  Claude) runs its CLI through `runCommand` too, so a timeout or the desk stopping ends its whole group (`execFile`
-  can't start one, and reached only the CLI itself). Deliberate change, with a test: `gh auth token` (`readToken`) is an
-  `Effect.callback` too, and interrupted it stops a `gh` that started and signals nothing for one that didn't
-  (`execFile`'s `signal` option sent SIGTERM to the desk's own process group, the desktop app's included, when `gh`
-  wasn't there). Deliberate change, with a test: a `gh auth token` that doesn't answer in 30 s is stopped and fails
-  with `GitHubAuthError` "gh auth token didn't answer in 30 s: run it in a terminal" (a write reads it inside its
-  uninterruptible region, so a keychain prompt nobody answered hung the write, and held its lock, until the desk
-  restarted).
-- Retries: GitHub reads retry with
-  `Effect.retry(Schedule.exponential(delay, 3).pipe(Schedule.setInputType<E>(), Schedule.while(({ input }) => retryable(input)), Schedule.upTo({ times: 2 }), Schedule.tap(({ input, attempt }) => Effect.sync(() => log(`${input.message}; retry ${attempt}/2`)))))`:
-  3 attempts, the delay then 3× it, no jitter, a log line for each retry. Not the `{ times, while }` options together
-  with a tapping schedule (it logs retries that never happen). Never retry a GitHub write: a timed-out one may have
-  landed. Deliberate change, with a test: a rate limit's `Retry-After` sent as a date is read as one, and one that can't
-  be read waits a minute (it was a `RangeError`).
-- Timeouts are the request's own: `AbortSignal.timeout` in a fetch (GitHub's reads and writes, 30 s; the CLI's and
-  MCP's client; the desktop app's `request`), an unref'd timer in a child's `Effect.callback` (`runCommand`'s,
-  `gh auth token`'s 30 s); map what it fails with to the domain error and its words. Nothing uses `Effect.timeout`;
-  `Effect.timeoutOption` only bounds how long the desktop app waits for a checkout's desk and Vite to exit before it
-  SIGKILLs what's left (`electron/source.ts`).
-- **Effect's timers keep the process up**: a fiber left in `Effect.sleep` or a `Schedule` keeps `node --test` from
-  exiting, silently. Periodic loops (the connector's poll and feed, the judge's backoff, the coordinator's ticker,
-  automations' minute) keep their unref'd Node timer and fork one runner Effect per tick. `Effect.sleep` and `Schedule`
-  are for waits inside one run: retries (GitHub's reads, launchd's bootstrap), the coordinator's `halt` waiting for its
-  `claude` to exit, `desk_inquiry`'s minute, the desktop app's (its reconnect backoff, a checkout's 15 s retry). The
-  activity long-poll is a Node `setTimeout` in an `Effect.callback` (`nextEvent`), which `record()` or the timer
-  resumes and whose cleanup clears it.
-- **A write and what the desk records after it are one `Effect.uninterruptible` region**: the GitHub write (approve,
-  reply, comment, inline, ready and asking reviewers, the More menu's), then `logWrite`, `doneAfterWrite`/`act`/`undo`,
-  `wrote`, and `ask`'s rollback. A request going away never cancels a write the desk started or skips its bookkeeping;
-  the write's own timeouts (its token read's and its fetch's) still apply inside it. Never `restore` around the write.
-- Locks (`approving`, `sending`): checked and taken at the start of the write's uninterruptible region (`Desk.locked`)
-  and released by its `Effect.ensuring` at the end, so nothing can interrupt between taking the lock and the write; a
-  held lock fails at once with `Busy`, never queues.
-- Caches and singleflight: never `Effect.cached` where a failure must be retried (it caches failures). A keyed cache
-  (`prContext` by the PR's id, node and `updated_at`, a PR's checks by its id, node and `detail_at`, the GitHub token) is
+  When a return type becomes an Effect, visit every call site in the same commit (`git grep -n '\bname('`).
+- **Promises: `Effect.tryPromise` with a `catch`, always.**
+  `Effect.tryPromise({ try: (signal) => fetch(url, { signal }), catch: (cause) => new X({ … }) })`. Why: without
+  `catch` it fails with `UnknownError` "An error occurred in Effect.try", and those words reach the owner. Never
+  `Effect.promise` for something that can fail: its rejection becomes a defect.
+- **Throwing sync APIs** (fs, `JSON.parse` of someone else's text): `Effect.try({ try, catch })`; for files,
+  `catch: fsError("write", file)`.
+- **`Effect.runSync` only over an Effect with no async step.** Why: over `tryPromise` or `callback` it throws
+  `AsyncFiberError`. So an Effect a sync caller runs (`readSettings`) stays on fs sync APIs.
+- **Child processes: `Effect.callback((resume) => { …; return cleanup })`, through `children.ts`.**
+  - The `close` handler clears the child's timer and listeners, then calls `resume` once.
+  - The cleanup runs only on interruption. It kills the process group (`children.ts`'s `kill`) and waits for `close`
+    (SIGKILL after a grace period), so an interrupted run has exited before its fiber ends.
+  - The child's own timeout is an unref'd `setTimeout` inside the callback.
+  - Never `execFile`'s `signal` option: it can SIGTERM the desk's own process group.
+- **Retries: GitHub reads only, never writes** (a timed-out write may have landed). The schedule, in
+  `src/github/client.ts`:
+  ```ts
+  Schedule.exponential(delay, 3).pipe(
+    Schedule.setInputType<E>(),
+    Schedule.while(({ input }) => retryable(input)),
+    Schedule.upTo({ times: 2 }),
+    Schedule.tap(({ input, attempt }) => Effect.sync(() => log(`${input.message}; retry ${attempt}/2`))),
+  );
+  ```
+  Don't use the `{ times, while }` options with a tapping schedule: it logs retries that never happen.
+- **Timeouts belong to the request**: `AbortSignal.timeout` in a fetch, an unref'd timer in a child's callback. Map what
+  it fails with to the domain error. No `Effect.timeout`.
+- **Effect's timers keep the process up.** A fiber left in `Effect.sleep` or a `Schedule` silently keeps `node --test`
+  from exiting. So periodic loops (the connector's poll, the judge, the coordinator's ticker, automations) use an
+  unref'd Node timer and fork one runner Effect per tick. `Effect.sleep` and `Schedule` are only for waits inside one
+  run (retries, `halt`, `desk_inquiry`'s minute).
+- **A GitHub write and its bookkeeping are one `Effect.uninterruptible` region**: the write, then `logWrite`,
+  `doneAfterWrite`/`act`/`undo`, `wrote`, `ask`'s rollback. Why: a client leaving must never cancel a started write or
+  skip its record. Never `restore` around the write.
+- **Locks (`approving`, `sending`)** are taken at the start of that region (`Desk.locked`) and released by its
+  `Effect.ensuring`. A held lock fails at once with `Busy`; it never queues.
+- **Never `Effect.cached` where a failure must be retried**: it caches failures. Use
   `Cache.makeWith(lookup, { capacity, timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity) })`,
-  with `Cache.invalidate` on a 401 (the token) or after your reply (`prContext`). Work shared by callers who may leave
-  (an AI review, `fetching`) is forked through the runner and completes a `Deferred` kept in its Map, so
-  `generating.has(id)` and `.size` stay synchronous; callers `Deferred.await` it, and the fiber deletes the entry (and
-  does its bookkeeping) before it completes the Deferred, which keeps no failure: the next caller starts a fresh run
-  (`Desk.shared`). The desk stopping interrupts the fiber, which ends its callers with it; a stopped desk starts none
-  and ends them at once. Deliberate change, with a test: a bug in the bookkeeping after it (`after`: an AI review's
-  notifying) is the runner's, logged and reported once, and its callers get the work's own result (a stored review
-  answered 502 with the bug's words).
-- Interruption records nothing: no `onExit`, `ensuring` or `onInterrupt` writes the store or notifies (a cut automation
-  run keeps `done_at: null`, so the next start marks it cut). Finalizers only kill children, clear timers and release
-  locks, and on a stopped desk the last write's lock closes the store (`closeIfIdle`). An `ensuring` inside a write's
-  uninterruptible region never sees an interruption: `markReady`'s and `askReviewers`' refresh of the PR, forked
-  whatever GitHub said and waited for, is one.
+  with `Cache.invalidate` when the value goes stale (a 401 for the token).
+- **Shared work (`Desk.shared`)**: work several callers wait on, any of whom may leave (an AI review, `fetching`), is
+  forked through the runner and completes a `Deferred` kept in a Map; callers `Deferred.await` it. The fiber deletes the
+  entry before completing, and keeps no failure, so the next caller starts fresh.
+- **Interruption records nothing.** No `onExit`, `ensuring` or `onInterrupt` writes the store or notifies. Finalizers
+  only kill children, clear timers and release locks.
 
 ## No throw, no catch
 
-Outside these exceptions there is no `throw`, `try`/`catch`, `.catch(` or `Promise.reject` for an expected failure:
+No `throw`, `try`/`catch`, `.catch(` or `Promise.reject` for an expected failure. Exceptions:
 
-- `throw` for a defect, `!` assertions and `throw new Error("unreachable: …")` stay.
-- A module's private recursive parser or evaluator may throw to unwind and convert once, at its exported edge, to a
-  `Result` or an Effect (`expr.ts`'s `compile` and `Compiled.eval`, with `Result.try`).
-- `Store.tx`'s rollback: `catch (e) { ROLLBACK; throw e }` rethrows the defect it caught.
+- `throw` for a defect: `!` assertions, `throw new Error("unreachable: …")`.
+- A private recursive parser may throw to unwind, converting once at its exported edge (`expr.ts`, with `Result.try`).
+- `Store.tx`'s rollback rethrows the defect it caught.
 - `electron/preload.cjs`: sandboxed CommonJS, it can't load `effect`.
-- Tests are `node:test` code: they run Effects through `test/helpers/run.ts`, or with `Effect.runPromiseExit`,
-  `runFork` or `runPromise` themselves where they assert on an exit, hold or interrupt a fiber, or expect a rejection.
-- `scripts/` (the shots, `dev-app.ts`, `icons.ts`, the smoke checks) are plain Node, Electron and Playwright tools: a
-  `throw` fails the run, and a `try`/`catch`/`finally` or a promise's `.catch` retries a step, cleans up after one,
-  passes over a request a reload dropped, or says what failed.
+- Tests may use `Effect.runPromiseExit`, `runFork` or `runPromise` directly to assert on an exit, hold or interrupt a
+  fiber, or expect a rejection.
+- `scripts/` are plain Node, Electron and Playwright tools.
 
-Recover with `Effect.catchTag`/`catchTags` for a specific failure, `Effect.catch` for every typed one. `Effect.ignore`
-only where the desk deliberately ignores a failure (with a one-line why), and `Effect.catchCause` only at a boundary or
-a loop's pass.
+To recover: `Effect.catchTag`/`catchTags` for a specific failure, `Effect.catch` for every typed one. `Effect.ignore`
+only where ignoring is deliberate, with a one-line why. `Effect.catchCause` only at a boundary or in a loop's pass.
 
 ## Background work
 
-`desk.runner.fork(what, effect, item?)` (`src/runner.ts`) is the only way the desk starts work nobody waits on: a sync
-after a reload, the loops' passes, an AI review, the judge, the coordinator's run, an automation, the `gh.refresh` after
-a write. It runs each in a trace of its own (a fiber keeps the context it was forked in, so a loop forked from a
-request would carry that request's trace), logs `Cause.pretty` and reports a failure or a defect under `what`, says
-nothing about interruption or anything that ends after `stop()`, and `stop()` interrupts every fiber. From Effect code:
-`Effect.sync(() => desk.runner.fork(…))`.
+`desk.runner.fork(what, effect, item?)` (`src/runner.ts`) is the only way the desk starts work nobody waits on. From
+Effect code: `Effect.sync(() => desk.runner.fork(…))`. The runner:
 
-- Each site handles its expected failures itself (stores its `*_error`, logs in its own words, calls
-  `report(err, what)` once), so the runner mostly sees bugs.
-- Deliberate change, with tests: the desk stopping interrupts the coordinator's run and an automation's run in flight,
-  which then record, notify and report nothing (the coordinator's kept going and wrote to the closed store; an
-  automation's reported a spurious "stopped"). A cut automation run keeps `done_at: null`. An ask or a Wake it waiting
-  on the coordinator's run then ends as interrupted (`Coordinator.ran`), a 499 nobody logs (it read the closed store: a
-  logged and reported 500).
-- Deliberate changes, each with a test: a bug with no words in the coordinator's run is kept and notified as "your
-  agent's run failed" (its empty message erased the kept error and notified nothing), and a `claude agents --json` that
-  isn't a list is a `CommandBadOutput` "claude agents --json didn't print a list" (a TypeError, which the watch's looks
-  reported every tick and a run kept as its error).
-- A loop's pass catches a defect (`Effect.catchCause`, log and report) and keeps its schedule: a desk that hit a bug in
-  one sync keeps syncing, where an unhandled rejection used to end it.
-- Deliberate change, with a test: the full pass after a write's refresh (approve, a reply, a comment, a line's comment)
-  runs in the refresh's own fiber, `gh.refresh(id)` and then every connector's `reconcile`, so the desk stopping
-  interrupts it (it ran in a nested `Effect.runPromise` the runner didn't hold, which kept going into the closed store).
-- Deliberate change, with a test: what fails one of an automation's items (`push`'s refusal) is still that item's
-  error, and the run goes on; a bug in `push` fails the run, reported and notified once (it was the item's error, never
-  reported).
-- `Effect.runFork` and `Effect.forkDetach` appear nowhere else in `src/` (a forked failure nobody observes vanishes),
-  `Effect.forkChild` never for work that must outlive its caller (it's interrupted when the caller ends), and never
-  `void Effect.runPromise(…)` (an unhandled rejection ends the desk). A promise nobody waits on is a lint error, `void`
-  included (`typescript/no-floating-promises` without `ignoreVoid`; `.oxlintrc.json` says where): fork its work
-  through the runner, await it, or, only where dropping it is right, handle it with a one-line why.
-- `desk.sync()` runs its pass in its caller's fiber (tests await it); a config reload's and `POST /api/sync`'s are
-  forked through the runner, and a write's refresh runs it after the PR's own refresh in the same runner fiber
-  (`refreshAfter`).
-- Deliberate change, with a test: a file the desk watches (policy.md, settings.json, config.toml) that changed on disk
-  is read again through the runner (`Desk.edited`), so one it can't read is logged (`config.toml failed: …`) and
-  reported, and the desk keeps what it had (it was an uncaught exception from the watcher, which ended the desk).
-- An AI review (`runAi`) keeps what fails it, a bug too, as that commit's `aiErrors` in its words, reported once and
-  logged with the login's own words when it's `ClaudeNotLoggedIn` (told by its tag); `retryAgents` and `paused()`
-  read the stored words by suffix. `aiReview` answers it as `Upstream` 502 with it as the cause.
+- runs each fork in its own trace (a fiber keeps the context it was forked in, so a loop forked from a request would
+  carry its trace);
+- logs `Cause.pretty` and reports any failure or defect under `what`;
+- stays quiet about interruption and anything ending after `stop()`;
+- `stop()` interrupts every fiber, synchronously.
+
+Rules:
+
+- **Each site handles its expected failures** (stores its `*_error`, logs in its words, `report(err, what)` once), so
+  the runner mostly sees bugs. Example: `runAi` keeps any failure as that commit's `aiErrors`.
+- **A loop's pass catches a defect** (`Effect.catchCause`, log, report) and keeps its schedule.
+- **No other way to fork.** No `Effect.runFork` or `Effect.forkDetach` elsewhere in `src/` (an unobserved failure
+  vanishes). No `Effect.forkChild` for work that must outlive its caller. No `void Effect.runPromise(…)` (an unhandled
+  rejection ends the desk).
+- **A promise nobody waits on is a lint error, `void` included** (`typescript/no-floating-promises` without
+  `ignoreVoid`; `.oxlintrc.json` says where). Fork it, await it, or handle it with a one-line why.
+- **Stopping interrupts everything in flight** (a sync, a write's refresh, the coordinator's run, an automation's run),
+  which then records, notifies and reports nothing.
 
 ## Boundaries
 
-Each runs an Effect whose failures it answers for, and nothing gets past it unhandled.
+Each boundary runs an Effect and answers for whatever fails.
 
-- **HTTP** (`src/server.ts`): a route runs its Effect with `Effect.runPromiseExit`, through
-  `respond(c, effect, { log, read? })`, every route (one that can't fail through `Effect.sync`, the static files,
-  `fromUi` and the SSE stream as the `Response` they build, which `respond` passes on); the host/origin/cross-site
-  middleware runs its check with `Effect.runSyncExit` and answers its `Forbidden` the same way, and `onError` sees only
-  a bug. Only reads and waits pass `{ signal: c.req.raw.signal }` (`read: true`: every GET but `total`'s, which can't
-  fail, the `/api/*` 404 and opening a PR, below; `/api/activity`'s wait, the static files and `fromUi` included), so a
-  client going away interrupts them; the SSE stream, one of `total`'s, is the `Response` it builds, and its own
-  `onAbort` unsubscribes it. A write and any work shared with other callers never take the request's signal: nor does
-  opening a PR (`GET /api/review/:id`), which starts its AI review and Claude's read once its diff and conversation are
-  in; its `?ahead=1` prefetch does. A `DeskHttpError` answers with its status and `errorBody`. An interrupt-only exit
-  (`Cause.hasInterruptsOnly`) means the client left: answer `new Response(null, { status: 499 })`, log and report
-  nothing. Any other failure or a defect is a 500 `{ error, tag: "Internal" }`, logged with `Cause.pretty`. For an
-  answer of 500 or more (Internal, `Upstream`, `ReviewersNotAsked`) the route sets `c.error` to
-  `Cause.squash(exit.cause)` (the failure itself, never a Cause) before returning, so the Sentry middleware decides: it
-  reports a 5xx except a 503 or one whose cause `report()` already sent.
+- **HTTP** (`src/server.ts`): every route runs through `respond(c, effect, { log, read? })`.
+  - A `DeskHttpError` answers with its status and `errorBody`.
+  - An interrupt-only exit (`Cause.hasInterruptsOnly`) means the client left: 499, nothing logged or reported.
+  - Anything else is a 500 `{ error, tag: "Internal" }`, logged with `Cause.pretty`.
+  - For 500 and up the route sets `c.error = Cause.squash(exit.cause)`. The Sentry middleware reports a 5xx unless it's
+    a 503 or `report()` already sent its cause.
+  - Only reads and waits pass the request's signal (`read: true`), so a client leaving interrupts them. Writes and work
+    shared with other callers never do; nor does opening a PR (`GET /api/review/:id`), which starts its AI review.
+  - The host/origin/cross-site middleware answers its `Forbidden` the same way (`Effect.runSyncExit`). `onError` sees
+    only bugs.
 - **Background**: the runner, above.
-- **CLI** (`src/cli.ts`): `main` runs one Effect and maps its exit. `UsageError` (and parseArgs' `ERR_PARSE_ARGS_*`,
-  turned into one where parseArgs is called) exits 2 with `desk: <msg>` and "run 'desk help' for usage". `DeskDown`
-  prints its message alone, exit 1. Any other failure, or a defect, prints `desk: <message>`, exit 1. stdout is flushed
-  before `process.exit`. `DeskApiError`'s message ends in " — candidates: a, b"; a client timeout (`DeskNoAnswer`) says
-  "The operation was aborted due to timeout". `ls` lists the boards on a `NotFound` and `config` works offline on
-  `DeskDown`, both by tag. `status --short` ends in `Effect.catchCause`: whatever happens it prints a status word, exit
-  0, and tells a config error from starting by the 503's `reason`. `serve` yields `startDesk`, and refreshes the skill
-  through the desk's runner: a file it can't write is logged in its words ("couldn't refresh the Inbox skill: …"),
-  and a bug in it is the runner's, logged and reported.
-- **MCP** (`src/mcp.ts`): a tool's failure is its `isError` text; a defect is also logged (the desk's log at `/mcp`,
-  stderr for `desk mcp`). Tools take no signal: `desk_inquiry`'s wait is an `Effect.sleep` loop of at most a minute.
-- **Electron** (`electron/main.ts`): an IPC handler runs its Effect and rejects with a plain `Error(message)` (only the
-  message survives the structured clone). Callbacks that must answer synchronously (`will-quit`, `desktop:theme`'s
-  `returnValue`, `will-navigate`, the window-open handler) stay plain code and fork only their async tail. `ipcAnswer`
-  (`electron/lib.ts`) is that boundary: `Forbidden` "not allowed" for a page that isn't the desk's, `BadRequest` "no
-  such theme", and a bug logged and reported too. The app's own failures live in `electron/lib.ts` (`DeskCallFailed`,
-  `DeskFailed`, `ElectronRefused`, `NoFreePort`), beside `FsError` and `CommandFailed`. What it starts and nobody waits
-  on (its start, following the desk, the tray's refresh, a link or Settings it opens, Sync now, a start page, quitting)
-  goes through one runner, `appRunner(log)`: src's `Runner`, logging to desk.log and reporting if the app ever reports.
-  A start page the next load supersedes (`ERR_ABORTED`) is no failure. Following the desk's events is a loop whose pass
-  logs a bug and goes on. Quitting closes the desk or stops the checkout's, each failure logged, then `app.exit(0)`
-  whatever happened. A file the app keeps for itself (window.json, theme.json, live.json) that's missing or isn't JSON
-  reads as `null` (`readJson`); a pid that's gone or a log line it can't write is nothing (`tryOr`, `quietly`).
-  Deliberate changes, each with a test: a node that `spawn` refuses at once (a NUL byte in its path) is a failure the
-  restart loop of the desk from a checkout handles like one that fails to start (it threw: an uncaught exception in the
-  main process, or `startSource` rejecting), and `commandOutput` gives no output for one (it rejected); what fails the
-  app's background work (a link the OS didn't open, Settings or Sync now) is logged as `<what> failed: …`, where it was
-  an unhandled rejection or ignored. Deliberate changes in `main.ts`, which no test loads: a desk from a checkout that
-  can't start (its home, a port for its UI) says so in the window and is tried again every 15 seconds, a live.json the
-  app can't remove is logged and passed over, and a login item the OS refused is logged as `open at login failed: …` and
-  the tray still updates (each failed the app's start, following the desk or the tray's refresh, in desk.log alone).
-- **UI** (`web/src`): `api.ts` answers with Effects failing with the UI's own tagged errors. Components run them through
-  one helper, `runUi(effect, { signal? })`: `Effect.runCallback`, whose `onExit` ignores an interrupt-only exit and logs
-  and reports to Sentry any other uncaught cause. Nothing in the window waits on it, so it returns nothing: there's no
-  promise to drop or to reject, and `web/src` keeps the same lint as `src/` (a promise nobody waits on, `void` included).
-  Reads pass their effect's signal; writes pass none, so an unmount never interrupts a write. `reviewOf`'s shared GET
-  runs on its own (`Effect.runPromiseExit`) so StrictMode's second open can join it; one that every open left before it
-  answered hands its exit to `runUi` (`Effect.ignore`: a refusal has nobody to tell), so a bug in it is still logged and
-  reported.
+- **CLI** (`src/cli.ts`): `main` runs one Effect and maps its exit. `UsageError` exits 2 with
+  `desk: <msg>` and "run 'desk help' for usage". `DeskDown` prints its message alone, exit 1. Anything else prints
+  `desk: <message>`, exit 1. stdout is flushed before `process.exit`. `status --short` always prints a status word,
+  exit 0.
+- **MCP** (`src/mcp.ts`): a tool's failure is its `isError` text; a defect is also logged. Tools take no signal.
+- **Electron** (`electron/main.ts`):
+  - `ipcAnswer` (`electron/lib.ts`) runs an IPC handler's Effect and rejects with a plain `Error(message)` (only the
+    message survives the structured clone).
+  - Callbacks that must answer synchronously (`will-quit`, `will-navigate`, the window-open handler) stay plain code and
+    fork only their async tail.
+  - Work nobody waits on goes through one runner, `appRunner(log)`, logging to desk.log.
+  - A file the app keeps for itself (window.json, theme.json, live.json) that's missing or not JSON reads as `null`
+    (`readJson`).
+- **UI** (`web/src`): components run `api.ts`'s Effects through `runUi(effect, { signal? })` (`Effect.runCallback`),
+  which ignores an interrupt-only exit and logs and reports any other uncaught cause. It returns nothing, so there's no
+  promise to drop. Reads pass a signal; writes don't, so an unmount never interrupts a write.
 
 ### The wire
 
-An error answers `{ error, tag, candidates?, reason? }`. `tag` and `reason` are additive: every reader (the client, the
-CLI, MCP, the UI) decodes `tag ?? fromStatus(status)` (400 BadRequest, 403 Forbidden, 404 NotFound, 409 AmbiguousRef
-with candidates else Conflict, 502 Upstream, 503 Unavailable, else Internal), and a 503's `reason ?? (error includes
-"config" ? "config" : "starting")`, so an older desk still reads right. A 409 from PUT `/api/policy` or `/api/config` is
-`Stale` whatever its tag; a reply that isn't JSON (the UI-starting page, a proxy's error page) is the desk unreachable.
+An error answers `{ error, tag, candidates?, reason? }`. Every reader (the client, the CLI, MCP, the UI) decodes
+`tag ?? BY_STATUS[status]` (409 with candidates is `AmbiguousRef`; unknown is `Internal`), and a 503's
+`reason ?? (error includes "config" ? "config" : "starting")`, so an older desk without tags still reads right. In the
+UI, a 409 from PUT `/api/policy` or `/api/config` is `Stale` whatever its tag, and a reply that isn't JSON means the desk
+is unreachable.
 
 ## Desk's shape
 
-- `new Desk(opts)` is a constructor; its I/O failing (the home, `desk.db`) is a startup defect that `startServer`'s
-  caller shows. A `settings.json` it can't read is a problem on the Settings page: the constructor, the file's watcher
-  and the desktop app read it once with `readSettings`, which folds `loadSettings`' `FsError` into the errors and gives
-  the text it read (`null` for one it couldn't). Deliberate change, with a test: one that can't be read (a directory)
-  threw from the constructor, and from the watcher. `init()` returns an Effect: GitHub's viewer failing, a first config
-  it can't write for want of your GitHub context (`Upstream`, "couldn't read your GitHub context to write a first
-  config: …") or a file it can't read or write (`FsError`) fails it, and `startServer`'s caller shows the words.
-  `startDesk` is the Effect (failing with `ListenFailed`, "port N is in use; is desk already running? (url)", too);
-  `startServer` runs it for a caller that awaits it (the desktop app) and rejects with the failure itself, and its
-  `close()` is a Promise. A port it can't listen on stops the desk it made, as init failing does, so a retry leaves no
-  store open. `stop()` is synchronous: it interrupts the runner's fibers, unwatches the files and closes the store, or,
-  under a GitHub write in flight, leaves that to the last one's lock (`closeIfIdle`). `close()` is an Effect that stops
-  the desk at once and also waits for `stopAll()` and for the store to close, so at most for a write's own timeouts.
-  Deliberate change, with a test: a write in flight when the desk stops still logs and records what it did, and its
-  method returns that (it hit the closed store, a logged and reported 500 with nothing recorded); the window doesn't get
-  that answer, since `startServer`'s `close()` drops the open connections at once, and the desktop app SIGKILLs a desk
-  run from a checkout that hasn't quit in 5 s, a write in flight or not. A stopped desk sends no new one: a write's first
-  step (`notStopped`, and `locked` for a desk that stopped on the way) ends it as interrupted, a 499 nobody logs, before
-  it reads the store (it read the closed one: a logged and reported 500). Deliberate change, with a test: the More
-  menu's refresh after its write, which the write awaits before answering, is the runner's, so the desk stopping cuts it
-  (it read GitHub to the end, up to three 30 s attempts and the retries' waits, and `close()` waited for it).
-- Internal helpers that run after a snapshot (`top`, `summary`, `card`, `queueCard`, `needsCards`, `compute`) assert the
-  config (`this.loaded!`, a defect); only an entry point checks it as a failure (`requireConfig`, or `resolve`, which
-  checks it first). The hooks the connectors call (`synced`, `rebaseConflicts`, `handBackUnasked`, `trackBlocked`,
-  `notifyNew`, `pumpAi`) stay `void` and never fail: a check they share with a request keeps a non-failing core
-  (`handBackUnasked` calls `sendBack`, the core `handBack` runs after validating).
-- The desk's synchronous layer (the validators, `act`, `undo`, the views, the inquiries, the policy, settings and config
-  writes) answers with Effects that have no async step, so a test can `runSync` one.
-- The fields tests watch keep their types: `coordinator.flushing` (a `Promise<void> | null` that never rejects),
-  `automations.running` (a Map whose values keep `.p`), `judge.running` and `judge.timer`, the connector's `syncing`,
-  `polling`, `pausedUntil` and `feedError`, the desk's `generating` (`.has`, `.size`), `warming`, `waiters`,
-  `aiErrors` and `aiPaused`. A change that drops one rewrites the tests that read it.
+- **`new Desk(opts)`** is a plain constructor; its I/O failing (the home, `desk.db`) is a startup defect.
+- **`init()` and `startDesk` return Effects.** `startDesk` also fails with `ListenFailed`. `startServer` runs it for a
+  caller that awaits it (the desktop app) and rejects with the failure itself.
+- **`stop()` is synchronous**: it interrupts the runner, unwatches files and closes the store. Under a write in flight,
+  the write's lock closes the store when it ends (`closeIfIdle`). **`close()`** is an Effect that also waits for that.
+- **A stopped desk starts no new write**: `notStopped` ends it as interrupted (a 499) before it reads the store.
+- **Config checks.** Helpers that run after a snapshot (`card`, `compute`, …) assert the config (`this.loaded!`, a
+  defect). Only an entry point checks it as a failure (`requireConfig`).
+- **The connectors' hooks never fail** (`synced`, `trackBlocked`, `notifyNew`, `pumpAi`, …): they stay `void`. A check
+  shared with a request keeps a non-failing core.
+- **The synchronous layer** (validators, `act`, `undo`, views, settings and config writes) answers with Effects that
+  have no async step, so a test can `runSync` one.
+- **The fields tests watch keep their types**: `coordinator.flushing` (a `Promise<void> | null` that never rejects),
+  `automations.running` (a Map whose values keep `.p`), `judge.running`, `judge.timer`, the connector's `syncing`,
+  `polling`, `pausedUntil` and `feedError`, the desk's `generating` (`.has`, `.size`), `warming`, `waiters`, `aiErrors`
+  and `aiPaused`. A change that drops one rewrites the tests that read it.
 
 ## Testing
 
-- `test/helpers/run.ts`: `await run(desk.approve(...))`, `runSync(desk.act(...))`; for a refusal
-  `assert.equal((await failure(desk.act(...)))._tag, "Conflict")`. `run` and `runSync` throw the typed failure itself
-  (so `assert.throws(…, { status: 409 })` still reads), but fail the test on a defect: a tagged error thrown where it
-  should have been yielded doesn't pass as a refusal.
-- Fakes of the desk's injection points (GitHub, its writer, the review deps, the coordinator) return Effects:
-  `Effect.succeed(x)`, `Effect.fail(new GitHubHttpError({ … }))`. An interface changes in the commit that changes its
-  implementation, which updates every fake, monkeypatch, stub and script that implements or calls it.
-- Mock timers with `t.mock.timers.enable({ apis: ["setTimeout"] })` (add `"Date"` if needed), never the default set:
-  Effect's scheduler yields on `setImmediate`. `tick()` resumes a sleeping fiber synchronously.
-- TypeScript 7 has no JS API (no `ts.createSourceFile`, no ts-morph): a codemod over many call sites uses `oxc-parser`
-  and `magic-string` from `node_modules`, and typechecks with `npm run typecheck`.
+- **Run Effects with `test/helpers/run.ts`**: `await run(desk.approve(...))`, `runSync(desk.act(...))`, and for a
+  refusal `(await failure(desk.act(...)))._tag`. `run` throws the typed failure but fails the test on a defect, so a
+  tagged error thrown instead of yielded can't pass as a refusal.
+- **Fakes return Effects** (`Effect.succeed(x)`, `Effect.fail(new GitHubHttpError({ … }))`). An interface changes in the
+  same commit as every fake, stub and script that implements or calls it.
+- **Mock only `setTimeout`**: `t.mock.timers.enable({ apis: ["setTimeout"] })` (plus `"Date"` if needed). Why: Effect's
+  scheduler yields on `setImmediate`.
+- **Codemods**: TypeScript 7 has no JS API (no ts-morph). Use `oxc-parser` and `magic-string` from `node_modules`, then
+  `npm run typecheck`.

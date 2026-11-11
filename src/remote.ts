@@ -1,6 +1,6 @@
 // Using the desk from your other devices over Tailscale: `tailscale serve` in front of a second loopback listener that
-// only it reaches, and each of your devices paired once with a one-time code for a token of its own (docs/api.md → Who
-// may call the desk).
+// only it reaches, and each of your devices paired once with a one-time code for a token of its own (docs/api.md →
+// Security model).
 import crypto from "node:crypto";
 import { Effect, Result } from "effect";
 import { Forbidden, NotFound, TailscaleError, TooManyRequests } from "./errors.ts";

@@ -1,20 +1,35 @@
 # UI
 
-The Inbox, the main page, is what's on your desk, in three sections under quiet headings, Urgent, Standard and FYI, one line per item, each saying why it's there. A PR's review opens in its place (in a window 1160px or wider, with the list it came from beside it) and Esc brings the list back. Blocked holds what can't move yet, and lower down Merging your own PRs Claude is getting merged and the Archive what's done, snoozed, muted or hidden; Settings is configuration.
+A tour of the window, page by page: what's on each and what each control does.
+
+- How it looks (tokens, type, widths, breakpoints, the shots): [visual.md](visual.md).
+- What the desk decides behind each page (urgency, rules, Merging, the API): [api.md](api.md).
+- Where the code for each part lives: [AGENTS.md](../AGENTS.md) → Where a change goes, and [Files](#files) below.
+
+The pages:
+
+| Page                                    | Route               | What it holds                                            |
+| --------------------------------------- | ------------------- | -------------------------------------------------------- |
+| [Inbox](#the-inbox)                     | `#/`                | What needs you, in three sections: Urgent, Standard, FYI |
+| [A review](#the-review-view)            | `#/review/<id>`     | One PR, read and acted on in the Inbox's place           |
+| [A question](#an-agents-question)       | `#/inquiry/<id>`    | An agent's question for you                              |
+| [Blocked](#blocked)                     | `#/blocked`         | Your PRs that can't move yet                             |
+| [Merging](#merging)                     | `#/inflight`        | Your PRs handed off to your agent to merge               |
+| [Archive](#archive)                     | `#/archive`         | What's done, snoozed, muted or hidden by rules           |
+| [A review document](#a-review-document) | `#/doc/<id>`        | A review document the desk rendered                      |
+| [Settings](#settings)                   | `#/settings/<part>` | Configuration, one part at a time                        |
 
 ## Principles
 
-- **Mouse first, plain words.** Every action is a button, a link or a row's right-click menu, named for what it does. The window names no key: no chips, and no key in a label, placeholder, flash or help text; a button's tooltip names its own. Nothing is selected when a page opens. A row's call to action is tinted and fills under the pointer. Only the platform's keys work (Keys, below). None acts on an item or writes to GitHub outside the box you're typing in.
-- **Your Inbox, in three sections.** The main page is what the desk put in now, today, later and fyi, as `src/urgency.ts` places it (docs/api.md → Urgency; the page only renders it, so another client could draw the same): **Urgent** (what an urgent criterion says yes to, what your agent handed back, and a score at the Urgent threshold; agents' questions and the sessions that need you lead it), **Standard**, and **FYI** (what the rules or an automation sorted away, or a low score; a review asked of you by name and your pin never go there). Each is a heading with its count, on the rows' text, that opens and closes it like the Archive's groups; within one, the higher score first, then the desk's order (what's back to you, other people's PRs waiting on your review, issues and the rest, then your own PRs: `group` on each card). Standard and FYI each fold after `queue.cards` behind their own "n more" line; Urgent never folds. The sidebar counts Urgent and Standard, the questions and the sessions.
-- **One line per item, as a table.** The rows sit on one sheet, edge to edge across the page, with a hairline between them. Each says whether it's a PR, an issue or an agent's question (a small grey label in its own column: PR, Issue, Question), the title (15px), then quietly its repo#number (a long repo name is cut short, to a few letters at most, the number never; and a stack's place, "3/20") and, in pencil, why it's on the Inbox (`reason`: a hand-back's words, the urgent criterion's name, the automation that put it there and its why, the score's line, the criteria that said yes, or the rules' why; it gives way first in a tight table), at most one call to action naming the action, then who it's from (a person's GitHub picture before their name, round and the size of the words; none for you or a bot; "by you" a shade darker), a PR's stage and its age in columns of one width on the right. Below 760px of table the stage column goes, below 620px who it's from, before a repo or a sorted-away row's why is cut to a few letters; on your own row the stage, which says more than "by you", takes its place below 760px, and changes requested, in amber, and handed back stay below 620px. No AI gist, concerns, verdict, chips or "sorted by Claude": a click opens the review (or an issue in place), where all that is. The call to action is the desk's (`cta` on the card), a button before the age, tinted with the accent and filled under the pointer: your own open draft's **Ready for review** (red CI too: the coordinator fixes CI once it's ready) (marks it ready on GitHub at once, and it leaves your desk), **Reply** on your own PR whose only action is answering someone (opens its review with the first reply box focused: ⌘↩ sends it, Esc leaves it), or **Add reviewers** on your ready PR nobody's asked to review (opens its review with the Reviewers box focused).
-- **Agents' questions lead it.** A Claude session asks you in the desk (`desk_inquire`) beside its chat, not instead of it: when you asked it to, or about work that goes on while you're elsewhere, and your agent always does. Its question is a row at the top of the one table, one line like a PR's or an issue's: labeled **Question**, the question as its title, **Answer** as its call to action, who asks where a PR says who it's by ("by your agent"; with the stage column's room too, as a question has no stage), and its age. A right-click opens its menu: Answer, Copy link and Dismiss. A click opens its page (`#/inquiry/<id>`), made to decide from without opening anything else: who asks and when, the question as its title, the PR or issue it's about (who it's from, its stage and whether it's resolved when the desk holds it, wherever it shows it; Open its review for a PR; its ref links to GitHub; a review opened from here goes back to the question), the agent's context in paragraphs (its `code` spans and URLs kept, never markup), its links with where each goes, and the answers as one table, each with what the agent does next and its pick marked; a click on one picks it, or write your own (Send, or ⌘↵), or Dismiss; Copy link after them copies the question's link (Layout, below). Answered or dismissed, it leaves the Inbox at once while the page stays and says so (✓ Answered, with your answer); a refusal brings it back with what you wrote. Under your answer, quietly, whether the session that asked has read it: **Not picked up yet**, then **Picked up 2m ago** (`desk_inquiry` gave it your answer, or the wake that gives your agent its own did). Nothing pushes an answer to a session that stopped waiting, so until then it's owed: a line in Merging's Claude's work, and after 30 minutes unread the desk tells you once that the session has probably ended. A dismissal owes nothing and says nothing more. The desk refuses a question without enough context, without a link or the item it's about, or with an answer that doesn't say what follows, so every one arrives with that.
-- **Then your sessions that need you.** Your own Claude Code and Codex sessions on this computer that are blocked on you or stalled (the Sessions source, `src/connectors/sessions.ts`; Settings → Sessions turns it off) come right after the questions, blocked ones first, each a row like a PR's: labeled **Session**, its name as its title, quietly its folder, its call to action (**Kick** for a background session with no process, **Resume in background** for a terminal's whose process is gone, **Open** for the desktop app's or Codex's), its kind where a PR says who it's by (CLI, Background, Desktop, Codex), why it's there where a PR's stage goes ("needs permission: Bash", "asked a question", "rate limited until 14:05", "stopped mid-turn", "login expired", "no progress") and its age. A click opens it in place, like an issue: the reason and when, the one line it last said or asks, its kind, folder, branch and whether its process runs, then its actions (the first filled; a background session that runs offers **Copy attach command**, `claude attach <id>`; a terminal's that runs has none, and says to go back to it there), Done, Snooze (until tomorrow), Mute and Close. It leaves on its own once the session moves on; Done hides it until it does, and the desk refuses Kick in words while its process runs or before its rate limit resets. A right-click opens its menu, as minimal as a PR's: Done, Snooze (to a time) and its call to action. Beside a review the list has no session rows.
-- **What you do takes it off.** Approve, a comment, Ready for review, Request changes, close, merge and Hand off for merge each take the item off its list at once (done until someone else acts) and into the Archive, or Merging for a hand-off, with a spinner in the toast until GitHub has it; if GitHub refuses, it comes back, and a bubble says why. One exception: Ready for review with nobody asked to review it (none picked with it, none asked while it was a draft) isn't done, so the PR comes back as the write lands, ready, its call to action Add reviewers (in its review, Ask reviewers and the reviewers' line in place of the button), the toast ending "Nobody's asked to review it yet"; ten minutes on it tops your desk. A review stays open: in place of the button you pressed it says what you did and where it went ("✓ Approved · in Archive"), so you can read on, comment, or go on to the next with Esc. Nothing asks for a second press.
-- **Merging is the coordinator's.** A PR you handed off (Hand off for merge) never shows on the main page. A draft isn't handed off: Ready for review is yours, so it would wait on you there; nor is a ready PR nobody's asked to review, since nobody would review it (one in Merging that becomes so comes back). Nor is one that isn't approved yet: Hand off for merge shows, in its review and on its row opened in place, only once its review is approved or its repo asks for none (not while it's "review required" or "changes requested"), since your agent gets an approved PR merged and can't get one approved; one already in Merging stays there if a push dismisses its approval. The coordinator, a background Claude Code session the desk starts and wakes, gets it merged; only a PR it hands back comes back to the main page, on top.
-- **One name for the agent you talk to.** The window calls the coordinator _your agent_; coordinator stays in code, settings keys, the skill, claude.ai's session name and the technical docs, as Merging is `inflight` inside.
-- **Send talks to your agent.** A box that posts on GitHub names what it does there (Reply, Comment); only the chat and an answer to your agent say Send.
-- **Calm, informational.** No highlighter. Ink and pencil grey on the paper; colour only where it carries information: "CI failing" red, "changes requested" and "merge conflict" amber, the same words and colours in a review, and an AI review's risk (low green, medium amber, high red). Calls to action take the accent: the one to press in each place is filled (Approve or Ready for review in a review, Reply under a conversation, Send in the chat, Request changes, Hand off for merge on your own PR, a row's call to action under the pointer), a row's off the pointer is tinted. On a row, an item opened in place and in a box you write in, the rest (an opened issue's Comment, Open on GitHub, Done, Snooze, Mute and Close; Cancel; Ask your agent) are text, no box, so there the one to press is the only shape; a review's few actions (its call to action and More) are buttons. What a Merging row waits on is all ink and pencil. Sentence case, no chips or boxed badges, no all-caps, no monospace outside code. The row you opened, right-clicked or Tab-focused is a neutral fill with a 2px accent mark at its leading edge, so a tinted call to action on it still shows; Tab's focus is its own ring round the row, in `--accent-ink`; nothing is selected when a page opens.
-- **Themes are per device.** Tokens live on `:root` in `web/src/styles.css`: the light set and the dark set under `prefers-color-scheme` (System), both the inbox design kit's cool greys with a petrol accent (the mark's colour), and `[data-theme]` sets for Dark, Sand (warm paper), Slate (blue-grey dark), Solarized, Catppuccin Latte, Sentry Dusk and Sentry Dawn (gricha/sentry-codex-theme's two, from Sentry's site colours: a charcoal plum and a lavender white, Blurple on both), Gruvbox, Tokyo Night, and five more of Omarchy's by its names (Everforest, Kanagawa, Nord, Rose Pine, which is Rosé Pine Dawn, and Flexoki Light), each from its published palette. `src/themes.ts` lists them (id, label, light or dark, the paper and pencil the desktop window paints before the UI does, the diff's syntax theme); a new theme is a row there, a block in `styles.css` and its id in `index.html`'s pre-paint list, and `web/test/themes.test.ts` checks they agree and that every theme sets every token and meets its contrast targets. On a machine running Omarchy (DHH's Arch and Hyprland setup) there's one more, Omarchy, which follows the theme Omarchy has on: the desk reads it where Omarchy stages it (`~/.local/state/omarchy/current/theme` and `theme.name` since 4.x, `~/.config/omarchy/current` in 3.x) and answers `GET /api/omarchy` (`src/omarchy.ts`); a theme of the same Omarchy name (`SAME` in `src/omarchy.ts`: Catppuccin Latte, Gruvbox, Tokyo Night and the five above; Omarchy's Catppuccin is Mocha) is shown as the desk's own, any other as tokens made from its `colors.toml` (`mode`, `light.mode` or its background say light or dark; its red, yellow and green only where they are one, since here they carry information), held to the same contrast floors, set inline on `<html>` with Light's or Dark's diff colours. Omarchy writes `theme.name` last on a switch, which the desk polls each second while a window's event stream is open and sends as an `omarchy` event, so the window follows a switch without a reload, an open review's diff with it; the last one shown is kept in localStorage (`desk.omarchy`) for the pre-paint. Settings → This device picks one for this device (`web/src/theme.ts`, never a desk setting): the desktop app keeps it in its own data (the UI's origin changes when it runs from a checkout), and paints the window and its start page in that theme's paper; a browser keeps it in localStorage. `index.html` applies it before the first paint. Text colours are `--ink`, `--ink-2` and `--pencil`; `--faint` is for non-text only. `--accent` fills a call to action under `--on-accent`; `--accent-ink` on `--accent-wash` tints one. Text and button labels meet WCAG AA in every theme. Each token's role, the mark and the layout's widths are in [visual.md](visual.md); check every change in light and dark and each theme (`npm run shots`, and visual.md → Checking a design change).
+- **Mouse first, plain words.** Every action is a button, a link or a row's right-click menu, named for what it does. The window names no key: no key chips, no key in a label, placeholder or flash. A button's tooltip may name its own key. Only platform keys work ([Keys](#keys)).
+- **Nothing selected on open.** A page opens with no row selected.
+- **One line per item, as a table.** No AI gist, verdict or chips on a row. A click opens the review, where all that is.
+- **What you do takes it off.** Approve, a comment, Ready for review, Request changes, Close, Merge and Hand off for merge each take the item off its list at once. It goes to the Archive (Merging for a hand-off). A toast spins until GitHub has it. If GitHub refuses, the item comes back and a bubble says why. Nothing asks for a second press.
+- **A review stays open after you act.** In place of the button it says what you did and where the item went ("✓ Approved · in Archive"), so you can read on or press Esc.
+- **One name for the coordinator.** The window calls it _your agent_. "Coordinator" stays in code, settings keys, the skill and technical docs. Merging is `inflight` in code.
+- **Send talks to your agent.** A box that posts on GitHub says what it does there (Reply, Comment). Only the chat and an answer to an agent say Send.
+- **Calm.** Colour only where it carries information: "CI failing" red, "changes requested" and "merge conflict" amber, an AI review's risk (low green, medium amber, high red). The one control to press in each place is filled with the accent; a row's call to action is tinted and fills under the pointer. Everything else on a row or an opened item is text. Sentence case, no all-caps, no monospace outside code. Details: [visual.md → The visual system](visual.md#the-visual-system).
+- **State lives on the desk.** Pages only render what the desk sends (`QueueView`, `Card`), so the tray, MCP and another client agree.
 
 ## Layout
 
@@ -34,36 +49,159 @@ The Inbox, the main page, is what's on your desk, in three sections under quiet 
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- No top bar: the sidebar is the window's only global chrome, and each page has its own head. The sidebar, 200px: the brand row (the mark and "Inbox", the app's name, right above the Inbox page of the same name; in the macOS app the traffic lights sit in it, and it's the window's drag handle), Inbox (the main page, with how many need you), Blocked (no count: nothing there can move yet), FYI (no count: nothing there needs you), then under a hairline Merging (no count either; the tooltip has how many are merging) and the Archive. Its footer, bottom up: Settings, then **Ask your agent** (below). What's wrong with the sync is a bubble (below). Settings → GitHub's tooltip has what's left of GitHub's rate limit, and the tray's Sync now and `desk sync` sync by hand; the desk syncs on its own every 90 seconds (`github.poll_seconds`). The active item is a neutral filled pill; a review is under the page it was opened from. Between 641 and 1000px it compacts to 148px: every word kept but the wordmark's (the mark alone), Ask your agent shortened to "Ask". At 640px and below (a browser at 200 % zoom, a phone) it's one row across the top, the mark, the pages, Ask and Settings, scrolling sideways inside itself when it must, its end fading out and a thin scrollbar saying there's more; the page never scrolls sideways.
-- Each page's head (52px, sticky, the desktop app's drag handle, its controls excepted) holds only that page's own: the Inbox, Blocked and the Archive the filter, on the rows' text edge; Merging and a Settings part its name; a review, a question and a Settings view the way back (below; a view's names the part it goes back to: "‹ GitHub", "‹ Agent", "‹ Your automations").
-- The Inbox, Merging and a review use the window's width, with the page's side padding.
-- **The list beside a review.** In a window 1160px or wider, a review (or an agent's question) keeps the list it was opened from beside it, between the sidebar and the review: the same rows as the page, in its order, under its groups' headings where it has them (FYI, Blocked, the Archive; the Inbox has none), with its filter (a question's, and a review opened from one, is the Inbox). It's 320 to 360px wide, full height, and scrolls on its own; its head, as tall as the page's, has the page's name (the Inbox with its count) and the filter (Merging has none). Its rows are two lines: the title, wrapping to two at most and cut there, then one pencil line: PR, Issue or Question, repo#number (a question has who asks instead), a sorted-away row's why, who it's from (not "by you" on a row with a call to action, which says it's yours) and a PR's stage (a long repo name gives way first, then a sorted-away row's why, then the last fact, each cut at its end down to a few letters, never to a bare "…"), then, where the row has one, its call to action as accent text (Ready for review, Reply, Add reviewers; a question's Answer) and its age, the ages ending in one column; the stage's amber where the table has it. The open item's row is marked as the table's selected row is (a neutral fill and the accent's mark at its leading edge), there even when it's behind the Inbox's "n more" (that line opens beside the review), Tab's focus is its own ring, and a click or a right-click does what it does on the table (a PR's review, an issue opened in place under its row, which Esc closes first, a question's page, the row's menu, its row marked while it's open; the page's own selection stays the one you left). A review opened from the list beside another review goes back to the list's page, even when the first came from a question (opened beside the question, it goes back to the question). A small chevron on the list's right divider just under its head (on its hairline when the list starts with a row: the Inbox's, Merging's), always there, folds it to a 28px rail and back ("Hide the list", "Show the list"), kept for this device; while the chat is open in a window under 1600px it folds to the rail on its own, without changing that choice, and Show the list puts it back beside the chat until the chat closes. Folding, unfolding, resizing and the list coming and going never draw the review or the question again or fetch it again: what you typed, the files you folded and where you were stay. Moving to another review keeps the list as it was, scrolled to bring the new one's row to its middle if it's out of sight. Below 1160px there's no list and no rail: the review takes the width, with its way back in its head.
-- While a page waits on the desk, it keeps its layout: quiet bars (`--wash`, no shimmer, a slow breath) where its rows or text will be, shown only once the wait passes about 150 ms, so a quick answer never flashes them. The Inbox, FYI and Merging show rows at a row's height, Settings a part, an issue opened in place its lines. Empty, each page is one pencil line: "Nothing needs you right now.", "Nothing sorted away.", "Nothing in Merging yet: …".
-- A list page opens at its top, and back from a review or a question opened from it, where you left it.
-- A review keeps what's above its diff short: it starts 18px under its head, 16px between its parts (the header, Claude's read, what reviewers said, the actions' row), and your comment's box is one line on the actions' row. `npm run shots` checks it (`review-top`: the empty box is one line beside the buttons, and the first file starts within 386px of the window's top, where it was at 486).
-- Every page ends near the window's bottom: below its last line there's only 84px under the last row, never empty paper to scroll into. `npm run shots` checks the Inbox, a review, Merging and Settings scrolled to the bottom.
-- The main page: its first `queue.cards` rows (10) in the desk's order, then one pencil line, "12 more", which a click opens in place; it folds only when two or more would go behind it. Empty, it's one line: "Nothing needs you right now." While Claude can't log in, a bubble says so once (below), never a line above the rows.
-- **Bubbles.** What's wrong with the system is never a line in a page: it's a small stack of bubbles at the window's bottom right, on the page's column (left of the chat when it's open), in the order they matter: the desk ("The desk isn't running" with Retry, "Restarting the desk", "The desk stopped" with its last lines, "The desk is starting"), your rules ("Your rules don't load" or "Your rules have 2 errors", with Fix rules; none on Searches and rules), your agent ("Claude is paused" or "AI reviews are paused" and the desk's words, with Open Settings → Agent; none on that page), the sync ("Sync failed" and the error, with Try again, which reads "Syncing…" while it runs; "GitHub's rate limit is used up" and when syncing starts again, with nothing to press, since the desk skips every sync until it resets), then an action that failed (GitHub refused, a save refused), its words alone, which fades in 8 seconds unless the pointer's on it, the newest last, three at most. Each says what's wrong in plain words, a dot before it red when it fails and amber for a caution, with at most one fix and Dismiss. While the desk doesn't answer, only that's said: what it said last is stale. A dismissed bubble stays gone, on this device, while its condition holds (a sync failing with other words or retrying is the same condition), and comes back when it changes (logged out to failing otherwise, failing to rate limited) or once it's resolved and recurs. The page keeps room under its end, so its last rows scroll clear of them, and a toast rises above them. They come from what the desk reports (`paused`, `sync_error`, the connectors, `config_errors`), so the tray and MCP agree. What belongs to the item on screen stays on it (its CI, its AI review's failure line), and Settings keeps its own diagnostics (Agent's paused row, GitHub's login, settings.json's problems, the rules' errors).
-- A stack of PRs is one line, the one the desk sends for it (the lowest member in the most urgent place), with its place among the stack's open PRs quietly after its repo#number: "api#4154 3/6". A row on FYI in a stack says it the same way.
-- The desk's order: what the coordinator handed back; a close look or high risk on the current commit, then on an earlier one; what a cap made not urgent; your PR approved and green; the rest as the rules ordered them; someone else's PR with CI failing, which waits on its author; "Skip it" last. Now's before Today's, each in that order, within each part (above).
-- The quiet rule: an item nobody has touched for `queue.quiet_days` (14) goes to FYI, before caps. A pinned item and a review you were asked for in that time stay.
-- A click on a PR opens its review (below). On an issue it opens the item in place under its row: why it's here ("Assigned to you"), one pencil line of facts (by, how you were asked, labels, comments, who placed it), where it sits and from which board, a collapsed rule trace, its recent activity (the last 8 events in plain words), and Comment, Open on GitHub, Done (Back on the desk when cleared), Snooze, Mute and Close (last), as text under a hairline; Close, a click on its row or Esc closes it. Comment opens a comment bar at the window's bottom, across the page on its padding, the issue scrolled up so its actions stay in sight above it (⌘↵ sends it to GitHub and the issue leaves your desk until someone else acts; Esc closes it; a refusal keeps your words in it, and a refresh that moves the row doesn't touch it). Snooze, in a row's menu or on an issue opened in place (which opens the row's menu there): a time or until activity, then what the PR can wait on now (`wake_on`: CI passes, new commits, it's approved, it's ready for review, the merge conflict is fixed). A right-click on any row (the Inbox, Blocked, FYI, Merging, the Archive) opens its menu at the pointer, only what's worth a right-click: Done (Back on the desk when cleared), Snooze (to the side, the same options), Close on GitHub where it can be closed, and Copy link, with arrows, → into Snooze, Enter and Esc; everything else is a click on the row, its call to action or its review. An agent's question's row has its own: Answer, Copy link and Dismiss, what its page offers.
-- Blocked (`#/blocked`; `#/waiting` still leads here): what can't move until something else happens, as your rules put it in the `blocked` bucket (`QueueView.sections.blocked`). By the first-run rules that's your own PRs: one blocked by another PR it needs merged first (its description says "Requires …", or it's stacked on it), down the chain; someone else's blocked PR isn't here (a review asked of you is yours to give whatever its PR waits on, so it's on the Inbox as any other, its stage saying "blocked"; a rule of yours can still send one here, with `pr.blocked` and `pr.blocker_mine`); and your PRs waiting on reviewers ("waits on a review from dana and @backend"; with a merge conflict, "waits on a review from dana, and a merge conflict fix": it stays here, beside the PRs it blocks). Your PRs in Merging that another PR blocks are listed too, in their chain ("in Merging · needs …"). One group, Blocked, with its count. Rows are like FYI's, in ink: after the repo#number the why, and in the age column how long it's been blocked, or since the latest ask. It's a tree, the desk's order: a chain at a time (its rows joined by what they need), the chain that's waited longest first; in it a PR always before the PRs that need it, each indented under the last of them, 20px a level, with a quiet guide (├ └ │ in `--rule-strong`) at the title's middle, still one line a row. A row's why names what it needs directly ("needs billing#2300", "needs web#2307 and web#2308"), and the chain says once what its blocker waits on: on the blocker's own row when it's listed here, else on its first row ("needs sentry#129460, which waits on your reply to markstory, then a review from cvxluo, skaasten and 6 more"). Filtered, the rows lie flat, since some of the tree is missing. A stack is one line. What you do on a row takes it off, as on FYI; it comes back when the PR it waits on merges. A coordinator's hand-back of a PR blocked by another waits here and tops the main page once that PR merges. Empty: "Nothing is blocked."
-- The Archive's groups: what's done or resolved (open with the page), Snoozed or muted, and Hidden by rules, each a heading with its count that opens and closes it (a folded one steps back to pencil). Their rows are the same one line plus, in pencil, why it's there: a snoozed row's "snoozed until Sat 9:00" or "snoozed until CI passes", a hidden one's rule. `#/later`, the FYI page's link, opens the Inbox: its FYI section is what that page's Later and FYI were.
-- Archive (`#/archive`, last in the sidebar, under Merging): what's done, newest first: what you did that took it off your desk ("done: back when someone else acts", with when you did it as its time) and what the world dealt with (its reason, "merged", "you approved", "approved by alice", with when it resolved), the last day's that were on the main page or that you opened or resolved yourself. Back on the desk, in a row's right-click menu or More in its review, puts it back on your desk. While filtering, groups with matches open on their own and empty ones disappear. Esc clears the filter, then goes back to the Inbox.
-- Copy link (a row's menu, a review's More) copies the item's permalink, `inbox://item/owner/repo/123`, and says "Copied the link to api#4127". A click on one anywhere on the computer opens the desktop app (or brings it forward) there, as `#/item/<id>`: a PR's review, or an issue opened in place on the page that lists it, its group open; the pages' are `inbox://inbox`, `inbox://blocked`, `inbox://fyi`, `inbox://merging` and `inbox://archive`. An agent reads it, or the desk's own `http://localhost:47823/#/review/<id>`, as the item's ref (`src/links.ts`; the protocol is the packaged app's, `electron/main.ts`). An agent's question has one too, `inbox://question/<id>`: Copy link in its row's menu or on its page copies it ("Copied the link to your agent's question"), it opens the question's page (`#/inquiry/<id>`), and pasted to any agent session, `desk_inquiry` reads it: your answer, or that there's none yet, and the question whole (who asks, its context, options and links, the item it's about). Reading it by its link isn't picking your answer up: only the session that asked does that.
-- Claude sorts every item; a hard rule is a floor. Who placed it is in the opened item's facts and the rule trace, never on the row.
-- Settings: no tabs. On a Settings route the sidebar shows its parts in the pages' place, under **‹ Inbox** (back to the Inbox, ⌘1 in its tooltip; ⌘1 to ⌘5 still open the app's pages): Inbox and notifications, Agent, Your automations and This device, the core's, then under a hairline one per plugin, GitHub today (`SETTINGS_PARTS` in `web/src/view.ts`); the footer is as on every page, its Settings marked. Each part is a route, `#/settings/<part>`, drawn alone and opening at its top, its name in the page head; the sidebar's Settings and `#/settings` open the first. 760px at most. A part is one sheet, with no intro: its name is in the head. A part's settings are rows on one sheet with hairlines between them, as the Inbox's table: the label (14px) and its help in pencil on the left, the control on the sheet's right edge so controls line up row to row, a number with its unit after it ("[14] days"); a prompt or a path takes the row's width under its label, and on a sheet under 560px each control goes under its words, but a switch stays beside them. Clicking a label flips its switch. Under the control, in the row's padding so showing it moves nothing, "Saved" (green, for a moment), "Not saved: …" (red, the field kept as typed) or, on a setting you changed, **Reset to default** (the default in its tooltip). A part's tuning folds behind one quiet row at its sheet's end, **More GitHub settings**, closed when the page opens, its rows following it in the same sheet once it's open. A row that would do nothing here isn't drawn, and one that waits on another is greyed (below); `desk settings` and settings.json still set every one. When settings.json has a problem, a notice above the part names each setting by its label and key, and a problem with a folded one opens its part's More. Going back from a view to its part puts the focus on what opened it; the old links still land: `#/settings/automations` (the old Automations tab) on Your automations, `notify` on Inbox and notifications, `review` and `handoff` on GitHub, `appearance` on This device, and a view's own link on that view. Two editors open as views inside Settings, each from its row's **Edit** or name: Searches and rules (`#/settings/rules`, and `#/rules`; 1180px, so the editor and its rail sit side by side) and Your policy (`#/settings/policy`); and so does each automation, from its name on its part (`#/settings/automations/<id>`; a plugin's, `#/settings/automations/github.<id>`). A view's head is its way back to its part, named so: "‹ GitHub" (Searches and rules, GitHub's automations), "‹ Agent" (Your policy), "‹ Your automations", and so is Esc once you've left its editor; its name (18px) and one pencil line start the page; the sidebar marks its part. Esc on a part goes to the Inbox. The parts and the views stay mounted once opened, so an unsaved Rules, policy or automation draft (a new one's included) survives leaving the view or the part, for another part or the Inbox, and coming back.
-- Settings → GitHub, the first plugin's part: its account, its settings, Searches and rules, then under the heading **Automations** a sheet of the automations it comes with (`src/connectors/github-automations.ts`): each row its name (its view), its one line of what it does and its last run, as one of yours ("Your ready PR waited a workday with nobody asked by name: it comes to your desk so you pick a reviewer. · ran 40m ago, put 1 on your desk"), **Run now** while it's on and its switch, the only thing of it you change. Its view is an automation's (below), with **Copy to your automations** where Edit would be: that makes one of yours from its definition, off, and opens its view to edit; there's no Delete. Its first row is its status, "Signed in as @you" (or "Not signed in") over "Through gh. The desk writes to GitHub only when you click a button that says so.", or over the last sync's error in red, with "Run `gh auth login` in a terminal, then sync." when a login would fix it (the row then says "GitHub doesn't accept your login", who you were signed in as in its tooltip); your teams and what's left of GitHub's rate limit are in its tooltip. Then its rows: **Searches and rules** (its help where each org's items start, as the desk works it out from your spaces, "acme goes to Work, everything else to Personal." (the space that takes the orgs no other names, whatever it's called), or the rules' error count in red when the saved file has errors), when someone else's approval archives a review request, and Claude's reviews ahead of time (the AI review); then More: the repos that count as yours, more bots, the close-collaborator threshold, the sync interval, and the prompts `desk prompt <ref>` prints for someone else's PR, yours and an issue. Searches and rules' view: one line, then the TOML editor with preview (its file's path quietly in its foot, its keys in Save's tooltip), as tall as the window leaves room for, its code wrapping so it never scrolls sideways; its foot (Save, filled while there are changes to save, Preview changes, Revert, the path, Unsaved changes and where the cursor is) stays on the window's bottom edge while the editor runs past it, Esc in the editor goes onto Save (or Preview changes), and a click on an error lands on its line however the lines above it wrap, selected in the theme's accent. In a narrow window, where the errors are under the editor, the first of them is also in red in the editor's foot, so what's wrong shows on Preview changes and stays beside its line. Beside it (under it in a narrow window), under **Rules Claude can't sort below**, the saved config's hard and final rules in board order, in plain lines: "PRs to review (Personal) → Now: someone asked you directly" over its `when` in pencil, a final one marked "(final)", the space named when two boards share a name; with none, one line says Claude can sort anything off your desk.
-- Settings → Agent: the agent first, as a choice (`agent.harness`: Claude Code; Codex is listed, greyed, "can't sort or review yet", since only Claude Code does the desk's sorting, reviews and your agent today); under it its status rows, only while something needs you, at most two: "Claude Code isn't connected to the desk" while it lacks the desk's MCP tools or skill, with **Connect Claude Code** (the page's one filled button; the commands it runs in its tooltip; a failure in red under the label), or "The desk's skill is out of date" with **Update the skill**, or "Claude Code has another skill or server named inbox" over what holds the name and where it points (the status's `taken`), with **Connect Claude Code** for once you've moved it; and when AI reviews are paused after failures in a row (an expired login), "AI reviews are paused" over why and the next try in ink ("… Next try in 30m."), once, instead of on every PR; when Claude's sorting fails for the same reason (a lapsed login stops both), "Claude is paused" says it for both, "Nothing is sorted or reviewed until then", with the sooner of their next tries, and Your policy's help doesn't say it again. With nothing to say there's no status row. Then its rows: **Sort my desk with Claude**; under it **Your policy** (its help says while the starter is in effect, and the judge's last failure in ink); **Run your agent** off stops it (the coordinator), nothing wakes it, and no Ask your agent shows; **Let your agent run without asking** (on by default; its row only while Run your agent is on) runs it in bypass permissions mode (its deny list still holds), and changing it restarts it in the new mode. Every agent is your own `claude` from your PATH: there's no agent, command or model to set. Behind **More Agent settings**: **Decision model key**, a password field (an OpenRouter key; its help says what then goes to OpenRouter, each item's title, labels, people, reviewers, state and the start of its description, and that with none Claude answers; it's saved only from this page, in secrets.json; once saved it shows dots, never the key, pasting over them replaces it and Reset to default clears it), and **Decision model**, the model's id. Your policy's view: one line (how you want Claude to sort your desk), then a plain text editor in the UI font across the column, as tall as what's in it until the window runs out of room, Save (⌘S; filled while there are changes) and Revert as an action line with the file's path, like Rules', then quiet lines: while policy.md is empty the editor holds the starter and one line says "This is the starter policy. Claude sorts by it until you change it." (editing and saving makes it yours; clearing it brings the starter back), and the judge's status (a failure in ink, not red) ("23 items sorted by Claude. 7 of 300 this hour.", or why it's off, or its last failure and the next try). If the file changed since you opened it, Save keeps your text and says so. Then a one-row sheet: **Let Claude sort up to** so many items an hour.
-- Settings → Inbox and notifications: when untouched items move to FYI, how many items Standard and FYI show before their fold, the scores from which an item is urgent (8) and FYI (3), notifications and quiet hours: two times (in this computer's 12- or 24-hour clock) and a switch at the row's right edge, in line with the others. Off saves none (`""`), its times greyed but kept (19:00 and 09:00 until you've had others); on saves them as `19:00-09:00`, as before; a time saves once you leave its field. The whole row greys while notifications are off.
-- Settings → Your automations (`#/settings/automations`): a row each on its one sheet, with no heading (the head names it), its name a link to its view, its help what starts it in words, as the desk reads it (a schedule: "Weekdays at 9:00", "Mon, Tue and Wed at 8:00", "Weekdays, every hour", one it can't read as written, times as the snooze menu writes them; or its events: "When CI changes or someone comments"), a schedule's next run, or "off", and its last run ("ran 2h ago, put 2 on your desk", "ran 2h ago, sorted 3 to FYI, snoozed 1"; only "failed 2h ago: …" or what it couldn't do, "couldn't add 1", "refused 2", in red), or, while a question's model can't answer, "waiting: …" with why in red in its place, and on its right **Run now** while it's on ("Running…" while it runs) and its switch (on: it runs on its schedule, or when its events land), in line with the other parts' switches and beside its words on a narrow sheet too. One an agent wrote or changed reads "An agent wrote it; read it before it runs · Mon and Thu at 17:30" and has a tinted **Review**, which opens its view, and no switch: it can't run before its instruction has been on screen. The sheet ends with **New automation**, which opens the editor under the sheet; with none yet, its one row says "None yet" over "Ask an agent to write one, or write one yourself." Its name opens its view: its name (18px), what starts it and a schedule's next run (or "on", "off", or for one an agent wrote "an agent wrote it: read it before you turn it on."), its instruction quoted (a rule has none), then what it is in a few plain lines, a pencil label and its words: **Only when**, its check as written, in the code font, when it has one; **Decides**, "A rule, with no model: snooze until CI passes, saying “CI is red: back when it passes”", "A question: Claude answers, without tools" (with a decision model's key set, "A question: typesafe/jev-1.14 answers, through OpenRouter") or "An agent: your Claude Code, with read-only tools"; and, but for a rule, **May**, "Add to your desk, sort to FYI and snooze"; while its question's model can't answer, a line in red says it's waiting, why, when it asks again and that nothing was spent; then **Run now** (not for a rule or a question with events and no check: there's nothing to run it on), **Edit** and **Turn off** or **Turn on** (for one an agent wrote, a filled **Turn on** and **Edit**: it can't run before you've read it), Edit opening the editor in their place; then its runs on a sheet: when and how each ran ("on schedule", "run now", "on an event") and what it did by verb ("put 2 on your desk, sorted 3 to FYI, snoozed 1"; what it couldn't, "couldn't add 1, refused 2", in red), the agent's summary (text only), each item it listed with what came of it (Added, Sorted to FYI, Hidden, Snoozed until CI passes, Marked done, Muted, Already on your desk, You'd dealt with it, Nobody needs it now, Held where it is, and in red Not allowed and Couldn't add) and its why, or for one held, refused or failed the reason, linked when it's a PR or issue, and **Copy resume command**, which copies `cd <the desk's home>/automations && claude --resume <id>` (in its tooltip, quoted when the path has a space) for what it did. Deleting one there goes back to Your automations; a link to one that isn't there says so. **New automation** or Edit in a view opens the editor, each field a label over its control and one line of help: **Name**; **Runs**, a choice of On a schedule (with its words beside it: `weekdays 09:00`) or When something happens (with the event log's kinds to tick, in as many columns as fit: "CI changes", "A review is asked of you or your team", "Someone comments" …), each keeping what it held when you switch to the other and back; **Only when**, the check, in the code font (a rule or a question on a schedule needs one, and its help says so in ink until it has it); **How it decides**, a choice of A rule, Ask a model (its help says who answers: "Claude answers, without tools.", or the decision model's id "through OpenRouter" once its key is set in Settings → Agent) or An agent with tools; then for a rule **Then**, its action as a choice (Add to your desk, Sort to Today, Sort to Later, Sort to FYI, Hide, Snooze, Mark done, Mute), for a snooze "until" and a second choice (tomorrow, an hour from then, 3 hours from then, Monday, new activity, CI passes, new commits, it's approved, it's ready for review, the merge conflict is fixed), and the why the item shows; for the other two **Instruction** and **It may**, the same eight as ticks, at least one; then Save (⌘S; off until what it has makes an automation), Cancel (Esc), and in a view Delete (no confirmation; it stops a run in progress). The ticks are the platform's own, in ink. A new one's id is its name's, made free with -2, -3… so it never replaces one you have; a switch leaves an open editor as it is.
-- Settings → Urgency (`#/settings/criteria`): your criteria on one sheet, each its name (a click opens its editor under the sheet: name, its question, its rule, and whether a yes is urgent; Save, Cancel, Delete), a line of what it says yes to, that a yes is urgent, how many Inbox items it says yes to now and who wrote it, and its switch; New criterion at the sheet's foot; then under From GitHub the ones GitHub comes with, which you only switch; under the sheets, quietly, who last scored your Inbox. A question waiting on its model says why on the sheet's first row.
-- Settings → This device: first one Theme select (System, Omarchy where the desk reads an Omarchy theme or it's already picked, then the light themes and the dark ones, each under its heading; with Omarchy offered its help adds the theme it has on, "(now Tokyo Night)") for this device; it isn't a desk setting, so it isn't in `settings.json` and another window or device keeps its own. Then, only in the desktop app, its own: the shortcut that shows or hides the window (its field, **Record**, whose tooltip names the keys it takes, and **Turn off** while one is set; its help is the app's word on it: "Works from any app.", "Off.", or in red why it couldn't take it, "Couldn't use Control+Alt+D: another app has this shortcut."; on a Mac the field, the help and a recorded shortcut use its words, Option and Command, "Control+Option+D", which the app takes as well; until the app answers, "From any app, while the desktop app runs."), Open at login, the menu bar's count (macOS only: the other trays have no count beside the icon) and Run from a checkout. In a browser the part is the theme alone; the app's window or `desk settings` sets the rest.
+Widths, breakpoints and spacing are in [visual.md → The layout](visual.md#the-layout). This section covers behaviour.
+
+### The sidebar
+
+The window's only global chrome. There's no top bar.
+
+- **Brand row**: the mark and "Inbox". In the macOS app it holds the traffic lights and is the window's drag handle.
+- **Pages**: Inbox (with its count), Blocked, then under a hairline Merging and Archive.
+  - Inbox counts Urgent, Standard, agents' questions and sessions that need you.
+  - Blocked, Merging and Archive have no count. Merging's tooltip says how many are merging.
+  - A review is marked under the page it was opened from; a question under the Inbox.
+  - Clicking Inbox while on it scrolls to the top.
+- **Footer**, bottom up: Settings, then the [update line](#the-update-line) when there's a newer Inbox, then [Ask your agent](#asking-your-agent).
+- **In Settings**, the pages give way to Settings' parts, under **‹ Inbox** ([Settings](#settings)).
+- **Narrow windows**: the sidebar compacts (the mark alone, "Ask" for Ask your agent), then becomes one row across the top that scrolls sideways inside itself.
+
+### A page's head
+
+Sticky, and the desktop app's drag handle. It holds only the page's own controls:
+
+- Inbox, Blocked, Archive: the filter. In the filter, Esc clears it; Enter or ↓ leaves it.
+- Merging and a Settings part: the page's name.
+- A review, a question, a Settings view: the way back ("‹ Inbox", "‹ Blocked", "‹ Merging", "‹ Archive", "‹ GitHub", "‹ Agent", "‹ Your automations"). Its tooltip names Esc, and for a review or question, ⌘[ and ⌘].
+
+### The list beside a review
+
+In a window 1160px or wider, a review or a question keeps the list it came from beside it.
+
+- Same rows, order, group headings and filter as that page. A question's list is the Inbox.
+- Two lines a row: the title (two lines at most), then one pencil line: PR, Issue or Question, repo#number, a sorted-away row's why, who it's from, the stage, the call to action as accent text, and the age.
+- The open item's row is marked, even when it's behind a "n more" fold (the fold opens).
+- A click or right-click does what it does on the full page. An issue opens in place under its row; Esc closes it first.
+- A review opened from the list goes back to the list's page. One opened beside a question goes back to the question.
+- A chevron on the list's divider folds it to a rail ("Hide the list", "Show the list"). The choice is kept per device.
+- While the chat is open in a window under 1600px, the list folds to its rail on its own without changing that choice.
+- Folding, resizing or the list appearing never redraws or refetches the review. Your typing, folded files and scroll stay.
+- Moving to another review scrolls its row into the middle if it's out of sight.
+- Below 1160px there's no list and no rail.
+
+### Loading, empty, scroll
+
+- While a page waits on the desk, quiet bars stand where its rows or text will be. They show only after about 150 ms, so a quick answer never flashes them.
+- An empty page is one pencil line: "Nothing needs you right now.", "Nothing is blocked.", "Nothing in Merging yet: …", "Nothing here yet: …". With a filter: "No matches."
+- A list page opens at its top. Back from a review or a question, it returns where you left it.
+- Every page ends a little below its last row: no empty paper to scroll into.
+
+## The Inbox
+
+The main page: what the desk put on your desk, in three sections. `src/urgency.ts` places and orders them ([api.md → Urgency](api.md#urgency)); the page only draws `QueueView.inbox`.
+
+- **Urgent**: what an urgent criterion says yes to (for example "Ready to merge": your own approved, green PR), what your agent handed back, and a score at the Urgent threshold. Agents' questions and sessions that need you lead it.
+- **Standard**: the rest.
+- **FYI**: what rules or an automation sorted away, or a low score. A review asked of you by name and a pinned item never go here.
+
+Each section is a heading with its count; a click opens or closes it. Within a section: higher score first, then the desk's order (`group` on each card): hand-backs, other people's PRs waiting on your review, issues and the rest, then your own PRs.
+
+Standard and FYI fold after `queue.cards` rows (10) behind one "n more" line; a click opens it. They fold only when two or more would hide. Urgent never folds.
+
+The quiet rule: an item nobody has touched for `queue.quiet_days` (14) moves to FYI, unless pinned or a review you were asked for in that time.
+
+### A row
+
+One line, columns lining up row to row:
+
+| Part           | What it shows                                                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Label          | PR, Issue, Question or Session. A bolt by "PR" marks someone else's small PR its AI review calls low risk (`Card.quick`).                  |
+| Title          | 15px.                                                                                                                                      |
+| Ref            | repo#number. A long repo name is cut short; the number never is. A stack's place follows ("3/6").                                          |
+| Why            | In pencil, `Card.reason`: a hand-back's words, the urgent criterion's name, an automation and its why, the score's line or the rules' why. |
+| Call to action | At most one ([below](#calls-to-action)).                                                                                                   |
+| By             | Who it's from, with their GitHub picture (none for you or a bot). "by you" a shade darker.                                                 |
+| Stage          | A PR's stage. On your own PR, "changes requested" is amber.                                                                                |
+| Age            | How long it's waited.                                                                                                                      |
+
+In a narrow table the stage column goes first, then who it's from. On your own row the stage takes the place of "by you". Who placed an item (Claude or a rule) is never on the row; it's in the opened item's facts and rule trace.
+
+A stack of PRs is one row: the lowest open member, in the most urgent place, with its place in the stack ("api#4154 3/6").
+
+### Calls to action
+
+The desk picks it (`cta` on the card). A tinted button before the age, filled under the pointer:
+
+- **Ready for review** on your own open draft, even with red CI (your agent fixes CI once it's ready). Marks it ready on GitHub at once and it leaves your desk.
+- **Reply** on your PR whose only action is answering someone. Opens its review with the first reply box focused.
+- **Add reviewers** on your ready PR nobody's asked to review. Opens its review with the Reviewers box focused.
+- **Merge** on your own PR that's approved, green and mergeable. Merges it on GitHub with the repo's merge method in one press, and it goes to the Archive.
+
+Ready for review with nobody asked isn't done: the PR comes back ready, with Add reviewers as its call to action, and the toast ends "Nobody's asked to review it yet". Ten minutes later it tops your desk.
+
+### Clicking a row
+
+- A PR opens its [review](#the-review-view).
+- An issue or a session opens in place under its row.
+- A question opens its [page](#an-agents-question).
+
+### An issue opened in place
+
+- Why it's here ("Assigned to you").
+- One pencil line of facts: by, how you were asked, labels, comments, who placed it.
+- Where it sits and from which board, a collapsed rule trace, and its last 8 events in plain words.
+- Actions as text under a hairline: **Comment**, **Open on GitHub**, **Done** (or **Back on the desk**), **Snooze**, **Mute**, **Close**.
+- Close, a click on its row, or Esc closes it.
+
+**Comment** opens a comment bar at the window's bottom. ⌘↵ sends it to GitHub and the issue leaves your desk until someone else acts. Esc closes the bar. A refusal keeps your words. A refresh that moves the row doesn't touch it.
+
+### A row's menu
+
+Right-click any row (Inbox, Blocked, Merging, Archive) for a menu at the pointer:
+
+- **Done** (or **Back on the desk** once cleared).
+- **Snooze**, opening to the side: a time, until activity, or what the PR can wait on now (`wake_on`: CI passes, new commits, it's approved, it's ready for review, the merge conflict is fixed).
+- **Close on GitHub**, where it can be closed.
+- **Copy link**.
+
+On Merging the menu is **Back to the desk** and **Copy link**. A question's is **Answer**, **Copy link**, **Dismiss**. A session's is **Done**, **Snooze** and its call to action. Arrows move, → opens Snooze, Enter picks, Esc closes.
+
+### Agents' questions
+
+A Claude Code session asks you in the desk (`desk_inquire`) beside its chat: when you asked it to, or about work going on while you're away. Your agent always asks here.
+
+A question is a row at the top of Urgent: labeled **Question**, the question as its title, **Answer** as its call to action, "by" who asks ("by your agent", or the session's name), and its age. The desk refuses a question without enough context, a link or item, or answers that say what follows.
+
+### Sessions that need you
+
+Your own Claude Code and Codex sessions on this computer that are blocked on you or stalled (`src/connectors/sessions.ts`; Settings → Sessions turns them off). They follow the questions, blocked ones first.
+
+- **Row**: labeled **Session**, its name, its folder, its call to action, its kind where "by" goes (CLI, Background, Desktop, Codex), why it's here where the stage goes ("needs permission: Bash", "asked a question", "rate limited until 14:05", "stopped mid-turn", "login expired", "no progress"), and its age.
+- **Calls to action**: **Kick** (a background session with no process), **Resume in background** (a terminal's whose process is gone), **Open** (the desktop app's or Codex's).
+- **Opened in place**: the reason and when, the last line it said or asked, its kind, folder, branch, and whether its process runs. Then its actions (a running background session offers **Copy attach command**, `claude attach <id>`; a running terminal one has none and says to go back to it), **Done**, **Snooze** (until tomorrow), **Mute**, **Close**.
+- It leaves on its own once the session moves on. Done hides it until then.
+- The desk refuses Kick, in words, while the process runs or before a rate limit resets.
+- No session rows in the list beside a review.
+
+## An agent's question
+
+`#/inquiry/<id>`. Made to decide from without opening anything else.
+
+- Who asks and when, and the question as its title.
+- The PR or issue it's about: who it's from, its stage, whether it's resolved. **Open its review** for a PR; its ref links to GitHub. A review opened from here goes back to the question.
+- The agent's context as paragraphs (`code` spans and URLs kept, never markup), and its links with where each goes.
+- The answers as a table, each with what the agent does next and its pick marked. A click picks one.
+- Or write your own: **Send** (or ⌘↵).
+- **Dismiss** leaves it unanswered; the agent decides itself.
+- **Copy link** copies the question's link ([Links](#links)).
+
+Once answered or dismissed it leaves the Inbox at once. The page stays and says so ("✓ Answered", with your answer). If the desk refuses, your words come back.
+
+Under your answer: **Not picked up yet**, then **Picked up 2m ago** once the asking session reads it (`desk_inquiry`, or your agent's wake). Nothing pushes an answer to a session that stopped waiting. Until it's read, it's a line in Merging's [Claude's work](#claudes-work); after 30 minutes unread the desk tells you once that the session has probably ended. A dismissal owes nothing.
 
 ## The review view
 
-`#/review/<id>`, Linear-style: the PR is read and approved in the desk, in the Inbox's place, with the sidebar still there and, in a wide window, the list it was opened from beside it (Layout, above). The diff takes the page's width; a foldable sidebar on the right holds the PR's state, a line each (its stack, its checks, its reviewers, what stands in its merge), then its files.
+`#/review/<id>`: a PR read and acted on in the desk, in the Inbox's place. The sidebar stays, and in a wide window so does the list it came from. The diff takes the page's width; a foldable sidebar on the right holds the PR's state and files.
 
 ```
   api#4154  3/6  by priya                                                                      [▯▮]
@@ -91,85 +229,467 @@ The Inbox, the main page, is what's on your desk, in three sections under quiet 
   Not worth reviewing · 1 file
 ```
 
-- Opening it never waits: the review draws at once from its row's card (the header with CI, the review state and size, and the AI review's read when the row carries one) and quiet bars where the conversation, the actions, the diff and the sidebar's files will be, in their places, so nothing moves when the rest lands. Resting on a PR's row (the pointer, 150 ms) fetches its review ahead (`?ahead=1`, which starts no AI review or read), and the desk fetches the main page's diffs ahead after each sync, so opening one is usually instant. A big diff draws its first files with the page and the rest a chunk at a time.
-- Header: the ref, a stack's place ("3/6", as on the main page), author (their picture before the name, a touch bigger than a row's; "by you" on yours), title, then one line: why it's on the desk (the row doesn't say; a fact it already says is left out), CI, the review state ("approved by marco"), a merge conflict (only while it's open), size. Where the PR has checks, the CI fact ("CI failing") is a button in its own words and colour: a click opens the sidebar, if it's folded, with the checks listed. Your PR in Merging says "Merging", with what it waits on and the coordinator's latest note and its age under it, in pencil, as Merging does. Your own open draft offers **Ready for review** first, as its row does, and no hand-off. One icon button at the review's top right shows the sidebar and hides it (its tooltip says which, and what it holds: "Show checks and files", "Hide the stack, checks and files"); it stays there, under the page's head, however far the review is scrolled. Its actions go in Merging's order, Back to desk last. Esc and the back link in the review's head ("‹ Inbox", "‹ Blocked", "‹ FYI", "‹ Merging" or "‹ Archive") go back to the page it was opened from. Problems are coloured words, and pencil at regular weight once the PR is sorted away, resolved, or calm in Merging. A wrapped line starts with a fact, never a "·", and a fact that wraps carries on after its "·", not under it.
-- A resolved PR (a click on a row in the Archive, or one you just approved) says so in one pencil line under the facts, "Resolved: merged by li-wei · 2h" (the reason, who merged or closed it, and how long ago, "just now" in the first minute), in place of the why.
-- What reviewers said, under the AI review (with none, nothing): "Waiting on your reply" and how many, then each one as a margin note: who (their picture before the name, as everywhere a person is named; none for a bot), where (file:line, "outdated", or "on the PR") and when in pencil, Claude's one-line gist in ink, its take with the call in semibold ("**Valid concern:** …", "**Only you can answer:** …"), the original words behind "What azulus wrote", and an empty reply box: the desk never writes your answer for you. **Reply** (or ⌘↩) posts it on GitHub, as you. Until Claude has read one, the gist is the comment's first line and a pencil line says "Claude is reading it."; a failure says why in ink. Claude's read, the original words and the quiet lines draw `code` as code, never as HTML, and a URL in them stays text; the original words keep their lines and indents, and a ``` block in them stays as typed. Everything not waiting on you is one quiet line, "3 more conversations not waiting on you", that opens to a line each (who started it, where, resolved, the last comment's start), each opening to its comments.
-- The AI review, with no heading, right under the header's facts and at their size: its verdict leads it (only "Look closely" is a step larger, in ink and semibold; "Skim it" in ink-2 and "Skip it" in pencil), then its risk in colour with a three-step meter (low green, medium amber, high red), then "on an earlier commit" in pencil when it is; the model and time are in the verdict's tooltip. Then the summary's first sentence, in ink. A chevron in the margin before the verdict, as on a file's header, folds the rest: a click on it or on the verdict opens the rest under the first sentence, a step quieter, and every PR opens folded; a summary of one sentence has no chevron. The summary, "Since your review" and the concerns are drawn as the agent chat draws an agent's words (`code` as code, **bold**, lists), never as HTML, and a URL in them stays text, never a link: the PR's author can steer what Claude writes. Each concern is also a note in the code, so the concerns are listed (as margin notes) only when no notes can sit there: none, or a review of an earlier commit. While it's being written, a quiet line says so ("Claude is reviewing it. The notes land in the code below in a minute or two."), and past its first two minutes or on another try, how long and which ("Claude is reviewing it, 4 minutes so far, try 2 of 3."); it says so exactly while its job runs, never for a review nobody runs. A failure shows its reason in ink, not red (it's about the agent, not the PR), with a command in it set as code (`claude auth login`): "The AI review failed: … Claude tries again in 2 minutes." while its next try waits, "The AI review failed 3 times: …" once it's given up, kept across a restart, and **Try again** asks again. When AI reviews are paused after failures in a row, a PR that wasn't tried says that. An open PR with none says "No AI review yet. **Ask Claude for one**"; a merged or closed PR with none says "No AI review."; your own PR, open or not, shows the section only once a review exists or is being written, and until one exists the first paragraph of its description sits under its title, saying what it's about. A re-review adds "**Since your review:** …" under the summary, never folded. A review of an earlier commit stays, marked "on an earlier commit" beside its risk, and its notes aren't placed in the new code.
-- The diff in the desk's reading order (`ReviewView.order`), the page's width: what Claude ranked first, a look before a skim, each a hunk under its file's name with its level ("Look" in ink, "Skim" a step quieter) and Claude's few words why; then what Claude didn't read ("Not read", and whether the PR or its file was too long); then what Claude left out, each "Skip" with no why, in view: its answer comes from a diff anyone can write, so it can't hide code; then one pencil line, "Not worth reviewing · 2 files", over what the desk itself folds (lockfiles and generated files, files with no text diff), which a click opens in place. A file's hunks next to each other at one level read as one. A review without a ranking (none yet, older, or for an earlier commit) keeps file order, and a file with no text diff says so in its header. A PR with no changed files says "No files changed."
-- Walk-through and By importance: when this commit's AI review has steps (`order.steps`), two words above the diff, drawn as tabs, switch between two views of the same diff, kept per device (`desk.review.view` in localStorage), Walk-through the first time; otherwise there's no switch and the page is as above. By importance is the order above, unchanged. Walk-through reads the diff as Claude would explain it: each step a heading in the diff's column ("1 of 4" in pencil, its title), its sentence or two, then "**Check:** …" when it says what to verify, all drawn as text (`code` as code, never HTML), no colour and no box; under it the same file sections for its hunks; at its foot a quiet "Next: <title>" that goes to the next step, the last one reading "End of the walk-through". The hunks no step covers follow under "Not in the walk-through · 5 hunks in 3 files", file by file, each with its own level, never folded; then the desk's own fold, as in By importance. Everything else on the page (the head, the AI review, conversations, your comment, Approve, notes at their lines, threads, folding a file) is the same in both, and in the sidebar the steps take the files' place (the number, the title, a dot when a step has notes, and "Not in the walk-through" with its count; the step you're in follows the scroll).
-- The sidebar (its toggle shows and hides it, and a click on the facts' CI opens it at the checks, for this device, kept in localStorage; it stays in view while the review scrolls, scrolling inside itself when it's taller than the window, its toggle's row kept at its top; 280px beside the diff when the page's column is 1000px or wider, which the list beside the review and the chat narrow as the window does (a container query on the column, `pane`), over the diff's right edge when it's narrower, where it starts folded and its toggle opens it without changing the kept choice, so at 1280px with the list open the files are behind the toggle and folding the list puts them back beside the diff; while your chat with your agent is open it takes the sidebar's place, and the toggle puts the sidebar back and closes the chat). Its toggle is one icon button (a window with its side pane marked, in the sidebar's line icons' style, on the sheet with a hairline so it reads over any line of the diff), in the sidebar's top right corner while it's beside the diff and over the diff's corner while it's hidden or lies over the diff; there a file's sticky name keeps its size clear of it. Top to bottom:
-  - The stack, when the PR is in one: "Stack on main", then its open PRs bottom first (the line through this PR; other branches at a fork under "Other branches"; merged and closed ones are left out, so "3/6" is the third row), each ○, its number and title, and only what's news: CI failing ✗ in red, changes requested ± in amber, approved ✓. The PR on screen wears the cursor's fill and ring; the words, a draft's included, are in each one's tooltip. A long stack shows the PR below this one, this one and the next two, then one quiet line, "16 more", that opens the rest, so the files stay in view. A click opens that one's review.
-  - The checks, when any ran on its head commit: one line that says where CI stands ("CI passing · 14 checks", "2 failing of 14 checks", "3 running of 14 checks", a cancelled one counted the same way), its words starting where the other headings do and a chevron at the panel's edge. It's red while a check that counts is failing, as "CI failing" is, and pencil on a PR that's sorted away or resolved, as the facts are. A click opens it to every check, what's wrong first (failing, cancelled, running, passing, skipped, each by name): the check's name, its state in words, and the row is a link to its page (a check run's on GitHub; a commit status's wherever it points, which its tooltip says). A failing check the base branch doesn't require reads "failing, not required", in pencil; when none of the failing ones is required the line says so ("1 failing (not required) of 14 checks") and isn't red. Every PR opens with them closed. The desk asks GitHub for them when the review opens and keeps them until it next reads the PR, so they're never older than the facts line; if GitHub won't give them, the part says why ("Couldn't load the checks: …").
-  - The files, each once in reading order with its level (Look, Skim, Not read, Skip) and a dot when it has notes; a click goes to where reading reaches it. A long folder gives way from its start ("…versions/0008_cache.py"), as in a file's header, so each file's name stays whole right after it. The file you're reading follows the scroll and wears the cursor's fill and ring.
-  - The reviewers, always: one line of where the review stands, as the desk works it out ("Approved by marco · waiting on sam and @backend", "Changes requested by kofi", "Waiting on you", "Comments from kai", "Nobody's asked"), amber while someone asks for changes, as "changes requested" is. A click opens it to each person or team with a standing, who holds it first: changes requested, asked (to review it, and it waits on them), approved, commented. A person has their picture before the name; you are "you", a team is its @slug, neither with a picture; bots and the PR's author are left out; someone's approval stands while they're asked again, and an approval without a say on the repo reads as a comment, as the stage has it.
-  - The merge, only when something stands in its way: "Merge conflict with main", in amber. The desk asks GitHub whether a PR merges only of your own PRs, so someone else's shows nothing here; it doesn't know when a branch is merely behind its base.
-- Diffs: `@pierre/diffs`, unified, word-level changes, wrapped lines, Shiki highlighting in the device's theme's syntax colours (`diff` in `src/themes.ts`: copies of Pierre's light for Light and Sand and Shiki's Solarized Light and Catppuccin Latte (darker), Pierre's dark for Dark and Slate (its greys, functions and types lighter), Pierre's dark in Sentry's syntax colours for Sentry Dusk, Shiki's GitHub Light Default for Sentry Dawn (its two near-white colours its text), Shiki's Gruvbox (its broken code's red brighter), Shiki's Tokyo Night (its comments lighter), Shiki's Everforest Dark and Kanagawa Wave as they are, Shiki's Nord (its comments lighter) and Rosé Pine Dawn (darker), and GitHub Light Default in Flexoki's accents for Flexoki Light, so their code reads on the sheet and a changed line (`web/src/diffThemes.ts`); System follows the computer), on `--sheet` in a hairline frame. Changed lines are tinted with the theme's own `--green` and `--red`, or, where that mix comes out grey or one louder than the other (Sentry Dusk, Gruvbox, Tokyo Night, Solarized), with a tint solved for that theme in `styles.css` (Pierre's override is what it mixes into the sheet, not the band; Dark's and Slate's changed words' boxes are calmer, so the code on them reads), and unchanged lines fold into a full-width band on `--paper` ("14 unmodified lines"). Its CSS variables take the app's fonts (JetBrains Mono for code). Each file's name sticks under the review's head while you read it.
-- AI notes are margin notes under the line they explain: a thin rule, the note in the UI font, its `code` drawn as code and a URL as text, as in the AI review. Notes about a whole file sit above its diff.
-- Review threads sit under the line they're on, after any AI note there, as the same margin notes: each comment's author, with their picture, and age, then its text (as the conversation draws the original words: `code` as code, never HTML, a URL as text), then Reply and On GitHub. A resolved one is one pencil line ("Resolved · priya: …") that opens. Outdated threads are only in the conversation above.
-- Commenting on a line: hovering a line shows a `+` by its number; a click opens a box under the line, after anything already on it (a drag down the numbers takes the range, within one hunk, marked in a quiet grey while you drag), and ⌘↩ or Comment posts it on GitHub at once, as you: one comment, as GitHub's "Add single comment", on the commit whose diff you picked the line in, so a push while you write doesn't move it. Esc in an empty box closes it; with words in it, Esc leaves the box and keeps them, and another `+` (or Reply) takes you back to them instead, opening their file if it's folded, so nothing you type can slip out of the box and approve; an empty box moves to the line you pick. Leaving the review keeps unsent words, in this window, for when you're back on it. While a box you're typing in is drawn again (a refresh regrouped its file), keys are swallowed. While one sends, the box is read-only and `+` on that PR waits, even in the review opened again; if GitHub refuses it, it says so (even after you've left) and the words come back to that PR's review. A comment pins to the commit the diff on screen is at, which can be newer than the desk's last sync. A box whose line or thread a push took off the diff moves above the diff, still yours to send or cancel. Reply on a thread opens the same box right under it (a resolved one stays open). What you sent shows in place, with a link, until the refreshed conversation has it. It's part of reviewing, not its end: the PR stays on your desk and Approve and Request changes stay. **Ask your agent**, quiet text after Cancel, opens your chat with your agent about those lines instead: an empty box closes, and words you typed stay in the box, unsent. Nothing moves between the two boxes. A thread's Reply box has the same, about that thread.
-- Folding files: a file's header (its chevron, level and name) folds its diff to the header, and every part of that file with it, and the file stays in view. Folded files in a row read as one list. A different PR starts with every file open.
-- Approve: a green button, as Hand off for merge is on yours; a click sends it at once, and the PR leaves your desk (above). It shows only on someone else's open PR; it's disabled, with the reason as its tooltip, on one you already approved at this commit. Under what reviewers said, on the actions' row and after them (Approve or the PR's own call to action, Hand off for merge, More), an open PR has a box for your comment on it: one line, as tall as the buttons ("Comment on api#4127…"), so the top of the review stays short and the diff starts high. It grows with what you write, as tall as the words need, while the buttons stay where they were at the row's top, and **Comment** shows at its foot once it has words; the cursor alone doesn't resize it, so nothing under it jumps when you click in or away. Comment (or ⌘↩) sends it, and the PR leaves your desk until someone answers; Esc leaves the box with your words in it (a refusal keeps your words in the box; with words in it, Approve, Hand off for merge, Back to desk and More go back to the box instead). What you wrote and didn't send is kept per PR in this window, as a line's comment is: leaving the review (its back link, a link, ⌘] to the next item, ⌘1) and coming back finds it in the box, at the size it needs, and sending it clears it. More has Done (or Back on the desk, when it's done, snoozed or muted), Ask Claude to review it (where the page doesn't offer it), Open on GitHub, Copy link, then under "On GitHub" the writes the PR allows. It approves the commit on screen: if the desk has seen a newer push, it refuses. The approval is one of the desk's writes to GitHub, with a reply you send and Ready for review ([api.md](api.md#security-model)).
-- Your draft's reviewers: a line above Ready for review. Those already asked show first and stay; you add more in a box that offers GitHub's suggested reviewers, then people with access and the org's teams as you type (↑/↓, Enter adds, Backspace on an empty box takes the last off, Esc leaves it). After the box, "Suggested" and GitHub's suggested reviewers you haven't picked, up to four, each a dashed pill: a click adds it. Ready for review asks them right after it marks the PR ready; with nobody on the line it only marks it ready, and the PR stays on your desk for the next sentence's. On your ready PR nobody's asked to review, the same line shows with the box focused when it opens, and the one filled button is **Ask reviewers**, which asks who you picked.
+Esc or the back link goes back to the page it was opened from.
+
+### Opening
+
+- It never waits. It draws at once from the row's card (header, CI, review state, size, and the AI review's read when the card has one), with quiet bars where the rest will land, so nothing moves.
+- Resting the pointer on a PR row for 150 ms fetches its review ahead (`?ahead=1`, which starts no AI work). The desk also fetches the Inbox's diffs after each sync.
+- A big diff draws its first files with the page and the rest a chunk at a time.
+
+### Header
+
+- The ref, a stack's place ("3/6"), the author with their picture ("by you" on yours), the title.
+- One line of facts: why it's on the desk (only what the row doesn't already say), CI, the review state ("approved by marco"), a merge conflict while open, size.
+- Where the PR has checks, the CI fact is a button: it opens the review's sidebar at the checks.
+- A resolved PR says so in place of the why: "Resolved: merged by li-wei · 2h".
+- Your PR in Merging says "Merging", with what it waits on and your agent's latest note.
+- Your own PR with no AI review shows the first paragraph of its description under the title.
+- Problems are coloured words; pencil once the PR is sorted away, resolved, or calm in Merging.
+
+### The AI review
+
+No heading; right under the facts.
+
+- **Verdict**: "Look closely" (a step larger, semibold), "Skim it" or "Skip it". The model and time are in its tooltip.
+- **Risk**: in colour with a three-step meter. "on an earlier commit" in pencil when it is.
+- **Summary**: its first sentence. A chevron (or a click on the verdict) opens the rest. Every PR opens folded.
+- **Since your review**: on a re-review, under the summary, never folded.
+- **Concerns**: each is also a note in the code. They're listed only when no note can sit there (none, or an earlier commit's review).
+- All of it is drawn as plain prose (`code`, **bold**, lists), never HTML. URLs stay text: the PR's author can steer what Claude writes.
+
+States:
+
+- Running: "Claude is reviewing it. The notes land in the code below in a minute or two." After two minutes or on a retry: "Claude is reviewing it, 4 minutes so far, try 2 of 3." Shown only while its job runs.
+- Failed: the reason in ink, not red (it's about the agent, not the PR). "… Claude tries again in 2 minutes." or "The AI review failed 3 times: …". **Try again** asks again.
+- Paused after failures in a row: a PR that wasn't tried says so.
+- None yet on an open PR: "No AI review yet. **Ask Claude for one**". On a merged or closed PR: "No AI review."
+- Your own PR shows the section only once a review exists or is running.
+
+The agent's name in these lines follows Settings → Agent (Claude, Codex or OpenCode).
+
+### What reviewers said
+
+Under the AI review, only when there's any.
+
+- "Waiting on your reply" and how many, then each as a margin note: who (with picture), where (file:line, "outdated", or "on the PR"), when.
+- Claude's one-line gist, then its take with the call in semibold ("**Valid concern:** …", "**Only you can answer:** …"), then the original words behind "What azulus wrote".
+- An empty reply box: the desk never writes your answer. **Reply** (or ⌘↵) posts it on GitHub as you.
+- Until Claude has read it, the gist is the comment's first line and "Claude is reading it." A failure says why in ink.
+- Text is drawn with `code` as code, never HTML; URLs stay text; the original keeps its lines and ``` blocks.
+- Everything not waiting on you is one line, "3 more conversations not waiting on you", opening to a line each and then their comments.
+
+### The diff
+
+The desk's reading order (`ReviewView.order`):
+
+1. What Claude ranked: each hunk under its file's name, its level ("Look", then "Skim") and Claude's few words why.
+2. What Claude didn't read ("Not read", and whether the PR or file was too long).
+3. What Claude left out: "Skip", with no why, still in view (anyone can write a diff, so it can't hide code).
+4. One pencil line, "Not worth reviewing · 2 files": lockfiles, generated files, files with no text diff. A click opens them in place.
+
+Neighbouring hunks of a file at one level read as one. Without a ranking (none yet, or an earlier commit's) it keeps file order. A PR with no changes says "No files changed."
+
+**Walk-through and By importance.** When this commit's AI review has steps (`order.steps`), two tabs above the diff switch views; the choice is kept per device (`desk.review.view`), Walk-through first.
+
+- By importance is the order above.
+- Walk-through: each step is a heading ("1 of 4", its title), a sentence or two, and "**Check:** …" when there's something to verify. Then the hunks it covers. A quiet "Next: <title>" at its foot; the last reads "End of the walk-through".
+- Hunks no step covers follow under "Not in the walk-through · 5 hunks in 3 files", then the desk's fold.
+- In the review's sidebar the steps take the files' place.
+
+**Drawing.** `@pierre/diffs`: unified, word-level changes, wrapped lines, Shiki highlighting in the theme's syntax colours (`diff` in `src/themes.ts`, `web/src/diffThemes.ts`). Unchanged lines fold into a band ("14 unmodified lines"). Each file's name sticks under the head while you read it.
+
+**Folding files.** A file's header folds its diff and everything on it. Consecutive folded files read as one list. A different PR starts with every file open.
+
+### Notes and threads on the diff
+
+- **AI notes** sit under the line they explain, in the UI font. Notes about a whole file sit above its diff.
+- **Review threads** sit under their line, after any AI note: each comment's author, picture, age and text, then **Reply** and **On GitHub**. A resolved one is one pencil line ("Resolved · priya: …") that opens. Outdated threads are only in the conversation above.
+
+### Commenting on a line
+
+- Hover a line: a `+` shows by its number. Click it (or drag down the numbers for a range within one hunk) to open a box under the line.
+- ⌘↵ or **Comment** posts one comment on GitHub at once, as you, on the commit whose diff you picked the line in.
+- Esc in an empty box closes it. With words, Esc leaves the box and keeps them; another `+` or Reply takes you back to them (opening their file if folded).
+- Leaving the review keeps unsent words in this window.
+- While it sends, the box is read-only and `+` on that PR waits. If GitHub refuses, it says so and the words come back.
+- If a push removes the line, the box moves above the diff, still yours to send or cancel.
+- **Reply** on a thread opens the same box under it.
+- What you sent shows in place, with a link, until the refreshed conversation has it.
+- Commenting doesn't finish a review: the PR stays and Approve stays.
+- **Ask your agent**, quiet text after Cancel, opens the chat about those lines or that thread instead. Nothing moves between the two boxes.
+
+### Actions
+
+The actions' row, under what reviewers said:
+
+- **Approve** (green): only on someone else's open PR. Sends at once; the PR leaves your desk. Disabled, with the reason in its tooltip, if you already approved this commit. It approves the commit on screen; if the desk has seen a newer push, it refuses.
+- Or the PR's own call to action: **Ready for review** or **Ask reviewers**.
+- **Hand off for merge** (green) on your own PR, only once it's approved or its repo needs no review. Not on a draft or a ready PR nobody's asked to review (unless its repo needs no review). One already in Merging shows **Back to desk** instead, last.
+- **More**: **Done** (or **Back on the desk**), **Copy link**, then under "On GitHub" the writes it allows: **Close**, **Request changes** (opens a box for its body).
+- **Your comment**: a one-line box on the same row ("Comment on api#4127…"). It grows as you write; **Comment** shows once it has words. ⌘↵ sends it and the PR leaves your desk until someone answers. Esc leaves it with your words kept. With words in it, the buttons take you back to the box instead of acting. Unsent words are kept per PR in this window.
+
+Every GitHub write is listed in [api.md → Security model](api.md#security-model).
+
+### Your draft's reviewers
+
+A line above Ready for review on your draft:
+
+- Those already asked show first and stay.
+- A box adds more: GitHub's suggestions, then people with access and the org's teams as you type (↑/↓, Enter adds, Backspace on empty removes the last, Esc leaves).
+- After it, "Suggested": up to four of GitHub's suggestions as dashed pills; a click adds one.
+- Ready for review asks them right after marking it ready. With nobody picked it only marks it ready and the PR stays for Add reviewers.
+
+On your ready PR nobody's asked to review, the same line opens with the box focused, and the filled button is **Ask reviewers**.
+
+### The review's sidebar
+
+One icon button at the review's top right shows and hides it ("Show checks and files", "Hide the stack, checks and files"). The choice is kept per device. It stays in view as you scroll. In a narrow page column it lies over the diff and starts folded. While the chat is open the chat takes its place; the toggle brings the sidebar back and closes the chat.
+
+Top to bottom:
+
+- **The stack**, when the PR is in one: "Stack on main", its open PRs bottom first, each with only what's news (✗ CI failing in red, ± changes requested in amber, ✓ approved). The PR on screen is marked. A long stack shows four and "16 more". A click opens that PR.
+- **The checks**, when any ran on its head: one line ("CI passing · 14 checks", "2 failing of 14 checks", "3 running of 14 checks"), red while a required check fails. A click opens every check, worst first, each linking to its page. A failing check the base branch doesn't require reads "failing, not required". Fetched when the review opens; "Couldn't load the checks: …" if GitHub won't give them.
+- **The files**, in reading order with their level and a dot when they have notes. A click scrolls there. The one you're reading is marked.
+- **The reviewers**, always: one line ("Approved by marco · waiting on sam and @backend", "Changes requested by kofi", "Waiting on you", "Nobody's asked"), amber on changes requested. A click lists each person or team, who holds it first. Bots and the author are left out.
+- **The merge**, only when something's in the way: "Merge conflict with main", in amber. Only asked for your own PRs.
+
+## Blocked
+
+`#/blocked` (`#/waiting` also lands here): what can't move until something else happens. Your rules put items in the `blocked` bucket (`QueueView.sections.blocked`). The first-run rules put there:
+
+- Your PRs that need another PR merged first (its description says "Requires …", or it's stacked on it), down the chain.
+- Your PRs waiting on reviewers ("waits on a review from dana and @backend").
+- Your PRs in Merging that another PR blocks ("in Merging · needs …").
+
+Someone else's blocked PR isn't here: a review asked of you is yours to give, so it stays on the Inbox with stage "blocked". A rule can still send one here (`pr.blocked`, `pr.blocker_mine`).
+
+The page is one group, Blocked, drawn as a tree:
+
+- A chain at a time, the longest-waiting first. A PR comes before the PRs that need it, each indented under it with a quiet guide (├ └ │).
+- A row's why names what it needs ("needs billing#2300"). The chain says once what its blocker waits on ("needs sentry#129460, which waits on your reply to markstory, then a review from …").
+- The age column is how long it's been blocked.
+- Filtering flattens the tree.
+
+What you do on a row takes it off. It comes back when the PR it waits on merges. A hand-back of a PR blocked by another waits here, and tops the Inbox once that PR merges.
 
 ## Merging
 
-`#/inflight`: your own open PRs you handed off (Hand off for merge), which the coordinator is getting merged, one line each like the main page's, at the window's width. Open ones first, the latest activity on top; merged and closed ones sit under Merged for 3 days, pencil rows like Resolved's.
+`#/inflight`: your PRs handed off with Hand off for merge, which your agent is getting merged. Nothing here reaches the Inbox; only a PR your agent hands back goes there, on top.
 
-- Each row: the title (as the main page's), its ref, a stack's place ("2/6"), one phrase, its age. The phrase is what it waits on, the desk's words ("waits on a CI fix", "waits on a second look from dana", "ready to merge"), then the coordinator's latest note ("Pushed 4be71c2 for dana's 3 comments", at 1000px and below only on the row you came back from); it stays on one line and gives way at its end. The whole phrase, with the note's age, is the row's tooltip. Every title takes the same share of the row and every ref one width, so refs and phrases start in one column, selected or not. All ink and pencil, problems included: the coordinator has it. No highlighter.
-- Above the rows, one quiet line about the coordinator: "Your agent", **Watch on claude.ai** (its Remote Control page, in the browser), **Copy attach command** (the command is its tooltip), **Wake it**; when it can't run, "**Your agent can't run:**" in red, the reason in ink-2 and **Try again**; before it's started, "Your agent starts on your first hand-off or ask." and **Start it now**; off, that it's off in Settings → Agent.
-- A stack's rows sit together, bottom first, under one quiet line ("Stack on main · 6 open") when two or more of its PRs are here.
-- A click on a row opens its review; a right-click opens its menu (Back to the desk, Copy link). The row you came back from (or Tab-focused) keeps only its title, ref and age; its phrase moves whole to the line under it, with the note's age, on the row's fill.
-- Under the rows, **Claude's work** and its count, only while there's some: what Claude owes you, as the desk's ledger has it ([architecture](architecture.md#claudes-work-srcjobsts)), one line each like the rows above: an AI review (the PR's title), your ask to your agent (your words) or your answer to an agent's question nobody has picked up (the question), its ref, where it stands and since when. Running first ("Claude is reviewing it · try 2 of 3", "Your agent has it"), then waiting ("Tries again in 2m · no answer in 5 minutes, so it was stopped", "Waiting its turn"), then failed ("Failed 3 times: …") with **Try again**, which runs the review again or asks your agent again. The reason is ink, not red: it's about the agent, not the PR. An answer reads "Your answer to <who asked> hasn't been picked up" from the moment you give it until its session reads it, and after 30 minutes "· that session has probably ended", with no Try again: only the session that asked can read it, and the line goes a day after that. A click opens the PR's review, for an ask your chat with your agent, for an answer its question. What's done isn't listed.
-- Nothing here reaches the main page. Only a PR the coordinator hands back goes there, on top, and leaves Merging.
-- Empty, the page is one line: "Nothing in Merging yet: hand off one of your PRs for merge when you're done with it."
+**The agent line**, above the rows: "Your agent", **Watch on claude.ai**, **Copy attach command** (the command in its tooltip), **Wake it**.
 
-## Keys
+- When it can't run: "**Your agent can't run:**" in red, the reason, and **Try again**.
+- Before it's started: "Your agent starts on your first hand-off or ask." and **Start it now**.
+- Off: says it's off in Settings → Agent.
 
-The window names no key; a button's tooltip names its own.
+**Rows**: open PRs first, latest activity on top.
 
-The keys that work are the platform's. Esc closes the topmost thing (a menu, the chat from outside its box, the comment bar, a line box: empty, it closes; with words, Esc leaves it; the reviewers list, an editor, a settings field); on the Inbox, Blocked, FYI and the Archive, it then closes an item opened in place, then clears the filter; then it goes back: a review or a question to where it was opened from, a Settings view to its part (an automation's to Your automations, a plugin's to its plugin's part), every other page to the Inbox. A held Esc doesn't repeat. ⌘↵ sends in every box that sends (a PR comment, a line comment or reply, a conversation's Reply, Request changes, the issue comment bar, an answer to an agent) and previews in Rules. In the chat, Enter sends and Shift+Enter is a new line. ⌘S saves Rules, Policy or an automation. Tab indents in the Rules editor (Save's tooltip says so, and that Esc leaves it, onto Save) and moves focus everywhere else: a row is a button, so Tab-focusing selects it and Enter or Space opens it. Menus, the reviewers box, settings fields and the hotkey recorder (Record's tooltip names its keys) take their arrows, Enter, Space, Backspace and Esc (→ into Snooze in a row's menu); in the filter box Esc clears it, and Enter or ↓ leaves it. The desktop app keeps its show or hide hotkey (Control+Alt+D, Control+Option+D on a Mac) and ⌘, for Settings.
+- The title, ref, stack place, one phrase, the age.
+- The phrase is what it waits on ("waits on a CI fix", "waits on a second look from dana", "ready to merge"), then your agent's latest note ("Pushed 4be71c2 for dana's 3 comments"). The whole phrase is the tooltip.
+- All ink and pencil, problems included: your agent has it.
+- A stack's rows sit together under "Stack on main · 6 open" when two or more are here.
+- The selected row moves its phrase to a line underneath.
+- Click opens the review; right-click: **Back to the desk**, **Copy link**.
 
-⌘1 to ⌘4 (Ctrl elsewhere) open the sidebar's pages, top to bottom: Inbox, Blocked, Merging, the Archive; each page's tooltip in the sidebar names its key. ⌘] and ⌘[ open the item after and before the one that's open in its list (else the selected one; with neither, the list's first or last), as a click on its row would: a question its page, a PR its review, a session or an issue in place on its list (so a review or a question gives way to the list); on Merging and in a review opened from it they step through its PRs. They stop at the list's ends and at a section's fold, work from a box you're typing in, and do nothing in Settings; a review's and a question's back link names them in its tooltip. They're `SIDE_PAGES` and `stepTo()` in `web/src/App.tsx`, read before any other key handler.
+**Merged**: PRs merged or closed in the last 3 days, as pencil rows.
 
-Nothing outside a box you're typing in writes to GitHub or changes an item.
+### Claude's work
+
+Under the rows, only while there's some: what Claude owes you, from the desk's ledger ([architecture.md → Claude's work](architecture.md#claudes-work-srcjobsts)). One line each: an AI review, your ask to your agent, or your unread answer to an agent's question.
+
+- Running ("Claude is reviewing it · try 2 of 3", "Your agent has it"), then waiting ("Tries again in 2m · …", "Waiting its turn"), then failed ("Failed 3 times: …") with **Try again**. Reasons are ink, not red.
+- An answer reads "Your answer to <who asked> hasn't been picked up", and after 30 minutes adds "· that session has probably ended". No Try again: only the asking session can read it. The line goes a day later.
+- A click opens the PR's review, the chat for an ask, or the question for an answer.
+
+Empty: "Nothing in Merging yet: hand off one of your PRs for merge when you're done with it."
+
+## Archive
+
+`#/archive`: what's done, newest first. Three groups, each a heading with its count:
+
+- **Archive** (open): what you did ("done: back when someone else acts", timed when you did it) and what the world resolved ("merged", "you approved", "approved by alice", timed when it resolved). Covers the last day's items that were on the Inbox or that you opened or resolved.
+- **Snoozed or muted** (folded): "snoozed until Sat 9:00", "snoozed until CI passes".
+- **Hidden by rules** (folded): the rule that hid it.
+
+**Back on the desk** (row menu, or More in a review) puts an item back. Filtering opens groups with matches and hides empty ones. Esc clears the filter, then goes to the Inbox.
+
+## Links
+
+**Copy link** (a row's menu, More in a review) copies the item's permalink, `inbox://item/owner/repo/123`, and says "Copied the link to api#4127".
+
+- Clicking one anywhere on the computer opens the desktop app there (`#/item/<id>`): a PR's review, or an issue opened in place on its page.
+- Pages: `inbox://inbox`, `inbox://blocked`, `inbox://merging`, `inbox://archive`. `inbox://fyi` opens the Inbox.
+- A question: `inbox://question/<id>` opens its page. Pasted to any agent, `desk_inquiry` reads it (the question whole and your answer). Reading it by link isn't picking up your answer; only the asking session does that.
+- A review document: `inbox://doc/<id>`.
+- An agent can also read `http://localhost:47823/#/review/<id>` as the item's ref.
+
+Code: `src/links.ts`; the protocol in `electron/main.ts`.
+
+## A review document
+
+`#/doc/<id>` shows a review document (`inbox.review/1`) as the desk rendered it, framed with nothing allowed but its links. Agents write them with `desk_doc` or `desk render`; they're kept in `<home>/docs`. Format: [review-format.md](review-format.md).
+
+## Settings
+
+No tabs. In Settings the sidebar lists its parts in place of the pages, under **‹ Inbox** (⌘1–⌘4 still open the pages):
+
+- The core's: Inbox and notifications, Agent, Your automations, Urgency, This device.
+- Under a hairline, one per plugin: GitHub, Sessions.
+
+`SETTINGS_PARTS` in `web/src/view.ts`. The sidebar's Settings and `#/settings` open the first part.
+
+### How a part works
+
+- Each part is a route, `#/settings/<part>`, drawn alone, its name in the head. No intro text.
+- Settings are rows on one sheet: label and help on the left, the control on the right edge. A number has its unit after it ("[14] days"). A prompt or path takes the row's width. On a narrow sheet controls go under their words; switches stay beside them.
+- Clicking a label flips its switch.
+- Under the control: "Saved" (green, briefly), "Not saved: …" (red, your input kept), or **Reset to default** on a changed setting (the default in its tooltip).
+- Tuning folds behind one quiet row at the sheet's end, **More <part> settings**, closed on open.
+- A row that would do nothing here isn't drawn (`SHOWN`); one that waits on another is greyed (`DISABLED`). `desk settings` and settings.json still set every one.
+- When settings.json has a problem, a notice above the part names each setting by label and key, and opens More if needed.
+- Old links still land: `#/settings/automations`, `notify` → Inbox and notifications, `review` and `handoff` → GitHub, `appearance` → This device, `#/rules` → Searches and rules.
+- **Views**: Searches and rules (`#/settings/rules`), Your policy (`#/settings/policy`) and each automation (`#/settings/automations/<id>`; a plugin's `github.<id>`) open as views. Their head is the way back to their part ("‹ GitHub", "‹ Agent", "‹ Your automations"), and so is Esc once you've left the editor. Coming back puts focus on what opened it.
+- Esc on a part goes to the Inbox.
+- Parts and views stay mounted once opened, so an unsaved rules, policy or automation draft survives leaving and coming back.
+
+### Inbox and notifications
+
+- Move untouched items to FYI after (days).
+- Show the first (rows before Standard's and FYI's fold).
+- Urgent from a score of (8), FYI up to a score of (3).
+- Notify me when something needs me.
+- Quiet hours: two times (in this computer's 12- or 24-hour clock) and a switch. Off saves `""` and greys the times, keeping them; on saves `19:00-09:00`. A time saves when you leave its field. The row greys while notifications are off.
+
+### Agent
+
+- **Agent** (`agent.harness`): Claude Code, Codex or OpenCode. Every run is your own `claude`, `codex` or `opencode` from your PATH, on your own login; there's no command or model to set. Labels across Settings name the one you picked.
+- **Status rows**, only while something needs you:
+  - "Claude Code isn't connected to the desk" with **Connect Claude Code** (the commands in its tooltip; a failure in red under it).
+  - "The desk's skill is out of date" with **Update the skill**.
+  - "Claude Code has another skill or server named inbox", with what holds the name and **Connect Claude Code**.
+  - "AI reviews are paused" after failures in a row (an expired login), with why and the next try. When sorting fails for the same reason, "Claude is paused" covers both: "Nothing is sorted or reviewed until then."
+- **Sort my desk with Claude**, and under it **Your policy** (its help says while the starter is in effect, or the judge's last failure in ink).
+- **Score the Inbox with Claude** (`agent.score`).
+- **Run your agent**. Off stops it, nothing wakes it, and no Ask your agent shows.
+- **Let your agent run without asking** (on by default; only while Run your agent is on): bypass permissions mode (its deny list still holds). Changing it restarts it.
+- **More Agent settings**: **Decision model key** (an OpenRouter key, saved only from this page in `secrets.json`; shows dots once saved; pasting replaces it; Reset to default clears it; its help says what goes to OpenRouter) and **Decision model** (its id).
+
+**Your policy** (`#/settings/policy`): how you want Claude to sort your desk.
+
+- A plain text editor, as tall as its text. **Save** (⌘S; filled while there are changes), **Revert**, and the file's path.
+- While policy.md is empty it holds the starter: "This is the starter policy. Claude sorts by it until you change it." Saving makes it yours; clearing it brings the starter back.
+- The judge's status in ink ("23 items sorted by Claude. 7 of 300 this hour.", why it's off, or its last failure and next try).
+- If the file changed since you opened it, Save keeps your text and says so.
+- **Let Claude sort up to** so many items an hour.
+
+### Your automations
+
+`#/settings/automations`: one row per automation, then **New automation**. With none: "None yet", "Ask an agent to write one, or write one yourself."
+
+Each row:
+
+- Its name, linking to its view.
+- What starts it, in words ("Weekdays at 9:00", "Weekdays, every hour", "When CI changes or someone comments"), a schedule's next run, or "off".
+- Its last run ("ran 2h ago, put 2 on your desk"). Failures in red ("failed 2h ago: …", "couldn't add 1", "refused 2"). While a question's model can't answer: "waiting: …" in red.
+- **Run now** while it's on ("Running…" while it runs) and its switch.
+- One an agent wrote or changed reads "An agent wrote it; read it before it runs · …" and has a tinted **Review** instead of a switch: it can't run before you've seen its instruction.
+
+**An automation's view** (`#/settings/automations/<id>`):
+
+- Name, what starts it and its next run (or "on", "off", "an agent wrote it: read it before you turn it on.").
+- Its instruction, quoted (a rule has none).
+- **Only when**: its check, in the code font.
+- **Decides**: a rule ("A rule, with no model: …"), a question ("A question: Claude answers, without tools", or the decision model "through OpenRouter"), or an agent ("An agent: your Claude Code, with read-only tools").
+- **May** (not for a rule): "Add to your desk, sort to FYI and snooze".
+- While its model can't answer: a red line saying it's waiting, why, when it asks again, and that nothing was spent.
+- **Run now** (not for a rule, or a question on events without a check), **Edit**, **Turn off**/**Turn on**. One an agent wrote has a filled **Turn on**.
+- Its runs: when and how ("on schedule", "run now", "on an event"), what it did ("put 2 on your desk, sorted 3 to FYI, snoozed 1"), the agent's summary, each item with what came of it (Added, Sorted to FYI, Hidden, Snoozed until CI passes, Marked done, Muted, Already on your desk, You'd dealt with it, Nobody needs it now, Held where it is; Not allowed and Couldn't add in red) and why.
+- **Copy resume command** copies `cd <home>/automations && claude --resume <id>` (`codex resume` or `opencode --session` for those agents).
+- Deleting one goes back to Your automations. A link to one that isn't there says so.
+
+**The editor** (New automation, or Edit in a view):
+
+- **Name**.
+- **Runs**: On a schedule (in words: `weekdays 09:00`) or When something happens (event kinds to tick: "CI changes", "A review is asked of you or your team", "Someone comments", …). Each keeps its value when you switch.
+- **Only when**: the check. A rule or a question on a schedule needs one.
+- **How it decides**: A rule, Ask a model, or An agent with tools.
+- For a rule, **Then**: Add to your desk, Sort to Today, Sort to Later, Sort to FYI, Hide, Snooze (with "until": tomorrow, an hour, 3 hours, Monday, new activity, CI passes, new commits, approved, ready for review, conflict fixed), Mark done, Mute; and the why the item shows.
+- For the others, **Instruction** and **It may** (the same eight, at least one).
+- **Save** (⌘S; off until it's a valid automation), **Cancel** (Esc), and in a view **Delete** (no confirmation; stops a run in progress).
+- A new one's id is its name's, made unique with -2, -3…
+
+### Urgency
+
+`#/settings/criteria`: your criteria on one sheet ([api.md → Urgency](api.md#urgency)).
+
+- Each row: its name, what it says yes to, whether a yes is urgent, how many Inbox items it says yes to now, who wrote it, and its switch.
+- A click on the name opens its editor under the sheet: name, question, rule (**Only when**), whether a yes is urgent; Save, Cancel, Delete.
+- **New criterion** at the sheet's foot.
+- **From GitHub**: the criteria GitHub comes with ("Asked by name", "Waiting on your reply", "Ready to merge", "Your PR others wait on", "Handed back"). You only switch them.
+- Under the sheets, quietly, who last scored your Inbox. A question waiting on its model says why on the first row.
+
+### This device
+
+- **Theme**, first: System, Omarchy (when available), then the light themes and the dark ones. Kept per device, not a desk setting ([Themes](#themes)).
+- Only in the desktop app:
+  - **Shortcut to show or hide the window**: its field, **Record** (tooltip names the keys it takes), **Turn off** while set. Help: "Works from any app.", "Off.", or in red why it couldn't take it ("Couldn't use Control+Alt+D: another app has this shortcut."). On a Mac it uses Option and Command. Default Control+Alt+D.
+  - **Open at login**.
+  - **Show the Inbox count in the menu bar** (macOS only).
+  - **Run from a checkout** ([AGENTS.md → Run](../AGENTS.md#run)).
+  - **Use it from your other devices** (Tailscale) and its devices ([api.md → Security model](api.md#security-model)).
+- In a browser the part is the theme alone.
+
+#### Themes
+
+- System (follows the computer), Light, Dark, Sand, Slate, Solarized, Catppuccin Latte, Sentry Dusk, Sentry Dawn, Gruvbox, Tokyo Night, Everforest, Kanagawa, Nord, Rose Pine (Dawn), Flexoki Light. Listed in `src/themes.ts`, each with a matching diff syntax theme.
+- Kept by the desktop app in its own data (it also paints the window in that paper before the UI loads); in a browser, in localStorage. `index.html` applies it before the first paint. Code: `web/src/theme.ts`.
+- **Omarchy**, on a machine running Omarchy, follows Omarchy's current theme (`src/omarchy.ts`, `GET /api/omarchy`). A theme the desk has by that name is shown as the desk's own; any other is built from its `colors.toml`, held to the same contrast floors. The desk polls Omarchy's `theme.name` each second while a window is connected and sends an `omarchy` event, so a switch shows without a reload. The last one shown is kept in localStorage (`desk.omarchy`) for the pre-paint.
+- Adding a theme and the token roles: [visual.md → The visual system](visual.md#the-visual-system).
+
+### GitHub
+
+The first plugin's part.
+
+- **Status**: "Signed in as @you" (or "Not signed in"), over "Through gh. The desk writes to GitHub only when you click a button that says so." Or the last sync's error in red, with "Run `gh auth login` in a terminal, then sync." when a login would fix it. Your teams and what's left of the rate limit are in its tooltip.
+- **Searches and rules**: its help says where each org's items start ("acme goes to Work, everything else to Personal."), or the error count in red.
+- **Archive a review request when someone else approves**: Always, only when your team was asked, or never.
+- **Claude reviews other people's PRs ahead of time** (the AI review).
+- **More GitHub settings**: AI reviews running at once, repos that count as yours, more bots, names agents use for you, the close-collaborator threshold, the sync interval (`github.poll_seconds`, 90 s), and the prompts `desk prompt <ref>` prints for someone else's PR, yours and an issue.
+- **Automations**: the ones GitHub comes with (`src/connectors/github-automations.ts`). Each row: its name, what it does and its last run, **Run now** and its switch (the only thing you change). Its view has **Copy to your automations** in place of Edit (makes an editable copy, off) and no Delete.
+
+**Searches and rules** (`#/settings/rules`):
+
+- One line, then the TOML editor with a preview, as tall as the window allows. Code wraps.
+- Its foot stays on the window's bottom edge: **Save** (filled while there are changes; ⌘S), **Preview changes** (⌘↵), **Revert**, the file's path, "Unsaved changes" and the cursor position.
+- Tab indents in the editor; Esc leaves it onto Save.
+- A click on an error jumps to its line. In a narrow window the first error also shows in the editor's foot.
+- Beside it, **Rules Claude can't sort below**: the saved hard and final rules in board order ("PRs to review (Personal) → Now: someone asked you directly" over its `when`; "(final)" marked). With none, one line says Claude can sort anything off your desk.
+
+Rules themselves: [api.md → Rules: built in and your own](api.md#rules-built-in-and-your-own).
+
+### Sessions
+
+The Sessions plugin's part ([api.md → Sessions](api.md#sessions)):
+
+- **Show sessions that need you** (`sessions.enabled`).
+- **Ask your agent whether a question waits on you** (`sessions.ask`).
+- **More Sessions settings**: **Stalled after** (`sessions.quiet_minutes`).
+
+## Bubbles
+
+What's wrong with the system is never a line in a page. It's a small stack of bubbles at the window's bottom right (left of the chat when it's open). `noticesOf()` in `web/src/notices.ts` decides them from what the desk reports, so the tray and MCP agree.
+
+In order:
+
+| Bubble                                                                           | Fix                                  |
+| -------------------------------------------------------------------------------- | ------------------------------------ |
+| "The desk isn't running" / "The desk is starting"                                | Retry                                |
+| "Restarting the desk" / "The desk stopped" (with its last lines)                 | none                                 |
+| "Your rules don't load" / "Your rules have 2 errors" (not on Searches and rules) | Fix rules                            |
+| "Claude is paused" / "AI reviews are paused" (not on Settings → Agent)           | Open Settings → Agent                |
+| "Sync failed" and the error                                                      | Try again ("Syncing…" while it runs) |
+| "GitHub's rate limit is used up" and when syncing resumes                        | none: every sync waits for the reset |
+| An action that failed (GitHub refused, a save refused)                           | none; fades after 8 s unless hovered |
+
+- While the desk is down, only that is said: what it said last is stale.
+- A dot before the title: red for failing, amber for a caution.
+- Each has at most one fix, and **Dismiss**.
+- A dismissed bubble stays gone on this device while its condition holds. It comes back when the condition changes (logged out → failing otherwise) or after it resolves and recurs.
+- Failed actions: newest last, three at most.
+- The page leaves room under its end so its last rows scroll clear. A toast rises above the bubbles.
+- What belongs to the item on screen stays on it (its CI, its AI review's failure). Settings keeps its own diagnostics.
 
 ## Asking your agent
 
-On every page, a quiet **Ask your agent** in the sidebar's footer opens your chat with your agent on the window's right, about what you're on: in a PR's review, the PR and the spot you were last on in it; elsewhere, the Merging row, the selected row, an agent's question's item, or nothing. In a review the spot is the last of:
+A quiet **Ask your agent** in the sidebar's footer opens your chat with your agent on the window's right, about what you're on:
 
-- a conversation's reply box you were in (or the **Ask your agent** after its Reply and Open on GitHub);
-- a thread's Reply on the diff;
-- lines you picked with the `+` (or a drag down the numbers).
+- In a PR's review: the PR and the last spot you were on: a conversation's reply box (or its **Ask your agent**), a thread's Reply, or lines you picked with `+`.
+- Elsewhere: the Merging row, the selected row, a question's item, or nothing.
 
-The `+` box and a thread's Reply box each have a quiet **Ask your agent** after Cancel: it opens the chat on those lines or that thread, an empty box closes, and words you typed stay in the box, unsent. The chat is never filled from any box, Claude's suggested reply included: the `+` box only posts to GitHub (⌘↩), and the chat only talks to your agent (↵). Line asks need an open PR.
+The `+` box and a thread's Reply box each have a quiet **Ask your agent** after Cancel. It opens the chat on those lines or that thread; your typed words stay in their box, unsent. The chat is never filled from a box: the `+` box only posts to GitHub, and the chat only talks to your agent. Line asks need an open PR.
 
-- The sidebar's item: above Settings, a speech bubble and its words. "**Your agent · waiting**" while your latest ask about the review's PR is unanswered, never a time, the bubble filled; "**Ask**" at 1000px and below, where the sidebar compacts, "**Asked**" while waiting. It isn't drawn while the chat is open, with your agent off, or on your agent's own question's page, whose answer box is how you talk to it there.
-- Where it sits: above 1100px it's a third column, full height beside the page, and the page narrows (at 1280 the main page's table drops its stage column, its designed fallback); at 1100px and below it opens over the page's right edge, under the page's head. Beside a review in a window under 1600px, the list beside the review folds to its rail while the chat is open. In a review it takes the sidebar's place, so the diff keeps its width: the sidebar's toggle closes the chat and shows the sidebar, Ask your agent shows the chat in its place, and closing the chat brings the sidebar back as you last left it. The toast centres on the page beside it, clear of its box.
-- Its head: "Your agent", the item it's about, and **Close**. Outside a review, a quiet × after the item makes the chat about nothing in particular: it then shows your general asks, and what you'd typed comes with you.
-- Just above the box, the spot your next ask carries: "On dana's thread on src/auth.ts:42", "On plan.ts:20–23", or "On plan.ts:17–18, removed" (the old side), cut to one line with the whole in its tooltip (a file's full path and the commit you read it at), and a quiet × that drops it, so the next ask is about the whole PR. Picking another spot replaces it; with the chat open it follows at once, keeping what you'd typed; leaving the review drops it. Nothing marks the lines on the diff once their box is gone.
-- Above that, one pencil line for each of your agent's open questions about the item: "Your agent asks: … · Answer", Answer opening its page.
-- The history, oldest first: every ask about the item (or about nothing). Your words sit on a wash at the right, as you wrote them, with their time and "on a thread" linking the conversation, or "on plan.ts:20–23" in pencil for lines. Each answer is drawn from its text, with its own time: paragraphs, `-` and `1.` lists, `code`, code blocks (wrapped, never scrolled sideways) and bold; an https link shows as its URL; never HTML, never an image, never a label in place of a URL; anything else stays as written. Under each code block a quiet **Copy** copies it with its ` ``` ` fence (a ` ```suggestion ` block included; longer than any run of backticks opening a line inside, so GitHub can't end it early), ready to paste in the `+` box, and reads "Copied". Under your latest ask only, until it's answered, one line says what your agent is doing, looked at every 10 s: "On it" with a spinner, "Queued" behind what it's on, "Waiting on a permission prompt" (answer it on claude.ai), or "It stopped without answering" with **Wake it**, and a link to watch it on claude.ai. With nothing asked about it yet: "Ask or tell it something about web#3: it answers here."
-- It opens at the newest turn's top (your question and the start of its answer, not the end of a long one), and goes there again on a send and when an answer lands. Shift+Tab from the box reaches the log, to scroll it with the arrows.
-- The box: Enter (or ⌘↵, or **Send**) sends, Shift+Enter is a new line. Esc in the empty box closes the chat; with words in it, Esc leaves the box and keeps them. Esc anywhere else that isn't a text box (the page, the chat's own buttons, links and log) closes the chat before the page reads it as "back"; Esc in any other box (a line comment, a reply, the PR comment, an inquiry's answer, the reviewers box) stays that box's. Focus never leaves the box on its own after a send; click the page to read on.
-- What you typed and didn't send is kept per item in this window, for when you open the chat about it again.
-- After your agent pushes a change you asked for to your own open PR that isn't handed off: it stays on your desk, not in Merging; the push counts as your own activity, so a done-until-someone-else-acts stays done and rules on your last action may move it; an open `+` box with words stays pinned to the commit you read and shows above the diff; the AI review goes stale (More → Ask Claude to review it again reruns it); its answer names the commit and says to pull before you push again.
-- It follows you into another PR's review (a click in the stack or on a row, a link), about that PR, and closes when you leave for any other page.
-- Your agent, when it won't start, says so where its status goes, and your words stay in the box. With your agent off (Settings → Agent), no Ask your agent shows anywhere; a chat already open says so where its history would be (under the box when it has one), and its box is greyed and sends nothing.
+### The sidebar item
+
+- "Ask your agent", or "**Your agent · waiting**" (filled bubble) while your latest ask about the review's PR is unanswered. Compact: "Ask" / "Asked".
+- Not drawn while the chat is open, with your agent off, or on your agent's own question's page (its answer box is how you talk to it there).
+
+### Where the chat sits
+
+- Above 1100px it's a third column and the page narrows. At 1100px and below it lies over the page's right edge.
+- Beside a review in a window under 1600px, the list beside the review folds to its rail.
+- In a review it takes the review sidebar's place. The sidebar's toggle closes the chat and brings it back.
+
+### The chat
+
+- **Head**: "Your agent", the item it's about, **Close**. Outside a review, a × after the item switches to general asks, keeping what you typed.
+- **The spot**, above the box: "On dana's thread on src/auth.ts:42", "On plan.ts:20–23", "On plan.ts:17–18, removed". Full path and commit in its tooltip. A × drops it so the next ask is about the whole PR. Picking another spot replaces it; leaving the review drops it.
+- **Open questions** from your agent about the item: "Your agent asks: … · Answer".
+- **History**, oldest first: your words on the right with their time and spot; each answer as plain prose (paragraphs, lists, `code`, code blocks, bold; https links shown as URLs; never HTML or images). Each code block has a **Copy** that keeps its ``` fence, ready to paste as a GitHub suggestion.
+- **Under your latest unanswered ask**: "On it", "Queued: …", "Waiting on a permission prompt" (answer it on claude.ai), or "It stopped without answering" with **Wake it**, plus a link to watch it on claude.ai.
+- With nothing asked yet: "Ask or tell it something about web#3: it answers here."
+- It opens at the newest turn's top and returns there on a send and when an answer lands. Shift+Tab from the box reaches the log.
+
+### The box
+
+- Enter, ⌘↵ or **Send** sends; Shift+Enter is a new line.
+- Esc in the empty box closes the chat; with words, Esc leaves the box and keeps them.
+- Esc anywhere outside a text box closes the chat before the page reads it as "back". Esc in another box stays that box's.
+- Focus stays in the box after a send.
+- Unsent words are kept per item in this window.
+
+### Behaviour
+
+- It follows you into another PR's review, about that PR, and closes when you leave for any other page.
+- When your agent pushes a change you asked for to your own open PR (not handed off): it stays on your desk; the push counts as your activity; an open `+` box stays pinned to the commit you read; the AI review goes stale; the answer names the commit and says to pull first.
+- If your agent won't start, the chat says so and your words stay.
+- With your agent off (Settings → Agent), no Ask your agent shows. An open chat says so and its box sends nothing.
+
+## The update line
+
+When a newer Inbox is released, a line appears in the sidebar's footer, above Settings (`Sidebar.tsx`):
+
+- **Update to x.y.z** where the app can install it itself (an AppImage on Linux, the installed Windows app). A click downloads it and restarts into it; it reads "Updating…" meanwhile.
+- **Download x.y.z** elsewhere (macOS, archives): a link to the release page. If an install failed, its tooltip says why.
+
+The desk checks the latest GitHub Release every 6 hours, only in the packaged app (`src/updates.ts`; the install is `electron-updater` in `electron/main.ts`). Releases: [README → Release](../README.md#release).
+
+## Keys
+
+The window names no key; a button's tooltip names its own. Only platform keys work. Nothing outside a box you're typing in writes to GitHub or changes an item.
+
+| Key                             | Does                                                                                                                                                                                                                                                                                                      |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Esc                             | Closes the topmost thing (a menu, the chat, the comment bar, a box, an editor). On a list: then closes the item opened in place, then clears the filter. Then goes back: a review or question to where it came from, a Settings view to its part, any other page to the Inbox. A held Esc doesn't repeat. |
+| ⌘↵                              | Sends in every box that sends (a comment, a line comment or reply, Reply, Request changes, the issue comment bar, an answer). Previews in Searches and rules.                                                                                                                                             |
+| Enter / Shift+Enter             | In the chat: send / new line.                                                                                                                                                                                                                                                                             |
+| ⌘S                              | Saves rules, policy or an automation.                                                                                                                                                                                                                                                                     |
+| Tab                             | Moves focus. A row is a button: focusing selects it, Enter or Space opens it. In the rules editor Tab indents.                                                                                                                                                                                            |
+| Arrows, Enter, Space, Backspace | In menus, the reviewers box, settings fields and the shortcut recorder.                                                                                                                                                                                                                                   |
+| ⌘1–⌘4                           | Inbox, Blocked, Merging, Archive (Ctrl elsewhere). Each page's tooltip names its key.                                                                                                                                                                                                                     |
+| ⌘] / ⌘[                         | The item after / before the open one in its list (else the selected one; with neither, the first or last), opened as a click would. On Merging, its PRs. Stops at the list's ends and at a fold. Works from a box; does nothing in Settings.                                                              |
+| ⌘,                              | Settings (desktop app).                                                                                                                                                                                                                                                                                   |
+| Control+Alt+D                   | Shows or hides the window from any app (desktop app; settable in This device).                                                                                                                                                                                                                            |
+
+Code: `onKey` and `onCapture` (`SIDE_PAGES`, `stepTo()`) in `web/src/App.tsx`, plus each box's own handler. `web/test/hints.test.ts` keeps key names out of the window's strings.
 
 ## Files
 
-|                                                              |                                                                                                       |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `web/src/App.tsx`                                            | state, data loading, SSE, Esc                                                                         |
-| `web/src/view.ts`                                            | routes, grouping, filter, rule-error line lookup, settings helpers (pure, tested in `web/test`)       |
-| `web/src/components/Sidebar.tsx`, `PageHead.tsx`             | the pages, Ask your agent, sync and Settings; each page's head: filter, back link or its name         |
-| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx`  | the Inbox's sections, and Blocked and the Archive (`Later`): one-line rows, an item opened in place   |
-| `web/src/components/Beside.tsx`                              | the list beside a review or a question: its head, its fold, its two-line rows' scroll                 |
-| `web/src/components/Review.tsx`                              | a PR's review: header, AI review, files, Pierre diffs with notes, approve                             |
-| `web/src/components/Inflight.tsx`                            | Merging: your PRs handed off, what each waits on, the coordinator's latest note                       |
-| `web/src/components/Settings.tsx`, `Rules.tsx`, `Policy.tsx` | configuration                                                                                         |
-| `web/src/styles.css`, `web/src/theme.ts`                     | token sets per theme, then layout by area; the device's theme, kept in localStorage                   |
-| `web/src/components/Mark.tsx`, `assets/brand/mark.svg`       | the mark in the window, and the master `npm run icons` draws every icon from ([visual.md](visual.md)) |
-| `web/src/fonts/`                                             | Instrument Sans (UI), JetBrains Mono (code), bundled so nothing loads from the network                |
-| `web/mock/server.ts`, `diffs.ts`                             | an in-memory API for UI work without GitHub: `node web/mock/server.ts`; real-looking diffs            |
+| File                                                                                            | What                                                                                 |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `web/src/App.tsx`                                                                               | state, data loading, SSE, keys, routes wired to pages                                |
+| `web/src/view.ts`                                                                               | routes, grouping, filter, settings parts and helpers (pure, tested in `web/test`)    |
+| `web/src/notices.ts`, `components/Bubbles.tsx`                                                  | the bubbles: which, in what words, dismissals                                        |
+| `web/src/components/Sidebar.tsx`, `PageHead.tsx`                                                | the sidebar (pages, Ask your agent, the update line, Settings); each page's head     |
+| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx`                                     | the Inbox, Blocked and the Archive: rows, an item opened in place                    |
+| `web/src/components/Inquiry.tsx`, `Session.tsx`                                                 | agents' questions (rows and page); sessions that need you                            |
+| `web/src/components/RowMenu.tsx`, `More.tsx`                                                    | a row's right-click menu; a review's More                                            |
+| `web/src/components/Beside.tsx`                                                                 | the list beside a review or a question                                               |
+| `web/src/components/Review.tsx`, `Conversation.tsx`, `Reviewers.tsx`                            | a PR's review: header, AI review, conversations, diffs and notes, actions, reviewers |
+| `web/src/components/Inflight.tsx`                                                               | Merging and Claude's work                                                            |
+| `web/src/components/Chat.tsx`, `Prose.tsx`                                                      | Ask your agent; drawing an agent's text                                              |
+| `web/src/components/Settings.tsx`, `Rules.tsx`, `Policy.tsx`, `Automations.tsx`, `Criteria.tsx` | Settings and its views                                                               |
+| `web/src/styles.css`, `web/src/theme.ts`                                                        | tokens per theme and layout ([visual.md](visual.md)); the device's theme             |
+| `web/src/components/Mark.tsx`, `assets/brand/mark.svg`                                          | the mark ([visual.md → The brand](visual.md#the-brand))                              |
+| `web/src/fonts/`                                                                                | bundled fonts, so nothing loads from the network                                     |
+| `web/mock/server.ts`, `diffs.ts`                                                                | an in-memory API for UI work without GitHub: `node web/mock/server.ts`               |

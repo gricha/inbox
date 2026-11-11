@@ -1271,7 +1271,7 @@ export function App() {
       return;
     }
     if (menuAt) return; // a row's menu has the keyboard, Esc included
-    // The platform's own: ⌘1-5 are the sidebar's pages, ⌘[ and ⌘] the item before and after, where there's a list (a list
+    // The platform's own: ⌘1-4 are the sidebar's pages, ⌘[ and ⌘] the item before and after, where there's a list (a list
     // page, Merging, a review or a question). The shortcut recorder reads its own keys.
     const mod = (MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey && !e.isComposing;
     const digit = /^Digit([1-4])$/.exec(e.code)?.[1];

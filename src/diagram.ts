@@ -1,4 +1,4 @@
-// An AI review's diagram: a strict subset of Mermaid (docs/review-spec.md → Diagrams) parsed into plain data, never run.
+// An AI review's diagram: a strict subset of Mermaid (docs/review-format.md → Diagrams) parsed into plain data, never run.
 // It accepts only what the window draws, so every diagram it takes is valid Mermaid too; any other line fails the whole one.
 import type {
   DiagramEdge,
