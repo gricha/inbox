@@ -466,9 +466,8 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 
 - **Agent** (`agent.harness`): Claude Code, Codex or OpenCode. Every run is your own `claude`, `codex` or `opencode` from your PATH, on your own login; there's no command or model to set. Labels across Settings name the one you picked.
 - **Status rows**, only while something needs you:
-  - "Claude Code isn't connected to the desk" with **Connect Claude Code** (the commands in its tooltip; a failure in red under it).
+  - "Claude Code isn't connected to the desk" with **Connect Claude Code** (the commands in its tooltip; a failure in red under it). When something else of yours keeps the name inbox, its help says what the desk goes in as instead ("Connects as inbox-47998: your other desk keeps inbox"), and the flash after says the same.
   - "The desk's skill is out of date" with **Update the skill**.
-  - "Claude Code has another skill or server named inbox", with what holds the name and **Connect Claude Code**.
   - "AI reviews are paused" after failures in a row (an expired login), with why and the next try. When sorting fails for the same reason, "Claude is paused" covers both: "Nothing is sorted or reviewed until then."
 - **Sort my desk with Claude**, and under it **Your policy** (its help says while the starter is in effect, or the judge's last failure in ink).
 - **Score the Inbox with Claude** (`agent.score`).
@@ -584,7 +583,7 @@ A desk that was never set up shows one page in the window's place, without the s
 - **Set up Inbox**, with the mark.
 - **GitHub**: "Signed in as @you", or why not ("You're not signed in to GitHub.", "The GitHub CLI isn't installed.", "Couldn't reach GitHub: …") with the command to run and **Retry**.
 - **Your agent**: one line on what it does, then Claude Code, Codex and OpenCode, each "Installed and logged in." with a green **Use Claude Code**, or "Not logged in." / "Not installed." with the command to run and **Retry**. While GitHub isn't connected the agents say only where they stand; GitHub's Retry asks about everything.
-- **Use …** is one press: "Connecting…", then the Inbox with the first sync running. What fails (the CLI refusing the MCP server, a name another server holds) is red under that agent, and the button stays to try again.
+- **Use …** is one press: "Connecting…", then the Inbox with the first sync running. What fails (the CLI refusing the MCP server, or missing) is red under that agent; a name something else of yours keeps never does, as Connect picks another, and the button stays to try again.
 - It never shows again. Settings → Agent changes the agent; `desk setup` does the same from a terminal.
 
 ## Bubbles

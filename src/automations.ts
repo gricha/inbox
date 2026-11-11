@@ -5,6 +5,7 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { Effect, Result, type Fiber } from "effect";
+import { serverName } from "./agents.ts";
 import { DENY as COORDINATOR_DENY, denyDir, wakeFor } from "./coordinator.ts";
 import type { Desk, Entry } from "./desk.ts";
 import { decide, type Question } from "./decisions.ts";
@@ -59,14 +60,15 @@ const SURE = 0.8;
 const AT_ONCE = 4; // decision requests in flight: one per item
 const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
 // The desk's MCP server, and its name before the rename to Inbox, which an agent connected then keeps until the desk renames it.
-const desks = (tools: string[]) => ["inbox", "review-desk"].flatMap((s) => tools.map((t) => `mcp__${s}__desk_${t}`));
+const NAMES = ["inbox", "review-desk"];
+const desks = (tools: string[], names: string[]) => names.flatMap((s) => tools.map((t) => `mcp__${s}__desk_${t}`));
 const READ_TOOLS = ["list", "item", "overview", "events", "brief", "merging"];
 // Codex's and OpenCode's run have only these: no shell, no web, no MCP server but the desk's.
 const CODEX_TOOLS =
   "- On this run you have the desk's read tools (desk_list, desk_item, desk_overview, desk_events, desk_brief, desk_merging) and nothing else: no shell, no gh, no web.";
 // A run reads, never asks, and is refused the rest: these and whatever your own settings allow (your MCP servers' tools you
-// allowed, say). The desk adds what it lists, so it reads the desk too.
-const ALLOW = [
+// allowed, say). The desk adds what it lists, so it reads the desk too: under the name it's connected as, beside another desk's inbox.
+const allow = (name: string | null) => [
   "Read",
   "Grep",
   "Glob",
@@ -86,10 +88,10 @@ const ALLOW = [
     "release view",
     "repo view",
   ].map((c) => `Bash(gh ${c}:*)`),
-  ...desks(READ_TOOLS),
+  ...desks(READ_TOOLS, name ? [name] : NAMES),
 ];
 // Even where your settings allow more: nothing that writes as you, pushes, merges or edits files, and none of the desk's writes.
-const DENY = [
+const deny = (name: string | null) => [
   ...COORDINATOR_DENY,
   "Write",
   "Edit",
@@ -118,7 +120,10 @@ const DENY = [
     "secret",
     "variable",
   ].map((c) => `Bash(gh ${c}:*)`),
-  ...desks(["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "inquiry", "automations", "criteria"]),
+  ...desks(
+    ["act", "add", "undo", "config", "policy", "note", "hand_back", "answer", "inquire", "inquiry", "automations", "criteria"],
+    [...new Set([...NAMES, ...(name ? [name] : [])])],
+  ),
 ];
 // The secrets file is the desk's: no tool of a run reads it. A rule's absolute path starts with //.
 const secretsDeny = (home: string) => `Read(/${secretsPath(home).replaceAll(path.sep, "/").replace(/^\/?/, "/")})`;
@@ -885,7 +890,7 @@ export class Automations {
         "--permission-mode",
         "dontAsk",
         "--allowedTools",
-        ALLOW.join(","),
+        allow(this.serverName()).join(","),
         "--disallowedTools",
         secretsDeny(this.desk.home),
         "--json-schema",
@@ -1048,7 +1053,12 @@ export class Automations {
 
   // The desk home's automations directory; its project settings keep the deny list, beside the owner's own.
   dir(): Effect.Effect<string, FsError> {
-    return denyDir(this.desk.home, "automations", [...DENY, secretsDeny(this.desk.home)]);
+    return denyDir(this.desk.home, "automations", [...deny(this.serverName()), secretsDeny(this.desk.home)]);
+  }
+
+  // What your Claude Code calls this desk's MCP server, when Connect named it.
+  private serverName(): string | null {
+    return this.desk.mcpUrl && this.desk.agent() === "claude-code" ? serverName("claude-code", this.desk.mcpUrl) : null;
   }
 }
 

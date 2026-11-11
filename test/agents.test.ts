@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Cause, Effect, Exit, Fiber } from "effect";
-import { connect, plan, refreshSkills, status } from "../src/agents.ts";
+import { connect, plan, refreshSkills, serverName, status } from "../src/agents.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 
 const SKILL = readFileSync(join(import.meta.dirname, "..", "skills", "inbox", "SKILL.md"), "utf8");
@@ -44,6 +47,7 @@ test("Claude Code: nothing connected yet, with the exact commands", () => {
   assert.equal(s.driver, "claude-code");
   assert.deepEqual(s.mcp, {
     connected: false,
+    name: "inbox",
     command: "claude mcp add --transport http --scope user inbox http://localhost:47961/mcp",
   });
   assert.ok(s.skill);
@@ -52,22 +56,20 @@ test("Claude Code: nothing connected yet, with the exact commands", () => {
   assert.match(s.skill.command, /^mkdir -p \S*\.claude.skills'? && cp -R \S*skills.inbox'? \S*\.claude.skills'?\/$/);
   assert.equal(s.needs, "connect");
   assert.deepEqual(s.connect, [s.mcp.command, s.skill.command]);
-  assert.equal(s.taken, null);
+  assert.equal(s.note, null);
 });
 
 test("Settings asks you to connect or update only while it's needed, and Connect runs only what's missing", () => {
-  const mcp = (connected: boolean) => ({ connected, command: "claude mcp add inbox" });
+  const mcp = (connected: boolean) => ({ connected, name: "inbox", command: "claude mcp add inbox" });
   const skill = (state: "installed" | "outdated" | "missing") => ({ state, path: "SKILL.md", command: "cp -R skills.inbox" });
-  assert.deepEqual(plan(mcp(true), skill("installed"), null), { needs: null, connect: [] });
-  assert.deepEqual(plan(mcp(true), skill("missing"), null), { needs: "connect", connect: ["cp -R skills.inbox"] });
-  assert.deepEqual(plan(mcp(false), skill("installed"), null), { needs: "connect", connect: ["claude mcp add inbox"] });
-  assert.deepEqual(plan(mcp(false), skill("outdated"), null), {
+  assert.deepEqual(plan(mcp(true), skill("installed")), { needs: null, connect: [] });
+  assert.deepEqual(plan(mcp(true), skill("missing")), { needs: "connect", connect: ["cp -R skills.inbox"] });
+  assert.deepEqual(plan(mcp(false), skill("installed")), { needs: "connect", connect: ["claude mcp add inbox"] });
+  assert.deepEqual(plan(mcp(false), skill("outdated")), {
     needs: "connect",
     connect: ["claude mcp add inbox", "cp -R skills.inbox"],
   });
-  assert.deepEqual(plan(mcp(true), skill("outdated"), null), { needs: "update", connect: ["cp -R skills.inbox"] });
-  // A name another skill or server holds: Settings says so, and Connect would only refuse.
-  assert.deepEqual(plan(mcp(false), skill("missing"), "inbox is taken"), { needs: "taken", connect: [] });
+  assert.deepEqual(plan(mcp(true), skill("outdated")), { needs: "update", connect: ["cp -R skills.inbox"] });
 });
 
 test("Claude Code: registered means user scope in ~/.claude.json", () => {
@@ -81,7 +83,7 @@ test("Claude Code: registered means user scope in ~/.claude.json", () => {
 
 test("Codex: ~/.codex/config.toml and ~/.agents/skills", () => {
   const s = runSync(status("codex", MCP));
-  assert.deepEqual(s.mcp, { connected: false, command: "codex mcp add inbox --url http://localhost:47961/mcp" });
+  assert.deepEqual(s.mcp, { connected: false, name: "inbox", command: "codex mcp add inbox --url http://localhost:47961/mcp" });
   assert.equal(s.skill?.path, join(home, ".agents", "skills", "inbox", "SKILL.md"));
   write(join(".codex", "config.toml"), `model = "o3"\n\n[mcp_servers.inbox]\nurl = "${MCP}"\n`);
   assert.equal(runSync(status("codex", MCP)).mcp?.connected, true);
@@ -90,9 +92,9 @@ test("Codex: ~/.codex/config.toml and ~/.agents/skills", () => {
   assert.equal(runSync(status("codex", MCP)).mcp?.connected, true, "desk.cmd mcp, on Windows");
 });
 
-test("OpenCode: ~/.config/opencode/opencode.json and its skills folder", () => {
+test("OpenCode: ~/.config/opencode/opencode.json and its skills folder", async () => {
   const s = runSync(status("opencode", MCP));
-  assert.deepEqual(s.mcp, { connected: false, command: "opencode mcp add inbox --url http://localhost:47961/mcp" });
+  assert.deepEqual(s.mcp, { connected: false, name: "inbox", command: "opencode mcp add inbox --url http://localhost:47961/mcp" });
   assert.equal(s.skill?.path, join(home, ".config", "opencode", "skills", "inbox", "SKILL.md"));
   write(join(".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { inbox: { type: "remote", url: MCP } } }));
   assert.equal(runSync(status("opencode", MCP)).mcp?.connected, true);
@@ -101,9 +103,9 @@ test("OpenCode: ~/.config/opencode/opencode.json and its skills folder", () => {
   write(join(".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { inbox: local } }));
   assert.equal(runSync(status("opencode", MCP)).mcp?.connected, true, "desk mcp over stdio");
   write(join(".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { inbox: { type: "local", command: ["helpdesk", "mcp"] } } }));
-  const taken = runSync(status("opencode", MCP));
-  assert.equal(taken.needs, "taken");
-  assert.match(taken.taken!, /^opencode has another MCP server named inbox \(helpdesk mcp\), not this desk/);
+  const beside = await run(status("opencode", MCP));
+  assert.deepEqual([beside.needs, beside.mcp.name], ["connect", "inbox-desk"]);
+  assert.equal(beside.note, "Connects as inbox-desk: your server named inbox (helpdesk mcp) keeps its name");
 });
 
 test(
@@ -325,34 +327,182 @@ const MAIL = "---\nname: inbox\ndescription: Triage my email inbox with the gmai
 // A support inbox whose tools end in desk_ (zendesk_search) isn't the desk's either.
 const SUPPORT =
   "---\nname: inbox\ndescription: Work my support inbox\n---\nFind the ticket with zendesk_search, then helpdesk_escalate it.\n";
+const ALT_SKILL = SKILL.replace(/^---\nname: inbox\n/, "---\nname: inbox-desk\n");
+const altSkill = () => join(home, ".claude", "skills", "inbox-desk", "SKILL.md");
 
-test("another skill named inbox is the owner's: the refresh, Connect and the rename leave it as it is", async () => {
+test("another skill named inbox is the owner's: the desk's goes in inbox-desk, named so, and theirs stays as it is", async () => {
   write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: MCP } } }));
   write(join(".claude", "skills", "inbox", "SKILL.md"), SUPPORT);
-  assert.equal(runSync(status("claude-code", MCP)).skill.state, "taken");
-  assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), []);
-  assert.equal(readFileSync(claudeSkill(), "utf8"), SUPPORT);
-  write(join(".claude", "skills", "inbox", "SKILL.md"), MAIL);
   const s = runSync(status("claude-code", MCP));
-  const words = `${claudeSkill()} is another skill named inbox, not the desk's: move it, then connect again`;
-  assert.deepEqual([s.skill.state, s.needs, s.connect, s.taken], ["taken", "taken", [], words], "said before Connect is pressed");
-  assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), []);
-  const taken = await failure(connect("claude-code", MCP));
-  assert.deepEqual([taken._tag, taken.message], ["Conflict", words]);
-  // The copy from before the rename stays where it is, so the agent keeps the desk's skill.
+  assert.deepEqual([s.skill.state, s.skill.path, s.needs], ["missing", altSkill(), "connect"]);
+  assert.equal(s.note, "The skill is inbox-desk: your skill named inbox keeps its name");
+  assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), [], "the refresh never installs one");
+  const c = await run(connect("claude-code", MCP));
+  assert.deepEqual([c.mcp.connected, c.skill.state, c.needs], [true, "installed", null]);
+  assert.equal(readFileSync(altSkill(), "utf8"), ALT_SKILL);
+  assert.equal(readFileSync(claudeSkill(), "utf8"), SUPPORT);
+  // Out of date there, it's refreshed there.
+  writeFileSync(altSkill(), ALT_SKILL.replace("Inbox", "Old Desk"));
+  assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), [`refreshed the Inbox skill at ${altSkill()}`]);
+  assert.equal(readFileSync(altSkill(), "utf8"), ALT_SKILL);
+  // inbox-desk taken too: inbox-desk-2.
+  write(join(".claude", "skills", "inbox", "SKILL.md"), MAIL);
+  write(join(".claude", "skills", "inbox-desk", "SKILL.md"), MAIL.replace("name: inbox", "name: inbox-desk"));
+  assert.equal(runSync(status("claude-code", MCP)).skill.path, join(home, ".claude", "skills", "inbox-desk-2", "SKILL.md"));
+  // The copy from before the rename moves beside the owner's, so the agent keeps the desk's skill.
+  rmSync(join(home, ".claude", "skills", "inbox-desk"), { recursive: true });
   write(join(".claude", "skills", "review-desk", "SKILL.md"), OLD_SKILL);
   const old = join(home, ".claude", "skills", "review-desk");
   assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), [
-    `kept the Inbox skill in ${old}: ${join(home, ".claude", "skills", "inbox")} is another skill named inbox`,
+    `moved the Inbox skill from ${old} to ${join(home, ".claude", "skills", "inbox-desk")}`,
   ]);
   assert.equal(readFileSync(claudeSkill(), "utf8"), MAIL);
-  assert.equal(readFileSync(join(old, "SKILL.md"), "utf8"), OLD_SKILL);
-  const kept = runSync(status("claude-code", MCP));
-  assert.deepEqual([kept.mcp.connected, kept.needs, kept.taken], [true, "taken", words], "not 'isn't connected': yours holds the name");
+  assert.equal(readFileSync(altSkill(), "utf8"), ALT_SKILL);
+});
+
+// A desk answering /health, as another desk does, on a port of its own; and a port nobody's on, as a gone desk's.
+async function liveDesk(t: { after: (fn: () => void) => void }) {
+  const s = createServer((req, res) => {
+    res.writeHead(req.url === "/health" ? 200 : 404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ ok: true, version: "0.0.0" }));
+  });
+  s.listen(0, "127.0.0.1");
+  await once(s, "listening");
+  t.after(() => {
+    s.close();
+  });
+  return `http://127.0.0.1:${(s.address() as AddressInfo).port}/mcp`;
+}
+async function goneDesk() {
+  const s = createServer();
+  s.listen(0, "127.0.0.1");
+  await once(s, "listening");
+  const port = (s.address() as AddressInfo).port;
+  s.close();
+  await once(s, "close");
+  return `http://127.0.0.1:${port}/mcp`;
+}
+// A Claude Code that adds and removes user-scope servers in ~/.claude.json, saying each call.
+function fakeClaude() {
+  writeFileSync(
+    join(bin, "claude"),
+    `#!${process.execPath}
+const fs = require("node:fs"), path = require("node:path");
+const file = path.join(process.env.HOME, ".claude.json");
+const [, sub, ...rest] = process.argv.slice(2);
+fs.appendFileSync(path.join(process.env.HOME, "claude-calls"), process.argv.slice(2).join(" ") + "\\n");
+const cfg = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+cfg.mcpServers ??= {};
+if (sub === "add") cfg.mcpServers[rest.at(-2)] = { type: "http", url: rest.at(-1) };
+if (sub === "remove") delete cfg.mcpServers[rest.at(-1)];
+fs.writeFileSync(file, JSON.stringify(cfg));
+`,
+  );
+  chmodSync(join(bin, "claude"), 0o755);
+}
+const claudeServers = () =>
+  (JSON.parse(readFileSync(join(home, ".claude.json"), "utf8")) as { mcpServers: Record<string, unknown> }).mcpServers;
+const posix = { skip: process.platform === "win32" };
+
+test("a desk's inbox that no longer answers is left from a gone desk: Connect replaces it with this desk", posix, async () => {
+  fakeClaude();
+  const gone = await goneDesk();
+  write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: gone }, other: {} } }));
+  const s = await run(status("claude-code", MCP));
+  const add = `claude mcp add --transport http --scope user inbox ${MCP}`;
+  assert.deepEqual([s.mcp.connected, s.mcp.name, s.mcp.command], [false, "inbox", `claude mcp remove --scope user inbox && ${add}`]);
+  assert.equal(s.note, `Connect replaces inbox (${gone}), left by a desk that isn't running`);
+  const said: string[] = [];
+  const c = await run(
+    connect("claude-code", MCP, {
+      log: (l) => {
+        said.push(l);
+      },
+    }),
+  );
+  assert.deepEqual([c.mcp.connected, c.mcp.name, c.needs, c.note], [true, "inbox", null, null]);
+  assert.deepEqual(calls(), ["mcp remove --scope user inbox", add.slice("claude ".length)]);
+  assert.deepEqual(claudeServers(), { other: {}, inbox: { type: "http", url: MCP } });
+  assert.deepEqual(said, [`replaced claude's MCP server inbox (${gone}), left by a desk that isn't running`]);
+  // A gone desk's `desk mcp` over stdio too.
+  rmSync(join(home, "claude-calls"));
+  const port = new URL(gone).port;
+  write(
+    ".claude.json",
+    JSON.stringify({ mcpServers: { inbox: { command: "/opt/desk/bin/desk", args: ["mcp"], env: { DESK_PORT: port } } } }),
+  );
+  await run(connect("claude-code", MCP));
+  assert.deepEqual(calls(), ["mcp remove --scope user inbox", add.slice("claude ".length)]);
+});
+
+test("another desk that's running keeps inbox: this one is added as inbox-<port>, and counts as connected", posix, async (t) => {
+  fakeClaude();
+  const live = await liveDesk(t);
+  write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: live } } }));
+  const s = await run(status("claude-code", MCP));
+  assert.deepEqual([s.mcp.connected, s.mcp.name, s.needs], [false, "inbox-47961", "connect"]);
+  assert.equal(s.note, "Connects as inbox-47961: your other desk keeps inbox");
+  const said: string[] = [];
+  const c = await run(
+    connect("claude-code", MCP, {
+      log: (l) => {
+        said.push(l);
+      },
+    }),
+  );
+  assert.deepEqual([c.mcp.connected, c.mcp.name, c.skill.state, c.needs], [true, "inbox-47961", "installed", null]);
+  assert.equal(c.note, "Connected as inbox-47961: your other desk keeps inbox");
+  assert.deepEqual(calls(), [`mcp add --transport http --scope user inbox-47961 ${MCP}`]);
+  assert.deepEqual(claudeServers(), { inbox: { type: "http", url: live }, "inbox-47961": { type: "http", url: MCP } });
+  assert.deepEqual(said, ["connected claude as inbox-47961: your other desk keeps inbox"]);
+  // A second press, or a restart: nothing runs again.
+  assert.deepEqual((await run(connect("claude-code", MCP))).mcp, c.mcp);
+  assert.deepEqual(await run(refreshSkills(join(home, ".inbox"), MCP)), []);
+  assert.equal(calls().length, 1);
+  // inbox-47961 someone else's too: the next free name.
+  write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: live }, "inbox-47961": { command: "x" } } }));
+  assert.equal((await run(status("claude-code", MCP))).mcp.name, "inbox-47961-2");
+});
+
+test("a server of yours named inbox that isn't a desk stays: this desk is added as inbox-desk", posix, async () => {
+  fakeClaude();
+  const mail = { type: "stdio", command: "npx", args: ["-y", "gmail-mcp"] };
+  write(".claude.json", JSON.stringify({ mcpServers: { inbox: mail } }));
+  const s = runSync(status("claude-code", MCP));
+  assert.deepEqual([s.mcp.connected, s.mcp.name, s.needs], [false, "inbox-desk", "connect"]);
+  assert.equal(s.note, "Connects as inbox-desk: your server named inbox (npx -y gmail-mcp) keeps its name");
+  const c = await run(connect("claude-code", MCP));
+  assert.deepEqual([c.mcp.connected, c.mcp.name, c.needs], [true, "inbox-desk", null]);
+  assert.deepEqual(claudeServers(), { inbox: mail, "inbox-desk": { type: "http", url: MCP } });
+  await run(connect("claude-code", MCP));
+  assert.deepEqual(calls(), [`mcp add --transport http --scope user inbox-desk ${MCP}`], "a repeat connect runs nothing");
+  // inbox-desk taken as well: inbox-<port>.
+  write(".claude.json", JSON.stringify({ mcpServers: { inbox: mail, "inbox-desk": mail } }));
+  assert.equal(runSync(status("claude-code", MCP)).mcp.name, "inbox-47961");
+  // Nothing says to rename or remove anything of yours.
+  assert.ok(!JSON.stringify(runSync(status("claude-code", MCP))).includes("rename or remove"));
+});
+
+test("Codex beside another running desk, and OpenCode over a gone desk's inbox", posix, async (t) => {
+  const live = await liveDesk(t);
+  write(join(".codex", "config.toml"), `[mcp_servers.inbox]\nurl = "${live}"\n`);
+  fake("codex", `printf '[mcp_servers.%s]\\nurl = "%s"\\n' "$3" "$5" >> "$HOME/.codex/config.toml"`);
+  const x = await run(connect("codex", MCP));
+  assert.equal(readFileSync(join(home, "codex-args"), "utf8"), `mcp\nadd\ninbox-47961\n--url\n${MCP}\n`);
+  assert.deepEqual([x.mcp.connected, x.mcp.name, x.note], [true, "inbox-47961", "Connected as inbox-47961: your other desk keeps inbox"]);
+  assert.match(readFileSync(join(home, ".codex", "config.toml"), "utf8"), new RegExp(`^\\[mcp_servers.inbox\\]\nurl = "${live}"\n`));
+
+  const gone = await goneDesk();
+  write(join(".config", "opencode", "opencode.json"), JSON.stringify({ mcp: { inbox: { type: "remote", url: gone } } }));
+  // OpenCode's add replaces one of that name: nothing to remove first.
+  fake("opencode", `printf '{"mcp":{"%s":{"type":"remote","url":"%s"}}}' "$3" "$5" > "$HOME/.config/opencode/opencode.json"`);
+  const o = await run(connect("opencode", MCP));
+  assert.equal(readFileSync(join(home, "opencode-args"), "utf8"), `mcp\nadd\ninbox\n--url\n${MCP}\n`);
+  assert.deepEqual([o.mcp.connected, o.mcp.name, o.note], [true, "inbox", null]);
 });
 
 test(
-  "another MCP server named inbox: the desk's stays review-desk, and Connect says the name is taken",
+  "another MCP server named inbox: the desk's stays review-desk, and the rename leaves theirs alone",
   { skip: process.platform === "win32" },
   async () => {
     before();
@@ -374,27 +524,13 @@ test(
     assert.equal(existsSync(join(home, "claude-calls")), false);
     assert.deepEqual(servers(), ["review-desk", "inbox"]);
 
-    write(".claude.json", JSON.stringify({ mcpServers: { inbox: mail } }));
-    const s = runSync(status("claude-code", MCP));
-    const words = `claude has another MCP server named inbox (npx -y gmail-mcp), not this desk at ${MCP}: rename or remove it, then connect again`;
-    assert.equal(s.mcp.connected, false, "a server named inbox isn't the desk's by its name");
-    assert.deepEqual([s.needs, s.connect, s.taken], ["taken", [], words], "said before Connect is pressed, with no add that would fail");
-    const taken = await failure(connect("claude-code", MCP));
-    assert.deepEqual([taken._tag, taken.message], ["Conflict", words]);
-    assert.equal(existsSync(join(home, "claude-calls")), false);
-    // The desk's own from before it moved port reads as where it points, not as a stranger's.
-    write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: "http://localhost:47823/mcp" } } }));
-    assert.equal(
-      (await failure(connect("claude-code", MCP))).message,
-      `claude has another MCP server named inbox (http://localhost:47823/mcp), not this desk at ${MCP}: rename or remove it, then connect again`,
-    );
     // The desk's own, by its URL on any loopback name, or as `desk mcp` over stdio (bin/desk, bin/desk.cmd, or node on this
     // desk's src/cli.ts) aimed at its port; another port, or another program's mcp, isn't this desk.
     const cli = join(import.meta.dirname, "..", "src", "cli.ts");
     const at = { DESK_PORT: "47961" };
     const connected = (inbox: object) => {
       write(".claude.json", JSON.stringify({ mcpServers: { inbox } }));
-      return runSync(status("claude-code", MCP)).mcp.connected;
+      return serverName("claude-code", MCP) === "inbox";
     };
     for (const inbox of [
       { type: "http", url: "http://127.0.0.1:47961/mcp" },
@@ -405,7 +541,7 @@ test(
       assert.equal(connected(inbox), true, JSON.stringify(inbox));
     for (const inbox of [
       { type: "http", url: "http://localhost:47962/mcp" },
-      { type: "stdio", command: "/usr/local/bin/desk", args: ["mcp"], env: { DESK_PORT: "47823" } },
+      { type: "stdio", command: "/usr/local/bin/desk", args: ["mcp"], env: { DESK_PORT: "47962" } },
       { type: "stdio", command: "/usr/local/bin/desk", args: ["mcp"] },
       { type: "stdio", command: "npx", args: ["-y", "@acme/helpdesk", "mcp"], env: at },
       { type: "stdio", command: "node", args: ["/elsewhere/src/cli.ts", "mcp"], env: at },

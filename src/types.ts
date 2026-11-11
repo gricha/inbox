@@ -349,12 +349,11 @@ export interface SetupAgent {
 // GET /api/agents: whether Claude Code has the desk's MCP tools and the Inbox skill.
 export interface AgentStatus {
   driver: string;
-  mcp: { connected: boolean; command: string }; // command: what Connect runs to register the desk
-  // path: the installed SKILL.md; taken: another skill of the owner's has the desk's folder
-  skill: { state: "installed" | "outdated" | "missing" | "taken"; path: string; command: string };
-  // What Settings asks of you: connect (tools or skill missing), update the skill, move what holds the name (taken), nothing.
-  needs: "connect" | "update" | "taken" | null;
-  taken: string | null; // what holds skills/inbox or the MCP server's name, and where it points, in Connect's 409's words
+  // name: the server's name, connected or to be; command: what Connect runs to register the desk
+  mcp: { connected: boolean; name: string; command: string };
+  skill: { state: "installed" | "outdated" | "missing"; path: string; command: string }; // path: the SKILL.md, installed or to be
+  needs: "connect" | "update" | null; // what Settings asks of you: connect (tools or skill missing), update the skill, nothing
+  note: string | null; // why a name isn't inbox: what keeps it ("Connected as inbox-47998: your other desk keeps inbox")
   connect: string[]; // what Connect runs: only what's missing, in its order
 }
 

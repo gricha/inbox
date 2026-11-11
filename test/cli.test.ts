@@ -503,14 +503,14 @@ test("connect claude prints what's missing and the commands that fix it", async 
   ]);
   assert.equal(lines[3], "# Skill: not installed");
   assert.match(lines[4]!, /^mkdir -p .*\.claude.skills'? && cp -R .*inbox'? .*\.claude.skills'?\/$/);
-  // A name another server holds: what holds it, and no add that would fail.
+  // A name another server keeps: the desk's goes beside it, and says so.
   writeFileSync(join(env.HOME, ".claude.json"), JSON.stringify({ mcpServers: { inbox: { command: "mail-mcp" } } }));
-  const taken = (await withEnv(env, () => run(["connect", "claude"]))).out.split("\n");
-  assert.deepEqual(taken.slice(1, 3), ["# MCP tools: not connected", "# Skill: not installed"]);
-  assert.equal(
-    taken[3],
-    "# claude has another MCP server named inbox (mail-mcp), not this desk at http://localhost:47960/mcp: rename or remove it, then connect again",
-  );
+  const beside = (await withEnv(env, () => run(["connect", "claude"]))).out.split("\n");
+  assert.deepEqual(beside.slice(1, 3), [
+    "# MCP tools: not connected",
+    "claude mcp add --transport http --scope user inbox-desk http://localhost:47960/mcp",
+  ]);
+  assert.equal(beside[5], "# Connects as inbox-desk: your server named inbox (mail-mcp) keeps its name");
 });
 
 test("setup shows GitHub and each agent with what to run, and naming one picks it", async () => {

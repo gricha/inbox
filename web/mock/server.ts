@@ -3721,13 +3721,13 @@ function agentStatus(): AgentStatus {
       ? "codex mcp add inbox --url http://localhost:47823/mcp"
       : "claude mcp add --transport http --scope user inbox http://localhost:47823/mcp";
   const skills = driver === "codex" ? `${homedir()}/.agents/skills` : `${homedir()}/.claude/skills`;
-  const mcp = { connected: linked.has(`${driver} mcp`), command };
+  const mcp = { connected: linked.has(`${driver} mcp`), name: "inbox", command };
   const skill: AgentStatus["skill"] = {
     state: linked.has(`${driver} skill`) ? "installed" : "missing",
     path: `${skills}/inbox/SKILL.md`,
     command: `mkdir -p ${skills} && cp -R skills/inbox ${skills}/`,
   };
-  return { driver, mcp, skill, taken: null, ...plan(mcp, skill, null) };
+  return { driver, mcp, skill, note: null, ...plan(mcp, skill) };
 }
 
 // ---------------------------------------------------------------------------

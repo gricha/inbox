@@ -833,19 +833,25 @@ test("agents: Claude Code's status, and connect", async () => {
     assert.equal(before.driver, "claude-code");
     assert.deepEqual(before.mcp, {
       connected: true,
+      name: "inbox",
       command: "claude mcp add --transport http --scope user inbox http://localhost:47823/mcp",
     });
     assert.equal(before.skill.state, "missing");
     const after = await t.json("/api/agents/connect", { method: "POST" });
     assert.equal(after.skill.state, "installed");
     assert.ok(fs.existsSync(path.join(home, ".claude", "skills", "inbox", "SKILL.md")));
-    // Another server named inbox: a refusal that says what to move, not the agent's CLI failing.
+    // Another server named inbox: the desk goes in beside it, so only the agent's CLI can fail it.
     fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: { inbox: { type: "stdio", command: "mail-mcp" } } }));
-    const taken = await t.req("/api/agents/connect", { method: "POST" });
-    assert.equal(taken.status, 409);
+    const beside = await t.json("/api/agents");
+    assert.deepEqual(
+      [beside.mcp.name, beside.note],
+      ["inbox-desk", "Connects as inbox-desk: your server named inbox (mail-mcp) keeps its name"],
+    );
+    const missing = await t.req("/api/agents/connect", { method: "POST" });
+    assert.equal(missing.status, 502);
     assert.match(
-      ((await taken.json()) as { error: string }).error,
-      /^claude has another MCP server named inbox \(mail-mcp\), not this desk at http:\/\/localhost:47823\/mcp: rename or remove it/,
+      ((await missing.json()) as { error: string }).error,
+      /Run it yourself: claude mcp add .* inbox-desk http:\/\/localhost:47823\/mcp$/,
     );
   } finally {
     for (const [k, v] of Object.entries(saved)) {

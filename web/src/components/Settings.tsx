@@ -648,15 +648,6 @@ const needs = (agent: string) => ({
     failed: "Couldn't update it",
     done: `Updated ${agent}'s copy of the desk's skill.`,
   },
-  // Its help is the status's own words: what holds the name, and where it points.
-  taken: {
-    label: `${agent} has another skill or server named inbox`,
-    help: "",
-    press: `Connect ${agent}`,
-    busy: "Connecting…",
-    failed: "Couldn't connect",
-    done: `Connected ${agent} to the desk.`,
-  },
 });
 
 // Under the agent's name, what needs you, and only then: the agent missing the desk's tools or skill, AI reviews paused.
@@ -700,7 +691,7 @@ function ClaudeStatus({
       api.connectAgent().pipe(
         Effect.tap((s) =>
           Effect.sync(() => {
-            if (say && !s.needs) flash(say.done);
+            if (say && !s.needs) flash(s.note ? `${s.note}.` : say.done);
           }),
         ),
         Effect.catch((e) =>
@@ -725,7 +716,7 @@ function ClaudeStatus({
           <div className="s-label-col">
             <p className="s-label">{say.label}</p>
             <p className={cls("s-help", error && "t-bad")}>
-              {error ? `${say.failed}: ${error}` : status.taken ? `${status.taken}.` : say.help}
+              {error ? `${say.failed}: ${error}` : status.note ? `${status.note}.` : say.help}
             </p>
           </div>
           <div className="s-control">
