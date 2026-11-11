@@ -69,7 +69,7 @@ A `ref` is `owner/repo#123`, `repo#123` when unique, a GitHub URL, or an item's 
 2. Answer as one list, most urgent first: ref, a short title, and the why. Then one line for the rest ("12 later, 30 FYI"). If `desk_list` says some PRs reach the queue once Claude has reviewed them, mention how many.
 3. No JSON. If nothing is urgent, say so plainly.
 
-`desk_list` shows the rules' buckets. The window's sections (Urgent, Standard, FYI) also weigh criteria and a score; `desk_item` and `desk_criteria list` explain those.
+`desk_list` lists items with their bucket; `desk_item` gives one item's metadata and why it's placed where it is; `desk_criteria list` explains the urgency criteria.
 
 ## Why is X (not) in the queue?
 
