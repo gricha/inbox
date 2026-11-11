@@ -25,6 +25,13 @@ curl -fsSL -H "Authorization: Bearer $(gh auth token)" https://raw.githubusercon
 
 It installs the latest release, `/Applications/Inbox.app` on macOS or `~/.local/bin/Inbox.AppImage` on Linux, which then updates itself. Until the first release, or with `bash -s -- --source`, it clones the repo to `~/.local/share/inbox`, installs its packages and links `desk` into `~/.local/bin`; start the app there with `npm run app`. The header is there because the repo is private: `gh` reads it with your login. On Windows, run the installer from [Releases](https://github.com/gricha/inbox/releases).
 
+Without the app, from npm: the server, the web UI at <http://localhost:47823> and the `desk` CLI.
+
+```bash
+npm install -g @gricha/inbox
+desk serve --open
+```
+
 From a checkout:
 
 ```bash
@@ -331,3 +338,5 @@ git push origin main v0.2.0    # the tag starts the release workflow
 - **Download 0.2.0** elsewhere, including macOS (the ad-hoc signed build can't self-update): download the `.dmg`, drag Inbox over the old one, and open it (right-click → Open the first time).
 
 A desk run from a checkout (`npm run app`, `desk serve`, Run from a checkout) never checks.
+
+**npm.** `npm publish` from the tagged commit ships `@gricha/inbox`: `prepack` compiles `src/` to `lib/` (Node won't run TypeScript from `node_modules`) and builds the web UI. An npm install has no Sentry SDK, so it reports nothing.

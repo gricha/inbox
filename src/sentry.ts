@@ -21,7 +21,12 @@ const root = AsyncLocalStorage.snapshot();
 export async function startSentry(): Promise<void> {
   if (process.env.DESK_SENTRY === "0") return;
   // Loaded here, not on import: only `desk serve` pays for the SDK, and the app ships without it.
-  const s = await import("@sentry/hono/node");
+  // The SDK is a dev dependency: an npm install has none, and reports nothing.
+  const s = await import("@sentry/hono/node").catch((e: unknown) => {
+    if ((e as { code?: unknown }).code === "ERR_MODULE_NOT_FOUND") return null;
+    throw e;
+  });
+  if (!s) return;
   release = commit();
   s.init({
     dsn: SERVER_DSN,

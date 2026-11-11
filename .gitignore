@@ -5,3 +5,4 @@ release/
 .DS_Store
 .shots/
 .claude/worktrees/
+lib/

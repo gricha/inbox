@@ -2,9 +2,25 @@
   "name": "@gricha/inbox",
   "productName": "Inbox",
   "version": "0.1.0",
-  "private": true,
-  "type": "module",
   "description": "A local desk that sorts your GitHub review load into boards and a priority queue.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gricha/inbox.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "skills",
+    "web/dist",
+    "web/src/styles.css",
+    "web/src/doc.css",
+    "web/src/fonts"
+  ],
+  "type": "module",
   "main": "electron/main.ts",
   "desktopName": "inbox.desktop",
   "bin": {
@@ -35,7 +51,8 @@
     "check": "npm run format:check && npm run lint && npm run lint:css && npm run typecheck && npm run knip && npm test",
     "prepare": "simple-git-hooks",
     "shots": "node --disable-warning=ExperimentalWarning scripts/shots.ts",
-    "release": "node --disable-warning=ExperimentalWarning scripts/release.ts"
+    "release": "node --disable-warning=ExperimentalWarning scripts/release.ts",
+    "prepack": "rm -rf lib && tsc -p tsconfig.build.json && npm run build"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",

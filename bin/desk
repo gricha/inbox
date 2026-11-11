@@ -9,4 +9,7 @@ while [ -L "$self" ]; do
   esac
 done
 root=$(cd "$(dirname "$self")/.." && pwd -P)
-exec node --disable-warning=ExperimentalWarning "$root/src/cli.ts" "$@"
+# A checkout runs src/cli.ts; the npm package ships compiled lib/cli.js.
+entry="$root/src/cli.ts"
+[ -f "$entry" ] || entry="$root/lib/cli.js"
+exec node --disable-warning=ExperimentalWarning "$entry" "$@"
