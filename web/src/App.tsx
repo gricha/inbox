@@ -62,7 +62,9 @@ import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { PageHead, PAGE_NAME } from "./components/PageHead.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
-import { SourceNotice, useSourceDown } from "./components/Source.tsx";
+import { useSourceDown } from "./components/Source.tsx";
+import { Bubbles } from "./components/Bubbles.tsx";
+import { forget, noticesOf, undismissed, withFailure, type Dismissed, type Fix, type Notice } from "./notices.ts";
 
 interface Toast {
   id: number;
@@ -96,6 +98,14 @@ const go = (r: Route) => {
 type Down = DeskUnreachable | DeskStarting | DeskConfigBroken; // why the API isn't usable right now
 const isDown = (e: ApiError): e is Down => e._tag === "DeskUnreachable" || e._tag === "DeskStarting" || e._tag === "DeskConfigBroken";
 const LIST = "desk.list"; // this device's choice: the list beside a review open or folded
+const DISMISSED = "desk.notices"; // this device's: the notices you dismissed, each as it was then
+function dismissedAtStart(): Dismissed {
+  const raw = getStored(DISMISSED);
+  const parsed: unknown = raw
+    ? Effect.runSync(Effect.try({ try: () => JSON.parse(raw) as unknown, catch: (e) => e }).pipe(Effect.orElseSucceed(() => null)))
+    : null;
+  return parsed && typeof parsed === "object" ? (parsed as Dismissed) : {};
+}
 const LIST_PAGES = new Set<Route["name"]>(["queue", "blocked", "archive"]);
 // The sidebar's pages, top to bottom: ⌘1 to ⌘4 (Ctrl elsewhere) open them, as tabs' numbers do in a browser.
 const SIDE_PAGES = ["queue", "blocked", "inflight", "archive"] as const;
@@ -155,6 +165,8 @@ export function App() {
   const [unfolded, setUnfolded] = useState<Partial<Record<GroupKey, boolean>>>({}); // the queue's "n more" line
   const [filter, setFilter] = useState("");
   const [toast, setToast] = useState<Toast | null>(null);
+  const [failures, setFailures] = useState<Notice[]>([]); // actions that failed, as bubbles that fade
+  const [dismissed, setDismissed] = useState<Dismissed>(dismissedAtStart);
   const [settings, setSettings] = useState<SettingsView | null>(null);
   const [section, setSection] = useState(route.name === "settings" ? route.section : "github"); // kept while on the queue
   const [settingsSeen, setSettingsSeen] = useState(route.name === "settings");
@@ -195,9 +207,15 @@ export function App() {
   const pending = useRef<{ id: string; until: number } | null>(null);
 
   // A GitHub write's Undo lasts as long as its toast, so nothing can reopen or un-draft it hours later.
+  // A failure with nothing to undo is a bubble at the window's edge, not the toast: the toast says what you did.
   const flash = useCallback((text: string, error = false, canUndo = false, ms = 6000, busy = false) => {
     clearTimeout(toastTimer.current);
     if (!canUndo) undoWrite.current = null;
+    if (error && !canUndo) {
+      setToast(null);
+      setFailures((f) => withFailure(f, text, Date.now()));
+      return;
+    }
     setToast({ id: Date.now(), text, error, undo: canUndo, busy });
     toastTimer.current = window.setTimeout(() => {
       setToast(null);
@@ -1327,6 +1345,39 @@ export function App() {
   const inbox = view ? inboxCount(view, leaving, answered) : null;
   const offline = down?._tag === "DeskUnreachable";
   const broken = down?._tag === "DeskConfigBroken" ? down : null;
+  // What's wrong with the system, from what the desk reports: the bubbles at the window's edge.
+  const notices = noticesOf({
+    offline,
+    source: sourceDown,
+    starting: down?._tag === "DeskStarting" ? down.message : null,
+    broken: broken?.message ?? null,
+    overview,
+    paused: view?.paused ?? null,
+    page: routeHash(route),
+    agent: aiName(),
+  });
+  // Only once the desk has answered and while it does: what it said isn't gone because it's loading or down for a moment.
+  const deskSaid = !!overview && (!!view || !!broken) && (!down || !!broken);
+  const settled = deskSaid ? forget(notices, dismissed) : dismissed;
+  useEffect(() => {
+    if (settled === dismissed) return;
+    setDismissed(settled);
+    setStored(DISMISSED, Object.keys(settled).length ? JSON.stringify(settled) : null);
+  }, [settled, dismissed]);
+  const dismissNotice = useCallback((n: Notice) => {
+    if (n.transient) {
+      setFailures((f) => f.filter((x) => x.id !== n.id));
+      return;
+    }
+    setDismissed((d) => {
+      const next = { ...d, [n.id]: n.sig };
+      setStored(DISMISSED, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+  const fixNotice = (f: Fix) => {
+    if ("run" in f) runUi(f.run === "sync" ? sync() : load());
+  };
   const ses: SessionCtx = {
     now,
     selected,
@@ -1425,10 +1476,6 @@ export function App() {
         from={reviewFrom}
         count={inbox}
         overview={overview}
-        offline={offline}
-        onSync={() => {
-          runUi(sync());
-        }}
         onUpdate={() => {
           runUi(update());
         }}
@@ -1461,47 +1508,6 @@ export function App() {
           setFilter={setFilter}
         />
         <main className="main">
-          {sourceDown && <SourceNotice s={sourceDown} />}
-          {down && !broken && !sourceDown && (
-            <div className={cls("notice", offline ? "err" : "warn")} role="alert">
-              {offline ? (
-                <span>
-                  The desk server isn't running. Start it with <code>desk serve</code> or open the desktop app.
-                </span>
-              ) : (
-                <span>{down.message}</span>
-              )}
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  runUi(load());
-                }}
-              >
-                Retry
-              </button>
-            </div>
-          )}
-          {broken && !(route.name === "settings" && route.section === "rules") && (
-            <div className="notice err" role="alert">
-              <span>
-                Your rules don't load, so there's nothing on your desk yet. {broken.message.replace(/^config has errors:\s*/, "")}
-              </span>
-              <a className="btn" href="#/settings/rules">
-                Fix rules
-              </a>
-            </div>
-          )}
-          {configErrors > 0 && !broken && !(route.name === "settings" && route.section === "rules") && (
-            <div className="notice warn">
-              <span>
-                Your rules have {configErrors} {configErrors === 1 ? "error" : "errors"}, so your desk uses the last version that worked.
-              </span>
-              <a className="btn" href="#/settings/rules">
-                Fix rules
-              </a>
-            </div>
-          )}
           {route.name === "queue" && !broken && (
             <Queue
               view={view}
@@ -1675,6 +1681,7 @@ export function App() {
           }}
         />
       )}
+      <Bubbles notices={[...undismissed(notices, dismissed), ...failures]} fix={fixNotice} dismiss={dismissNotice} />
       {toast && (
         // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader announces <output> as a live region; role=status is
         <div key={toast.id} className={cls("toast", toast.error && "error")} role="status">

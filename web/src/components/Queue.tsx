@@ -4,7 +4,6 @@ import { foldOf, PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../v
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { SessionRow, type SessionCtx } from "./Session.tsx";
-import { withCode } from "./Review.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
 // The main page: what's on your Inbox, in its sections, each in the desk's order: Urgent (agents' questions and the sessions
@@ -66,11 +65,6 @@ export function Queue({
   const any = parts.some(({ g, lead }) => lead > 0 || g.cards.some((c) => !ctx.leaving.has(c.id)));
   return (
     <div className="queue">
-      {view.paused && (
-        <p className="ai-paused">
-          <b>{view.paused.who === "claude" ? `${aiName()} is paused:` : "AI reviews are paused:"}</b> {withCode(view.paused.why)}
-        </p>
-      )}
       {any ? (
         parts.map(({ g, lead }) => (
           <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>

@@ -162,7 +162,7 @@ const inOrder = (ys: number[]) => ys.every((y, i) => y >= 0 && (i === 0 || y > y
 // AI reviews paused, as after an expired login: a mock-only switch (web/mock/server.ts).
 const pauseAi = (paused: boolean) => async (page: Page) => {
   await page.evaluate(`fetch("/api/mock/ai-paused", { method: "POST", body: JSON.stringify({ paused: ${paused} }) })`);
-  await page.locator(".ai-paused").waitFor({ state: paused ? "visible" : "detached", timeout: 5000 });
+  await page.locator(".bubble", { hasText: "is paused" }).waitFor({ state: paused ? "visible" : "detached", timeout: 5000 });
 };
 // The queue as the mock serves it, changed in the browser: for states the mock's data doesn't reach.
 const queueAs = (change: (q: QueueView) => void) => async (page: Page) => {
@@ -576,12 +576,32 @@ const resetStep = (page: Page, key: string, want: unknown, still?: false) =>
 // The page the sidebar marks as where you are: a review's or a question's is the page it was opened from.
 const sideOn = (page: Page) =>
   page.evaluate<string | null>(`document.querySelector(".side-item.on .side-name")?.textContent.trim() ?? null`);
-// The sidebar's sync line, null while there's nothing wrong: its words, red, spinning, its tooltip.
-const syncLine = (page: Page) =>
-  page.evaluate<{ text: string; red: boolean; spin: boolean; tip: string | null; press: boolean } | null>(`(() => {
-    const b = document.querySelector(".side-sync");
-    return b && { text: b.textContent.trim(), red: b.classList.contains("err"), spin: !!b.querySelector(".spin"), tip: b.getAttribute("title"), press: b.tagName === "BUTTON" };
-  })()`);
+// The bubbles at the window's edge, top to bottom: each its title, words, colour and fix, and whether it lies on the page's
+// column inside the window, clear of the sidebar, the list beside a review and the chat.
+interface BubbleSays {
+  title: string;
+  text: string | null;
+  tone: "red" | "amber" | null;
+  fix: string | null;
+  dismiss: boolean;
+  placed: boolean;
+}
+const bubblesSay = (page: Page) =>
+  page.evaluate<BubbleSays[]>(`[...document.querySelectorAll(".bubble")].map((b) => {
+    const r = b.getBoundingClientRect();
+    const left = Math.max(0, ...[".side", ".beside"].map((s) => document.querySelector(s)?.getBoundingClientRect().right ?? 0));
+    const chat = document.querySelector(".chat")?.getBoundingClientRect().left ?? innerWidth;
+    return {
+      title: b.querySelector(".bubble-title").textContent,
+      text: b.querySelector(".bubble-text")?.textContent ?? null,
+      tone: b.classList.contains("t-red") ? "red" : b.classList.contains("t-amber") ? "amber" : null,
+      fix: b.querySelector(".bubble-fix")?.textContent ?? null,
+      dismiss: b.querySelector(".bubble-x")?.getAttribute("aria-label") === "Dismiss",
+      placed: (innerWidth <= 640 || r.left >= left) && r.right <= Math.min(chat, innerWidth) && r.bottom <= innerHeight && r.top >= 0,
+    };
+  })`);
+const SYNC_401 = "GitHub rejected the token (HTTP 401)";
+const refusing = new Set<string>(); // routes a shot refuses on purpose: the browser's console error for each is expected
 // The page head's words: a list's filter, a review's way back, or the page's name.
 const headSays = (page: Page) =>
   page.evaluate<string | null>(
@@ -674,7 +694,7 @@ const SHOTS: Shot[] = [
       if (on !== "Inbox") failures.push(`queue: the sidebar marks ${JSON.stringify(on)}`);
       const head = await headSays(page);
       if (head !== "Filter") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the filter`);
-      if (await page.locator(".side-sync").count()) failures.push("queue: the sidebar has a sync line while the sync is fine");
+      if (await page.locator(".bubble").count()) failures.push("queue: a bubble while nothing's wrong");
       // Its sections under their headings, Urgent led by an agent's question, a row like the rest; a hand-back saying so on
       // its own row at every width; each row saying why it's there; a fold line that says just how many.
       const list = await page.evaluate<{
@@ -805,25 +825,24 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // GitHub's rate limit: the sidebar's sync line, there only when something's wrong, says so in red with the error in its
-    // tooltip; nothing to press, since the desk skips a sync until the limit resets, so a click shows no retry.
+    // GitHub's rate limit: a bubble at the window's edge says so in amber, and when syncing starts again; nothing to press,
+    // since the desk skips a sync until the limit resets.
     name: "sync-limited",
     go: async (page) => {
       const error = "GitHub rate limited until 2026-11-09T00:00:00Z (HTTP 403)";
       await overviewAs((o) => {
         o.sync_error = error;
         o.connectors = o.connectors.map((c) => ({ ...c, status: "paused", error }));
+        o.rate_limit = { remaining: 0, reset_at: new Date(Date.now() + 40 * 60_000).toISOString() };
       })(page);
       await page.reload();
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
-      await page.locator(".side-sync").waitFor();
-      const line = await syncLine(page);
-      if (line?.text !== "Rate limited" || !line.red || line.spin || line.tip !== error || line.press)
-        failures.push(`sync-limited: the rate-limited sync line reads ${JSON.stringify(line)}`);
-      await page.locator(".side-sync").click();
-      await page.waitForTimeout(150);
-      const after = await syncLine(page);
-      if (after?.text !== "Rate limited") failures.push(`sync-limited: a click on the line reads ${JSON.stringify(after)}`);
+      await page.locator(".bubble").waitFor();
+      await page.waitForTimeout(300); // in, not rising
+      const b = await bubblesSay(page);
+      if (b.length !== 1 || b[0]!.title !== "GitHub's rate limit is used up" || b[0]!.tone !== "amber" || b[0]!.fix || !b[0]!.placed)
+        failures.push(`sync-limited: the bubbles read ${JSON.stringify(b)}`);
+      if (!b[0]?.text?.startsWith("Syncing starts again at ")) failures.push(`sync-limited: its words are ${JSON.stringify(b[0]?.text)}`);
     },
     after: unsettle,
   },
@@ -857,7 +876,58 @@ const SHOTS: Shot[] = [
     after: unsettle,
   },
   {
-    // The desk gone: the list stays under the red line with Retry, and the sync line says Offline in red.
+    // The last sync failed: a red bubble with the error and Try again, the list kept beside it. Dismissed, it stays gone
+    // across a reload while the sync keeps failing; once a sync works and a later one fails, it's back.
+    name: "sync-failed",
+    go: async (page) => {
+      await overviewAs((o) => {
+        o.sync_error = SYNC_401;
+      })(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      await page.locator(".bubble").waitFor();
+      await page.waitForTimeout(300); // in, not rising
+      const b = await bubblesSay(page);
+      if (
+        b.length !== 1 ||
+        b[0]!.title !== "Sync failed" ||
+        b[0]!.text !== SYNC_401 ||
+        b[0]!.tone !== "red" ||
+        b[0]!.fix !== "Try again" ||
+        !b[0]!.dismiss ||
+        !b[0]!.placed
+      )
+        failures.push(`sync-failed: the bubbles read ${JSON.stringify(b)}`);
+      if (!(await page.locator(".queue .line").count())) failures.push("sync-failed: the list isn't kept");
+    },
+    after: async (page) => {
+      await page.locator(".bubble-x").click();
+      await page
+        .locator(".bubble")
+        .waitFor({ state: "detached", timeout: 2000 })
+        .catch(() => failures.push("sync-failed: Dismiss leaves it"));
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(300);
+      if (await page.locator(".bubble").count())
+        failures.push("sync-failed: a dismissed bubble is back after a reload, the sync still failing");
+      await unroute(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(300);
+      await overviewAs((o) => {
+        o.sync_error = SYNC_401;
+      })(page);
+      await page.reload();
+      await page
+        .locator(".bubble", { hasText: "Sync failed" })
+        .waitFor({ timeout: 5000 })
+        .catch(() => failures.push("sync-failed: failing again after a sync worked, it isn't back"));
+      await unsettle(page);
+    },
+  },
+  {
+    // The desk gone: the list stays, and a red bubble says the desk isn't running, with Retry.
     name: "sync-offline",
     go: async (page) => {
       await at("#/")(page);
@@ -866,21 +936,22 @@ const SHOTS: Shot[] = [
         route.request().url().endsWith("/api/events") ? route.fallback() : route.fulfill({ contentType: "text/plain", body: "" }),
       );
       await page.evaluate(`document.dispatchEvent(new Event("visibilitychange"))`);
-      await page.locator(".side-sync", { hasText: "Offline" }).waitFor();
-      const line = await syncLine(page);
-      if (!line?.red || line.spin) failures.push(`sync-offline: the sync line reads ${JSON.stringify(line)}`);
-      if (!(await page.locator(".notice.err").isVisible()) || !(await page.locator(".queue .line").count()))
-        failures.push("sync-offline: the list isn't kept under the red line");
+      await page.locator(".bubble", { hasText: "The desk isn't running" }).waitFor();
+      await page.waitForTimeout(300); // in, not rising
+      const b = await bubblesSay(page);
+      if (b.length !== 1 || b[0]!.tone !== "red" || b[0]!.fix !== "Retry" || !b[0]!.placed)
+        failures.push(`sync-offline: the bubbles read ${JSON.stringify(b)}`);
+      if (await page.locator(".main .notice").count()) failures.push("sync-offline: the page still has a notice line");
+      if (!(await page.locator(".queue .line").count())) failures.push("sync-offline: the list isn't kept");
     },
-    // Then the desk back: the red line and the sync line both go.
+    // Then the desk back: the bubble goes.
     after: async (page) => {
       await unroute(page);
       await page.evaluate(`document.dispatchEvent(new Event("visibilitychange"))`);
-      for (const sel of [".side-sync", ".notice.err"])
-        await page
-          .locator(sel)
-          .waitFor({ state: "detached", timeout: 5000 })
-          .catch(() => failures.push(`sync-offline: ${sel} stays once the desk is back`));
+      await page
+        .locator(".bubble")
+        .waitFor({ state: "detached", timeout: 5000 })
+        .catch(() => failures.push("sync-offline: the bubble stays once the desk is back"));
       await fresh(page);
     },
   },
@@ -1104,15 +1175,108 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // One line above the queue instead of a note on every card.
+    // Claude logged out: one bubble at the window's edge instead of a line on the page or a note on every card, its words and
+    // the way to Settings → Agent; on that page, none, as the page says it.
     name: "queue-ai-paused",
     writes: true,
     go: async (page) => {
       await at("#/")(page);
       await pauseAi(true)(page);
       await top(page);
+      const b = await bubblesSay(page);
+      if (
+        b.length !== 1 ||
+        b[0]!.title !== "Claude is paused" ||
+        !b[0]!.text?.includes("Run claude auth login") ||
+        b[0]!.tone !== "red" ||
+        b[0]!.fix !== "Open Settings → Agent" ||
+        !b[0]!.placed
+      )
+        failures.push(`queue-ai-paused: the bubbles read ${JSON.stringify(b)}`);
+      const first = await page.locator(".queue > *").first().getAttribute("class");
+      if (!first?.includes("group"))
+        failures.push(`queue-ai-paused: the queue starts with ${JSON.stringify(first)}, not its first section`);
     },
-    after: pauseAi(false),
+    after: async (page) => {
+      await page.locator(".bubble-fix", { hasText: "Open Settings → Agent" }).click();
+      await page.waitForTimeout(400);
+      const hash = await page.evaluate<string>("location.hash");
+      if (hash !== "#/settings/agent") failures.push(`queue-ai-paused: Open Settings → Agent went to ${hash}`);
+      if (await page.locator(".bubble").count()) failures.push("queue-ai-paused: Settings → Agent says it and still has the bubble");
+      await at("#/")(page);
+      await pauseAi(false)(page);
+    },
+  },
+  {
+    // Three at once, the order they matter: Claude paused, the sync failing, then an action that failed, which fades on its
+    // own. The list's last rows scroll clear of them.
+    name: "bubbles-stack",
+    writes: true,
+    go: async (page) => {
+      await overviewAs((o) => {
+        o.sync_error = SYNC_401;
+      })(page);
+      refusing.add("/api/act");
+      await page.route("**/api/act", (route) =>
+        route.fulfill({
+          status: 502,
+          json: { error: "GitHub refused: Resource not accessible by integration (HTTP 403)", tag: "Upstream" },
+        }),
+      );
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      await pauseAi(true)(page);
+      await rowMenuPick(page, ".queue .line:not(.inq) >> nth=1", "Done");
+      await page.locator(".bubble.transient").waitFor({ timeout: 5000 });
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(400);
+      const b = await bubblesSay(page);
+      const titles = b.map((x) => x.title);
+      if (
+        JSON.stringify(titles) !==
+        JSON.stringify(["Claude is paused", "Sync failed", "GitHub refused: Resource not accessible by integration (HTTP 403)"])
+      )
+        failures.push(`bubbles-stack: the bubbles read ${JSON.stringify(titles)}`);
+      if (b.some((x) => !x.placed)) failures.push(`bubbles-stack: a bubble lies off the page's column: ${JSON.stringify(b)}`);
+      if (await page.locator(".toast").count()) failures.push("bubbles-stack: the failure is in the toast too");
+      // At the page's end its last row sits above the stack, not under it.
+      const clear = await page.evaluate<boolean>(`(() => {
+        scrollTo(0, document.documentElement.scrollHeight);
+        const rows = document.querySelectorAll(".queue .line");
+        const last = rows[rows.length - 1]?.getBoundingClientRect();
+        const stack = document.querySelector(".bubbles").getBoundingClientRect();
+        return !!last && last.bottom <= stack.top;
+      })()`);
+      if (!clear) failures.push("bubbles-stack: the list's last row stays under the bubbles at the page's end");
+      await top(page);
+    },
+    after: async (page) => {
+      await page
+        .locator(".bubble.transient")
+        .waitFor({ state: "detached", timeout: 12_000 })
+        .catch(() => failures.push("bubbles-stack: the failed action's bubble doesn't fade on its own"));
+      refusing.delete("/api/act");
+      await pauseAi(false)(page);
+      await unsettle(page);
+    },
+  },
+  {
+    // Beside the chat, never under it.
+    name: "bubbles-chat",
+    writes: true,
+    go: async (page) => {
+      await at("#/")(page);
+      await pauseAi(true)(page);
+      await page.locator(".side-ask").click();
+      await page.locator(".chat-input").waitFor();
+      await page.waitForTimeout(300);
+      const b = await bubblesSay(page);
+      if (b.length !== 1 || !b[0]!.placed) failures.push(`bubbles-chat: beside the chat, the bubbles read ${JSON.stringify(b)}`);
+    },
+    after: async (page) => {
+      await closeChat(page);
+      await pauseAi(false)(page);
+    },
   },
   {
     // A click on a PR opens its review; an issue opens in place, its actions quiet text, Close last.
@@ -3041,11 +3205,11 @@ const SHOTS: Shot[] = [
       })()`);
       if (!help?.red || !help.text.includes("Run gh auth login in a terminal, then sync."))
         failures.push(`settings-github-error: the status row's help reads ${JSON.stringify(help)}`);
-      // The sync line that help means: there with the error, red, the error in its tooltip.
-      await page.locator(".side-sync").waitFor({ timeout: 5000 });
-      const line = await syncLine(page);
-      if (line?.text !== "Sync failed" || !line.red || line.tip !== "GitHub rejected the token (HTTP 401)")
-        failures.push(`settings-github-error: the sidebar's sync line reads ${JSON.stringify(line)}`);
+      // The sync that help means: its bubble, there with the error in red.
+      await page.locator(".bubble").waitFor({ timeout: 5000 });
+      const b = await bubblesSay(page);
+      if (b[0]?.title !== "Sync failed" || b[0].tone !== "red" || b[0].text !== SYNC_401)
+        failures.push(`settings-github-error: the bubbles read ${JSON.stringify(b)}`);
     },
     after: unsettle,
   },
@@ -4868,7 +5032,13 @@ try {
       // A review document's frame runs no script, so the stand-ins above, which Playwright puts in every frame, are refused there.
       const docFrame = (m: string) => m.startsWith("Blocked script execution in") && m.includes("/api/docs/");
       page.on("console", (m) => {
-        if (m.type() === "error" && !m.location().url.startsWith("https://avatars.githubusercontent.com/") && !docFrame(m.text()))
+        const from = m.location().url;
+        if (
+          m.type() === "error" &&
+          !from.startsWith("https://avatars.githubusercontent.com/") &&
+          !docFrame(m.text()) &&
+          ![...refusing].some((r) => from.includes(r))
+        )
           failures.push(`${theme}/${size.name}: console error: ${m.text()}`);
       });
       await page.goto(`${url}/#/`);

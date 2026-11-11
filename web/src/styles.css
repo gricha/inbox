@@ -729,8 +729,7 @@ p {
   color: var(--pencil);
 }
 
-/* The footer, bottom up: Settings, the sync line when something's wrong, Ask your agent, quieter than the pages. Never in
-   the way. */
+/* The footer, bottom up: Settings, a newer Inbox when there is one, Ask your agent, quieter than the pages. Never in the way. */
 .side-foot {
   display: grid;
   gap: 1px;
@@ -792,26 +791,6 @@ p {
 /* The word fills the row, so it sits by its icon: .side-item spreads its parts apart. */
 .side-foot .side-name {
   flex: 1;
-}
-
-/* The sync line, there only when something's wrong, a step quieter than the pages; red but while a retry runs. */
-.side-sync {
-  font-size: 12.5px;
-}
-
-.side-foot .side-sync.err {
-  color: var(--red);
-}
-
-/* Rate limited says so and waits: nothing to press. */
-p.side-sync {
-  margin: 0;
-  cursor: default;
-}
-
-.side-foot p.side-sync:hover {
-  background: none;
-  color: var(--red);
 }
 
 /* A newer Inbox: the accent, as a call to action. */
@@ -1031,11 +1010,6 @@ p.side-sync {
   font-weight: 600;
 }
 
-.notice.calm {
-  background: var(--wash);
-  color: var(--pencil);
-}
-
 /* The last lines a desk from a checkout printed before it stopped. */
 .notice-log {
   max-height: 16em;
@@ -1059,10 +1033,6 @@ p.side-sync {
 .col:has(.queue) .main {
   padding: 0 0 84px;
   background: var(--sheet);
-}
-
-.col:has(.queue) .main > .notice {
-  margin: 20px var(--pad) 0;
 }
 
 .queue {
@@ -1930,14 +1900,9 @@ p.side-sync {
   font-size: 14px;
 }
 
-.beside .ai-paused,
 .beside .queue-reviewing {
   padding-top: 14px;
   font-size: 13px;
-}
-
-.beside .ai-paused {
-  padding-bottom: 12px;
 }
 
 .beside .lane-stack {
@@ -2206,24 +2171,6 @@ p.side-sync {
   font-size: 13px;
   font-weight: 450;
   font-variant-numeric: tabular-nums;
-}
-
-/* AI reviews are paused (an expired login): said once, above the queue, not on every card; clear of the table's top hairline. */
-.ai-paused {
-  margin: 0;
-  padding: 20px var(--pad) 16px;
-  color: var(--ink-2);
-  font-size: 14px;
-}
-
-.ai-paused b {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-/* A command it says to run stays on one line. */
-.ai-paused code {
-  white-space: nowrap;
 }
 
 /* The queue's "n more": a click opens it in place. */
@@ -2763,7 +2710,8 @@ p.side-sync {
 
 /* Tinted, so each row's action shows without shouting; filled under the pointer, the one you're about to press. */
 .line .line-cta:not(.primary),
-.s-cta {
+.s-cta,
+.bubble-fix {
   border-color: transparent;
   background: var(--accent-wash);
   color: var(--accent-ink);
@@ -2771,7 +2719,8 @@ p.side-sync {
 }
 
 .line .line-cta:not(.primary):hover:not(:disabled),
-.s-cta:hover:not(:disabled) {
+.s-cta:hover:not(:disabled),
+.bubble-fix:hover:not(:disabled) {
   border-color: transparent;
   background: var(--accent);
   color: var(--on-accent);
@@ -3164,6 +3113,148 @@ p.side-sync {
   background: color-mix(in srgb, var(--paper) 14%, transparent);
   font-weight: 600;
   cursor: pointer;
+}
+
+/* What's wrong with the system (the desk, your agent, the sync, your rules, an action that failed): a small stack at the
+   window's bottom right, on the page's column and clear of the chat. The page keeps room for it under its end
+   (--bubbles-h), so nothing has to stay under it. */
+.bubbles {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 45;
+  display: grid;
+  gap: 8px;
+  width: min(340px, calc(100vw - var(--side-w) - var(--list-w) - 32px));
+  pointer-events: none;
+}
+
+.bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px 4px 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+  pointer-events: auto;
+  animation: rise-in 160ms ease-out;
+}
+
+.bubble-words {
+  flex: 1;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+.bubble-title {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* An action's failure is its own words, a step quieter than a condition's name. */
+.bubble.transient .bubble-title {
+  font-weight: 500;
+}
+
+/* Colour only where it carries information: a dot before the words, red failing, amber a caution; none for news. */
+.bubble.t-red .bubble-title::before,
+.bubble.t-amber .bubble-title::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin: 0 8px 1px 0;
+  border-radius: 50%;
+  background: var(--red);
+  vertical-align: middle;
+}
+
+.bubble.t-amber .bubble-title::before {
+  background: var(--amber);
+}
+
+.bubble-text {
+  margin: 2px 0 0;
+  color: var(--pencil);
+  overflow-wrap: anywhere;
+}
+
+.bubble-text code {
+  color: var(--ink-2);
+}
+
+/* The last lines a desk from a checkout printed before it stopped. */
+.bubble-log {
+  max-height: 8em;
+  margin: 8px 0 0;
+  overflow: auto;
+  color: var(--ink-2);
+  font: 11.5px/1.45 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bubble-fix {
+  height: 28px;
+  margin-top: 6px;
+  padding: 0 10px;
+}
+
+.bubble-x {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--pencil);
+  cursor: pointer;
+}
+
+.bubble-x:hover {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+/* A transient one fades out over its last second; the pointer on it holds it. */
+.bubble.fading {
+  animation:
+    rise-in 160ms ease-out,
+    bubble-fade 8s linear forwards;
+}
+
+@keyframes bubble-fade {
+  0%,
+  88% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+/* Its last rows can scroll clear of the stack; a toast rises above it. */
+.app:has(.bubble) .main {
+  padding-bottom: max(84px, calc(var(--bubbles-h, 0px) + 32px));
+}
+
+.app:has(.bubble) .toast {
+  bottom: calc(var(--bubbles-h, 0px) + 28px);
+}
+
+.app:has(> .chat) .bubbles {
+  right: calc(var(--chat-w) + 16px);
+  width: min(340px, calc(100vw - var(--side-w) - var(--list-w) - var(--chat-w) - 32px));
 }
 
 /* Your comment on an issue opened in place, over the page's bottom: across the page's column on its padding, from the rows'

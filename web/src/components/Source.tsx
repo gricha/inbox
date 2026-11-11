@@ -32,23 +32,6 @@ export function useSourceDown(down: boolean): SourceStatus | null {
   return down && (s?.state === "running" || s?.state === "failed") ? s : null;
 }
 
-export function SourceNotice({ s }: { s: SourceStatus }) {
-  return (
-    <div className="notice calm" aria-live="polite">
-      {s.state === "running" ? (
-        <span>
-          Restarting the desk with the latest changes in <code>{tilde(s.dir)}</code>…
-        </span>
-      ) : (
-        <span>
-          The desk in <code>{tilde(s.dir)}</code> stopped. It starts again on the next change under src/ or after npm install.
-          {s.detail && <pre className="notice-log">{s.detail}</pre>}
-        </span>
-      )}
-    </div>
-  );
-}
-
 // Under the setting in Settings.
 export function SourceLine({ s }: { s: SourceStatus | null }) {
   if (!s) return null;

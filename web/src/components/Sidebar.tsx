@@ -1,20 +1,18 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { Overview } from "../../../src/types.ts";
-import { cls, MOD, syncTrouble } from "../format.ts";
+import { cls, MOD } from "../format.ts";
 import { pageOf, routeHash, SETTINGS_PARTS, settingsPart, type ListPage, type Route } from "../view.ts";
 import { Mark } from "./Mark.tsx";
 
 // The window's only global chrome. The pages, in the owner's order: Inbox, Blocked, then Merging and the Archive under
 // a hairline; in Settings, its parts instead, under the way back to the Inbox: the core's, then the plugins' under a
-// hairline. In the footer, bottom up, Settings, a newer Inbox (only when there's one), the sync line (only when
-// something's wrong) and Ask your agent.
+// hairline. In the footer, bottom up, Settings, a newer Inbox (only when there's one) and Ask your agent; what's wrong with
+// the sync is a bubble (Bubbles.tsx).
 export function Sidebar({
   route,
   from,
   count,
   overview,
-  offline,
-  onSync,
   onUpdate,
   ask,
   waiting,
@@ -24,8 +22,6 @@ export function Sidebar({
   from: ListPage; // where a review was opened from: it stays that page's
   count: number | null; // what the Inbox counts, less what's leaving it; null until the queue loads
   overview: Overview | null;
-  offline: boolean;
-  onSync: () => void;
   onUpdate: () => void;
   ask: boolean; // Ask your agent: not with the chat open, your agent off, or on its own question's page
   waiting: boolean; // the open review's latest ask is unanswered
@@ -56,7 +52,6 @@ export function Sidebar({
       el?.removeEventListener("scroll", check);
     };
   }, []);
-  const trouble = syncTrouble(overview, offline);
   const up = overview?.update?.available ? overview.update : null;
   return (
     <aside ref={side} className={cls("side", more && "more")}>
@@ -151,28 +146,6 @@ export function Sidebar({
             <span className="side-name side-ask-long">{waiting ? "Your agent \u00b7 waiting" : "Ask your agent"}</span>
             <span className="side-name side-ask-short">{waiting ? "Asked" : "Ask"}</span>
           </button>
-        )}
-        {trouble?.retry && (
-          <button
-            type="button"
-            className={cls("side-item", "side-sync", !trouble.busy && "err")}
-            onClick={onSync}
-            title={overview?.sync_error ?? "Sync now"}
-          >
-            <svg className={cls("i", trouble.busy && "spin")} viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" />
-            </svg>
-            <span className="side-name">{trouble.text}</span>
-          </button>
-        )}
-        {trouble && !trouble.retry && (
-          <p className="side-item side-sync err" title={overview?.sync_error ?? undefined}>
-            <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 4.5V8l2.5 1.5" />
-              <circle cx="8" cy="8" r="5.5" />
-            </svg>
-            <span className="side-name">{trouble.text}</span>
-          </p>
         )}
         {/* A newer Inbox: the app installs it where it can, else its release page has the download. */}
         {up?.install && (
