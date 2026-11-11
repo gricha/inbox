@@ -17,8 +17,18 @@ You need:
 - the GitHub CLI, logged in (`gh auth status`)
 - for AI reviews, sorting and the coordinator: Claude Code (`claude`), Codex or OpenCode, logged in
 
+Install (macOS and Linux):
+
 ```bash
-cd ~/code/review-desk && npm install
+curl -fsSL -H "Authorization: Bearer $(gh auth token)" https://raw.githubusercontent.com/gricha/inbox/main/install.sh | bash
+```
+
+It installs the latest release, `/Applications/Inbox.app` on macOS or `~/.local/bin/Inbox.AppImage` on Linux, which then updates itself. Until the first release, or with `bash -s -- --source`, it clones the repo to `~/.local/share/inbox`, installs its packages and links `desk` into `~/.local/bin`; start the app there with `npm run app`. The header is there because the repo is private: `gh` reads it with your login. On Windows, run the installer from [Releases](https://github.com/gricha/inbox/releases).
+
+From a checkout:
+
+```bash
+npm install
 npm run app
 ```
 
@@ -30,7 +40,7 @@ To build an installable app for the current OS into `release/` (a `.dmg`, an App
 npm run dist     # or dist:mac, dist:linux, dist:win
 ```
 
-The macOS build is ad-hoc signed and not notarized: the first time, right-click the app → Open.
+The macOS build is ad-hoc signed and not notarized: the first time, right-click the app → Open (`install.sh` clears the quarantine flag, so it opens directly).
 
 **Coming from Review Desk?** Quit Review Desk.app and delete it, or its login item keeps starting it (Inbox removes the old Linux autostart entry itself). Inbox keeps your window, theme and settings, and moves `~/.review-desk` to `~/.inbox` on first start, leaving a link at the old path.
 
