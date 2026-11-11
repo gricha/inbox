@@ -29,6 +29,7 @@ import {
   askClaude,
   buildPrompt,
   forgetCodexServers,
+  strictSchema,
   tomlKey,
   claudeEnvelope,
   claudeError,
@@ -402,7 +403,11 @@ test(
       "the servers it would load with the same features off, plugins' own gone with plugins",
     );
     assert.equal(f.read("stdin"), "PROMPT");
-    assert.deepEqual(JSON.parse(f.read("schema")), schema);
+    assert.deepEqual(
+      JSON.parse(f.read("schema")),
+      { ...schema, additionalProperties: false, required: ["summary"] },
+      "strict mode's shape, which the model's API is sent as it is",
+    );
     assert.equal(f.read("cwd-listing").trim(), path.basename(at), "the run's directory holds only its schema");
     assert.deepEqual(fs.readdirSync(dir), [], "both files are gone after the run");
     fs.rmSync(f.dir, { recursive: true });
@@ -1395,6 +1400,52 @@ test("with Codex chosen, the AI review and its check both run on codex, and its 
     fs.rmSync(claude.dir, { recursive: true });
     fs.rmSync(home, { recursive: true });
   }
+});
+
+// What OpenAI's strict mode refuses (live, through Codex on OpenRouter): an open object, or a property not required.
+test("a Codex call's schema is closed and all required, as an automation's answer, with its optional until, needs to be", () => {
+  const automation = {
+    type: "object",
+    properties: {
+      summary: { type: "string" },
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            ref: { type: "string" },
+            do: { type: "string", enum: ["add", "snooze"] },
+            why: { type: "string" },
+            until: { type: "string" },
+          },
+          required: ["ref", "do", "why"],
+        },
+      },
+    },
+    required: ["summary", "items"],
+  };
+  assert.deepEqual(strictSchema(automation), {
+    type: "object",
+    additionalProperties: false,
+    required: ["summary", "items"],
+    properties: {
+      summary: { type: "string" },
+      items: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["ref", "do", "why", "until"],
+          properties: {
+            ref: { type: "string" },
+            do: { type: "string", enum: ["add", "snooze"] },
+            why: { type: "string" },
+            until: { type: "string" },
+          },
+        },
+      },
+    },
+  });
 });
 
 // ---------------------------------------------------------------- the desk

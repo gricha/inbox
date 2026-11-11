@@ -730,7 +730,7 @@ export const codexRun = Effect.fn("codexRun")(function* (
   const run = Effect.gen(function* () {
     // The agent's own directory, made by the desk: failing to write in it is a defect.
     const mcp = yield* codexMcp(command, opts.dir, opts.desk);
-    fs.writeFileSync(schema, JSON.stringify(opts.schema ?? SCHEMA));
+    fs.writeFileSync(schema, JSON.stringify(strictSchema(opts.schema ?? SCHEMA)));
     const spawnAs = yield* claudeSpawn(command, codexArgs(opts.dir, schema, out, mcp, !!opts.desk));
     const events = yield* runCommand(spawnAs, {
       input: prompt,
@@ -756,6 +756,17 @@ export const codexRun = Effect.fn("codexRun")(function* (
     ),
   );
 });
+
+// --output-schema goes to the model's API as it is, in OpenAI's strict mode, which refuses a schema with an open object
+// or an optional property (an automation's answer has both): closed and all required, a property the answer needn't
+// carry is then an empty one, which every reader of the desk's answers takes as none.
+export function strictSchema(s: unknown): unknown {
+  if (Array.isArray(s)) return s.map(strictSchema);
+  if (!s || typeof s !== "object") return s;
+  const o: Record<string, unknown> = Object.fromEntries(Object.entries(s).map(([k, v]) => [k, strictSchema(v)]));
+  if (o.type !== "object") return o;
+  return { ...o, additionalProperties: false, required: Object.keys(o.properties ?? {}) };
+}
 
 // The thread `codex exec --json` says it started: its first event.
 export function codexThread(events: string): string | null {
