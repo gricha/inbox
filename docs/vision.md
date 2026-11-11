@@ -7,16 +7,16 @@ Inbox is the owner's control center for routine engineering work, and a partner 
 ```
 connectors ──events──▶ event log ──▶ judge ──▶ feed items (open / resolved) ──▶ UI, coordinator
    ▲                                  ▲  rules (structured, cheap)                │
-   │                                  └─ policy (prose, judged by the agent)      │
+   │                                  └─ their weights, weighed by the agent      │
    └──────────────────── actions (approve, comment, push) ◀───────────────────────┘
 ```
 
 - **Connectors** turn a source into a stream of events (review requested, approved, CI failed, new comment, mention, merged) plus snapshots of the items they concern. GitHub is the first; Linear, Slack and Sentry can follow.
 - **The event log** keeps every event. The UI shows an item's recent activity from it; the coordinator reads it on each wake.
-- **The judge** decides what reaches the feed. Structured rules run first (cheap and exact). The agent handles the gray zone, guided by a prose policy the owner writes.
+- **The judge** decides what reaches the feed. Structured rules run first (cheap and exact). The agent handles the gray zone, weighing the owner's rules by their weights.
 - **The feed** is one list in priority order. Items resolve on their own when the world resolves them (approved by someone else, merged, closed, no longer requested), and come back if that stops being true.
 - **Merging** holds the owner's PRs they've handed off. The coordinator keeps CI green, handles members' comments, merges, and hands back only what needs the owner.
-- **The coordinator** is one background agent session the desk starts and wakes with news, using the desk's MCP tools and skill. It also edits the policy and config when asked in prose.
+- **The coordinator** is one background agent session the desk starts and wakes with news, using the desk's MCP tools and skill. It also edits the rules and their weights when asked in prose.
 - **Review in the desk**: inline PR review (with `@pierre/diffs`), AI notes on the changed code, one click to approve.
 
 ## Decisions

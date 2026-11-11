@@ -12,7 +12,7 @@ Everything else is a client of that API: the desktop window, the CLI (`desk …`
 GitHub (GraphQL, notifications) ──read──> src/github/ ──> src/connectors/github.ts ──snapshots, events──> src/store.ts
                                                                                                              │
 config.toml, settings.json ──> src/config.ts, src/settings.ts ──> src/rules.ts (+ src/signals.ts, src/expr.ts) │
-policy.md ──> src/judge.ts (your agent) ─────────────────────────────┘                                       │
+rule weights ──> src/judge.ts (your agent) ──────────────────────────┘                                       │
 criteria ──> src/urgency.ts (Urgent / Standard / FYI) ─────────────────────────────────┐                     │
                                                                                        ▼                     ▼
                                                             src/desk.ts: views, actions, event log, notifications,
@@ -39,7 +39,6 @@ What the home holds:
 | `config.toml`           | spaces, boards, rules                                                            |
 | `settings.json`         | every other setting, only the ones you changed                                   |
 | `secrets.json`          | the decision model's key                                                         |
-| `policy.md`             | your prose policy for the judge                                                  |
 | `desk.db`               | the store (below)                                                                |
 | `desk.log`              | the desk's log                                                                   |
 | `labels.jsonl`          | every criterion answer and score the desk takes (api.md → Urgency)               |
@@ -71,7 +70,7 @@ What the home holds:
 `Desk.compute()` builds one snapshot of everything, then each item goes through:
 
 1. **Rules** (`classify()` in `src/rules.ts`): the board's filter, then the first matching rule, else the board default.
-2. **Judge** (`src/judge.ts`): your agent reads your policy and the rules' hint and answers `{ bucket, why }`. Details below.
+2. **Judge** (`src/judge.ts`): your agent weighs every rule that matches (with its weight), an automation's sort and the criteria's yeses, from the first rule's hint, and answers `{ bucket, why }`. Details below.
 3. **Quiet**: an item nobody touched for `queue.quiet_days` (default 14) drops from Now or Today to Later. Pins, recent review requests and hard floors stay.
 4. **Caps** (`caps = { now = 3, today = 6 }` per board): overflow drops one bucket, keeping order. Pins and `nocap` rules are exempt. Hard-rule items count but stay at their floor.
 5. **Urgency** (`src/urgency.ts`): items in now, today, later or fyi get criteria answers and a score out of 10, then a section: Urgent, Standard or FYI. That's `QueueView.inbox`, what the window draws. Full detail: [api.md → Urgency](api.md#urgency).
@@ -82,10 +81,10 @@ Every item appears once, at its best placement across boards. The buckets stay t
 
 - Batches of 20, one call at a time, at most `policy.max_per_hour` items an hour. Half of that at most goes to re-judging items it already answered.
 - Each item goes with its facts: how you were asked, others' reviews, how much is in your areas, the AI review's call, the description's start.
-- Answers are kept in kv `judge:<id>`, keyed by what the judge read (not `updated_at`, so a bot's comment doesn't re-ask) and the policy's hash.
+- Answers are kept in kv `judge:<id>`, keyed by what the judge read (not `updated_at`, so a bot's comment doesn't re-ask) and the signals it weighed (`Snapshot.judging`), so a rule's new weight re-asks what it matches.
 - Until an item has an answer, or after a failure, it sits where the rules put it. Failures back off 5, 10, 20, then 60 minutes.
 - It never answers `blocked`.
-- While `policy.md` is empty, `DEFAULT_POLICY` applies.
+- Its instructions are fixed in `buildJudgePrompt()`; the owner's say is rules, weights, automations and criteria.
 
 ## Expression language (`src/expr.ts`)
 
@@ -263,7 +262,7 @@ One set of tools (`@modelcontextprotocol/sdk`), two transports:
 - **HTTP** at `/mcp`: a fresh stateless server per request, calling the routes in-process.
 - **stdio** via `desk mcp`: proxies to the HTTP API through `src/client.ts`.
 
-Tool results mark PR titles and bodies as untrusted; the policy and config come fenced. No tool writes to GitHub. Tool list: [api.md → MCP tools](api.md#mcp-tools).
+Tool results mark PR titles and bodies as untrusted; the config comes fenced. No tool writes to GitHub. Tool list: [api.md → MCP tools](api.md#mcp-tools).
 
 ## CLI (`src/cli.ts`)
 

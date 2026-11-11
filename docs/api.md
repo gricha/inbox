@@ -14,7 +14,7 @@ The CLI, `desk mcp` and the web UI are all clients of it. Types live in [src/typ
 - **Reference:** [The first run](#the-first-run) · [Connect an agent](#connect-an-agent) · [MCP tools](#mcp-tools) · [HTTP routes](#http-routes) · [Main types](#main-types) · [Events](#events)
 - **Agents and models:** [Your own agent](#your-own-agent) · [The decision model](#the-decision-model-openrouter)
 - **Reviews:** [The AI review](#the-ai-review) · [What reviewers said](#what-reviewers-said)
-- **Sorting:** [Rules: built in and your own](#rules-built-in-and-your-own) · [The policy and the judge](#the-policy-and-the-judge) · [Your areas](#your-areas) · [Urgency](#urgency)
+- **Sorting:** [Rules: built in and your own](#rules-built-in-and-your-own) · [The judge](#the-judge) · [Your areas](#your-areas) · [Urgency](#urgency)
 - **Working for you:** [The coordinator](#the-coordinator) · [Asks](#asks) · [Sessions](#sessions) · [Automations](#automations)
 - **Items:** [Stacks](#stacks) · [Dependencies](#dependencies) · [Adding](#adding) · [Resolved](#resolved) · [Opened for you](#opened-for-you)
 - **Your PRs:** [Merging](#merging) · [Ready for review](#ready-for-review) · [Nobody's asked to review it](#nobodys-asked-to-review-it) · [The More menu](#the-more-menu)
@@ -102,7 +102,7 @@ A page's link (`inbox://blocked`), a question's link (`inbox://question/<id>`) o
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `desk_overview`    | none                                                                                                                                                          | Counts per space and board, Focus totals, sync status, config errors; JSON `Overview`. Read only                                                                                                                                                                                                                                                   |
 | `desk_list`        | `board?` (omit or `"focus"` for Focus), `buckets?` (`now` `today` `blocked` `later` `fyi` `hide` `cleared`; default now, today), `limit?` (1–200, default 25) | One line per card: bucket, id, title, why, and "stack 3/20" with the PRs it stands for. Focus holds only now and today, a stack once, led by the sessions that need you (`session:<id>`). JSON of the cards. Read only                                                                                                                             |
-| `desk_item`        | `ref`                                                                                                                                                         | Facts, bucket and why per board, the rule trace, its stack, the AI review's verdict, summary and concerns, the hand-off prompt, and its `inbox://` link to give the owner; JSON `{ card, placements, state }`. A `session:<id>` gives its `SessionCard`. Read only                                                                                 |
+| `desk_item`        | `ref`                                                                                                                                                         | Facts, bucket and why per board, the rule trace, the signals the judge weighs (and what its answer weighed), its stack, the AI review's verdict, summary and concerns, the hand-off prompt, and its `inbox://` link to give the owner; JSON `{ card, placements, judge, state }`. A `session:<id>` gives its `SessionCard`. Read only              |
 | `desk_act`         | `ref`, `action` (`done` `snooze` `mute` `unmute` `pin` `unpin` `restore`), `until?` (snooze only; default `tomorrow`, or one of the card's `wake_on`)         | What changed and the undo `seq`; JSON `{ ok, state, undo_seq }`. On a session: done, snooze to a time, mute, unmute, restore                                                                                                                                                                                                                       |
 | `desk_add`         | `ref` (`repo#123` only for an item the desk holds), `why` (one line, ≤300), `from` (your task, ≤60)                                                           | Adds and pins it ([Adding](#adding)): `added <id> to the user's desk, pinned`, its AI review's state, the undo `seq`, then the item as `desk_item` gives it                                                                                                                                                                                        |
 | `desk_undo`        | `seq?` (default: the latest action from anyone)                                                                                                               | `undid <action> on <id>`. Can't undo a hand-off for merge or a Back to desk (the owner's to undo)                                                                                                                                                                                                                                                  |
@@ -113,8 +113,7 @@ A page's link (`inbox://blocked`), a question's link (`inbox://question/<id>`) o
 | `desk_merging`     | none                                                                                                                                                          | One line per PR in Merging: CI and failing checks, reviews, unresolved threads, mergeable, base, what blocks it, the repo's merge method, "no review needed" where so, the last note. Titles and notes fenced; JSON of the rows. Read only                                                                                                         |
 | `desk_hand_back`   | `ref`, `why` (one line, ≤300)                                                                                                                                 | The PR leaves Merging for the top of the queue as "handed back: <why>"; the owner is notified. Only on the owner's open PR in Merging                                                                                                                                                                                                              |
 | `desk_note`        | `ref`, `text` (one line, ≤300)                                                                                                                                | `noted on <ref>`: the PR's status line on its row in Merging, with its age; only the latest shows. Only on the owner's open PR in Merging                                                                                                                                                                                                          |
-| `desk_policy`      | `action` (`get` `set`), `text?`, `base?` (set: the whole policy, and the hash from get)                                                                       | get: the policy in effect (fenced; says when it's the starter), its hash, the judge's status. set: saves; a stale `base` is an error                                                                                                                                                                                                               |
-| `desk_config`      | `action` (`get` `preview` `save`), `text?` (the whole config.toml), `base?` (save)                                                                            | get: config.toml fenced, its hash and errors, each board's built-in rules by id. preview: errors, counts per board before → after, items that would move; saves nothing. save: valid text only; a stale `base` is an error                                                                                                                         |
+| `desk_config`      | `action` (`get` `preview` `save`), `text?` (the whole config.toml), `base?` (save)                                                                            | get: config.toml fenced, its hash and errors, the judge's status, each board's built-in rules by id with their weights. preview: errors, counts per board before → after, items that would move; saves nothing. save: valid text only; a stale `base` is an error                                                                                  |
 | `desk_answer`      | `ask_id` (from the wake message), `text` (≤6,000, paragraphs, answer first)                                                                                   | `answered ask <id>`: the coordinator's answer to the owner's ask, shown in their chat; the owner is notified                                                                                                                                                                                                                                       |
 | `desk_ask`         | `ask_id` (from a wake that says `desk_ask <id> says where`)                                                                                                   | Where the owner's ask is: their words, whose the item is and its state, the thread or the lines (side, numbers, commit read, head now), and `Push: yes` only on their own open PR (else `Push: no` and why). File name, `file_arg`, base and branch are fenced                                                                                     |
 | `desk_inquire`     | `question`, `context` (200–6,000), `options?` (≤6 `{ answer, next }`), `links?` (≤12 `{ label, url }`), `item?`, `from`                                       | `asked as inquiry <id>`: a question for the owner, a row on their main page with its own page, and a notification. Beside the chat, not instead of it. Its description says when to ask and what the page needs. Poll `desk_inquiry` for the answer                                                                                                |
@@ -182,17 +181,15 @@ Every write here is own page only, logged, and answers 502 with GitHub's reason 
 | GET    | `/api/reviewers/:id`        | `?q=` → `Reviewer[]` (`id login name team suggested`): GitHub's suggestions matching `q` first, then people with access and the org's teams, never you. 409 unless it's your PR. Read only                                                                                                           |     |
 | POST   | `/api/github`               | `{ id, action, head_oid?, body? }` → `{ ok, url }`: a [More menu](#the-more-menu) write (`close`, `draft`, `ready`, `merge`, `reopen`, `request_changes` with `body`); refreshes the item first. 409 unless the card offers it now, or for new commits since `head_oid` on a merge or change request | ✓   |
 
-### Settings, rules and policy
+### Settings and rules
 
 | Method | Path                  | What it does                                                                                                                                                                                                                                                               | 503 |
 | ------ | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
-| GET    | `/api/config`         | `ConfigDoc`: `{ path, text, hash, errors, warnings?, hard, builtins }`. `hard`: the hard and final rules. `builtins`: per board that names a set, each built-in rule with `on` and `yours` ([Rules](#rules-built-in-and-your-own))                                         | ✓   |
+| GET    | `/api/config`         | `ConfigDoc`: `{ path, text, hash, errors, warnings?, hard, builtins }`. `hard`: the hard and final rules. `builtins`: per board that names a set, each built-in rule with its `weight`, `on` and `yours` ([Rules](#rules-built-in-and-your-own))                           | ✓   |
 | POST   | `/api/config/preview` | `{ text }` → `PreviewResult`: errors, and per board the new counts and which items would move                                                                                                                                                                              | ✓   |
 | PUT    | `/api/config`         | `{ text, base? }` → `{ ok, errors, warnings }`. Saves only valid text, and never with a settings section (`poll_seconds`, `[signals]`, `[notify]`, `[handoff]`, `[analyze]`: those live in Settings). 409 if the file changed since `base` (text or hash)                  | ✓   |
 | PUT    | `/api/config/builtin` | `{ board, rule, on, base? }`: switches one built-in rule through the board's `off` list; answers as `PUT /api/config`. 400 when `off` spans lines                                                                                                                          | ✓   |
-| GET    | `/api/policy`         | `PolicyDoc`; `text` is `""` until you write one, and `starter` is in effect meanwhile                                                                                                                                                                                      |     |
-| PUT    | `/api/policy`         | `{ text, base? }` → `{ ok, hash }`: writes `policy.md`. 409 if it changed since `base`; 400 over 20,000 characters                                                                                                                                                         |     |
-| GET    | `/api/settings`       | `SettingsView`: schema, effective values, what's overridden, GitHub status                                                                                                                                                                                                 |     |
+| GET    | `/api/settings`       | `SettingsView`: schema, effective values, what's overridden, GitHub status, the judge's status (`judge`)                                                                                                                                                                   |     |
 | PUT    | `/api/settings`       | `{ set?, reset? }` → `{ ok, errors, settings }`; writes nothing if any value is invalid. Setting a secret (`agent.decision_key`) is own page only                                                                                                                          |     |
 | GET    | `/api/agents`         | `AgentStatus` for your agent: `{ driver, mcp: { connected, name, command }, skill: { state, path, command }, needs, note, connect }`. `skill.state` is `installed`, `outdated` or `missing`; `needs` is `connect`, `update` or null; `note` says a name that isn't `inbox` |     |
 | POST   | `/api/agents/connect` | `AgentStatus` after installing the skill and registering the MCP server (under another name when `inbox` is kept by something else); 502 with the command to run yourself when the agent's CLI fails or isn't on PATH                                                      |     |
@@ -407,15 +404,17 @@ interface Placement {
   hard?: boolean; // a hard rule matched
   floor?: Bucket; // it never sorts below this (hard rule or pin)
   judge?: JudgeStep; // while the judge is on
-  hint?: { bucket: Bucket; why: string }; // where the rules put it
+  hint?: { bucket: Bucket; why: string }; // where the first matching rule put it
+  signals?: JudgeSignal[]; // every rule on this board that matches it
 }
 
-interface PolicyDoc {
-  path: string;
-  text: string; // empty: the starter is in use
-  starter: string;
-  hash: string; // pass back as `base`
-  judge: JudgeStatus; // off | idle | running | error, this hour's counts, retry_at
+interface JudgeSignal {
+  from: string; // "built-in rule asked-directly on \"PRs to review\"", "your rule #2 on …", "automation …", "criterion …"
+  bucket?: Bucket; // what it suggests; a criterion's yes suggests none
+  why: string;
+  weight: number; // 0 to 10
+  hard?: boolean;
+  key: string; // changes when the rule, its bucket or its weight does
 }
 
 interface ItemDetail {
@@ -423,6 +422,7 @@ interface ItemDetail {
   item: Item; // the normalized GitHub item
   signals: Signals; // every field rules can read
   placements: Placement[]; // per board
+  judge?: { signals: JudgeSignal[]; saw: JudgeSignal[] | null; at: string | null; fresh: boolean }; // what the judge weighs now; what its answer weighed
   state: ItemState;
   handoff_prompt: string;
   ai: AiReview | null;
@@ -741,7 +741,7 @@ interface AutomationView extends Automation {
 
 `GET /api/events` is a server-sent events stream:
 
-- `event: update`, `data: {"rev": n}`: once on connect, then after any change (a sync, a triage action or undo, a config, settings or policy save, an AI review or judge call starting or finishing, an approval, a draft marked ready, a note, a hand-back, a hand-off or Back to desk). Refetch what you show.
+- `event: update`, `data: {"rev": n}`: once on connect, then after any change (a sync, a triage action or undo, a config or settings save, an AI review or judge call starting or finishing, an approval, a draft marked ready, a note, a hand-back, a hand-off or Back to desk). Refetch what you show.
 - `event: notify`, `data: {"title", "body"}`: only with `?notify=1`. The desktop app asks for these when it attaches to a desk it doesn't run in-process; while one listens, the desk shows no notification of its own.
 - `event: omarchy`: the Omarchy theme changed (the same value as `GET /api/omarchy`).
 - `: ping` comment lines every 25 s keep the connection open.
@@ -981,7 +981,7 @@ Bots never wait on you. Nor does a thread your push answered: GitHub marks it ou
 
 ## Sorting
 
-Rules place each item first: they're cheap and say exactly what they do. Then your agent, the judge, sorts by your policy. Then [Urgency](#urgency) orders the Inbox into Urgent, Standard and FYI.
+Rules place each item first: they're cheap and say exactly what they do. Then your agent, the judge, weighs every rule that matches it (with its weight), automations' sorts and criteria's yeses, and makes the call. Then [Urgency](#urgency) orders the Inbox into Urgent, Standard and FYI. What you want is said in rules, weights, automations and criteria. An old `~/.inbox/policy.md` is left on disk and not read; desk.log says so once.
 
 ### Rules: built in and your own
 
@@ -999,7 +999,7 @@ id = "acme-review"
 builtin = "review"                 # GitHub's rules for PRs to review
 off = ["your-repo"]                # switched off
 rules = [
-  { when = "'ml' in item.labels", bucket = "now", why = "ML" },                    # yours: before GitHub's
+  { when = "'ml' in item.labels", bucket = "now", why = "ML", weight = 8 },        # yours: before GitHub's, counts a lot
   { id = "bot-pr", when = "author.bot", bucket = "fyi", why = "bot PR" },         # yours, in place of GitHub's bot-pr
   { after = "stacked", when = "pr.ci == 'pending'", bucket = "later", why = "CI running" },  # yours, right after stacked
 ]
@@ -1022,21 +1022,38 @@ An override is the whole rule as written (`hard`, `final` and `nocap` too), not 
 
 **Older configs** had GitHub's rules copied onto each board. `migrateBuiltIns()` runs once (kv `builtins_migrated`, with `config.toml.bak`). A board whose rules match one set in order for at least half of it names the set. Rules equal to the set's go; one that differs only in its `when` or `why` becomes an override with that `id`; the rest keep their place with `after`; what the set has that the board didn't goes in `off`. It writes nothing unless every board's resolved rules come out exactly as before, and leaves alone a board written as `[[boards.rules]]` tables or that's mostly yours.
 
-### The policy and the judge
+### The judge
 
 Your agent triages everything that reaches the desk, after the rules.
 
 **Placements and floors:**
 
-- A matching rule's bucket and why (or the board's `default` when none matched) is the judge's **hint**, and holds until it answers. `bucket = "judge"` hints the board default.
-- `hard = true` is a **floor**: what it matches never sorts below the rule's bucket (Today for a Now rule), whatever the judge, the quiet rule (`queue.quiet_days`) or caps say. Now's cap still sends overflow to Today. The first-run config makes the rules for a review asked of you by name hard: a person's ask (bucket now, so it lands in Now or Today) and one a bot added (bucket today; Junior adds asks for people). Configs from before hard rules get these once, with a `config.toml.bak`.
+- The first matching rule's bucket and why (or the board's `default` when none matched) is the judge's **hint**, and holds until it answers. `bucket = "judge"` hints the board default.
+- `hard = true` is a **floor**: what it matches never sorts below the rule's bucket (Today for a Now rule), whatever the judge, the quiet rule (`queue.quiet_days`) or caps say. Now's cap still sends overflow to Today. GitHub's rules set it on your fresh drafts.
 - `final = true` takes the item away from the judge: it stays in the rule's bucket (your pin's floor still lifts it; `bucket = "judge"` can't be final).
-- **Your pin** is a floor too: Today or above. A pin from the coordinator's `desk_add` (`from` "Inbox coordinator") isn't: the judge sees "pinned by the coordinator" and sorts by your policy. A pin or unpin sorts the item again.
+- **Your pin** is a floor too: Today or above. A pin from the coordinator's `desk_add` (`from` "Inbox coordinator") isn't: the judge sees "pinned by the coordinator" and weighs it like a signal of weight 5. A pin or unpin sorts the item again.
 - Resolution still applies: a PR that's merged, closed, or approved by someone else (`github.resolve_on_others_approval`) leaves the desk ([Resolved](#resolved)).
 
-**The policy** is prose in `~/.inbox/policy.md`. Write it in Settings → Agent → Your policy, through an agent (`desk_policy`), or in any editor; the desk re-reads it on change. While it's empty a built-in starter is in effect (`DEFAULT_POLICY` in `src/judge.ts`, "less is more"), so sorting works from the first sync. `desk_policy get` and Settings say when it's the starter.
+**Signals.** For each item the judge gets every signal about it (`JudgeSignal`), not just the first rule:
 
-**The prompt** goes to your agent, tool-less, with the policy and items fenced with a random tag. It asks what you should do with each item:
+- every rule that matches it, on every board that lists it (yours and GitHub's), each with its bucket, why and weight; one that's hard says so;
+- an automation's sort of it (weight 8), which also stands in for the judge's answer until the judge has weighed it;
+- each criterion that says yes to it ([Urgency](#urgency)).
+
+A rule's `weight` is 0 to 10, 5 when unset (`RULE_WEIGHT`): 9 or 10 is your firm default, 6 to 8 strong, 3 to 5 a lean, under 3 a hint. GitHub's rules carry the weights that once were its starter prose:
+
+| Weight | GitHub's rules                                                                                                                        |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| 9, 8   | a review asked of you by name (a person's ask 9, a bot's 8); a bot's PR (hide); your PR with changes requested, or approved and green |
+| 7      | a team ask someone else has (FYI); your PR others wait on, ready with no review needed, or stacked                                    |
+| 6      | a CODEOWNERS ping (FYI); new replies; new commits after you asked for changes; your drafts; your PR opened by a bot                   |
+| 5      | a team ask (FYI), or one in your area nobody took in a day; your repo; your PR quiet, or needing a closed PR                          |
+| 4      | new commits since your review; a bot added you; CI red or new activity on your PR; unresolved threads; mentions                       |
+| 3, 2   | a close collaborator; a CODEOWNERS or team ask in your area; your own issue; a collaborator's new PR                                  |
+
+A review asked of you by name is a heavy default, not a forced push: the judge can still make the call, and so can the scorer ([Urgency](#urgency)).
+
+**The prompt** goes to your agent, tool-less, with the items fenced with a random tag. Its instructions are the judge's own, fixed in `buildJudgePrompt()` (`src/judge.ts`), the same on every desk. It asks what you should do with each item:
 
 - `now`: a person is blocked on you today; one or two at most; never CI on your own PR.
 - `today`: a person is waiting on you, or it's yours to finish (approved and green).
@@ -1044,9 +1061,21 @@ Your agent triages everything that reaches the desk, after the rules.
 - `fyi`: someone else has it, or nobody needs you; kept off your page.
 - `hide`: automated noise.
 
-Only rules fill `blocked`: the schema leaves it out and an answer of it is dropped. The prompt says less is more and to sort away what it's unsure of. When the policy's lines disagree, a line that sorts an item away for who made it or its state (bots, drafts, stacked PRs, someone else asked by name, a teammate reviewing) beats one that promotes it for what it touches. Being asked by name, a pin and a hard rule's floor beat both. What counts most is how you were asked, whether you usually review the author, and whether it builds on what you're building; a directory you've worked in is weak evidence on its own.
+Only rules fill `blocked`: the schema leaves it out and an answer of it is dropped. The prompt says less is more and to sort away what it's unsure of. It says how to weigh signals: the heaviest usually decides, several agreeing count more than one, at equal weight your rule beats GitHub's, and a hard signal, a floor and your pin bound the answer. Reading the facts, how you were asked counts most (by name far more than through a team), then whether you usually review the author and whether it builds on what you're building; a directory you've worked in is weak evidence on its own.
 
-Each item gets its hint (where the rules put it, on which board, why; a hard rule's floor; who pinned it) and its facts, a line each:
+An item's signals as the judge reads them:
+
+```
+  hint: the rules would put it in today on the "PRs to review" board (an ml-team ask)
+  signals:
+  - today, weight 7: your rule #1 on "PRs to review": an ml-team ask
+  - fyi, weight 7: built-in rule team-taken on "PRs to review": asked of @ml-team; someone else has it
+  - fyi, weight 5: built-in rule team on "PRs to review": asked of @ml-team
+  - fyi, weight 8: automation Team reviews someone else took: someone else reviewed it for your team
+  - yes: criterion About ML
+```
+
+Each item gets its hint (where the first rule put it, on which board, why), its signals, a hard rule's floor, who pinned it, and its facts, a line each:
 
 - who opened it and when ("PR by sentry-junior (bot) for Michelle Tran");
 - size, CI, review state, and "stacked on <base>" when its base isn't the default branch;
@@ -1064,13 +1093,13 @@ Each item gets back a bucket and a few words of why, which replace the hint's (a
 
 - Up to 20 items per call, one call at a time, at most `policy.max_per_hour` items an hour (default 300; only calls that answered count).
 - Never-answered items go first, then those in Now or Today, then by latest activity. Re-sorting already-answered items uses at most half the hour, so new items always have room.
-- Answers are kept per item, keyed on what the judge read that can change (`judgeKey`: others' latest activity, state, draft, commit, red CI, review decision, mergeability, title, labels, review requests, people's reviews; once they arrive, its files and its commit's AI review) and on the policy's hash. A bot's comment or a CI rerun asks nothing.
-- A changed item keeps its old answer until the new one lands. So does every item when the policy changes, then all are sorted again, never-answered first. An item the reply leaves out stays where the rules put it until it changes, and its card says "Claude gave no answer".
+- Answers are kept per item (kv `judge:<id>`, with the signals it weighed), keyed on what the judge read that can change (`judgeKey`: others' latest activity, state, draft, commit, red CI, review decision, mergeability, title, labels, review requests, people's reviews; once they arrive, its files and its commit's AI review) and on its signals' keys (`Snapshot.judging`). A bot's comment or a CI rerun asks nothing; a rule's new weight, bucket or `when`, a new automation sort or a criterion's new yes asks again for what it touches.
+- A changed item keeps its old answer until the new one lands, and so does each item a rule change touches; never-answered items go first. An item the reply leaves out stays where the rules put it until it changes, and its card says "Claude gave no answer".
 - `policy.judge` (default on) turns the judge off; then the rules' placements stand.
 
-**Failures.** Until an item has an answer, or if the call fails, it sits where the rules put it. A failure (an expired login, a timeout) shows in Settings → Agent under Your policy and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on, or changing the agent settings, tries again now. desk.log keeps the agent's own words.
+**Failures.** Until an item has an answer, or if the call fails, it sits where the rules put it. A failure (an expired login, a timeout) shows in Settings → Agent under Sort my desk with Claude and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on, or changing the agent settings, tries again now. desk.log keeps the agent's own words.
 
-**What you see.** The rule trace (`desk_item`, `desk show`, the item's detail) ends with the judge's step: `Claude: today, <why>` (plus "an earlier answer; sorting it again" while a fresh one is due), or `Claude: not sorted yet, so where the rules put it`. A hard rule's step names its floor (`hard rule: never below today`). The card's facts say who placed it: "sorted by Claude", "placed by a hard rule", "kept up by its pin", "not sorted by Claude yet" or "Claude gave no answer".
+**What you see.** The rule trace (`desk_item`, `desk show`, the item's detail) ends with the judge's step: `Claude: today, <why>` (plus "an earlier answer; sorting it again" while a fresh one is due), `automation <name>: fyi, <why> (Claude is weighing it)`, or `Claude: not sorted yet, so where the rules put it`. `desk_item` and `desk show` then list the signals the judge weighs and, when its answer weighed others, those (`ItemDetail.judge`). A hard rule's step names its floor (`hard rule: never below today`). The card's facts say who placed it: "sorted by Claude", "placed by a hard rule", "kept up by its pin", "not sorted by Claude yet" or "Claude gave no answer".
 
 ### Your areas
 
@@ -1110,19 +1139,19 @@ The Inbox's sections, Urgent, Standard and FYI, and their order come from `src/u
 **Criteria** (Settings → Urgency, `desk_criteria`, `/api/criteria`) are yes-or-no questions about an item.
 
 - Yours are in kv `criteria` (`Criterion` in `src/types.ts`). A plugin's are in its file (`Connector.criteria`; GitHub's in `src/connectors/github-criteria.ts`), switched in kv `criteria_builtin`.
-- Each has an id, a name, and at least one of: `when` (the rules' language, free and exact, compiled on save) and `ask` (a question for a model, asked only of items whose `when` passes). `urgent`: a yes puts the item in Urgent whatever its score.
+- Each has an id, a name, and at least one of: `when` (the rules' language, free and exact, compiled on save) and `ask` (a question for a model, asked only of items whose `when` passes). `urgent`: a yes puts the item in Urgent whatever its score. A plugin's may carry a `weight`: the points a yes adds to the desk's own score (1 unless set), and the scorer reads it as "counts 3 times".
 - A criterion only orders the Inbox and never acts on an item, so one an agent saves is on at once (`by: "an agent"`). Any local client may save or delete yours; only the window switches one (403 otherwise).
 - An urgent yes brings even an item the rules or the judge hid onto the Inbox.
 
 GitHub's are rule-only, so a fresh desk sections from its first sync:
 
-| Criterion              | Says yes when                                                                                                                                              | Urgent |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| Asked by name          | `me.requested_direct`: a review asked of you by name, whoever added it; not one asked only of a team you're on. Reviewing it drops the request             | yes    |
-| Waiting on your reply  | `me.owes_reply`, or someone else's PR you reviewed got pushes since                                                                                        |        |
-| Ready to merge         | yours, approved or in a repo that needs no review, green, not a draft, not stacked or blocked, and no PR waits on it: one press merges it (`cta: "merge"`) | yes    |
-| Your PR others wait on | yours, other PRs need it merged first, and it's ready to merge or waits on your reply                                                                      | yes    |
-| Handed back            | `me.handed_back`                                                                                                                                           | yes    |
+| Criterion              | Says yes when                                                                                                                                              | Urgent   |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| Asked by name          | `me.requested_direct`: a review asked of you by name, whoever added it; not one asked only of a team you're on. Reviewing it drops the request             | weight 3 |
+| Waiting on your reply  | `me.owes_reply`, or someone else's PR you reviewed got pushes since                                                                                        |          |
+| Ready to merge         | yours, approved or in a repo that needs no review, green, not a draft, not stacked or blocked, and no PR waits on it: one press merges it (`cta: "merge"`) | yes      |
+| Your PR others wait on | yours, other PRs need it merged first, and it's ready to merge or waits on your reply                                                                      | yes      |
+| Handed back            | `me.handed_back`                                                                                                                                           | yes      |
 
 **Outcomes.** A `when` alone is evaluated every time the desk computes its view. A question's answer is kept per item (kv `said:<id>`), keyed on the item (`sortKey()`, less the pin) and the question, so a model is asked again only when either changes; until then the item keeps its earlier answer (no, before the first). Questions go in the background, before scores:
 
@@ -1136,7 +1165,7 @@ A model that can't answer holds every question and score for 30 minutes (`Urgenc
 - On the decision model when its key is set: a `choice` of 0 to 10; the score is the probabilities' mean, with no why.
 - Else on your agent, 20 items a call, one call at a time, after the judge answered for the item.
 - Kept in kv `score:<id>`, keyed on the item, its placement, the outcomes and the scorer, and held while the item stays in the bucket it was scored in.
-- With `agent.score` off, or no score yet, the desk's own: the bucket's (now 7, today 6, later 3, fyi 1) plus one per yes, at most 10.
+- With `agent.score` off, or no score yet, the desk's own: the bucket's (now 7, today 6, later 3, fyi 1) plus each yes's weight, at most 10. Asked by name's 3 takes an ask in Now or Today to Urgent and one in Later to Standard; a model's score can still put it in Standard.
 
 **Sections** (`sectionOf()`):
 
@@ -1377,7 +1406,7 @@ A rule or an ask is about items, so on a schedule it needs `when` (400 otherwise
 On Claude Code: `claude -p --output-format json --permission-mode dontAsk --allowedTools <…> --disallowedTools Read(//<home>/secrets.json) --json-schema <{ summary, items: [{ ref, why }] }>` in `<home>/automations`.
 
 - **Allowed:** Read, Grep, Glob, WebSearch, WebFetch; `gh`'s issue and pr list and view, pr diff and checks, search, run and release list and view, repo view; the desk's read tools (under the name Claude Code has this desk as, else `mcp__inbox__` and the old `mcp__review-desk__`).
-- **Denied**, added to the folder's `.claude/settings.json` when missing: the coordinator's deny list, plus `Write`, `Edit`, `NotebookEdit`, `git push`, `git commit`, `gh`'s merge, issue transfer/delete/lock/pin, label, release writes, workflow, run rerun/cancel, repo writes, secret and variable, the desk's writing tools (`mcp__inbox__desk_<act|add|undo|config|policy|note|hand_back|answer|inquire|inquiry|automations>`, also under `mcp__review-desk__` and the desk's own name), and reading `<home>/secrets.json`. It never asks and is refused the rest.
+- **Denied**, added to the folder's `.claude/settings.json` when missing: the coordinator's deny list, plus `Write`, `Edit`, `NotebookEdit`, `git push`, `git commit`, `gh`'s merge, issue transfer/delete/lock/pin, label, release writes, workflow, run rerun/cancel, repo writes, secret and variable, the desk's writing tools (`mcp__inbox__desk_<act|add|undo|config|note|hand_back|answer|inquire|inquiry|automations>`, also under `mcp__review-desk__` and the desk's own name), and reading `<home>/secrets.json`. It never asks and is refused the rest.
 - **stdin:** the instruction, the read-only rules, its last good run's time and the items the desk took from it (never one it couldn't or refused).
 - 20 minutes at most. An answer without a summary fails the run. The run stores the session id from claude's envelope.
 
@@ -1520,7 +1549,7 @@ A config with the earlier rule, which left out a conflicted PR, gets today's onc
 - **Pinning.** Either way it's pinned. One done, snoozed or muted comes back too, logged as one `pin`: the returned `undo_seq` undoes both.
 - **Pre-review.** For a PR the desk starts what opening its review would: its diff and conversations, your agent's read of what waits on you, and its AI review (with `review.auto_ai`, on someone else's PR with none for this commit). These queue with the background ones, `review.at_once` at a time, so an agent adding many doesn't start an agent run for each.
 - **The Added board.** Your pins that no board places sit on a board of their own, `added` (why "you added it", Today by default). The judge sorts them like anything else, and your pin's floor keeps them in Today or above. They don't notify; you put them there.
-- **From the coordinator.** A `desk_add` with `from` exactly "Inbox coordinator" (or "Review Desk coordinator") is the coordinator's opinion, not your pin: no floor, so the judge sorts it by your policy (and a rule's Blocked keeps it there). One no board places is on `added` too, with its why.
+- **From the coordinator.** A `desk_add` with `from` exactly "Inbox coordinator" (or "Review Desk coordinator") is the coordinator's opinion, not your pin: no floor, so the judge weighs it with the item's signals (and a rule's Blocked keeps it there). One no board places is on `added` too, with its why.
 - **Keeping it fresh.** While a pinned item is open and no search returns it, each sync refreshes it (every 3 minutes), probes its stack, and keeps it from the 14-day prune. Once merged or closed it resolves and goes like anything else.
 - **The hand-off.** `why` (one plain line) and `from` are the card's `handoff` (`{ why, from }`), shown in the review's header and the opened item ("From seer write gate: …") and given to agents in `desk_item`. They're kept in kv `added:<id>` by the seq of that pin, and shown while that pin is the item's latest and you haven't acted on the item since (undoing your action brings the hand-off back). The card's `why` stays whatever placed it.
 - `desk_add` requires both `why` and `from`; `desk add <ref> [why] --from <task>` and the HTTP route take them optionally.

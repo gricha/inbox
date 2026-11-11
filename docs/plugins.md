@@ -258,8 +258,8 @@ Required: `id`, `look`, `resolved`, `row`. The rest are optional; GitHub uses th
 **Deterministic first.** From data to placement:
 
 1. `look` turns snapshots into facts in code: waits, the blocker, needs, what's yours. GitHub's `author.engaged_90d` and `me.my_area` are deterministic. A model-made fact (the AI review's verdict) is cached per commit, and rules can read it.
-2. Rules (config.toml, plus the source's built-ins) map fields to a bucket. First match wins, `hard` sets a floor, `final` keeps the judge out, and only rules fill Blocked.
-3. The judge (policy.md, through your agent) decides what rules leave open, with their bucket as a hint. It never goes below a floor, never answers Blocked, and reads the plugin's `brief`. No `brief`, never judged.
+2. Rules (config.toml, plus the source's built-ins) map fields to a bucket, each with a weight for the judge. First match places it, `hard` sets a floor, `final` keeps the judge out, and only rules fill Blocked.
+3. The judge (your agent) weighs every matching rule by its weight and decides, with the first rule's bucket as a hint. It never goes below a floor, never answers Blocked, and reads the plugin's `brief`. No `brief`, never judged.
 4. The plugin's own prefilter holds an item (`arrive: "held"`) while it works (GitHub's AI review), then feeds `weight`.
 5. The core applies quiet days, caps, `needs` and order.
 
@@ -344,13 +344,13 @@ The agents' channel to you, as asks are yours to your agent. Nothing about them 
 
 They stay exactly this in desk.ts unless you take Q.
 
-### The judge and policy (core)
+### The judge (core)
 
-The judge stays in `src/judge.ts` with what it has today: batches of 20, one call at a time, `policy.max_per_hour`, the backoff, kv `judge:<id>` and the policy hash. Stale answers show until fresh ones land. `JUDGE_BUCKETS` leaves out Blocked, and `final` skips it. The per-item key parts come from `Lens.judge` and the lines from `brief`; the frame stays the core's.
+The judge stays in `src/judge.ts` with what it has today: batches of 20, one call at a time, `policy.max_per_hour`, the backoff, kv `judge:<id>` keyed on the item and its signals. Stale answers show until fresh ones land. `JUDGE_BUCKETS` leaves out Blocked, and `final` skips it. The per-item key parts come from `Lens.judge` and the lines from `brief`; the frame stays the core's.
 
 - **In:** rules first, then the judge where rules leave it open, then the plugin's own `arrive: "held"`.
 - **Out:** the judge's only way out is FYI (fyi or hide), with its why. The world takes an item off through `resolved()`. Done, snooze and mute are yours (or an automation's, only with the verbs its `can` allows).
-- **Per plugin:** a source's AI prefilter is set on its boards' rules: `bucket = "judge"`, `final`, `hard`, and with F2, `judge = "<automation>"`. One policy.md; the prompt names each item's board.
+- **Per plugin:** a source's AI prefilter is set on its boards' rules: `bucket = "judge"`, `final`, `hard`, and with F2, `judge = "<automation>"`. One judge, with fixed instructions; each signal names its board.
 
 ### Automations (`src/automations.ts`, core)
 
@@ -406,7 +406,7 @@ Stays core:
 
 - **GitHub's facts and words:** stage, wait kinds, resolution reasons, chips, cta kinds, stacks, `requires` parsing and the dependency graph, Context, spaces' `org:` scope, search queries, the feed, the rate limit, CODEOWNERS, merge conditions, hand-off prompts. Each reaches the core only as a lens field or inside `row.extra`.
 - **Plugin pages and asks.** The Review page is GitHub's UI. New things become rules or settings, not pages. Asks are your agent's channel, not items; a plugin only words one (`about`).
-- **Not added:** a loader, manifests, versions or sandboxes (plugins are modules in this repo, listed in `startServer`); a route or MCP tool registry; an event bus; a plugin storage API; one shared "agent job" pump (the judge, AI review, conversations, automations and coordinator fail differently on purpose); a `remove` call; plugin buckets or parts; a `block` verb or `desk_block`; an agent registry; per-plugin policy files; rules that act instead of place.
+- **Not added:** a loader, manifests, versions or sandboxes (plugins are modules in this repo, listed in `startServer`); a route or MCP tool registry; an event bus; a plugin storage API; one shared "agent job" pump (the judge, AI review, conversations, automations and coordinator fail differently on purpose); a `remove` call; plugin buckets or parts; a `block` verb or `desk_block`; an agent registry; per-plugin judge prompts; rules that act instead of place.
 - **GitHub's kv keys** stay unprefixed and are listed in its file: `context`, `blocked`, `review:`, `pr:`, `take:`, `reconciled_at`, `synced_at`. `baseline_at` (what counts as new) is the core's; GitHub sets it once, after its first pass.
 
 **Still GitHub-shaped in core files, on purpose** (until a second plugin needs otherwise):
@@ -498,6 +498,6 @@ Each has a recommended answer and today's behaviour as the conservative one, wit
 **Offered, not assumed.**
 
 - **F1. Tools on automations.** Recommended: yes, last. An automation gets `tools?: string[]`: tools allowed beyond the desk's and plugins'. An agent's edit already leaves it off until you turn it on, and deny still wins. _Conservative:_ not built.
-- **F2. An automation as a source's prefilter.** Recommended: yes, last, as one rule key: `{ when = "…", bucket = "judge", judge = "<automation>" }`. The run gets the items, fenced, with its prompt and tools, and answers `{ bucket, why }` per item. Answers are kept like the judge's, keyed by `Lens.judge` and the automation's `updated_at`. Floors and `final` bind them; they never answer Blocked. _Conservative:_ not built; the judge with policy.md does it.
+- **F2. An automation as a source's prefilter.** Recommended: yes, last, as one rule key: `{ when = "…", bucket = "judge", judge = "<automation>" }`. The run gets the items, fenced, with its prompt and tools, and answers `{ bucket, why }` per item. Answers are kept like the judge's, keyed by `Lens.judge` and the automation's `updated_at`. Floors and `final` bind them; they never answer Blocked. _Conservative:_ not built; the judge weighing the rules does it.
 
-**Settled.** Ids carry their source in the prefix. Blocking fields stay `pr.blocked*`, so config.toml is never rewritten. AI takes things off your desk only by sorting them into FYI. Plugins are code in this repo, listed in `startServer`. One policy.md. The desk's own moves stay code over `needs`. Merging takes only what a plugin calls `yours`: your own PRs today.
+**Settled.** Ids carry their source in the prefix. Blocking fields stay `pr.blocked*`, so config.toml is never rewritten. AI takes things off your desk only by sorting them into FYI. Plugins are code in this repo, listed in `startServer`. One judge. The desk's own moves stay code over `needs`. Merging takes only what a plugin calls `yours`: your own PRs today.

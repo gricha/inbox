@@ -101,7 +101,7 @@ In a window 1160px or wider, a review or a question keeps the list it came from 
 
 The main page: what the desk put on your desk, in three sections. `src/urgency.ts` places and orders them ([api.md → Urgency](api.md#urgency)); the page only draws `QueueView.inbox`.
 
-- **Urgent**: what an urgent criterion says yes to (for example "Asked by name": a review asked of you, not your team, until you review it; or "Ready to merge": your own approved, green PR), what your agent handed back, and a score at the Urgent threshold. Agents' questions and sessions that need you lead it.
+- **Urgent**: what an urgent criterion says yes to (for example "Ready to merge": your own approved, green PR), what your agent handed back, and a score at the Urgent threshold (a review asked of you by name usually reaches it: "Asked by name" counts 3). Agents' questions and sessions that need you lead it.
 - **Standard**: the rest.
 - **FYI**: what rules or an automation sorted away, or a model's low score. A review asked of you by name and a pinned item never go here. Before the scorer answers, what the rules put in later is Standard, under the rest.
 
@@ -450,10 +450,10 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 - Tuning folds behind one quiet row at the sheet's end, **More <part> settings**, closed on open.
 - A row that would do nothing here isn't drawn (`SHOWN`); one that waits on another is greyed (`DISABLED`). `desk settings` and settings.json still set every one.
 - When settings.json has a problem, a notice above the part names each setting by label and key, and opens More if needed.
-- Old links still land: `#/settings/automations`, `notify` → Inbox and notifications, `review` and `handoff` → GitHub, `appearance` → This device, `#/rules` → Searches and rules.
-- **Views**: Searches and rules (`#/settings/rules`), Your policy (`#/settings/policy`) and each automation (`#/settings/automations/<id>`; a plugin's `github.<id>`) open as views. Their head is the way back to their part ("‹ GitHub", "‹ Agent", "‹ Your automations"), and so is Esc once you've left the editor. Coming back puts focus on what opened it.
+- Old links still land: `#/settings/automations`, `notify` → Inbox and notifications, `review` and `handoff` → GitHub, `appearance` → This device, `#/rules` → Searches and rules, `policy` (Your policy, gone) → Agent.
+- **Views**: Searches and rules (`#/settings/rules`) and each automation (`#/settings/automations/<id>`; a plugin's `github.<id>`) open as views. Their head is the way back to their part ("‹ GitHub", "‹ Your automations"), and so is Esc once you've left the editor. Coming back puts focus on what opened it.
 - Esc on a part goes to the Inbox.
-- Parts and views stay mounted once opened, so an unsaved rules, policy or automation draft survives leaving and coming back.
+- Parts and views stay mounted once opened, so an unsaved rules or automation draft survives leaving and coming back.
 
 ### Inbox and notifications
 
@@ -470,19 +470,11 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
   - "Claude Code isn't connected to the desk" with **Connect Claude Code** (the commands in its tooltip; a failure in red under it). When something else of yours keeps the name inbox, its help says what the desk goes in as instead ("Connects as inbox-47998: your other desk keeps inbox"), and the flash after says the same.
   - "The desk's skill is out of date" with **Update the skill**.
   - "AI reviews are paused" after failures in a row (an expired login), with why and the next try. When sorting fails for the same reason, "Claude is paused" covers both: "Nothing is sorted or reviewed until then."
-- **Sort my desk with Claude**, and under it **Your policy** (its help says while the starter is in effect, or the judge's last failure in ink).
+- **Sort my desk with Claude**: Claude weighs every rule that matches an item. Under it, only when its last call failed (and not for the reason "Claude is paused" already says), **Sorting failed** with why and the next try, in ink.
 - **Score the Inbox with Claude** (`agent.score`).
 - **Run your agent**. Off stops it, nothing wakes it, and no Ask your agent shows.
 - **Let your agent run without asking** (on by default; only while Run your agent is on): bypass permissions mode (its deny list still holds). Changing it restarts it.
-- **More Agent settings**: **Decision model key** (an OpenRouter key, saved only from this page in `secrets.json`; shows dots once saved; pasting replaces it; Reset to default clears it; its help says what goes to OpenRouter) and **Decision model** (its id).
-
-**Your policy** (`#/settings/policy`): how you want Claude to sort your desk.
-
-- A plain text editor, as tall as its text. **Save** (⌘S; filled while there are changes), **Revert**, and the file's path.
-- While policy.md is empty it holds the starter: "This is the starter policy. Claude sorts by it until you change it." Saving makes it yours; clearing it brings the starter back.
-- The judge's status in ink ("23 items sorted by Claude. 7 of 300 this hour.", why it's off, or its last failure and next try).
-- If the file changed since you opened it, Save keeps your text and says so.
-- **Let Claude sort up to** so many items an hour.
+- **More Agent settings**: **Let Claude sort up to** so many items an hour, **Decision model key** (an OpenRouter key, saved only from this page in `secrets.json`; shows dots once saved; pasting replaces it; Reset to default clears it; its help says what goes to OpenRouter) and **Decision model** (its id).
 
 ### Your automations
 
@@ -565,7 +557,9 @@ The first plugin's part.
 - Its foot stays on the window's bottom edge: **Save** (filled while there are changes; ⌘S), **Preview changes** (⌘↵), **Revert**, the file's path, "Unsaved changes" and the cursor position.
 - Tab indents in the editor; Esc leaves it onto Save.
 - A click on an error jumps to its line. In a narrow window the first error also shows in the editor's foot.
-- Beside it, **Rules Claude can't sort below**: the saved hard and final rules in board order ("PRs to review (Personal) → Now: someone asked you directly" over its `when`; "(final)" marked). With none, one line says Claude can sort anything off your desk.
+- Beside it, **Built in**: each board's GitHub rules, folded per board, each with its bucket, why and weight in plain words ("Now: someone asked you directly · firm, 9 of 10"; `weightText()`), a switch, or Edit where yours stands in its place.
+- Then **Rules Claude can't sort below**: the saved hard and final rules in board order ("My PRs (Personal) → Today: your draft: finish it · strong, 6 of 10" over its `when`; "(final)" marked in place of a weight). With none, one line says Claude can sort anything off your desk.
+- The Syntax sheet says what `weight` does: 0 to 10, 5 unless set.
 
 Rules themselves: [api.md → Rules: built in and your own](api.md#rules-built-in-and-your-own).
 
@@ -674,7 +668,7 @@ The window names no key; a button's tooltip names its own. Only platform keys wo
 | Esc                             | Closes the topmost thing (a menu, the chat, the comment bar, a box, an editor). On a list: then closes the item opened in place, then clears the filter. Then goes back: a review or question to where it came from, a Settings view to its part, any other page to the Inbox. A held Esc doesn't repeat. |
 | ⌘↵                              | Sends in every box that sends (a comment, a line comment or reply, Reply, Request changes, the issue comment bar, an answer). Previews in Searches and rules.                                                                                                                                             |
 | Enter / Shift+Enter             | In the chat: send / new line.                                                                                                                                                                                                                                                                             |
-| ⌘S                              | Saves rules, policy or an automation.                                                                                                                                                                                                                                                                     |
+| ⌘S                              | Saves rules or an automation.                                                                                                                                                                                                                                                                             |
 | Tab                             | Moves focus. A row is a button: focusing selects it, Enter or Space opens it. In the rules editor Tab indents.                                                                                                                                                                                            |
 | Arrows, Enter, Space, Backspace | In menus, the reviewers box, settings fields and the shortcut recorder.                                                                                                                                                                                                                                   |
 | ⌘1–⌘4                           | Inbox, Blocked, Merging, Archive (Ctrl elsewhere). Each page's tooltip names its key.                                                                                                                                                                                                                     |
@@ -686,22 +680,22 @@ Code: `onKey` and `onCapture` (`SIDE_PAGES`, `stepTo()`) in `web/src/App.tsx`, p
 
 ## Files
 
-| File                                                                                            | What                                                                                 |
-| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `web/src/App.tsx`                                                                               | state, data loading, SSE, keys, routes wired to pages                                |
-| `web/src/view.ts`                                                                               | routes, grouping, filter, settings parts and helpers (pure, tested in `web/test`)    |
-| `web/src/notices.ts`, `components/Bubbles.tsx`                                                  | the bubbles: which, in what words, dismissals                                        |
-| `web/src/components/Sidebar.tsx`, `PageHead.tsx`                                                | the sidebar (pages, Ask your agent, the update line, Settings); each page's head     |
-| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx`                                     | the Inbox, Blocked and the Archive: rows, an item opened in place                    |
-| `web/src/components/Inquiry.tsx`, `Session.tsx`                                                 | agents' questions (rows and page); sessions that need you                            |
-| `web/src/components/RowMenu.tsx`, `More.tsx`                                                    | a row's right-click menu; a review's More                                            |
-| `web/src/components/Beside.tsx`                                                                 | the list beside a review or a question                                               |
-| `web/src/components/Review.tsx`, `Conversation.tsx`, `Reviewers.tsx`                            | a PR's review: header, AI review, conversations, diffs and notes, actions, reviewers |
-| `web/src/components/Inflight.tsx`                                                               | Merging and Claude's work                                                            |
-| `web/src/components/Chat.tsx`, `Prose.tsx`                                                      | Ask your agent; drawing an agent's text                                              |
-| `web/src/components/Settings.tsx`, `Rules.tsx`, `Policy.tsx`, `Automations.tsx`, `Criteria.tsx` | Settings and its views                                                               |
-| `web/src/components/Setup.tsx`                                                                  | the first-run page                                                                   |
-| `web/src/styles.css`, `web/src/theme.ts`                                                        | tokens per theme and layout ([visual.md](visual.md)); the device's theme             |
-| `web/src/components/Mark.tsx`, `assets/brand/mark.svg`                                          | the mark ([visual.md → The brand](visual.md#the-brand))                              |
-| `web/src/fonts/`                                                                                | bundled fonts, so nothing loads from the network                                     |
-| `web/mock/server.ts`, `diffs.ts`                                                                | an in-memory API for UI work without GitHub: `node web/mock/server.ts`               |
+| File                                                                              | What                                                                                 |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `web/src/App.tsx`                                                                 | state, data loading, SSE, keys, routes wired to pages                                |
+| `web/src/view.ts`                                                                 | routes, grouping, filter, settings parts and helpers (pure, tested in `web/test`)    |
+| `web/src/notices.ts`, `components/Bubbles.tsx`                                    | the bubbles: which, in what words, dismissals                                        |
+| `web/src/components/Sidebar.tsx`, `PageHead.tsx`                                  | the sidebar (pages, Ask your agent, the update line, Settings); each page's head     |
+| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx`                       | the Inbox, Blocked and the Archive: rows, an item opened in place                    |
+| `web/src/components/Inquiry.tsx`, `Session.tsx`                                   | agents' questions (rows and page); sessions that need you                            |
+| `web/src/components/RowMenu.tsx`, `More.tsx`                                      | a row's right-click menu; a review's More                                            |
+| `web/src/components/Beside.tsx`                                                   | the list beside a review or a question                                               |
+| `web/src/components/Review.tsx`, `Conversation.tsx`, `Reviewers.tsx`              | a PR's review: header, AI review, conversations, diffs and notes, actions, reviewers |
+| `web/src/components/Inflight.tsx`                                                 | Merging and Claude's work                                                            |
+| `web/src/components/Chat.tsx`, `Prose.tsx`                                        | Ask your agent; drawing an agent's text                                              |
+| `web/src/components/Settings.tsx`, `Rules.tsx`, `Automations.tsx`, `Criteria.tsx` | Settings and its views                                                               |
+| `web/src/components/Setup.tsx`                                                    | the first-run page                                                                   |
+| `web/src/styles.css`, `web/src/theme.ts`                                          | tokens per theme and layout ([visual.md](visual.md)); the device's theme             |
+| `web/src/components/Mark.tsx`, `assets/brand/mark.svg`                            | the mark ([visual.md → The brand](visual.md#the-brand))                              |
+| `web/src/fonts/`                                                                  | bundled fonts, so nothing loads from the network                                     |
+| `web/mock/server.ts`, `diffs.ts`                                                  | an in-memory API for UI work without GitHub: `node web/mock/server.ts`               |

@@ -32,7 +32,7 @@ Known limits of that evidence:
 ## Principles
 
 1. **Show only what needs the owner.** Short lists, one queue, everything else sorted away but never silently dropped (hidden items stay listed with the rule that hid them).
-2. **Rules are cheap and certain; the agent handles the rest.** Rules give a hint and, when `hard`, a floor. Your agent judges the gray zone by your prose policy. A pin or a hard rule is never overridden.
+2. **Rules are cheap and certain; the agent handles the rest.** Rules give a hint and, when `hard`, a floor. Your agent judges the gray zone, weighing every rule that matches by its weight. A pin or a hard rule is never overridden.
 3. **The desk is the truth.** It decides what's on the queue, its order and what notifies. Every client (window, tray, CLI, MCP) only renders, so they agree.
 4. **Snoozes are conditions, not timers.** "Until CI passes" is checked against each fresh snapshot (`happened()` in `src/signals.ts`). A sleeping laptop loses nothing.
 5. **PR text is untrusted.** It's fenced in every prompt and in MCP results. Agent calls that read it have no tools.

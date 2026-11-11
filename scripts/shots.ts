@@ -124,7 +124,7 @@ interface Shot {
   name: string;
   go: (page: Page) => Promise<void>;
   after?: (page: Page) => Promise<void>; // puts back what `go` changed in the mock
-  writes?: true; // changes the desk's settings, policy or state: only against the mock, never a real desk at --url
+  writes?: true; // changes the desk's settings or state: only against the mock, never a real desk at --url
   sizes?: string[]; // only at these of SIZES; without it, at every size but the ones a shot must ask for
 }
 const at = (hash: string) => async (page: Page) => {
@@ -369,19 +369,6 @@ const settingsView = async (page: Page, name: string, title: string, part: strin
   if (seen.h1 !== title) failures.push(`${name}: the view's name reads ${JSON.stringify(seen.h1)}`);
   if (seen.col !== col) failures.push(`${name}: the column is ${seen.col}, not ${col}`);
   if (await page.locator(".s-page:visible").count()) failures.push(`${name}: a Settings part shows beside the view`);
-};
-// The policy view's hourly cap: its row, on screen once scrolled to, under the judge's status line.
-const capUnderStatus = async (page: Page, name: string) => {
-  const cap = page.locator('[id="row-policy.max_per_hour"]');
-  if (!(await cap.isVisible())) {
-    failures.push(`${name}: no hourly cap in the policy view`);
-    return;
-  }
-  const [status, row] = await page.evaluate<number[]>(`[
-    [...document.querySelectorAll(".policy > .s-live")].at(-1)?.getBoundingClientRect().bottom ?? -1,
-    document.getElementById("row-policy.max_per_hour").getBoundingClientRect().top,
-  ]`);
-  if (status! < 0 || row! < status!) failures.push(`${name}: the hourly cap isn't under the judge's status`);
 };
 // A theme picked in Settings → This device, as its select sets it; `after` puts System back.
 const pickTheme = (id: string) => async (page: Page) => {
@@ -3523,6 +3510,17 @@ const SHOTS: Shot[] = [
       const tall = await below();
       if (tall > 0) failures.push(`settings-rules: with the editor dragged taller, its foot ends ${Math.round(tall)}px below the window`);
       await page.evaluate(`document.querySelector(".rules-wrap .editor").style.height = ""`);
+      // Each built-in rule says how much Claude counts it, in words, and a final one says final instead.
+      const weights = await page.evaluate<string[]>(
+        `[...document.querySelectorAll(".builtin-rules li .br-text > span:first-child")].map((s) => s.textContent.replaceAll("\\u00a0", " "))`,
+      );
+      if (!weights.some((w) => w.includes("asked you directly · firm, 9 of 10")))
+        failures.push(`settings-rules: no built-in rule reads its weight: ${JSON.stringify(weights.slice(0, 3))}`);
+      if (weights.some((w) => w.includes("(final)") && w.includes(" of 10"))) failures.push("settings-rules: a final rule shows a weight");
+      await page.evaluate(`document.querySelector(".builtin-board").open = true`);
+    },
+    after: async (page) => {
+      await page.evaluate(`document.querySelector(".builtin-board").open = false`);
     },
   },
   {
@@ -3660,7 +3658,8 @@ const SHOTS: Shot[] = [
       })))()`);
       const want = {
         "agent.harness": "Agent / Sorts your desk and reviews PRs ahead of time, on your own login.",
-        "policy.judge": "Sort my desk with Codex / Codex places each item by your policy; off, only your rules do.",
+        "policy.judge":
+          "Sort my desk with Codex / Codex places each item by weighing every rule that matches it; off, the first matching rule does.",
         "agent.coordinator": "Run your agent / A Codex session that answers Ask your agent and gets what you hand off merged.",
       };
       if (JSON.stringify(said) !== JSON.stringify(want)) failures.push(`settings-agent-codex: the rows read ${JSON.stringify(said)}`);
@@ -3694,6 +3693,11 @@ const SHOTS: Shot[] = [
         failures.push(`settings-agent-more: the key's row reads ${JSON.stringify(seen)}`);
       const model = await page.locator('[id="setting-agent.decision_model"]').inputValue();
       if (model !== "typesafe/jev-1.14") failures.push(`settings-agent-more: the model reads ${JSON.stringify(model)}`);
+      // The judge's hourly cap is tuning: folded here, now that Your policy is gone.
+      if (!(await page.locator('[id="row-policy.max_per_hour"]').isVisible()))
+        failures.push("settings-agent-more: no Let Claude sort up to in More Agent settings");
+      if (await page.locator(".s-view-row").filter({ hasText: "Your policy" }).count())
+        failures.push("settings-agent-more: a Your policy row is still drawn");
       await key.fill(KEY);
       await key.blur();
       await row.getByText("Saved").waitFor({ timeout: 3000 });
@@ -3781,15 +3785,6 @@ const SHOTS: Shot[] = [
     after: async (page) => {
       await unroute(page);
       await at("#/")(page);
-    },
-  },
-  {
-    // Your policy, a view of its own: the editor, the judge's status, then the hourly cap's row under it.
-    name: "settings-policy",
-    go: async (page) => {
-      await at("#/settings/policy")(page);
-      await settingsView(page, "settings-policy", "Your policy", "agent", "760px");
-      await capUnderStatus(page, "settings-policy");
     },
   },
   {
@@ -4383,32 +4378,6 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // policy.md empty: the editor holds the starter, and says so.
-    name: "settings-policy-starter",
-    writes: true,
-    go: async (page) => {
-      await page.evaluate(`(async () => {
-        const p = await (await fetch("/api/policy")).json();
-        window.__policy = p.text;
-        await fetch("/api/policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "", base: p.hash }) });
-      })()`);
-      await at("#/settings/agent")(page);
-      const help = await page.evaluate<string | null>(
-        `[...document.querySelectorAll(".s-view-row")].find((r) => r.querySelector(".s-name")?.textContent === "Your policy")?.querySelector(".s-help")?.textContent ?? null`,
-      );
-      if (help !== "The starter policy, until you change it.")
-        failures.push(`settings-policy-starter: Your policy's row says ${JSON.stringify(help)}`);
-      await at("#/settings/policy")(page);
-      await capUnderStatus(page, "settings-policy-starter");
-    },
-    after: async (page) => {
-      await page.evaluate(`(async () => {
-        const p = await (await fetch("/api/policy")).json();
-        await fetch("/api/policy", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: window.__policy, base: p.hash }) });
-      })()`);
-    },
-  },
-  {
     // On Settings the sidebar marks Settings, none of the pages, and the page head names it; in a browser This device is the
     // theme alone (the mac size has the app's bridge: settings-app-desktop).
     name: "settings-app",
@@ -4552,7 +4521,7 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
       await pauseAi(true)(page);
       await at("#/settings/agent")(page);
-      // The login lapsed, which stops the sorting too: said once, in Claude's part, and not again in Your policy.
+      // The login lapsed, which stops the sorting too: said once, in Claude's part, and not again under the sorting's switch.
       const said = await page.evaluate<number>(
         `[...document.querySelectorAll(".settings .s-help")].filter((el) => el.textContent.includes("isn't logged in")).length`,
       );

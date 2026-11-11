@@ -1,6 +1,6 @@
 # Inbox
 
-A desktop app that turns your GitHub review load into one queue. It shows only what you need to act on, one line each, in order. Rules and your policy sort everything else away.
+A desktop app that turns your GitHub review load into one queue. It shows only what you need to act on, one line each, in order. Your rules, and your agent weighing them, sort everything else away.
 
 - **Review in the desk.** A click on a PR opens its diff with an AI summary, concerns and notes on the changes. One click approves it, and it leaves your list at once.
 - **Hand off your own PRs.** **Hand off for merge** gives a PR to the coordinator, a background agent session the desk starts. It fixes CI, addresses review comments and merges once the PR is approved and green. It hands the PR back to your Inbox only when it can't.
@@ -78,10 +78,13 @@ More on each page: [docs/ui.md](docs/ui.md).
 
 Rules give each item its first placement. Edit them in Settings → GitHub → Searches and rules: **Preview changes** shows what would move, **Save** saves. They live in `~/.inbox/config.toml`, which you can also edit directly.
 
-A **board** is one or more GitHub searches plus rules. The first rule whose `when` is true sets the bucket. Then your agent sorts everything by your policy (Settings → Agent → Your policy), with the rule's bucket as a hint. An item on several boards shows once, at its most urgent placement.
+A **board** is one or more GitHub searches plus rules. The first rule whose `when` is true sets the bucket. Then your agent (the judge) sorts everything, weighing every rule that matches with its weight, plus your automations' sorts and criteria. An item on several boards shows once, at its most urgent placement.
 
+- `weight = 8`: how much your agent counts the rule, 0 to 10 (5 unless set). 9 or 10 is your firm default, under 3 a hint. GitHub's rules carry their own: a review asked of you by name weighs 9, a team ping 5.
 - `hard = true`: a floor. What it matches never sorts below its bucket.
 - `final = true`: your agent doesn't re-sort it (your pin still lifts it).
+
+To change how something sorts, add or reweigh a rule, or ask your agent to.
 
 ```toml
 [[spaces]]
@@ -233,7 +236,7 @@ Every item on your Inbox gets a score out of 10. The score and your **criteria**
 
 - A **criterion** is a yes-or-no about an item: a rule (`when`, free and exact) or a question your model answers (`ask`, such as "Is it about service accounts?"). A yes raises the score. An **urgent** criterion's yes puts the item in Urgent whatever its score, even one your rules hid.
 - Tell your agent what you care about ("I care about PRs about service accounts") and it saves a criterion. Criteria only order your Inbox; they never act on an item.
-- Settings → Urgency lists yours and GitHub's (Waiting on your reply, and the urgent ones: Asked by name, Ready to merge, Your PR others wait on, Handed back), each with a switch.
+- Settings → Urgency lists yours and GitHub's (Asked by name, which counts 3 points, Waiting on your reply, and the urgent ones: Ready to merge, Your PR others wait on, Handed back), each with a switch.
 - Your agent scores 20 items a call, with the one-line why your row shows. With a decision model key (Settings → Agent → More), that model scores instead. Before a model answers, or with Score the Inbox off, the desk scores from the rules and criteria.
 - Urgent is 8 or more, FYI 3 or less (Settings → Inbox and notifications). A review asked of you by name, or your pin, never goes below Standard.
 - Every answer is kept in `~/.inbox/labels.jsonl`, to train a cheaper model later.
@@ -288,7 +291,7 @@ Everything else is read-only: GraphQL queries, GETs of your notifications (never
 - An automation never writes. The desk acts on what it lists, only as you allowed. Only you turn one on.
 - Nothing about your items goes to a model other than your own agent, unless you set a decision model key (see [Automations](#automations)).
 - PR text never goes into the coordinator's wakes, only URLs and numbers. The AI review fences PR text as untrusted and runs with no tools. Each concern quotes the code it's about, and a second pass drops any the diff doesn't bear out.
-- What you write (comments, replies, answers, your policy) never reaches Sentry, where the desk reports its errors and traces. Request bodies, MCP arguments and your IP stay off. Log lines can carry what the desk logs (an agent's question, a hand-back's reason). `DESK_SENTRY=0` sends nothing.
+- What you write (comments, replies, answers, your rules) never reaches Sentry, where the desk reports its errors and traces. Request bodies, MCP arguments and your IP stay off. Log lines can carry what the desk logs (an agent's question, a hand-back's reason). `DESK_SENTRY=0` sends nothing.
 
 ## Files
 
@@ -297,7 +300,6 @@ Everything else is read-only: GraphQL queries, GETs of your notifications (never
 | `~/.inbox/config.toml`                         | spaces, boards, rules                                            |
 | `~/.inbox/settings.json`                       | settings you changed from the default                            |
 | `~/.inbox/secrets.json`                        | the decision model key                                           |
-| `~/.inbox/policy.md`                           | your policy                                                      |
 | `~/.inbox/desk.db`                             | cache and local state (SQLite), and paired devices' token hashes |
 | `~/.inbox/docs/`                               | review documents                                                 |
 | [AGENTS.md](AGENTS.md)                         | where each kind of change goes                                   |

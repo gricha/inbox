@@ -63,7 +63,7 @@ services (`Context.Service`, `Layer`, `ManagedRuntime`), `Data.TaggedError` not 
 | `NotFound`          | 404    | an unknown ref, board, ask, inquiry, automation or `/api/*` route                                              |
 | `TooManyRequests`   | 429    | pairing past five tries a minute (`Remote.trade`)                                                              |
 | `AmbiguousRef`      | 409    | a ref matching several items, with `candidates`                                                                |
-| `Stale`             | 409    | a stale base (`putPolicy`, `putConfig`) or head (`approve`, `githubAct`)                                       |
+| `Stale`             | 409    | a stale base (`putConfig`) or head (`approve`, `githubAct`)                                                    |
 | `Busy`              | 409    | a held `approving` or `sending` lock                                                                           |
 | `Conflict`          | 409    | any other state that refuses: in Merging, not yours, already answered, your agent is off                       |
 | `Upstream`          | 502    | a GitHub write or read the desk passes on, your agent not starting (`cause`: the original error)               |
@@ -210,7 +210,7 @@ Each boundary runs an Effect and answers for whatever fails.
 An error answers `{ error, tag, candidates?, reason? }`. Every reader (the client, the CLI, MCP, the UI) decodes
 `tag ?? BY_STATUS[status]` (409 with candidates is `AmbiguousRef`; unknown is `Internal`), and a 503's
 `reason ?? (error includes "config" ? "config" : "starting")`, so an older desk without tags still reads right. In the
-UI, a 409 from PUT `/api/policy` or `/api/config` is `Stale` whatever its tag, and a reply that isn't JSON means the desk
+UI, a 409 from PUT `/api/config` is `Stale` whatever its tag, and a reply that isn't JSON means the desk
 is unreachable.
 
 ## Desk's shape
