@@ -814,6 +814,12 @@ p.side-sync {
   color: var(--red);
 }
 
+/* A newer Inbox: the accent, as a call to action. */
+.side-foot .side-update,
+.side-foot .side-update:hover:not(:disabled) {
+  color: var(--accent-ink);
+}
+
 .side-ask-short {
   display: none;
 }

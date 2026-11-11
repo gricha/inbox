@@ -879,6 +879,14 @@ export function App() {
     });
   }
 
+  // The app downloads the newer Inbox and restarts into it; the overview says how it's going.
+  function update(): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      setOverview((o) => (o?.update ? { ...o, update: { ...o.update, installing: true } } : o));
+      return api.update().pipe(Effect.catch(failed), Effect.andThen(refreshNow));
+    });
+  }
+
   // A PR opens its review in place of the queue; an issue opens in place.
   function openCard(c: Card) {
     if (c.kind !== "pr") {
@@ -1418,6 +1426,9 @@ export function App() {
         offline={offline}
         onSync={() => {
           runUi(sync());
+        }}
+        onUpdate={() => {
+          runUi(update());
         }}
         ask={!asking && !!overview?.agent && !(route.name === "inquiry" && isCoordinator(questionOf(route.id)?.from ?? ""))}
         waiting={route.name === "review" && askWaiting}

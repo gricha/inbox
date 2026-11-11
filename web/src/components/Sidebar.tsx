@@ -6,7 +6,8 @@ import { Mark } from "./Mark.tsx";
 
 // The window's only global chrome. The pages, in the owner's order: Inbox, Blocked, then Merging and the Archive under
 // a hairline; in Settings, its parts instead, under the way back to the Inbox: the core's, then the plugins' under a
-// hairline. In the footer, bottom up, Settings, the sync line (only when something's wrong) and Ask your agent.
+// hairline. In the footer, bottom up, Settings, a newer Inbox (only when there's one), the sync line (only when
+// something's wrong) and Ask your agent.
 export function Sidebar({
   route,
   from,
@@ -14,6 +15,7 @@ export function Sidebar({
   overview,
   offline,
   onSync,
+  onUpdate,
   ask,
   waiting,
   onAsk,
@@ -24,6 +26,7 @@ export function Sidebar({
   overview: Overview | null;
   offline: boolean;
   onSync: () => void;
+  onUpdate: () => void;
   ask: boolean; // Ask your agent: not with the chat open, your agent off, or on its own question's page
   waiting: boolean; // the open review's latest ask is unanswered
   onAsk: () => void;
@@ -54,6 +57,7 @@ export function Sidebar({
     };
   }, []);
   const trouble = syncTrouble(overview, offline);
+  const up = overview?.update?.available ? overview.update : null;
   return (
     <aside ref={side} className={cls("side", more && "more")}>
       {/* Not a link: on macOS this row is the window's drag handle, which swallows clicks. */}
@@ -169,6 +173,39 @@ export function Sidebar({
             </svg>
             <span className="side-name">{trouble.text}</span>
           </p>
+        )}
+        {/* A newer Inbox: the app installs it where it can, else its release page has the download. */}
+        {up?.install && (
+          <button
+            type="button"
+            className="side-item side-update"
+            onClick={onUpdate}
+            disabled={up.installing}
+            title={
+              up.installing
+                ? `Downloading Inbox ${up.latest}; the app restarts into it`
+                : `Download Inbox ${up.latest} and restart into it (this is ${up.current})`
+            }
+          >
+            <svg className={cls("i", up.installing && "spin")} viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />
+            </svg>
+            <span className="side-name">{up.installing ? "Updating\u2026" : `Update to ${up.latest}`}</span>
+          </button>
+        )}
+        {up && !up.install && up.url && (
+          <a
+            href={up.url}
+            target="_blank"
+            rel="noreferrer"
+            className="side-item side-update"
+            title={`${up.error ? `The update failed: ${up.error}. ` : ""}Inbox ${up.latest} is out (this is ${up.current}): its release page has the download`}
+          >
+            <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />
+            </svg>
+            <span className="side-name">{`Download ${up.latest}`}</span>
+          </a>
         )}
         <a href="#/settings" className={cls("side-item", onSettings && "on")}>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">

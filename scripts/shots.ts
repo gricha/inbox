@@ -17,6 +17,7 @@ import type {
   InflightView,
   OmarchyTheme,
   Overview,
+  UpdateView,
   QueueView,
   ReviewHunk,
   ReviewOrder,
@@ -448,6 +449,16 @@ const overviewAs = (change: (o: Overview) => void) => async (page: Page) => {
     await route.fulfill({ response: res, json: o });
   });
 };
+// A newer Inbox, as a packaged app's desk says it; its release page only, unless a shot says the app installs it.
+const NEWER: UpdateView = {
+  current: "0.1.0",
+  latest: "0.2.0",
+  url: "https://github.com/gricha/inbox/releases/tag/v0.2.0",
+  available: true,
+  install: false,
+  installing: false,
+  error: null,
+};
 // The automations as the mock serves them, changed in the browser; unsettle undoes it.
 const automationsAs = (change: (v: AutomationView[]) => void) => async (page: Page) => {
   await page.route("**/api/automations", async (route) => {
@@ -813,6 +824,35 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(150);
       const after = await syncLine(page);
       if (after?.text !== "Rate limited") failures.push(`sync-limited: a click on the line reads ${JSON.stringify(after)}`);
+    },
+    after: unsettle,
+  },
+  {
+    // A newer Inbox: the sidebar's footer offers it above Settings in the accent; Update when the app installs it
+    // itself, Download (its release page) when it can't.
+    name: "sidebar-update",
+    go: async (page) => {
+      await overviewAs((o) => {
+        o.update = { ...NEWER, install: true };
+      })(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      const text = await page.locator(".side-update").textContent();
+      if (text !== "Update to 0.2.0") failures.push(`sidebar-update: the line reads ${JSON.stringify(text)}`);
+    },
+    after: unsettle,
+  },
+  {
+    name: "sidebar-download",
+    go: async (page) => {
+      await overviewAs((o) => {
+        o.update = NEWER;
+      })(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      const link = page.locator("a.side-update");
+      if ((await link.textContent()) !== "Download 0.2.0" || !(await link.getAttribute("href"))?.includes("/releases/tag/v0.2.0"))
+        failures.push(`sidebar-download: the line reads ${JSON.stringify(await link.textContent())}`);
     },
     after: unsettle,
   },

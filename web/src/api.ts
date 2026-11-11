@@ -36,6 +36,7 @@ import type {
   ReviewView,
   SettingsView,
   SettingValue,
+  UpdateView,
 } from "../../src/types.ts";
 import { report } from "./sentry.ts";
 
@@ -234,6 +235,7 @@ export const api = {
     call<{ ok: true; ask: Ask }>("POST", "/api/ask", b),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
+  update: () => call<UpdateView>("POST", "/api/update", {}),
   config: () => call<ConfigDoc>("GET", "/api/config"),
   preview: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),
   // A stale base fails with DeskConflict "Stale".
