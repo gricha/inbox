@@ -283,7 +283,7 @@ Under the AI review, only when there's any.
 
 ### The diff
 
-The desk's reading order (`ReviewView.order`):
+The desk's reading order (`ReviewView.order`), which the guide's steps are built from:
 
 1. What Claude ranked: each hunk under its file's name, its level ("Look", then "Skim") and Claude's few words why.
 2. What Claude didn't read ("Not read", and whether the PR or file was too long).
@@ -292,11 +292,10 @@ The desk's reading order (`ReviewView.order`):
 
 Neighbouring hunks of a file at one level read as one. Without a ranking (none yet, or an earlier commit's) it keeps file order. A PR with no changes says "No files changed."
 
-**Walk-through and By importance.** When this commit's AI review has steps (`order.steps`), two tabs above the diff switch views; the choice is kept per device (`desk.review.view`), Walk-through first.
+**Guided Review and Traditional.** Two tabs above the diff, the choice kept per device (`desk.review.view`), Guided Review first. A review without steps (`order.steps`: none yet, or an earlier commit's) shows Traditional alone, with no tabs.
 
-- By importance is the order above.
-- Walk-through: each step is a heading ("1 of 4", its title), a sentence or two, and "**Check:** …" when there's something to verify. Then the hunks it covers. A quiet "Next: <title>" at its foot; the last reads "End of the walk-through".
-- Hunks no step covers follow under "Not in the walk-through · 5 hunks in 3 files", then the desk's fold.
+- **Guided Review** is only the guide, as Linear's guided reviews: each step is a heading ("1 of 4", its title), a sentence or two, and "**Check:** …" when there's something to verify, then only the hunks it covers. A quiet "Next: <title>" at its foot. The last reads "End of the guide.", and when files changed outside it, "3 more files change outside it: read every file in Traditional", a link to that tab. Nothing the steps leave out is drawn, so the guide holds your attention. A test file in a step is folded until you open it (`isTestPath()` in `src/sections.ts`).
+- **Traditional** is the plain diff: every file in the PR's order, all its hunks in diff order, Claude's notes inline on their lines (`traditional()` in `src/sections.ts`), then the desk's "Not worth reviewing" fold.
 - In the review's sidebar the steps take the files' place.
 
 **Drawing.** `@pierre/diffs`: unified, word-level changes, wrapped lines, Shiki highlighting in the theme's syntax colours (`diff` in `src/themes.ts`, `web/src/diffThemes.ts`). Unchanged lines fold into a band ("14 unmodified lines"). Each file's name sticks under the head while you read it.
@@ -352,7 +351,7 @@ Top to bottom:
 
 - **The stack**, when the PR is in one: "Stack on main", its open PRs bottom first, each with only what's news (✗ CI failing in red, ± changes requested in amber, ✓ approved). The PR on screen is marked. A long stack shows four and "16 more". A click opens that PR.
 - **The checks**, when any ran on its head: one line ("CI passing · 14 checks", "2 failing of 14 checks", "3 running of 14 checks"), red while a required check fails. A click opens every check, worst first, each linking to its page. A failing check the base branch doesn't require reads "failing, not required". Fetched when the review opens; "Couldn't load the checks: …" if GitHub won't give them.
-- **The files**, in reading order with their level and a dot when they have notes. A click scrolls there. The one you're reading is marked.
+- **The files**, in Traditional, in the PR's order with a dot when they have notes. A click scrolls there. The one you're reading is marked.
 - **The reviewers**, always: one line ("Approved by marco · waiting on sam and @backend", "Changes requested by kofi", "Waiting on you", "Nobody's asked"), amber on changes requested. A click lists each person or team, who holds it first. Bots and the author are left out.
 - **The merge**, only when something's in the way: "Merge conflict with main", in amber. Only asked for your own PRs.
 

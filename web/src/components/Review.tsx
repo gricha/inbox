@@ -56,7 +56,7 @@ import {
   threadsOn,
   type Acted,
 } from "../view.ts";
-import { FIT, LEVEL, onLines, sections, STATUS, VERDICT, walk, type Section } from "../../../src/sections.ts";
+import { FIT, isTestPath, LEVEL, onLines, STATUS, traditional, VERDICT, walk, type Section } from "../../../src/sections.ts";
 import "../diffThemes.ts";
 import { getStored, setStored } from "../storage.ts";
 import { diffTheme, omarchyTheme, onOmarchy } from "../theme.ts";
@@ -111,7 +111,7 @@ const STACK_SHOWN = 4; // the PR below this one, this one and two above; the res
 const ROOM = 1000; // px of the page's column (styles.css's @container pane): narrower, the sidebar opens over the diff, folded
 const ROW = 19; // px: .rv-diff's --diffs-line-height
 const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded, where it has room
-const VIEW = "desk.review.view"; // this device's choice: the walk-through or by importance, when a review has steps
+const VIEW = "desk.review.view"; // this device's choice: the guided review or traditional, when a review has steps
 const pane = () => document.querySelector(".col");
 // The fractional width, as the container query reads it, so the two agree at the edge.
 const roomy = () => (pane()?.getBoundingClientRect().width ?? innerWidth) >= ROOM;
@@ -195,7 +195,8 @@ export function Review({
   const [view, setView] = useState<ReviewView | string | null>(null); // string: why it failed
   const [secIdx, setSecIdx] = useState(0); // the section you're in; with the rest folded, its line is one past the last shown
   const [restOpen, setRestOpen] = useState(false);
-  const [walking, setWalking] = useState(() => getStored(VIEW) !== "importance");
+  const [walking, setWalking] = useState(() => !["traditional", "importance"].includes(getStored(VIEW) ?? ""));
+  const [testsOpen, setTestsOpen] = useState<ReadonlySet<string>>(new Set()); // test files you opened in the guided review
   const [side, setSide] = useState(() => getStored(SIDE) !== "folded");
   const [room, setRoom] = useState(roomy); // the page's column has room for the sidebar beside the diff
   const [over, setOver] = useState(false); // without room, Files opened it over the diff (not kept)
@@ -305,25 +306,24 @@ export function Review({
   // The desk's reading order; its notes are only those written for this commit, in reading order.
   const order = v?.order;
   const guided = !!order?.steps?.length;
-  const { list, rest, steps, beyond } = useMemo(
-    () =>
-      !order ? { list: [], rest: 0, steps: [], beyond: 0 } : guided && walking ? walk(order) : { ...sections(order), steps: [], beyond: 0 },
-    [order, guided, walking],
-  );
-  const outside = list.slice(beyond, rest);
-  const outHunks = outside.reduce((n, y) => n + y.hunks.length, 0);
-  const outFiles = new Set(outside.map((y) => y.path)).size;
-  // The sidebar's rows in the walk-through: each step, then what no step covers.
+  // The guided review is only its steps: what no step covers is left to Traditional, so the guide holds your attention.
+  const guiding = guided && walking;
+  const { list, rest, steps, left } = useMemo(() => {
+    if (!order) return { list: [], rest: 0, steps: [], left: [] };
+    if (!guiding) return { ...traditional(order), steps: [], left: [] };
+    const w = walk(order);
+    return { list: w.list.slice(0, w.beyond), rest: w.beyond, steps: w.steps, left: w.list.slice(w.beyond) };
+  }, [order, guiding]);
+  const beyond = list.length;
+  const leftFiles = new Set(left.map((y) => y.path)).size;
+  // Guided, a test file stays folded until you open it.
+  const isShut = (path: string) => shut.has(path) || (guiding && isTestPath(path) && !testsOpen.has(path));
+  // The sidebar's rows in the guided review: its steps.
   const noted = (at: number, end: number) => list.slice(at, end).some((y) => y.notes.length > 0);
-  const stops = [
-    ...steps.map((st, k) => {
-      const end = steps[k + 1]?.at ?? beyond;
-      return { n: k + 1, name: st.title, at: st.at, end, el: `#rv-step-${k}`, notes: noted(st.at, end) };
-    }),
-    ...(beyond < rest
-      ? [{ n: null, name: "Not in the walk-through", at: beyond, end: rest, el: "#rv-beyond", notes: noted(beyond, rest), count: outHunks }]
-      : []),
-  ];
+  const stops = steps.map((st, k) => {
+    const end = steps[k + 1]?.at ?? beyond;
+    return { n: k + 1, name: st.title, at: st.at, end, el: `#rv-step-${k}`, notes: noted(st.at, end) };
+  });
   const notes = order?.notes ?? [];
   const folded = !!order?.ranked && rest < list.length && !restOpen;
   const visible = folded ? list.slice(0, rest) : list;
@@ -442,6 +442,12 @@ export function Review({
 
   function toggleFold(path: string, at: number) {
     holdKeys(false); // you've left the box for the fold
+    if (guiding && isTestPath(path) && !testsOpen.has(path)) {
+      setTestsOpen(new Set([...testsOpen, path]));
+      setShut(new Set([...shut].filter((p) => p !== path)));
+      setStay(at);
+      return;
+    }
     const next = new Set(shut);
     if (next.has(path)) next.delete(path);
     else next.add(path);
@@ -455,6 +461,7 @@ export function Review({
     const i = drawnAt(d, list, v.conversation, v.diff_head);
     const path = list[i]?.path;
     if (path && shut.has(path)) setShut((cur) => new Set([...cur].filter((p) => p !== path)));
+    if (path && guiding && isTestPath(path)) setTestsOpen((cur) => new Set([...cur, path]));
     if (i >= 0) goTo(i, ".rv-inline", "center");
     else document.querySelector(".rv-orphan")?.scrollIntoView({ block: "center" });
     setFocusAsk((f) => f + 1);
@@ -738,7 +745,7 @@ export function Review({
       looks={view.ai_stale ? [] : (view.ai?.look ?? [])}
       order={notes}
       now={now}
-      shut={shut.has(x.path)}
+      shut={isShut(x.path)}
       onFold={() => {
         toggleFold(x.path, i);
       }}
@@ -939,8 +946,8 @@ export function Review({
           <nav className="rv-views" aria-label="Diff order">
             {(
               [
-                [true, "Walk-through"],
-                [false, "By importance"],
+                [true, "Guided Review"],
+                [false, "Traditional"],
               ] as const
             ).map(([w, name]) => (
               <button
@@ -950,7 +957,7 @@ export function Review({
                 aria-pressed={w === walking}
                 onClick={() => {
                   setWalking(w);
-                  setStored(VIEW, w ? "walk" : "importance");
+                  setStored(VIEW, w ? "guided" : "traditional");
                 }}
               >
                 {name}
@@ -984,12 +991,6 @@ export function Review({
                       {figure(steps[k]!.diagram)}
                     </header>
                   )}
-                  {steps.length > 0 && i === beyond && (
-                    <h2 className="rv-step rv-step-head" id="rv-beyond">
-                      Not in the walk-through · {outHunks} {outHunks === 1 ? "hunk" : "hunks"} in {outFiles}{" "}
-                      {outFiles === 1 ? "file" : "files"}
-                    </h2>
-                  )}
                   {section(x, i)}
                   {end >= 0 &&
                     (next ? (
@@ -1003,7 +1004,26 @@ export function Review({
                         Next: {next.title}
                       </button>
                     ) : (
-                      <p className="quiet rv-next">End of the walk-through</p>
+                      <p className="quiet rv-next">
+                        End of the guide.
+                        {leftFiles > 0 && (
+                          <>
+                            {" "}
+                            {leftFiles === 1 ? "1 more file changes" : `${leftFiles} more files change`} outside it:{" "}
+                            <button
+                              type="button"
+                              className="link-btn"
+                              onClick={() => {
+                                setWalking(false);
+                                setStored(VIEW, "traditional");
+                                scrollTo({ top: 0 });
+                              }}
+                            >
+                              read every file in Traditional
+                            </button>
+                          </>
+                        )}
+                      </p>
                     ))}
                 </Fragment>
               );
@@ -1073,7 +1093,7 @@ export function Review({
           {view.merge && <SidePart id="merge" name="Merge" line={view.merge} bad="t-warn" tone={calm(card)} />}
           {steps.length > 0 && <StepList stops={stops} on={secIdx} onGo={goTo} />}
           {list.length > 0 && !steps.length && (
-            <nav className="rv-files" aria-label="Files in reading order">
+            <nav className="rv-files" aria-label="Files">
               <h2 className="rv-side-head">
                 <span>
                   {files.length} {files.length === 1 ? "file" : "files"}
@@ -1113,20 +1133,20 @@ export function Review({
   );
 }
 
-// The walk-through's steps in the sidebar, where the files list is in By importance; the one you're in follows the scroll.
+// The guided review's steps in the sidebar, where Traditional lists the files; the one you're in follows the scroll.
 function StepList({
   stops,
   on,
   onGo,
 }: {
-  stops: { n: number | null; name: string; at: number; end: number; el: string; notes: boolean; count?: number }[];
+  stops: { n: number; name: string; at: number; end: number; el: string; notes: boolean }[];
   on: number;
   onGo: (i: number, el: string) => void;
 }) {
   return (
-    <nav className="rv-files" aria-label="Steps of the walk-through">
+    <nav className="rv-files" aria-label="Steps of the guided review">
       <h2 className="rv-side-head">
-        <span>Walk-through</span>
+        <span>Guided Review</span>
       </h2>
       <ol>
         {stops.map((r) => (
@@ -1138,12 +1158,11 @@ function StepList({
                 onGo(r.at, r.el);
               }}
             >
-              {r.n && <span className="rv-lvl">{r.n}</span>}
+              <span className="rv-lvl">{r.n}</span>
               <span className="rv-fname">
                 <span className="rv-base">{r.name}</span>
               </span>
               {r.notes && <span className="rv-nn" title="AI notes" />}
-              {r.count !== undefined && <span className="rv-lvl">{r.count}</span>}
             </button>
           </li>
         ))}

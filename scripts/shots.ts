@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Browser, type Page, type Request as Sent, type Route } from "playwright-core";
 import { colorsOf, tokensFrom } from "../src/omarchy.ts";
+import { isTestPath } from "../src/sections.ts";
 import { THEMES } from "../src/themes.ts";
 import type {
   AgentStatus,
@@ -2330,65 +2331,65 @@ const SHOTS: Shot[] = [
       await toBottom("review-unread")(page);
     },
   },
-  // The walk-through: two words above the diff where the review has steps, Walk-through first; its steps in order, each with
-  // its sections; what no step covers under its own heading; every hunk drawn once; By importance as before.
-  ...(["review-walk", "review-walk-next", "review-walk-beyond", "review-walk-importance"] as const).map((name): Shot => ({
+  // The guided review: two words above the diff where the review has steps, Guided Review first; only its steps, each with
+  // its sections, test files folded; what no step covers is left to Traditional, which draws every file in the PR's order.
+  ...(["review-guided", "review-guided-next", "review-guided-end", "review-traditional"] as const).map((name): Shot => ({
     name,
     go: async (page) => {
       await page.evaluate(`localStorage.removeItem("desk.review.view")`);
-      const id = name === "review-walk-beyond" ? "acme/worker#879" : "acme/api#4127";
+      const id = name === "review-guided-end" ? "acme/worker#879" : "acme/api#4127";
       await review(id)(page);
       const bad = (m: string) => failures.push(`${name}: ${m}`);
       const tabs = await page.locator(".rv-views .head-tab").allTextContents();
       const on = await page.locator(".rv-views .head-tab.on").allTextContents();
-      if (tabs.join("|") !== "Walk-through|By importance" || on.join() !== "Walk-through")
+      if (tabs.join("|") !== "Guided Review|Traditional" || on.join() !== "Guided Review")
         bad(`the switch reads ${JSON.stringify(tabs)}, on ${JSON.stringify(on)}`);
       // What the desk sent, and the sections the page drew, in order.
+      const sectionsDrawn = `[...document.querySelectorAll(".rv-diffs > .rv-step, .rv-diffs > .rv-file-sec[id]")].map((el) =>
+            el.classList.contains("rv-file-sec")
+              ? el.getAttribute("aria-label") + (el.classList.contains("shut") ? " (folded)" : "")
+              : "# " + (el.children.length ? [...el.querySelectorAll(":scope > h2, :scope > p")].map((c) => c.textContent).join(" ") : el.textContent).replace(/\\s+/g, " ").trim(),
+          )`;
       const seen = await page.evaluate<{ o: ReviewOrder; drawn: string[] }>(`(async () => {
           scrollTo(0, document.documentElement.scrollHeight);
           await new Promise((r) => setTimeout(r, 600));
           const v = await (await fetch("/api/review/" + encodeURIComponent(${JSON.stringify(id)}) + "?ahead=1")).json();
-          const drawn = [...document.querySelectorAll(".rv-diffs > .rv-step, .rv-diffs > .rv-file-sec[id]")].map((el) =>
-            el.classList.contains("rv-file-sec")
-              ? el.getAttribute("aria-label")
-              : "# " + (el.children.length ? [...el.querySelectorAll(":scope > h2, :scope > p")].map((c) => c.textContent).join(" ") : el.textContent).replace(/\\s+/g, " ").trim(),
-          );
+          const drawn = ${sectionsDrawn};
           scrollTo(0, 0);
           return { o: v.order, drawn };
         })()`);
       const { o } = seen;
-      const all = [...o.chunks, ...o.unread, ...o.skipped].map((h) => h.id);
-      const walked = [...(o.steps ?? []).flatMap((st) => st.hunks), ...(o.beyond ?? [])].map((h) => h.id);
-      if (walked.length !== all.length || walked.toSorted().join() !== all.toSorted().join())
-        bad(`the walk-through doesn't hold every hunk once: ${walked.join()} against ${all.join()}`);
-      // Sections as the page groups them: a step's run of one file at one level, then what no step covers.
+      const tests = (p: string) => (isTestPath(p) ? `${p} (folded)` : p);
+      // Sections as the page groups them: a step's run of one file at one level.
       const runs = (hs: ReviewHunk[]) =>
-        hs.filter((h, i) => i === 0 || h.path !== hs[i - 1]!.path || h.level !== hs[i - 1]!.level).map((h) => h.path);
+        hs.filter((h, i) => i === 0 || h.path !== hs[i - 1]!.path || h.level !== hs[i - 1]!.level).map((h) => tests(h.path));
       const steps = o.steps ?? [];
-      const uncovered = o.beyond ?? [];
-      const want = [
-        ...steps.flatMap((st, i) => [
-          `# ${i + 1} of ${steps.length} ${st.title}${st.body ? ` ${st.body.replaceAll("`", "")}` : ""}${st.check ? ` Check: ${st.check}` : ""}${st.note ? ` ${st.note}` : ""}`,
-          ...runs(st.hunks),
-        ]),
-        ...(uncovered.length
-          ? [
-              `# Not in the walk-through · ${uncovered.length} ${uncovered.length === 1 ? "hunk" : "hunks"} in ${new Set(uncovered.map((h) => h.path)).size} ${new Set(uncovered.map((h) => h.path)).size === 1 ? "file" : "files"}`,
-              ...runs(uncovered),
-            ]
-          : []),
-      ];
+      const want = steps.flatMap((st, i) => [
+        `# ${i + 1} of ${steps.length} ${st.title}${st.body ? ` ${st.body.replaceAll("`", "")}` : ""}${st.check ? ` Check: ${st.check}` : ""}${st.note ? ` ${st.note}` : ""}`,
+        ...runs(st.hunks),
+      ]);
       if (steps.length < 2) bad(`the review has ${steps.length} steps`);
       if (seen.drawn.join("\n") !== want.join("\n")) bad(`the page draws\n${seen.drawn.join("\n")}\nnot\n${want.join("\n")}`);
       const nexts = await page.locator(".rv-next").allTextContents();
-      if (nexts.join("|") !== [...steps.slice(1).map((st) => `Next: ${st.title}`), "End of the walk-through"].join("|"))
+      const last = nexts.at(-1) ?? "";
+      if (
+        nexts.slice(0, -1).join("|") !==
+          steps
+            .slice(1)
+            .map((st) => `Next: ${st.title}`)
+            .join("|") ||
+        !last.startsWith("End of the guide.")
+      )
         bad(`the steps end with ${JSON.stringify(nexts)}`);
+      const outside = new Set([...(o.beyond ?? []), ...o.rest].map((h) => h.path)).size;
+      if (outside > 0 !== last.includes("Traditional"))
+        bad(`with ${outside} files outside the guide, its end reads ${JSON.stringify(last)}`);
       if (await page.locator(".rv-side").isVisible()) {
         const rows = await page.locator(".rv-files .rv-file").allTextContents();
-        if (rows.length !== steps.length + (uncovered.length ? 1 : 0)) bad(`the sidebar lists ${JSON.stringify(rows)}`);
+        if (rows.length !== steps.length) bad(`the sidebar lists ${JSON.stringify(rows)}`);
       }
-      if (name === "review-walk") await page.locator(".rv-views").scrollIntoViewIfNeeded();
-      if (name === "review-walk-next") {
+      if (name === "review-guided") await page.locator(".rv-views").scrollIntoViewIfNeeded();
+      if (name === "review-guided-next") {
         await page.locator(".rv-next").first().click();
         await page.waitForTimeout(500);
         const stepTop = await page.evaluate<number>(`document.querySelector("#rv-step-1").getBoundingClientRect().top`);
@@ -2399,27 +2400,33 @@ const SHOTS: Shot[] = [
         const marked = await page.locator(".rv-files .rv-file.on").allTextContents();
         if (marked.length !== 1 || !marked[0]!.includes(steps[1]!.title)) bad(`the sidebar marks ${JSON.stringify(marked)}, not step 2`);
       }
-      if (name === "review-walk-beyond") {
-        await page.locator("#rv-beyond").scrollIntoViewIfNeeded();
-        await page.evaluate(`document.querySelector("#rv-beyond").scrollIntoView({ block: "start" })`);
+      if (name === "review-guided-end") {
+        await page.locator(".rv-next").last().scrollIntoViewIfNeeded();
+        await page.evaluate(`document.querySelector(".rv-next:last-of-type")?.scrollIntoView({ block: "center" })`);
         await page.waitForTimeout(300);
       }
-      if (name === "review-walk-importance") {
-        await page.locator(".rv-views .head-tab", { hasText: "By importance" }).click();
+      if (name === "review-traditional") {
+        await page.locator(".rv-views .head-tab", { hasText: "Traditional" }).click();
         await page.waitForTimeout(400);
-        const drawn = await page.evaluate<string[]>(
-          `[...document.querySelectorAll(".rv-diffs > .rv-step, .rv-diffs > .rv-file-sec[id]")].map((el) => el.getAttribute("aria-label") ?? "# step")`,
-        );
-        const ranked = runs([...o.chunks, ...o.unread, ...o.skipped]);
-        if (drawn.join() !== ranked.join()) bad(`By importance draws ${drawn.join()}, not ${ranked.join()}`);
-        if ((await page.evaluate<string | null>(`localStorage.getItem("desk.review.view")`)) !== "importance") bad("the choice isn't kept");
-        if (await page.locator(".rv-next, .rv-files[aria-label='Steps of the walk-through']").count())
-          bad("By importance still shows the steps");
+        const drawn = await page.evaluate<string[]>(`(async () => {
+          scrollTo(0, document.documentElement.scrollHeight);
+          await new Promise((r) => setTimeout(r, 600));
+          const d = ${sectionsDrawn};
+          scrollTo(0, 0);
+          return d;
+        })()`);
+        const all = [...o.chunks, ...o.unread, ...o.skipped];
+        const files = [...new Set(all.toSorted((a, b) => a.file - b.file).map((h) => h.path))];
+        if (drawn.join() !== files.join()) bad(`Traditional draws ${drawn.join()}, not every file in order: ${files.join()}`);
+        if ((await page.evaluate<string | null>(`localStorage.getItem("desk.review.view")`)) !== "traditional")
+          bad("the choice isn't kept");
+        if (await page.locator(".rv-next, .rv-files[aria-label='Steps of the guided review']").count())
+          bad("Traditional still shows the steps");
         await page.locator(".rv-views").scrollIntoViewIfNeeded();
       }
     },
     after: async (page) => {
-      await page.evaluate(`localStorage.setItem("desk.review.view", "importance")`);
+      await page.evaluate(`localStorage.setItem("desk.review.view", "traditional")`);
       await sideDefault(page);
     },
     // xl has room for the sidebar beside the list, where the steps replace the files.
@@ -2427,10 +2434,10 @@ const SHOTS: Shot[] = [
   })),
   {
     // A review without steps has no switch: the page is as it was.
-    name: "review-walk-none",
+    name: "review-guided-none",
     go: async (page) => {
       await review("acme/api#4154")(page);
-      if (await page.locator(".rv-views, .rv-step").count()) failures.push("review-walk-none: a review without steps shows the switch");
+      if (await page.locator(".rv-views, .rv-step").count()) failures.push("review-guided-none: a review without steps shows the switch");
     },
   },
   {
@@ -2592,7 +2599,7 @@ const SHOTS: Shot[] = [
         }
         return { names: [...side.querySelectorAll("section, nav")].map((el) => el.getAttribute("aria-label")), text: side.textContent, lines };
       })()`);
-      if (parts.names.join(" | ") !== "Stack | Checks | Reviewers | Merge | Files in reading order")
+      if (parts.names.join(" | ") !== "Stack | Checks | Reviewers | Merge | Files")
         failures.push(`review-panel: the sidebar's parts are ${parts.names.join(" | ")}`);
       if (/recent activity/i.test(parts.text)) failures.push("review-panel: the sidebar still lists recent activity");
       const want = {
@@ -5089,8 +5096,8 @@ try {
         colorScheme: theme,
         deviceScaleFactor: 2,
       });
-      // The review shots read By importance, as they did before the walk-through; the review-walk ones start from the default.
-      await page.addInitScript(`localStorage.getItem("desk.review.view") ?? localStorage.setItem("desk.review.view", "importance")`);
+      // The review shots read Traditional; the review-guided ones start from the default.
+      await page.addInitScript(`localStorage.getItem("desk.review.view") ?? localStorage.setItem("desk.review.view", "traditional")`);
       // The macOS app's bridge (electron/preload.cjs) with only status() faked: App takes the shell's markers from it, and
       // Settings → This device draws the app's rows. No theme, so the theme stays in localStorage as in a browser.
       if (size.mac) {

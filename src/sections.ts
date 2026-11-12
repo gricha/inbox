@@ -1,5 +1,6 @@
-// A review's reading order (src/review.ts's reviewOrder) as the stretches a page draws: by importance, or the walk-through's
-// steps. The window's review (web/src/components/Review.tsx) and a rendered review document (src/render.ts) both read it.
+// A review's reading order (src/review.ts's reviewOrder) as the stretches a page draws: by importance, the guided review's
+// steps, or traditional file order. The window's review (web/src/components/Review.tsx) and a rendered review document
+// (src/render.ts) both read it.
 import type { AiReview, ReviewFile, ReviewHunk, ReviewNote, ReviewOrder } from "./types.ts";
 
 // The review's words for what it is.
@@ -56,6 +57,24 @@ export function sections(o: ReviewOrder): { list: Section[]; rest: number } {
   const list = grouped([...o.chunks, ...o.unread, ...o.skipped]);
   return { list: [...list, ...restOf(o)], rest: list.length };
 }
+
+// Traditional: every file in the PR's order, each one section with all its hunks in diff order and Claude's notes on them;
+// then the desk's fold. No ranking, no levels.
+export function traditional(o: ReviewOrder): { list: Section[]; rest: number } {
+  const byFile = new Map<number, ReviewHunk[]>();
+  for (const h of [...o.chunks, ...o.unread, ...o.skipped]) byFile.set(h.file, [...(byFile.get(h.file) ?? []), h]);
+  const list = [...byFile.entries()]
+    .toSorted(([a], [b]) => a - b)
+    .map(([file, hs]): Section => {
+      const hunks = hs.toSorted((x, y) => Number(x.id.slice(1)) - Number(y.id.slice(1)));
+      return { key: `file:${file}`, path: hunks[0]!.path, file, level: null, why: null, hunks, notes: hunks.flatMap((h) => h.notes) };
+    });
+  return { list: [...list, ...restOf(o)], rest: list.length };
+}
+
+// A test file: the guided review folds it until you open it, so the change itself gets the attention.
+export const isTestPath = (p: string): boolean =>
+  /(^|\/)(tests?|__tests__|specs?|testing)\//i.test(p) || /([._-](test|spec)s?|^test_[^/]*)\.[a-z0-9]+$/i.test(p.split("/").pop() ?? "");
 
 export interface WalkStep {
   at: number; // its first section in the list

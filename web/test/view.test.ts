@@ -69,7 +69,7 @@ import {
   handsOff,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
-import { onLines, sections, walk } from "../../src/sections.ts";
+import { isTestPath, onLines, sections, traditional, walk } from "../../src/sections.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
 
 const card = (id: string, extra: Partial<Card> = {}): Card => {
@@ -810,6 +810,55 @@ test("the walk-through is one list: each step's sections, then what no step cove
       .list.flatMap((s) => s.hunks.map((h) => h.id))
       .toSorted(),
   );
+});
+
+test("Traditional is every file in the PR's order, all its hunks in diff order, then the desk's fold", () => {
+  const hunk = (id: string, path: string, file: number, level: ReviewHunk["level"]): ReviewHunk => ({
+    id,
+    path,
+    file,
+    header: "@@ -1,3 +1,4 @@",
+    patch: "@@ -1,3 +1,4 @@\n+x",
+    additions: 1,
+    deletions: 0,
+    level,
+    rank: null,
+    why: "w",
+    notes: id === "h3" ? [0] : [],
+  });
+  const o: ReviewOrder = {
+    ranked: true,
+    chunks: [hunk("h3", "b.ts", 1, "look"), hunk("h2", "a.ts", 0, "skim")],
+    unread: [hunk("h4", "b.ts", 1, "unread")],
+    skipped: [hunk("h1", "a.ts", 0, "skip")],
+    rest: [{ path: "c.lock", file: 2, why: "lockfile or generated", hunks: [hunk("h5", "c.lock", 2, "skip")], notes: [] }],
+    notes: [0],
+  };
+  const t = traditional(o);
+  assert.deepEqual(
+    t.list.map((s) => [s.path, s.level, s.hunks.map((h) => h.id), s.notes]),
+    [
+      ["a.ts", null, ["h1", "h2"], []],
+      ["b.ts", null, ["h3", "h4"], [0]],
+      ["c.lock", "skip", ["h5"], []],
+    ],
+  );
+  assert.equal(t.rest, 2);
+});
+
+test("test files are told apart from the code they test", () => {
+  for (const p of [
+    "test/review.test.ts",
+    "web/test/view.test.ts",
+    "src/__tests__/a.ts",
+    "pkg/foo_test.go",
+    "tests/test_api.py",
+    "a.spec.tsx",
+    "spec/models/user_spec.rb",
+  ])
+    assert.equal(isTestPath(p), true, p);
+  for (const p of ["src/review.ts", "src/testing.ts", "contest/a.ts", "src/latest.ts", "docs/testing-guide.md"])
+    assert.equal(isTestPath(p), false, p);
 });
 
 test("a note on a hunk's lines goes on the diff; one on none of them is about the whole file", () => {

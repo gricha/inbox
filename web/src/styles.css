@@ -1838,7 +1838,7 @@ p {
   position: absolute;
   top: 60px;
   right: -14px;
-  z-index: 1;
+  z-index: 6; /* over the list's pinned section heading */
   display: grid;
   place-items: center;
   width: 28px;

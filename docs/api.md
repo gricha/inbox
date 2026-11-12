@@ -931,7 +931,7 @@ The ranking says which hunks are worth your attention, and in what order.
 
 Each hunk has its own patch, level, rank, why and notes; `order.notes` lists the notes in reading order. `files[].patch` repeats the same text. A review from before ranking, one for an older commit, or a ranking whose ids no longer name the same files gives `ranked: false`: every hunk, file by file.
 
-#### Walk-through
+#### Walk-through (Guided Review)
 
 The same answer carries `steps`: two to eight parts of the change in the order that makes it easiest to understand (where it starts, what builds on it, its callers, then wiring and tests). Each has a title, a sentence or two, what to check there, and the hunk ids it covers, from any files. It costs no extra call, and the checker doesn't see it.
 
