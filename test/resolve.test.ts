@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defaultConfigText, parseConfig } from "../src/config.ts";
 import { resolution } from "../src/resolve.ts";
+import { compile } from "../src/expr.ts";
+import { GITHUB_CRITERIA } from "../src/connectors/github-criteria.ts";
+import { Result } from "effect";
 import { DEFAULTS, type Settings } from "../src/settings.ts";
 import { analyze } from "../src/signals.ts";
 import type { Item } from "../src/types.ts";
@@ -156,25 +159,19 @@ test("you approved, then asked again (or still asked): back", () => {
   );
 });
 
-test("you approved, then a push or someone else's reply: back where its rules put it", () => {
+test("you approved, then a push or someone else's reply: still done, as on GitHub, where only asking you again brings it back", () => {
   const pushed = youApproved({ reviews: [review("me", "approved", hoursAgo(2))], head_oid: "def", head_committed_at: hoursAgo(1) });
-  assert.equal(resolve(pushed), null, "new commits since your approval");
-  assert.equal(
-    resolve(youApproved({ head_oid: "def", head_author: "me", head_committed_at: hoursAgo(1) })),
-    "you approved",
-    "your own push",
-  );
+  assert.equal(resolve(pushed), "you approved", "new commits since your approval");
   const reply = [{ author: "alice", author_bot: false, at: hoursAgo(1) }];
-  assert.equal(resolve(youApproved({ comments: reply, comments_total: 1 })), null, "the author @mentions you after it");
+  assert.equal(resolve(youApproved({ comments: reply, comments_total: 1 })), "you approved", "the author comments after it");
   assert.equal(
-    resolve(youApproved({ comments: [...reply, { author: "me", author_bot: false, at: hoursAgo(0.5) }], comments_total: 2 })),
-    "you approved",
-    "you answered",
+    resolve(youApproved({ head_oid: "def", head_committed_at: hoursAgo(1), request_events: [ask(hoursAgo(10)), ask(hoursAgo(0.5))] })),
+    null,
+    "pushed, then asked you again",
   );
-  assert.equal(resolve(youApproved({ comments: [{ author: "ci-bot[bot]", author_bot: true, at: hoursAgo(1) }] })), "you approved", "a bot");
-  // Someone else approving after you: still resolved, under their name.
+  // Someone else approving after you: still yours, done.
   const both = [review("me", "approved", hoursAgo(3)), review("carol", "approved", hoursAgo(1))];
-  assert.equal(resolve(youApproved({ reviews: both, review_decision: "approved" })), "approved by carol");
+  assert.equal(resolve(youApproved({ reviews: both, review_decision: "approved" })), "you approved");
 });
 
 test("your approval doesn't resolve when it isn't your latest verdict, nor when nobody asked you", () => {
@@ -190,4 +187,15 @@ test("your own PRs and issues only resolve by closing", () => {
   const mine = makeItem({ author: "me", request_events: [ask(hoursAgo(10))], reviews: [review("carol", "approved", hoursAgo(2))] });
   assert.equal(resolve(mine), null);
   assert.equal(resolve(makeItem({ kind: "issue", request_events: [ask(hoursAgo(10))] })), null);
+});
+
+test("Waiting on your reply: a push after your changes request or comment is one; after your approval it isn't", () => {
+  const reply = Result.getOrThrow(compile(GITHUB_CRITERIA.find((x) => x.id === "reply")?.when ?? ""));
+  const says = (state: Item["reviews"][number]["state"]) => {
+    const it = youApproved({ reviews: [review("me", state, hoursAgo(2))], head_oid: "def", head_committed_at: hoursAgo(1) });
+    return Result.getOrThrow(reply.eval(analyze(it, ctx, cfg, NOW).signals));
+  };
+  assert.equal(says("approved"), false, "you approved: done with it");
+  assert.equal(says("changes_requested"), true);
+  assert.equal(says("commented"), true);
 });

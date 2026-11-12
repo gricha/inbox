@@ -2338,6 +2338,21 @@ test("after you approve, the PR alone is refreshed first and resolves as 'you ap
     "newest first",
   );
 
+  // The author pushes and a bot comments after your approval: you're done with it, as on GitHub; nothing brings it back.
+  t.gh.items.set("acme/api#1", {
+    ...approved,
+    updated_at: hoursAgo(0.3),
+    head_oid: "h2",
+    head_author: "carol",
+    head_committed_at: hoursAgo(0.3),
+    comments: [{ author: "carol", author_bot: false, at: hoursAgo(0.3) }],
+    comments_total: 1,
+  });
+  await t.sync();
+  const all = runSync(t.desk.focus()).sections;
+  assert.ok(![...all.now, ...all.today].some((c) => c.id === "acme/api#1"), "a push after your approval: still off your desk");
+  assert.equal(runSync(t.desk.queue()).resolved.find((c) => c.id === "acme/api#1")?.why, "you approved");
+
   t.gh.items.set("acme/api#1", {
     ...approved,
     updated_at: hoursAgo(0.2),

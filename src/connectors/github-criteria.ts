@@ -14,9 +14,9 @@ export const GITHUB_CRITERIA: readonly BuiltInCriterion[] = [
   {
     id: "reply",
     name: "Waiting on your reply",
-    help: "Someone answered you: on your PR they spoke last, on theirs they pushed after your review.",
+    help: "Someone answered you: on your PR they spoke last, on theirs they pushed after your review (not after your approval: that one's done).",
     on: true,
-    when: "me.owes_reply || (!me.author && me.reviewed && me.pushed_since_review)",
+    when: "me.owes_reply || (!me.author && me.reviewed && me.pushed_since_review && me.review_state != 'approved')",
     urgent: false,
   },
   {
