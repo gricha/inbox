@@ -12,6 +12,7 @@ export const MORE: Record<GitHubAction, string> = {
   reopen: "Reopen",
   request_changes: "Request changes",
   rerequest: "Re-request review",
+  unrequest: "Remove me as a reviewer",
 };
 
 // A row has no room to write in: requesting changes is in the PR's review.

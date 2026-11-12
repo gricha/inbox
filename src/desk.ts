@@ -197,6 +197,7 @@ const GITHUB_VERB: Record<GitHubAction, [string, string]> = {
   reopen: ["reopen %", "reopened %"],
   request_changes: ["request changes on %", "requested changes on %"],
   rerequest: ["re-request review on %", "re-requested review on %"],
+  unrequest: ["remove you as a reviewer of %", "removed you as a reviewer of %"],
 };
 const MAX_ASK = 2_000; // your words to the coordinator, and your answer to an agent's question
 const MAX_ANSWER = 6_000; // the coordinator's answer: room for a list and a few lines of code, as an inquiry's context
@@ -2593,7 +2594,8 @@ export class Desk {
     const me = e.analysis.signals.me;
     if (!this.writer || e.inflight || this.wrote.get(it.id) === it.updated_at) return [];
     if (it.kind === "issue") return it.state === "open" && (me.author || me.assignee) ? ["close"] : [];
-    if (!me.author) return it.state === "open" ? ["request_changes"] : [];
+    // Asked of you by name, you can take yourself off it; a team's ask is the team's.
+    if (!me.author) return it.state === "open" ? ["request_changes", ...(me.requested_direct ? (["unrequest"] as const) : [])] : [];
     if (it.state === "closed") return ["reopen"];
     if (it.state !== "open") return [];
     return [
@@ -2632,6 +2634,7 @@ export class Desk {
         if (action === "merge") return Effect.as(w.merge(it.node_id, it.head_oid, it.merge_method!), none);
         if (action === "reopen") return Effect.as(w.reopen(it.node_id), none);
         if (action === "rerequest") return Effect.as(w.rerequest(it.node_id, rerequestable(it)), none);
+        if (action === "unrequest") return Effect.as(w.unrequest(it.repo, it.number, this.me()), none);
         return w.requestChanges(it.node_id, it.head_oid, body);
       };
       const write = Effect.gen({ self: this }, function* () {

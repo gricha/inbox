@@ -19,5 +19,6 @@ export function refuseWrites(why = "not in this test"): GitHubWriter {
     reopen: no,
     requestChanges: no,
     closeIssue: no,
+    unrequest: no,
   };
 }

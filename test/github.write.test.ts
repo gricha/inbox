@@ -5,14 +5,19 @@ import os from "node:os";
 import path from "node:path";
 import { createClient as createDeskClient } from "../src/client.ts";
 import { createClient } from "../src/github/client.ts";
-import { ALLOWED, createWriter } from "../src/github/write.ts";
+import { ALLOWED, REST_ALLOWED, createWriter } from "../src/github/write.ts";
 import { Effect, Result } from "effect";
 import { failure, run } from "./helpers/run.ts";
 
 function fakeFetch(reply: { status?: number; body: unknown }) {
-  const calls: { body: string; headers: Record<string, string> }[] = [];
-  const fn: typeof fetch = (_url, init) => {
-    calls.push({ body: init?.body as string, headers: init?.headers as Record<string, string> });
+  const calls: { url: string; method: string; body: string; headers: Record<string, string> }[] = [];
+  const fn: typeof fetch = (url, init) => {
+    calls.push({
+      url: typeof url === "string" ? url : url instanceof URL ? url.href : url.url,
+      method: init?.method ?? "",
+      body: init?.body as string,
+      headers: init?.headers as Record<string, string>,
+    });
     return Promise.resolve(new Response(JSON.stringify(reply.body), { status: reply.status ?? 200 }));
   };
   return { fetch: fn, calls };
@@ -34,6 +39,7 @@ test("the allowlist is exactly these mutations: approve, a reply or comment, one
     "request_changes",
     "close_issue",
   ]);
+  assert.deepEqual(REST_ALLOWED, { unrequest: "DELETE /repos/{repo}/pulls/{number}/requested_reviewers" });
   assert.match(
     ALLOWED.approve,
     /addPullRequestReview\(input: \{ pullRequestId: \$pr, commitOID: \$commit, event: APPROVE, body: \$body \}\)/,
@@ -180,7 +186,8 @@ test("the More menu's writes send their mutation once each, a merge pinned to it
   await run(w.rerequest("PR_1", ["sam"]));
   assert.deepEqual(await run(w.requestChanges("PR_1", "h1", "Add a test")), { url: "https://github.com/a/b/pull/1#r2" });
   await run(w.closeIssue("I_1"));
-  const sent = f.calls.map((c) => JSON.parse(c.body) as { query: string; variables: unknown });
+  await run(w.unrequest("acme/api", 7, "me"));
+  const sent = f.calls.slice(0, -1).map((c) => JSON.parse(c.body) as { query: string; variables: unknown });
   assert.deepEqual(
     sent.map((x) => [x.query, x.variables]),
     [
@@ -193,6 +200,11 @@ test("the More menu's writes send their mutation once each, a merge pinned to it
       [ALLOWED.close_issue, { issue: "I_1" }],
     ],
   );
+  // The one REST write: your login off the PR's requested reviewers.
+  const rest = f.calls.at(-1)!;
+  assert.equal(rest.url, "https://api.github.com/repos/acme/api/pulls/7/requested_reviewers");
+  assert.equal(rest.method, "DELETE");
+  assert.deepEqual(JSON.parse(rest.body), { reviewers: ["me"] });
   assert.deepEqual(logs, [
     "github write: close PR_1",
     "github write: draft PR_1",
@@ -201,6 +213,7 @@ test("the More menu's writes send their mutation once each, a merge pinned to it
     "github write: rerequest PR_1",
     "github write: request_changes PR_1 at h1",
     "github write: close_issue I_1",
+    "github write: unrequest acme/api#7",
   ]);
 });
 

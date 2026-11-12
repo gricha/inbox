@@ -58,6 +58,11 @@ export const ALLOWED = {
 }`,
 } as const;
 
+// The one REST write, for what GraphQL can't do: take your own review request off someone else's PR.
+export const REST_ALLOWED = {
+  unrequest: "DELETE /repos/{repo}/pulls/{number}/requested_reviewers",
+} as const;
+
 // GitHub's DraftPullRequestReviewThread: line numbers in the file on that side (LEFT: the old file), the range ending at line.
 export interface InlineThread {
   path: string;
@@ -82,6 +87,7 @@ export interface GitHubWriter {
   reopen(prNodeId: string): Effect.Effect<void, GitHubWriteError>;
   requestChanges(prNodeId: string, commit: string, body: string): Effect.Effect<{ url: string }, GitHubWriteError>;
   closeIssue(issueNodeId: string): Effect.Effect<void, GitHubWriteError>;
+  unrequest(repo: string, number: number, login: string): Effect.Effect<void, GitHubWriteError>; // you, off its reviewers
 }
 
 type Url = { url?: string } | null;
@@ -125,6 +131,31 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
         ...(types.length > 0 && { types }),
       });
     return data;
+  });
+
+  const sendRest = Effect.fnUntraced(function* (
+    name: keyof typeof REST_ALLOWED,
+    repo: string,
+    number: number,
+    body: Record<string, unknown>,
+  ): Effect.fn.Return<void, GitHubWriteError> {
+    log(`github write: ${name} ${repo}#${number}`);
+    const authorization = `bearer ${yield* readToken(opts.token)}`;
+    const [method = "", path = ""] = REST_ALLOWED[name].split(" ");
+    const { res, text } = yield* Effect.tryPromise({
+      try: async () => {
+        const answer = await doFetch(`https://api.github.com${path.replace("{repo}", repo).replace("{number}", String(number))}`, {
+          method,
+          headers: { authorization, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "inbox" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(30_000),
+        });
+        return { res: answer, text: await answer.text() };
+      },
+      catch: (cause) => new GitHubWriteUncertain({ message: cause instanceof Error ? cause.message : String(cause), cause }),
+    });
+    if (!res.ok) return yield* new GitHubHttpError({ status: res.status, message: `GitHub HTTP ${res.status}: ${text.slice(0, 200)}` });
+    return undefined;
   });
 
   const url = (u: Url | undefined) => ({ url: u?.url ?? "" });
@@ -180,5 +211,6 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
         ),
       ),
     closeIssue: (issue) => send("close_issue", issue, { issue }).pipe(Effect.asVoid),
+    unrequest: (repo, number, login) => sendRest("unrequest", repo, number, { reviewers: [login] }),
   };
 }

@@ -282,7 +282,7 @@ A run that added something, couldn't, or failed notifies you. When a question's 
 - Reply under a conversation in a PR's review.
 - Ready for review on your draft (asking the reviewers you picked), and Ask reviewers on your ready PR.
 - Merge on your PR's row, when it's approved (or needs no review), green, not a draft, not stacked and mergeable. It uses the repo's merge method, pinned to the commit the desk checked.
-- The More menu, when the desk allows it for that item: close, reopen, convert to draft or merge your PR, or re-request review from who reviewed it; request changes on someone else's; close an issue you opened or are assigned. The toast's Undo reopens or marks ready again.
+- The More menu, when the desk allows it for that item: close, reopen, convert to draft or merge your PR, or re-request review from who reviewed it; request changes on someone else's, or take yourself off its reviewers; close an issue you opened or are assigned. The toast's Undo reopens or marks ready again.
 
 Everything else is read-only: GraphQL queries, GETs of your notifications (never marking them read) and of a PR's files. Agents can't reach the writer. Hand off for merge, Back to desk and hand-backs write nothing. The coordinator pushes and merges with your own `git` and `gh`.
 

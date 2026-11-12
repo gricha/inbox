@@ -627,7 +627,7 @@ test("your own draft carries one call to action, Ready for review, and the mock 
 test("the More menu's GitHub writes: the cards say which, and the mock takes them like the desk", async () => {
   const card = async (id: string) => (await call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent(id)}`)).data.card;
   assert.deepEqual((await card("acme/worker#875")).actions, ["close", "draft", "rerequest", "merge"], "yours, approved and green");
-  assert.deepEqual((await card("acme/api#4127")).actions, ["request_changes"], "someone else's");
+  assert.deepEqual((await card("acme/api#4127")).actions, ["request_changes", "unrequest"], "someone else's, asked of you by name");
   assert.equal((await card("acme/web#2295")).actions, undefined, "in Merging");
   const gh = (id: string, action: string) => call("POST", "/api/github", { id, action });
   assert.equal((await gh("acme/api#4127", "close")).status, 409, "not yours");

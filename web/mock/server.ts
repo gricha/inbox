@@ -1891,7 +1891,7 @@ function actionsOf(r: Rec): GitHubAction[] {
   const it = itemOf(r);
   if (inFlight(r)) return [];
   if (it.kind === "issue") return it.state === "open" && (mineOf(s) || !!s.assignee) ? ["close"] : [];
-  if (!mineOf(s)) return it.state === "open" ? ["request_changes"] : [];
+  if (!mineOf(s)) return it.state === "open" ? ["request_changes", ...(s.direct ? (["unrequest"] as const) : [])] : [];
   if (it.state === "closed") return ["reopen"];
   if (it.state !== "open") return [];
   const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;

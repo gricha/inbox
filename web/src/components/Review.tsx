@@ -899,7 +899,9 @@ export function Review({
             {more && (
               <MoreMenu
                 card={card}
-                actions={(card.actions ?? []).filter((a) => a === "close" || a === "request_changes" || a === "rerequest")}
+                actions={(card.actions ?? []).filter(
+                  (a) => a === "close" || a === "request_changes" || a === "rerequest" || a === "unrequest",
+                )}
                 links={[
                   // As the row's menu says it: Done, or Back on the desk once it's done, snoozed or muted.
                   ...(!card.inflight && !acted

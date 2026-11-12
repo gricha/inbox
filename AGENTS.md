@@ -99,7 +99,7 @@ Settings → This device → Run from a checkout (`app.source`, or `DESK_SOURCE`
 
 - **Commits.** Small commits straight on main: no branches or pull requests (the owner is effectively the only contributor). Each commit is one change that passes `npm run check`. Commit messages are one line: the owner's habit.
 - **GitHub writes.** The desk writes to GitHub only through `src/github/write.ts`, and only on an explicit click in the UI. Its `ALLOWED` map is the complete list of mutations; adding one is a product decision, not a refactor.
-  - Today's writes: Approve, Comment (PR or issue), a comment on a diff line, Reply in a conversation, Ready for review (and asking the picked reviewers), Ask reviewers, the row's Merge, and the More menu's close, reopen, convert to draft, merge, re-request review, request changes and close issue.
+  - Today's writes: Approve, Comment (PR or issue), a comment on a diff line, Reply in a conversation, Ready for review (and asking the picked reviewers), Ask reviewers, the row's Merge, and the More menu's close, reopen, convert to draft, merge, re-request review, remove me as a reviewer (the one REST write, `REST_ALLOWED`), request changes and close issue.
   - `Desk.actions()` decides which an item allows, by whose it is (`me.author`: yours, or a bot's PR opened for you; a bot's `via` line alone never counts). It refuses others with 409.
   - Nothing an agent can call (MCP, CLI) reaches the writer. The read client in `src/github/client.ts` refuses any `mutation`.
   - Hand off for merge, Back to desk, hand-backs and Ask your agent write nothing to GitHub.

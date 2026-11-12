@@ -62,6 +62,10 @@ function fakeWriter(t: () => Awaited<ReturnType<typeof setup>>) {
         calls.push(["rerequest", pr, ...logins]);
         land(pr, { review_requests: logins.map((reviewer) => ({ reviewer, type: "user" as const, codeowner: false })) });
       }),
+    unrequest: (repo, number, login) =>
+      Effect.sync(() => {
+        calls.push(["unrequest", `${repo}#${number}`, login]);
+      }),
     requestChanges: (pr, commit, body) =>
       Effect.sync(() => {
         calls.push(["requestChanges", pr, commit, body]);
@@ -111,7 +115,7 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
   ]);
   runSync(t.desk.act("web#8", "inflight"));
   const actions = (ref: string) => runSync(t.desk.item(ref)).card.actions;
-  assert.deepEqual(actions("api#1"), ["request_changes"], "someone else's open PR");
+  assert.deepEqual(actions("api#1"), ["request_changes", "unrequest"], "someone else's open PR, asked of you by name");
   assert.deepEqual(actions("web#3"), ["close", "draft"], "not approved: no merge");
   assert.deepEqual(actions("web#4"), ["close", "draft", "merge"], "approved, green and mergeable");
   assert.deepEqual(actions("web#5"), ["close", "ready"], "a draft: ready for review instead");
@@ -228,7 +232,7 @@ test("a bot's PR opened for you gets your PR's writes; one whose via line alone 
   ]);
   const card = (id: string) => runSync(t.desk.item(id)).card;
   assert.deepEqual([card("api#9").by, card("api#9").actions], ["you", ["close", "draft", "merge"]]);
-  for (const id of ["api#10", "api#11"]) assert.deepEqual(card(id).actions, ["request_changes"], id);
+  for (const id of ["api#10", "api#11"]) assert.deepEqual(card(id).actions, ["request_changes", "unrequest"], id);
   await assert.rejects(run(t.desk.githubAct("api#10", "merge")), (e: Error & { status: number }) => e.status === 409);
   assert.deepEqual(w.calls, []);
   await run(t.desk.githubAct("api#9", "merge"));
@@ -433,4 +437,14 @@ test("Re-request review asks again whoever reviewed your PR and isn't asked now:
   await run(t.desk.githubAct("web#3", "rerequest"));
   assert.deepEqual(w.calls, [["rerequest", "PR_acme/web_3", "sam"]], "dana is asked already");
   assert.deepEqual(writes(t, "acme/web#3"), ["rerequest"]);
+});
+
+test("Remove me as a reviewer takes your by-name request off someone else's PR, and it leaves your desk; a team's ask offers none", async (c) => {
+  const team = { review_requests: [{ reviewer: "backend", type: "team" as const, codeowner: false }] };
+  const { t, w } = await withWriter(c, [reviewAsk(1), reviewAsk(2, team)]);
+  assert.deepEqual(runSync(t.desk.item("api#2")).card.actions, ["request_changes"]);
+  await run(t.desk.githubAct("api#1", "unrequest"));
+  assert.deepEqual(w.calls, [["unrequest", "acme/api#1", "me"]]);
+  assert.deepEqual(writes(t, "acme/api#1"), ["unrequest"]);
+  assert.equal(runSync(t.desk.item("api#1")).card.status, "done");
 });
