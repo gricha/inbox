@@ -1311,10 +1311,13 @@ function Head({
             {card.stack.pos}/{card.stack.size}
           </span>
         )}
-        <span className="rv-by">
-          by {isMine ? me && <Avatar login={me} /> : !card.author_bot && <Avatar login={card.author} />}
-          {isMine ? "you" : card.author}
-          {card.author_bot ? (isMine ? `, through ${card.author}` : " (bot)") : ""}
+        <span className="rv-by rv-author">
+          by
+          {isMine ? me && <Avatar login={me} /> : !card.author_bot && <Avatar login={card.author} />}
+          <span>
+            {isMine ? "you" : card.author}
+            {card.author_bot ? (isMine ? `, through ${card.author}` : " (bot)") : ""}
+          </span>
         </span>
       </p>
       <h1 className="rv-title">{card.title}</h1>

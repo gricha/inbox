@@ -5186,7 +5186,7 @@ a.rv-part-row:hover {
 .rv-ref {
   display: flex;
   align-items: baseline;
-  gap: 14px;
+  gap: 10px;
   font-size: clamp(13px, 11.5px + 0.2vw, 14.5px);
 }
 
@@ -5206,6 +5206,17 @@ a.rv-part-row:hover {
 
 .rv-by {
   color: var(--pencil);
+}
+
+/* "by", the face, the name: one even gap each, the face centred on the words. */
+.rv-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+}
+
+.rv-author .avatar {
+  margin: 0;
 }
 
 /* Under the title: its size, + green and − red, then who reviews it. */
