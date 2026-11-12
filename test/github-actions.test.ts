@@ -223,7 +223,7 @@ test("request changes needs what you wrote, is pinned to the commit you read, an
   assert.deepEqual(writes(t, "acme/api#1"), ["request_changes"]);
 });
 
-test("a bot's PR opened for you gets your PR's writes; one whose via line alone names you, or that doesn't assign you, gets none", async (c) => {
+test("a bot's PR opened for you gets your PR's writes; one whose via line alone names you, or that doesn't assign you, gets someone else's", async (c) => {
   const junior = { author: "junior[bot]", author_bot: true, ...READY };
   const { t, w } = await withWriter(c, [
     reviewAsk(9, { ...junior, requester: "@me", assignees: ["me"] }),
@@ -232,8 +232,12 @@ test("a bot's PR opened for you gets your PR's writes; one whose via line alone 
   ]);
   const card = (id: string) => runSync(t.desk.item(id)).card;
   assert.deepEqual([card("api#9").by, card("api#9").actions], ["you", ["close", "draft", "merge"]]);
-  for (const id of ["api#10", "api#11"]) assert.deepEqual(card(id).actions, ["request_changes", "unrequest"], id);
-  await assert.rejects(run(t.desk.githubAct("api#10", "merge")), (e: Error & { status: number }) => e.status === 409);
+  // Someone else's approved PR: merged as GitHub's button would, but never closed or drafted, and no Merge on its row.
+  for (const id of ["api#10", "api#11"]) {
+    assert.deepEqual(card(id).actions, ["request_changes", "unrequest", "merge"], id);
+    assert.equal(card(id).cta, undefined, id);
+  }
+  await assert.rejects(run(t.desk.githubAct("api#10", "close")), (e: Error & { status: number }) => e.status === 409);
   assert.deepEqual(w.calls, []);
   await run(t.desk.githubAct("api#9", "merge"));
   assert.deepEqual(w.calls[0]?.[0], "merge");

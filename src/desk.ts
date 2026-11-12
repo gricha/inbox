@@ -1348,7 +1348,7 @@ export class Desk {
       }
       const isNew = analysis.others_at !== null && analysis.others_at > (state.seen_at ?? baseline);
       const resolved = resolution(item, analysis.signals, this.settings, ctx.teams);
-      const inflight = !!state.inflight_at && item.kind === "pr" && item.state === "open" && analysis.signals.me.author;
+      const inflight = !!state.inflight_at && item.kind === "pr" && item.state === "open";
       const freed = deps.get(item.id)?.merged.at(-1)?.at ?? "";
       const activityAt = freed > analysis.activity_at ? freed : analysis.activity_at;
       const status = statusOf(state, activityAt, now);
@@ -1644,7 +1644,8 @@ export class Desk {
       // Even with red CI: getting it green is the coordinator's once it's ready, so the desk never holds this back.
       ...(it.kind === "pr" && it.draft && it.state === "open" && me.author && this.writer && { cta: "ready" as const }),
       ...(snap.unasked.has(it.id) && this.writer && { cta: "reviewers" as const }),
-      ...(actions.includes("merge") && { cta: "merge" as const }),
+      // Merge on the row only for yours, and only once it's green and mergeable; anyone's reviewed PR has it in More.
+      ...(me.author && actions.includes("merge") && readyToMerge(it, this.me()) && { cta: "merge" as const }),
       ...(me.author && sig.review_optional && { review_optional: true as const }),
       ...(talked(it, this.me()) && { talk: true as const }),
       ...(actions.length > 0 && { actions }),
@@ -2594,16 +2595,28 @@ export class Desk {
     const me = e.analysis.signals.me;
     if (!this.writer || e.inflight || this.wrote.get(it.id) === it.updated_at) return [];
     if (it.kind === "issue") return it.state === "open" && (me.author || me.assignee) ? ["close"] : [];
+    // Anyone's reviewed PR, as GitHub's merge button: GitHub says no to red CI it requires. Stacked, it would merge into the PR
+    // below, which Merging says it waits on.
+    const merge =
+      it.state === "open" &&
+      !it.draft &&
+      mergeReviewed(it, this.me()) &&
+      it.mergeable !== "conflict" &&
+      !e.analysis.signals.pr.stacked &&
+      !!it.merge_method &&
+      !!it.head_oid
+        ? (["merge"] as const)
+        : [];
     // Asked of you by name, you can take yourself off it; a team's ask is the team's.
-    if (!me.author) return it.state === "open" ? ["request_changes", ...(me.requested_direct ? (["unrequest"] as const) : [])] : [];
+    if (!me.author)
+      return it.state === "open" ? ["request_changes", ...(me.requested_direct ? (["unrequest"] as const) : []), ...merge] : [];
     if (it.state === "closed") return ["reopen"];
     if (it.state !== "open") return [];
     return [
       "close",
       ...(it.draft ? (["ready"] as const) : (["draft"] as const)),
       ...(!it.draft && rerequestable(it).length ? (["rerequest"] as const) : []),
-      // Stacked: it would merge into the PR below, which Merging says it waits on.
-      ...(readyToMerge(it, this.me()) && !e.analysis.signals.pr.stacked && it.merge_method && it.head_oid ? (["merge"] as const) : []),
+      ...merge,
     ];
   }
 
@@ -2753,9 +2766,11 @@ export class Desk {
           Object.assign(s, ACTIVE);
           break;
         case "inflight":
-          // Handed off for merge: only your own open PR, and the coordinator takes it from here.
-          if (entry.item.kind !== "pr" || !entry.analysis.signals.me.author || entry.item.state !== "open")
-            return yield* new Conflict({ message: `only your own open PRs are handed off for merge; ${id} isn't one` });
+          // Handed off for merge: your own open PR, or anyone's approved one, which the coordinator only merges.
+          if (entry.item.kind !== "pr" || entry.item.state !== "open")
+            return yield* new Conflict({ message: `only open PRs are handed off for merge; ${id} isn't one` });
+          if (!entry.analysis.signals.me.author && entry.item.review_decision !== "approved")
+            return yield* new Conflict({ message: `${id} isn't yours, so it's handed off for merge once it's approved` });
           if (s.inflight_at) return yield* new Conflict({ message: `${id} is in Merging already` });
           // Ready for review is yours, so a draft in Merging would wait on you there.
           if (entry.item.draft) return yield* new Conflict({ message: `${id} is a draft: mark it ready for review first` });
@@ -3077,7 +3092,7 @@ export class Desk {
       const rows: InflightRow[] = [];
       for (const e of snap.entries.values()) {
         const it = e.item;
-        if (!e.state.inflight_at || it.kind !== "pr" || !e.analysis.signals.me.author) continue;
+        if (!e.state.inflight_at || it.kind !== "pr") continue;
         if (it.state !== "open" && (it.closed_at ?? it.updated_at) < cutoff) continue;
         const m = this.merging(it.id);
         const { approved_by, changes_by } = verdicts(it, me);
@@ -3096,6 +3111,7 @@ export class Desk {
           mergeable: it.mergeable,
           draft: it.draft,
           rebase: !!m.rebase,
+          theirs: !e.analysis.signals.me.author,
           blocked_by: e.analysis.signals.pr.blocked
             ? { ref: e.analysis.signals.pr.blocker, waits: e.analysis.signals.pr.blocker_waits }
             : null,
@@ -3392,7 +3408,8 @@ export class Desk {
     const e = id ? this.snapshot().entries.get(id) : undefined;
     if (!e) return null;
     const it = e.item;
-    const whose = it.kind === "issue" ? "issue" : e.inflight || e.analysis.signals.me.author ? "mine" : "theirs";
+    // Someone else's PR in Merging is still theirs: the coordinator only merges it.
+    const whose = it.kind === "issue" ? "issue" : e.analysis.signals.me.author ? "mine" : "theirs";
     return { url: it.url, whose, merging: e.inflight, state: it.state };
   }
 
@@ -4030,9 +4047,12 @@ export class Desk {
 
 // The desk's ready rule: what o merges on GitHub, and what the More menu's merge needs.
 function readyToMerge(it: Item, me: string): boolean {
-  const reviewed = it.review_decision === "approved" || (reviewOptional(it) && !verdicts(it, me).changes_by.length);
-  return reviewed && it.ci === "green" && it.mergeable === "clean" && !it.draft;
+  return mergeReviewed(it, me) && it.ci === "green" && it.mergeable === "clean" && !it.draft;
 }
+
+// Approved, or in a repo that needs no review with nobody asking for changes.
+const mergeReviewed = (it: Item, me: string) =>
+  it.review_decision === "approved" || (reviewOptional(it) && !verdicts(it, me).changes_by.length);
 
 function countsOf(r: BoardResult): Record<Bucket, number> {
   return {

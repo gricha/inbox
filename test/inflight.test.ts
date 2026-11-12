@@ -116,14 +116,18 @@ test("a PR in Merging stays there whatever it waits on: never in the queue, focu
   assert.deepEqual(runSync(t.desk.overview()).inflight, { total: 3 });
 });
 
-test("only your own open PRs are handed off for merge", async (c) => {
-  const t = await setup([reviewAsk(1), myPr(3)]);
+test("someone else's PR is handed off for merge once approved, and then it's still theirs: Merging says merge only", async (c) => {
+  const t = await setup([reviewAsk(1), reviewAsk(2, { review_decision: "approved" }), myPr(3)]);
   c.after(t.cleanup);
   await run(t.desk.sync());
   assert.throws(
     () => runSync(t.desk.act("api#1", "inflight")),
-    (e: Error & { status: number }) => e.status === 409 && e.message.includes("your own open PRs"),
+    (e: Error & { status: number }) => e.status === 409 && e.message.includes("once it's approved"),
   );
+  runSync(t.desk.act("api#2", "inflight"));
+  const row = (await run(t.desk.inflight())).rows.find((r) => r.card.id === "acme/api#2");
+  assert.equal(row?.theirs, true);
+  assert.equal(t.desk.askAbout("acme/api#2")?.whose, "theirs", "an ask about it may not push to it");
   assert.throws(() => runSync(t.desk.act("web#3", "takeback")), /isn't in Merging/);
 });
 

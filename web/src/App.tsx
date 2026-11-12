@@ -1074,9 +1074,17 @@ export function App() {
         return { text: `${DID[action]}: ${shortRef(c)}`, undo: !!to };
       }),
     );
-    if (action === "close" || action === "merge" || action === "request_changes") {
-      const verb = action === "close" ? "Closing" : action === "merge" ? "Merging" : "Requesting changes on";
-      const what = action === "close" ? "Closed" : action === "merge" ? "Merged" : "Requested changes";
+    // These take it off your desk at once, as Done does; GitHub's answer follows in the toast.
+    if (action === "close" || action === "merge" || action === "request_changes" || action === "unrequest") {
+      const verb = {
+        close: "Closing",
+        merge: "Merging",
+        request_changes: "Requesting changes on",
+        unrequest: "Taking you off the reviewers of",
+      }[action];
+      const what = { close: "Closed", merge: "Merged", request_changes: "Requested changes", unrequest: "Removed you as a reviewer" }[
+        action
+      ];
       return finish(c, `${verb} ${shortRef(c)} on GitHub\u2026`, { what, where: "archive" }, write);
     }
     return write.pipe(
@@ -1222,7 +1230,8 @@ export function App() {
     else if (k === "a" && c.cta === "merge") runUi(github(c, "merge"));
     else if (k === "a" && c.cta === "reviewers")
       openCard(c); // its review, with the reviewers box ready
-    else if (k === "m" && c.kind === "pr" && !c.resolved && c.author.toLowerCase() === me.toLowerCase()) {
+    // Yours (or a bot's for you), or anyone's approved PR; the desk says no to the rest.
+    else if (k === "handoff" && c.kind === "pr" && !c.resolved) {
       if (awaitsReview(c)) flash(`${shortRef(c)} isn't approved yet`);
       else handOff(c);
     } else if (k === "o") {

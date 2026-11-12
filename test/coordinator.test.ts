@@ -1416,7 +1416,7 @@ test("an ask says whose it is in the desk's words: my PR not handed off or in Me
     "about someone else's PR acme/web#8 (https://github.com/acme/web/pull/8), read only: don't push to it or post on it",
     "a bot's via line alone never makes it mine",
   );
-  assert.throws(() => runSync(t.desk.act("web#8", "inflight")), /only your own open PRs/);
+  assert.throws(() => runSync(t.desk.act("web#8", "inflight")), /isn't yours, so it's handed off for merge once it's approved/);
   assert.equal(await about("web#6"), "about my PR acme/web#6 (https://github.com/acme/web/pull/6), not handed off", "opened for me");
   runSync(t.desk.act("web#6", "inflight"));
   assert.equal(await about("web#6"), "about my PR acme/web#6 (https://github.com/acme/web/pull/6), in Merging");

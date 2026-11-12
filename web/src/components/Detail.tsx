@@ -48,7 +48,7 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
   const placements = [...detail.placements].sort((a, b) => Number(b.board === card.board) - Number(a.board === card.board));
   const [main, ...others] = placements;
   const muted = card.status === "muted";
-  const mine = pr && item.state === "open" && card.author.toLowerCase() === ctx.me.toLowerCase();
+  const mine = pr && item.state === "open" && card.by === "you"; // yours, or a bot's opened for you
   const run = (k: string) => {
     ctx.run(card, k);
   };
@@ -231,7 +231,7 @@ export function HandButton({
   if (!handsOff(card)) return null; // a draft, one nobody's asked to review where review is needed, one not approved yet
   return (
     <ActButton
-      k="m"
+      k="handoff"
       label="Hand off for merge"
       title="Your agent gets it merged: it fixes CI, addresses comments and merges it"
       className={cls(primary && "primary go")}

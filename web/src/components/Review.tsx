@@ -255,7 +255,7 @@ export function Review({
   const readying = v?.card.cta === "ready";
   // Your ready PR nobody's asked to review, or one you add reviewers to: Ask reviewers asks who you pick.
   const [adding, setAdding] = useState("");
-  const yoursOpen = !!v && !!me && v.card.author.toLowerCase() === me.toLowerCase() && v.item.state === "open" && !v.item.draft;
+  const yoursOpen = !!v && v.card.by === "you" && v.item.state === "open" && !v.item.draft;
   const asking = v?.card.cta === "reviewers" || (adding === id && yoursOpen);
   const picking = readying || asking;
   // A PR in Merging is the coordinator's: no AI review to ask for.
@@ -621,7 +621,7 @@ export function Review({
       if (picked.length) onAskReviewers(v.card, picked);
       else document.querySelector<HTMLInputElement>(".rv-reviewers-input")?.focus();
     } else if (k === "a") approve();
-    else if ((k === "d" || k === "m" || k === "b") && v) onCard(v.card, k);
+    else if ((k === "d" || k === "handoff" || k === "b") && v) onCard(v.card, k);
     else if (k === "." && v) setMore(true);
   }
 
@@ -676,7 +676,7 @@ export function Review({
     );
 
   const { card, item, files } = view;
-  const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
+  const isMine = card.by === "you"; // yours, or a bot's opened for you
   const mine = item.state === "open" && isMine;
   const size = item.changed_files ? { add: item.additions, del: item.deletions } : null;
   const deps = depFacts(card);
@@ -886,9 +886,11 @@ export function Review({
             />
           )}
           {/* While you owe replies, Reply is the one filled button. */}
-          {mine && !(acted?.where === "inflight" && !card.inflight) && (
-            <HandButton card={card} run={run} primary={card.cta !== "reply" && !asking && !acted} />
-          )}
+          {/* Yours, or anyone's approved PR: your agent gets it merged (someone else's, by merging it alone). */}
+          {(mine || (item.state === "open" && (card.inflight || card.review === "approved"))) &&
+            !(acted?.where === "inflight" && !card.inflight) && (
+              <HandButton card={card} run={run} primary={card.cta !== "reply" && !asking && !acted} />
+            )}
           <span className="more-wrap">
             <MoreButton
               open={more}
@@ -899,9 +901,7 @@ export function Review({
             {more && (
               <MoreMenu
                 card={card}
-                actions={(card.actions ?? []).filter(
-                  (a) => a === "close" || a === "request_changes" || a === "rerequest" || a === "unrequest",
-                )}
+                actions={(card.actions ?? []).filter((a) => a !== "draft" && a !== "ready" && a !== "reopen")}
                 links={[
                   // As the row's menu says it: Done, or Back on the desk once it's done, snoozed or muted.
                   ...(!card.inflight && !acted
@@ -1249,7 +1249,7 @@ function Head({
   row: InflightRow | null;
   reviewers: Standing[];
 }) {
-  const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
+  const isMine = card.by === "you"; // yours, or a bot's opened for you
   // What it waits on and the coordinator's latest note, as Merging says it.
   const lane = row?.state === "open" && (row.waits_on || row.note) ? row : null;
   return (
@@ -1268,7 +1268,7 @@ function Head({
         <span className="rv-by">
           by {isMine ? me && <Avatar login={me} /> : !card.author_bot && <Avatar login={card.author} />}
           {isMine ? "you" : card.author}
-          {card.author_bot ? " (bot)" : ""}
+          {card.author_bot ? (isMine ? `, through ${card.author}` : " (bot)") : ""}
         </span>
       </p>
       <h1 className="rv-title">{card.title}</h1>
@@ -1341,7 +1341,7 @@ function Shell({
   side: boolean;
   toggle: ReactNode; // the sidebar's, as the loaded review draws it
 }) {
-  const isMine = !!card && !!me && card.author.toLowerCase() === me.toLowerCase();
+  const isMine = card?.by === "you";
   const pf = card?.preflight;
   const ai =
     pf?.verdict && pf.risk && pf.summary

@@ -347,6 +347,7 @@ function mergingLine(r: InflightRow): string {
   const facts = [
     r.state === "open" ? "" : r.state,
     r.rebase ? "rebase only: don't merge it" : "",
+    r.theirs ? "someone else's PR: merge it only, never push, post or rebase; hand it back if it can't merge as it is" : "",
     r.draft ? "draft" : "",
     ci[r.ci],
     r.approved_by.length

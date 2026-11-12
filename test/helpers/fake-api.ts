@@ -212,6 +212,7 @@ const inflightView: InflightView = {
       mergeable: "clean",
       draft: false,
       rebase: false,
+      theirs: false,
       blocked_by: { ref: "sentry#5", waits: "waits on a review from kai" },
       requires_closed: [],
       waits_on: "waits on a CI fix",

@@ -1891,10 +1891,15 @@ function actionsOf(r: Rec): GitHubAction[] {
   const it = itemOf(r);
   if (inFlight(r)) return [];
   if (it.kind === "issue") return it.state === "open" && (mineOf(s) || !!s.assignee) ? ["close"] : [];
-  if (!mineOf(s)) return it.state === "open" ? ["request_changes", ...(s.direct ? (["unrequest"] as const) : [])] : [];
+  // Anyone's approved PR merges, as GitHub's button: GitHub says no to red CI it requires.
+  const ready =
+    it.state === "open" && it.review_decision === "approved" && it.mergeable !== "conflict" && !it.draft && !signals(r).pr.stacked;
+  if (!mineOf(s))
+    return it.state === "open"
+      ? ["request_changes", ...(s.direct ? (["unrequest"] as const) : []), ...(ready ? (["merge"] as const) : [])]
+      : [];
   if (it.state === "closed") return ["reopen"];
   if (it.state !== "open") return [];
-  const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
   const reviewed = it.reviews.some(
     (x) => !x.author_bot && x.author !== it.author && !it.review_requests.some((q) => q.reviewer === x.author),
   );
@@ -2183,7 +2188,7 @@ function preflightOf(r: Rec): Preflight {
 const laneNotes = new Map<string, { text: string; at: string }>();
 for (const r of recs) if (r.seed.fly?.note) laneNotes.set(r.id, { text: r.seed.fly.note[0], at: iso(r.seed.fly.note[1]) });
 
-const inFlight = (r: Rec) => !!r.state.inflight_at && mineOf(r.seed) && !r.seed.resolved && (r.seed.kind ?? "pr") === "pr";
+const inFlight = (r: Rec) => !!r.state.inflight_at && !r.seed.resolved && (r.seed.kind ?? "pr") === "pr";
 const laneOwned = (r: Rec) => inFlight(r) && status(r) === "active";
 // Another PR blocks it and the rules keep it in Blocked: the hand-back waits there until that PR merges.
 const handedBack = (r: Rec) =>
@@ -2244,6 +2249,7 @@ function laneRow(r: Rec): InflightRow {
     mergeable: sig.pr.mergeable,
     draft: !!s.draft,
     rebase: false,
+    theirs: !mineOf(r.seed),
     blocked_by: sig.pr.blocked ? { ref: sig.pr.blocker, waits: sig.pr.blocker_waits } : null,
     requires_closed: sig.pr.requires_closed,
   };
@@ -2856,8 +2862,10 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
     Object.assign(st, { done_at: null, snooze_until: null, snooze_on_activity: false, snooze_when: null, muted: false });
   else if (action === "seen") st.seen_at = now;
   else if (action === "inflight") {
-    if (!mineOf(r.seed) || r.seed.resolved || (r.seed.kind ?? "pr") !== "pr")
-      throw new HttpError(409, `only your own open PRs are handed off for merge; ${r.id} isn't one`);
+    if (r.seed.resolved || (r.seed.kind ?? "pr") !== "pr")
+      throw new HttpError(409, `only open PRs are handed off for merge; ${r.id} isn't one`);
+    if (!mineOf(r.seed) && itemOf(r).review_decision !== "approved")
+      throw new HttpError(409, `${r.id} isn't yours, so it's handed off for merge once it's approved`);
     if (st.inflight_at) throw new HttpError(409, `${r.id} is in Merging already`);
     if (r.seed.draft) throw new HttpError(409, `${r.id} is a draft: mark it ready first (a a)`);
     st.inflight_at = now;
