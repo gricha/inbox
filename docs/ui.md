@@ -519,7 +519,7 @@ Each row:
 - Each row: its name, what it says yes to, whether a yes is urgent, how many Inbox items it says yes to now, who wrote it, and its switch.
 - A click on the name opens its editor under the sheet: name, question, rule (**Only when**), whether a yes is urgent; Save, Cancel, Delete.
 - **New criterion** at the sheet's foot.
-- **From GitHub**: the criteria GitHub comes with ("Asked by name", "Waiting on your reply", "Ready to merge", "Your PR others wait on", "Handed back"). You only switch them.
+- **From GitHub**: the criteria GitHub comes with ("Asked by name", "Waiting on your reply", "Ready to merge", "Your draft", "Your PR others wait on", "Handed back"). You only switch them.
 - Under the sheets, quietly, who last scored your Inbox. A question waiting on its model says why on the first row.
 
 ### Appearance

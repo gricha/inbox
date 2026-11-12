@@ -28,6 +28,14 @@ export const GITHUB_CRITERIA: readonly BuiltInCriterion[] = [
     urgent: true,
   },
   {
+    id: "draft",
+    name: "Your draft",
+    help: "Your own PR is still a draft: it waits on you to mark it Ready for review, so it's Urgent.",
+    on: true,
+    when: "me.author && item.draft",
+    urgent: true,
+  },
+  {
     id: "unblocks",
     name: "Your PR others wait on",
     help: "Your PR other PRs need merged first is ready to merge, or waits on your reply.",

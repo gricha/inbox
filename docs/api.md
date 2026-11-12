@@ -1152,6 +1152,7 @@ GitHub's are rule-only, so a fresh desk sections from its first sync:
 | Asked by name          | `me.requested_direct`: a review asked of you by name, whoever added it; not one asked only of a team you're on. Reviewing it drops the request             | weight 3 |
 | Waiting on your reply  | `me.owes_reply`, or someone else's PR you reviewed got pushes since                                                                                        |          |
 | Ready to merge         | yours, approved or in a repo that needs no review, green, not a draft, not stacked or blocked, and no PR waits on it: one press merges it (`cta: "merge"`) | yes      |
+| Your draft             | yours and still a draft: it waits on you to mark it Ready for review (`cta: "ready"`)                                                                      | yes      |
 | Your PR others wait on | yours, other PRs need it merged first, and it's ready to merge or waits on your reply                                                                      | yes      |
 | Handed back            | `me.handed_back`                                                                                                                                           | yes      |
 

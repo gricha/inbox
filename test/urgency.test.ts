@@ -113,6 +113,15 @@ test("with no model to answer, the desk scores from the rules and the yeses: a f
   assert.equal(t.desk.urgency.view().criteria.find((x) => x.id === "github.asked")!.yes, 1);
 });
 
+test("your own draft is Urgent: only you can mark it ready; someone else's draft isn't", posix, async (c) => {
+  const t = await setup([myPr(7, { draft: true }), reviewAsk(8, { draft: true, author: "carol" })], { settings: QUIET });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const [s7, c7] = where(t, "acme/web#7")!;
+  assert.deepEqual([s7, c7.reason], ["urgent", "Your draft"]);
+  assert.notEqual(where(t, "acme/api#8")?.[1].reason, "Your draft");
+});
+
 test(
   "an agent's criterion is on as it's saved; its question is asked once per item and again when the item or the question changes",
   posix,
