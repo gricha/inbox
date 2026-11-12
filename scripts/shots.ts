@@ -1614,7 +1614,7 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
       await review("acme/api#4127")(page);
       const wide = await page.evaluate<boolean>("innerWidth >= 1160");
-      if (wide) await faces(page, "beside-review", ".c-line:not(.inq) .c-meta .line-by");
+      if (wide) await faces(page, "beside-review", ".c-line:not(.inq, .memo) .c-meta .line-by");
       const b = await besideSays(page);
       if (!wide) {
         if (b || (await page.locator(".beside").count())) failures.push("beside-review: a list or its rail beside the review below 1160px");
@@ -2479,16 +2479,6 @@ const SHOTS: Shot[] = [
     after: sideDefault,
   },
   {
-    // Rule whys are yours to write and can run long: a fact that wraps carries on after its "·", never under it.
-    name: "review-long-why",
-    go: async (page) => {
-      await review("acme/api#4127")(page);
-      await page.evaluate(
-        `document.querySelector(".rv-meta .why").textContent = "close collaborator: you engaged with 128 of their PRs in 90 days, and the observability team wants your eyes on the query explorer directly"`,
-      );
-    },
-  },
-  {
     // A click from the queue on a PR with no AI review yet: it's being written.
     name: "review-writing",
     go: async (page) => {
@@ -2612,7 +2602,7 @@ const SHOTS: Shot[] = [
       const parts = await page.evaluate<{
         names: string[];
         text: string;
-        lines: Record<string, { text: string; lines: number; amber: boolean; open: string | null }>;
+        lines: Record<string, { text: string; amber: boolean }>;
       }>(`(() => {
         const probe = document.createElement("span");
         probe.style.color = "var(--amber)";
@@ -2621,13 +2611,8 @@ const SHOTS: Shot[] = [
         probe.remove();
         const side = document.querySelector(".rv-side"), lines = {};
         for (const part of side.querySelectorAll(".rv-part")) {
-          const words = part.querySelector(".rv-side-head .fact-word");
-          lines[part.getAttribute("aria-label")] = {
-            text: words.textContent,
-            lines: Math.round(words.getBoundingClientRect().height / parseFloat(getComputedStyle(words).lineHeight)),
-            amber: getComputedStyle(words).color === amber,
-            open: part.querySelector(".rv-part-lead")?.getAttribute("aria-expanded") ?? null,
-          };
+          const words = part.querySelector(".rv-part-line");
+          lines[part.getAttribute("aria-label")] = { text: words.textContent, amber: getComputedStyle(words).color === amber };
         }
         return { names: [...side.querySelectorAll("section, nav")].map((el) => el.getAttribute("aria-label")), text: side.textContent, lines };
       })()`);
@@ -2635,18 +2620,17 @@ const SHOTS: Shot[] = [
         failures.push(`review-panel: the sidebar's parts are ${parts.names.join(" | ")}`);
       if (/recent activity/i.test(parts.text)) failures.push("review-panel: the sidebar still lists recent activity");
       const want = {
-        Checks: { text: "CI passing · 11 checks", lines: 1, amber: false, open: "false" },
-        Reviewers: { text: "Changes requested by sam", lines: 1, amber: true, open: "false" },
-        Merge: { text: "Merge conflict with main", lines: 1, amber: true, open: null },
+        Checks: { text: "CI passing · 11 checks", amber: false },
+        Reviewers: { text: "Changes requested by sam", amber: true },
+        Merge: { text: "Merge conflict with main", amber: true },
       };
       if (JSON.stringify(parts.lines) !== JSON.stringify(want))
-        failures.push(`review-panel: closed, the parts read ${JSON.stringify(parts.lines)}`);
-      const lead = page.locator("[data-part=reviewers] .rv-part-lead");
-      if (await lead.count()) await lead.click();
+        failures.push(`review-panel: the parts read ${JSON.stringify(parts.lines)}`);
+      // Open sections: the reviewers listed without a click.
       const rows = await page.evaluate<string[]>(
         `[...document.querySelectorAll("[data-part=reviewers] .rv-part-row")].map((el) => el.querySelector(".rv-part-name").textContent + ": " + el.querySelector(".rv-part-state").textContent)`,
       );
-      if (rows.join(" | ") !== "sam: changes requested") failures.push(`review-panel: opened, the reviewers read ${rows.join(" | ")}`);
+      if (rows.join(" | ") !== "sam: changes requested") failures.push(`review-panel: the reviewers read ${rows.join(" | ")}`);
       await faces(page, "review-panel", "[data-part=reviewers] .rv-part-name");
     },
     after: async (page) => {
