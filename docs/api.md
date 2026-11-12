@@ -1574,7 +1574,7 @@ An item that drops out of every search gets one refresh, so the desk learns why.
 
 ### Opened for you
 
-A PR an agent's bot opened for you is yours wherever the desk decides "mine" (`me.author`): your PRs' boards and rules, its stage and who it's from ("you"), Ready for review, Add reviewers, Reply, the More menu's writes on your PR, Hand off for merge and Merging, the coordinator's "my PR" and the branch it may push, and the AI review it skips as yours.
+A PR an agent's bot opened for you is yours wherever the desk decides "mine" (`me.author`): your PRs' boards and rules, its stage and who it's from ("you"), Ready for review, Add reviewers, Reply, the More menu's writes on your PR, Hand off for merge and Merging, the coordinator's "my PR" and the branch it may push, and the AI review it skips as yours. A review the bot asked of you on it (Junior often adds whoever asked as a reviewer) isn't one: `me.requested` and the rest read false, so rules about PRs to review never take it.
 
 `requesterOf()` in `src/github/behalf.ts` reads who a PR's description names when the desk reads its details (`Item.requester`: `"@login"` or a name; `""` when none, or when two lines disagree). `onBehalf()` decides, in `analyze()` and in the connector, which then reads the PR as deeply and as often as your own. No model is asked. It takes all of:
 

@@ -208,10 +208,13 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
   const headAt = item.head_committed_at ? ([item.head_committed_at, item.updated_at, nowIso].sort()[0] ?? null) : null;
 
   const mine = (r: { reviewer: string; type: "user" | "team" }) => (r.type === "user" ? isMe(r.reviewer) : teams.has(lc(r.reviewer)));
-  const myRequests = item.review_requests.filter(mine);
+  const author = item.author;
+  const yours = isMe(author) || onBehalf(item, ctx.me, [ctx.name ?? "", ...cfg.signals.my_names], isBot);
+  // A bot that opened your PR often asks you to review it too: it's yours all the same, never a review asked of you.
+  const myRequests = yours ? [] : item.review_requests.filter(mine);
   const direct = myRequests.some((r) => r.type === "user");
   const team = myRequests.find((r) => r.type === "team")?.reviewer ?? "";
-  const requestEvents = item.request_events.filter((e) => mine({ reviewer: e.reviewer, type: e.reviewer_type }));
+  const requestEvents = yours ? [] : item.request_events.filter((e) => mine({ reviewer: e.reviewer, type: e.reviewer_type }));
   const requestEvent = requestEvents.findLast((e) => (direct ? e.reviewer_type === "user" : true)) ?? null;
   const requested = myRequests.length > 0;
 
@@ -225,7 +228,6 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
       ? myReview.commit !== item.head_oid && !isMe(item.head_author)
       : othersCommit && othersCommit > myReview.at),
   );
-  const author = item.author;
 
   const lastAction = latest([
     ...item.comments.filter((c) => isMe(c.author)).map((c) => c.at),
@@ -253,7 +255,6 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date): Analy
   const engaged = Object.entries(ctx.affinity).find(([k]) => lc(k) === lc(author))?.[1] ?? 0;
   const authorBot = isBot(author, item.author_bot);
   const via = authorBot ? (item.via ?? "") : "";
-  const yours = isMe(author) || onBehalf(item, ctx.me, [ctx.name ?? "", ...cfg.signals.my_names], isBot);
   const repoPrs = Object.entries(ctx.repo_prs).find(([k]) => lc(k) === lc(item.repo))?.[1] ?? 0;
   const myAreaFiles = areaFiles(item, ctx);
   const waitingOn =

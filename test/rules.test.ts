@@ -178,7 +178,7 @@ test("default review rules: an ask by name weighs most whoever added it; close c
   assert.deepEqual([b(5).bucket, b(5).why], ["later", "close collaborator: you engaged with 12 of their PRs in 90 days"]);
 });
 
-test("default review rules: a bot's PR is hidden, but one it opened for a person isn't, and one it opened for you (by a name you gave, or your login and assigned) is yours", () => {
+test("default review rules: a bot's PR is hidden, but one it opened for a person isn't, and one it opened for you (by a name you gave, or your login and assigned) isn't yours to review", () => {
   const review = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-review")!;
   const asked = { review_requests: [{ reviewer: "ml-team", type: "team" as const, codeowner: false }] };
   const bot = { author: "sentry-junior", author_bot: true, ...asked };
@@ -195,8 +195,9 @@ test("default review rules: a bot's PR is hidden, but one it opened for a person
   const b = (n: number) => r.placements.get(`acme/api#${n}`)!;
   assert.deepEqual([b(1).bucket, b(1).why], ["hide", "bot PR"]);
   assert.deepEqual([b(2).bucket, b(2).why], ["fyi", "asked of @ml-team"], "a person's, asked of your team");
-  assert.deepEqual([b(3).bucket, b(3).why], ["later", "your PR, opened through sentry-junior"]);
-  assert.deepEqual([b(4).bucket, b(4).why], ["later", "your PR, opened through sentry-junior"]);
+  // Yours, so its review request for you isn't one: it's on My PRs, not PRs to review.
+  assert.equal(r.placements.get("acme/api#3"), undefined);
+  assert.equal(r.placements.get("acme/api#4"), undefined);
 });
 
 test("default My PRs rules: stacked PRs and a red CI from the last hour's push wait in Later, like PRs waiting on reviewers", () => {

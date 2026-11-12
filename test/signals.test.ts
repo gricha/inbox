@@ -196,6 +196,24 @@ test("a bot's PR opened for you is yours: its line names your login and it assig
   assert.equal(human.me.author, false, "only a bot opens PRs for people");
 });
 
+test("a bot's PR opened for you that asks you to review it is yours, not a review asked of you", () => {
+  const c = makeContext({ name: "Greg Pstrucha", teams: ["backend"] });
+  const ask = [
+    { reviewer: "me", type: "user" as const, codeowner: false },
+    { reviewer: "backend", type: "team" as const, codeowner: true },
+  ];
+  const events = [{ reviewer: "me", reviewer_type: "user" as const, actor: "sentry-junior", actor_bot: true, at: hoursAgo(5) }];
+  const it = (requester: string) =>
+    analyze(makeItem({ author: "sentry-junior", author_bot: true, requester, review_requests: ask, request_events: events }), c, cfg, NOW)
+      .signals.me;
+  const yours = it("greg.pstrucha");
+  assert.deepEqual(
+    [yours.author, yours.requested, yours.requested_direct, yours.requested_team, yours.requested_by_bot],
+    [true, false, false, "", false],
+  );
+  assert.equal(it("dana.k").requested_direct, true, "opened for someone else: a review asked of you");
+});
+
 test("stacked: a PR whose base isn't its repo's default branch; unknown until the default branch is", () => {
   const s = (o: Partial<Item>) => analyze(makeItem(o), makeContext(), cfg, NOW).signals.pr.stacked;
   assert.equal(s({ base: "ref/sa-narrow", default_branch: "master" }), true);
