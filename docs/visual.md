@@ -167,7 +167,7 @@ The Inbox, Blocked, Merging and the Archive.
 - Hairlines between rows and above and below the table (none right under the head, which has its own).
 - The Inbox's sections (Urgent, Standard, FYI) and the other pages' groups have quiet headings on the rows' text,
   further from the table above than from their own rows.
-- Rows, headings and the lines between them (Your agent, the fold, "n more reach you…") start on the head's padding:
+- Rows, headings and the lines between them (Your agent, "n more reach you…") start on the head's padding:
   24px (12px at 640px and below; 16px beside a review). So the filter's edge, Merging's name and the rows' text make
   one line.
 - Inside a table: below 760px the stage column goes (on your own row the stage takes the place of "by you"); below 620px

@@ -694,7 +694,6 @@ export interface FocusView {
   sessions: SessionCard[]; // sessions that need you, after agents' questions: blocked, then stalled
   sections: { now: Card[]; today: Card[] }; // one list on screen: now first, then today
   reviewing: number; // PRs that reach it once Claude's first review of them is written
-  cards: number; // queue.cards: the queue shows this many, the rest behind one line; 0 = all
   paused: Paused | null; // said once above the queue instead of on every card
 }
 
@@ -714,7 +713,6 @@ export interface QueueView {
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // merged, closed, approved by someone else, no longer requested; newest first
-  cards: number; // as in FocusView
   paused: Paused | null;
   stacks: Record<string, Stack>; // by id: each stack a card here carries (current: the card sections list it by, else its first card)
   // The Inbox, by section, each by score then the desk's order: what's in now, today, later and fyi (sections), as

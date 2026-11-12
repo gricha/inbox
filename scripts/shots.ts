@@ -218,17 +218,6 @@ const reviewAs = (change: (v: ReviewView) => void) => async (page: Page) => {
   await page.reload(); // nothing fetched before this stands in for it
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
-// Standard and FYI fold after their first ten: open both for a row that sits behind a line.
-const unfold = async (page: Page) => {
-  const folds = page.locator(".queue .fold");
-  for (let n = await folds.count(); n > 0; n--) await folds.first().click();
-  await page.waitForTimeout(200);
-};
-// The fold is per window: a reload folds the queue again for the shots after this one.
-const refold = async (page: Page) => {
-  await page.reload();
-  await page.locator(READY).first().waitFor({ timeout: 15_000 });
-};
 // Scrolled to the end, the last thing on the page ends near the window's bottom: no empty room to scroll into.
 const BOTTOM_ROOM = 160;
 const toBottom = (name: string) => async (page: Page) => {
@@ -820,13 +809,13 @@ const SHOTS: Shot[] = [
       if (head !== "Filter") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the filter`);
       if (await page.locator(".bubble").count()) failures.push("queue: a bubble while nothing's wrong");
       // Its sections under their headings, Urgent led by an agent's question, a row like the rest; a hand-back saying so on
-      // its own row at every width; each row saying why it's there; a fold line that says just how many.
+      // its own row at every width; each row saying why it's there; every row shown, no "n more".
       const list = await page.evaluate<{
         heads: string[];
         tables: number;
         first: (string | null)[];
         back: string | null;
-        fold: string | null;
+        fold: number;
         reasons: number;
         rows: number;
       }>(`(() => {
@@ -839,7 +828,7 @@ const SHOTS: Shot[] = [
           tables: document.querySelectorAll(".queue .lines").length,
           first: [text(first, ".line-kind"), text(first, ".line-by"), text(first, ".line-cta")],
           back: back?.getClientRects().length ? back.textContent : null,
-          fold: text(document, ".queue .fold"),
+          fold: document.querySelectorAll(".queue .fold").length,
           reasons: cards.filter((c) => c.querySelector(".line-note")?.textContent.trim()).length,
           rows: cards.length,
         };
@@ -850,7 +839,7 @@ const SHOTS: Shot[] = [
       if (list.first.join(" · ") !== "Question · by your agent · Answer")
         failures.push(`queue: an agent's question's row reads ${JSON.stringify(list.first)}`);
       if (list.back !== "handed back") failures.push(`queue: the handed-back PR's stage reads ${JSON.stringify(list.back)}`);
-      if (!/^\d+ more$/.test(list.fold ?? "")) failures.push(`queue: the fold line reads ${JSON.stringify(list.fold)}`);
+      if (list.fold) failures.push('queue: a section folds behind a "more" line');
     },
   },
   {
@@ -1247,22 +1236,22 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The queue's "n more" line, Tab-focused; a click opens the rest in place.
-    name: "queue-fold",
+    // Scrolled into Standard, its heading stays pinned under the page's head, rows passing under it.
+    name: "queue-pinned-head",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".queue .fold").focus();
-      await page.locator(".queue .fold").scrollIntoViewIfNeeded();
-    },
-  },
-  {
-    name: "queue-unfolded",
-    go: async (page) => {
-      await at("#/")(page);
-      await page.locator(".queue .fold").click();
+      await page.evaluate(`(() => {
+        const rows = document.querySelectorAll(".g-standard .line");
+        rows[Math.min(6, rows.length - 1)].scrollIntoView({ block: "start" });
+      })()`);
       await page.waitForTimeout(200);
+      const pin = await page.evaluate<{ top: number; head: number } | null>(`(() => {
+        const h = document.querySelector(".g-standard .group-head"), head = document.querySelector(".page-head");
+        return h && head ? { top: Math.round(h.getBoundingClientRect().top), head: Math.round(head.getBoundingClientRect().bottom) } : null;
+      })()`);
+      if (!pin || pin.top !== pin.head)
+        failures.push(`queue-pinned-head: Standard's heading is at ${JSON.stringify(pin)}, not under the page's head`);
     },
-    after: refold,
   },
   {
     // Your pin lifts a blocked PR onto your page, its stage "blocked", under api#1294, which it waits on and which offers Reply.
@@ -1274,13 +1263,11 @@ const SHOTS: Shot[] = [
         const at1294 = list.findIndex((c) => c.id === "acme/api#1294");
         if (pinned) list.splice(at1294 + 1, 0, { ...pinned, group: "mine", pinned: true, reason: "kept up by your pin" });
       })(page);
-      await unfold(page);
       await page.evaluate(`document.querySelector('.queue [data-id="acme/billing#2298"]').scrollIntoView({ block: "center" })`);
       await page.waitForTimeout(200);
     },
     after: async (page) => {
       await unroute(page);
-      await refold(page);
     },
   },
   {
@@ -1288,11 +1275,9 @@ const SHOTS: Shot[] = [
     name: "queue-on-behalf",
     go: async (page) => {
       await at("#/")(page);
-      await unfold(page);
       await page.evaluate(`document.querySelector('.queue [data-id="acme/api#4131"]').scrollIntoView({ block: "center" })`);
       await page.waitForTimeout(200);
     },
-    after: refold,
   },
   {
     // The end of the queue: its last rows and the fold line, then the window's edge.
@@ -1411,7 +1396,6 @@ const SHOTS: Shot[] = [
     name: "expanded",
     go: async (page) => {
       await at("#/")(page);
-      await unfold(page);
       await page.locator(".line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.waitForTimeout(400);
       const acts = await page.evaluate<{ text: string; title: string | null }[]>(
@@ -1424,10 +1408,8 @@ const SHOTS: Shot[] = [
   {
     // Comment on an issue opened in place: the comment bar at the window's bottom.
     name: "issue-comment",
-    after: refold,
     go: async (page) => {
       await at("#/")(page);
-      await unfold(page);
       await page.locator(".line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.waitForTimeout(400);
       await page.locator(".card-keys button", { hasText: "Comment" }).click();
@@ -1440,7 +1422,6 @@ const SHOTS: Shot[] = [
     name: "issue-snooze",
     go: async (page) => {
       await at("#/")(page);
-      await unfold(page);
       await page.locator(".line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.waitForTimeout(400);
       await page.locator(".card-keys button", { hasText: "Snooze" }).click();
@@ -1449,7 +1430,6 @@ const SHOTS: Shot[] = [
     },
     after: async (page) => {
       for (let i = 0; i < 2 && (await page.locator(".ctx").count()); i++) await page.keyboard.press("Escape");
-      await refold(page);
     },
   },
   {
@@ -1613,7 +1593,6 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/")(page);
       await review("acme/api#4127")(page);
-      await page.locator(".beside .queue .fold").click();
       await page.locator(".beside .line", { hasText: "Worker OOM on large batches" }).locator(".row-main").click();
       await page.locator(".beside .line.open .card-keys").waitFor();
       await page.waitForTimeout(300);
@@ -1629,7 +1608,6 @@ const SHOTS: Shot[] = [
       );
       if (left.open || !left.review) failures.push(`beside-issue: after Esc, ${JSON.stringify(left)}`);
       if (left.open) await page.locator(".beside .line.open .card-keys .act", { hasText: "Close" }).last().click();
-      await refold(page);
     },
   },
   // Folded to its rail: the review's sidebar has room beside the diff again; the choice is kept on this device.
@@ -2476,7 +2454,6 @@ const SHOTS: Shot[] = [
     name: "review-writing",
     go: async (page) => {
       await at("#/")(page);
-      await unfold(page);
       await page.locator(".line", { hasText: "Virtualize the issue stream list" }).locator(".row-main").click();
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
       await page.waitForTimeout(600);
@@ -3258,10 +3235,8 @@ const SHOTS: Shot[] = [
   {
     // Your own draft's one call to action, Ready for review.
     name: "draft-cta",
-    after: refold,
     go: async (page) => {
       await at("#/")(page);
-      await unfold(page);
       await page.locator('.line[data-id="acme/web#2303"] .row-main').focus();
       await page.waitForTimeout(200);
     },
@@ -3273,7 +3248,6 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await page.route("**/ready", () => {});
       await at("#/")(page);
-      await unfold(page);
       await page.locator('.line[data-id="acme/web#2303"] .line-cta').click();
       await page.waitForTimeout(500); // past the row's fade and fold
     },
@@ -3376,7 +3350,7 @@ const SHOTS: Shot[] = [
       };
       page.on("request", put);
       await page.locator('[id="setting-notify.quiet-from"]').click();
-      await page.locator('[id="setting-queue.cards"]').click();
+      await page.locator('[id="setting-queue.quiet_days"]').click();
       await page.waitForTimeout(400);
       page.off("request", put);
       if (puts.length) failures.push(`settings-queue-quiet-kept: leaving quiet hours unchanged saved ${puts.join(", ")}`);
@@ -4812,7 +4786,6 @@ const SHOTS: Shot[] = [
         failures.push(`keys: ${mod}+] x3 then ${mod}+[ went to ${JSON.stringify(seen)}, the list starting ${JSON.stringify(ids)}`);
       // An issue opens in place on its list, so the review before it gives way to the list; Merging steps through its PRs.
       await at("#/")(page);
-      await unfold(page);
       const before = await page.evaluate<string | null>(
         `[...document.querySelectorAll(".queue .line")].find((l, i, all) => all[i + 1]?.querySelector(".line-kind")?.textContent === "Issue")?.dataset.id ?? null`,
       );
@@ -4956,7 +4929,6 @@ const SHOTS: Shot[] = [
       if (seen.hash !== "#/" || seen.open !== "acme/worker#860" || !seen.inView)
         failures.push(`link-issue: the link opened ${JSON.stringify(seen)}`);
     },
-    after: refold,
   },
   {
     // Done in a row's menu: the row leaves and takes its fill with it; no neighbour is filled in its place. Held, so the mock

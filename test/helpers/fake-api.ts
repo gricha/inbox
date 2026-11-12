@@ -116,7 +116,7 @@ const overview: Overview = {
   rate_limit: { remaining: 4800, reset_at: ago(-1) },
 };
 
-const focus: FocusView = { sessions: [], sections: { now: [CARDS.now], today: [CARDS.today] }, reviewing: 2, cards: 10, paused: null };
+const focus: FocusView = { sessions: [], sections: { now: [CARDS.now], today: [CARDS.today] }, reviewing: 2, paused: null };
 
 // One automation that's on and may snooze, with a run that added one item and snoozed another; its summary carries text a
 // fence must hold.
@@ -185,7 +185,6 @@ const queueView: QueueView = {
   hidden: [CARDS.hidden],
   cleared: [CARDS.cleared],
   resolved: [CARDS.resolved],
-  cards: 10,
   paused: null,
   stacks: {},
   inbox: { urgent: [CARDS.now], standard: [CARDS.today], fyi: [CARDS.later, CARDS.fyi] },

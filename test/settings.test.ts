@@ -142,17 +142,16 @@ test("settings that no longer exist (the Claude model and command) load without 
   assert.equal(checkSetting("analyze.command", "/opt/bin/claude"), 'unknown setting "analyze.command"');
 });
 
-test("Now's and Today's folds give way to one for the queue: the old keys load without errors and are ignored", () => {
+test("the queue's folds are gone: their old keys load without errors and are ignored", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-settings-"));
   const file = path.join(dir, "settings.json");
-  fs.writeFileSync(file, JSON.stringify({ "queue.now_cards": 3, "queue.today_cards": 8, "queue.quiet_days": 7 }));
+  fs.writeFileSync(file, JSON.stringify({ "queue.now_cards": 3, "queue.today_cards": 8, "queue.cards": 10, "queue.quiet_days": 7 }));
   const { overrides, errors, raw } = readSettings(file);
   assert.deepEqual(errors, []);
   assert.deepEqual(overrides, { "queue.quiet_days": 7 });
-  assert.deepEqual(raw, { "queue.now_cards": 3, "queue.today_cards": 8, "queue.quiet_days": 7 });
-  assert.equal(effective(overrides)["queue.cards"], 10);
+  assert.deepEqual(raw, { "queue.now_cards": 3, "queue.today_cards": 8, "queue.cards": 10, "queue.quiet_days": 7 });
   assert.match(checkSetting("queue.now_cards", 3)!, /unknown/);
-  assert.equal(checkSetting("queue.cards", 0), null, "0 shows them all");
+  assert.match(checkSetting("queue.cards", 10)!, /unknown/);
 });
 
 test("writeSettings writes through a symlinked settings.json", () => {
@@ -308,7 +307,7 @@ test("a secret setting is kept in secrets.json, yours alone to read, set only fr
     assert.deepEqual([r.status, (JSON.parse(r.text) as { tag: string }).tag], [403, "Forbidden"], JSON.stringify(body));
   }
   assert.equal(t.desk.settings["agent.decision_key"], "");
-  assert.equal((await put({ set: { "queue.cards": 11 } }, agent)).status, 200);
+  assert.equal((await put({ set: { "queue.quiet_days": 11 } }, agent)).status, 200);
   const saved = (await put({ set: { "agent.decision_key": KEY } })).text;
   assert.ok(!saved.includes(KEY), "the answer to the save doesn't repeat it");
   assert.equal(t.desk.settings["agent.decision_key"], KEY, "the desk has it");
@@ -323,8 +322,8 @@ test("a secret setting is kept in secrets.json, yours alone to read, set only fr
     assert.ok(!body.includes(KEY), `${p} doesn't carry it`);
   }
   // What a client was shown, sent back, changes nothing; another setting saved beside it leaves it alone.
-  await put({ set: { "agent.decision_key": DOTS, "queue.cards": 12 } });
-  assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.settings["queue.cards"]], [KEY, 12]);
+  await put({ set: { "agent.decision_key": DOTS, "queue.quiet_days": 12 } });
+  assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.settings["queue.quiet_days"]], [KEY, 12]);
   await run(t.desk.putSettings({ reset: ["agent.decision_key"] }));
   assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.getSettings().values["agent.decision_key"]], ["", ""], "reset clears it");
   assert.ok(!logs.join("\n").includes(KEY), "nothing logged it");
@@ -333,18 +332,18 @@ test("a secret setting is kept in secrets.json, yours alone to read, set only fr
 test("a secret in settings.json moves to secrets.json once, and secrets.json is never written through a link", async (c) => {
   const { setup } = await import("./helpers/desk.ts");
   const KEY = "sk-or-v1-3333333333333333333333333333333333333333333333333333333333333333";
-  const t = await setup([], { settings: { "agent.decision_key": KEY, "queue.cards": 12 } });
+  const t = await setup([], { settings: { "agent.decision_key": KEY, "queue.quiet_days": 12 } });
   c.after(t.cleanup);
   const settings = path.join(t.home, "settings.json");
   const secrets = path.join(t.home, "secrets.json");
   assert.deepEqual(
     JSON.parse(fs.readFileSync(settings, "utf8")),
-    { "agent.score": false, "queue.cards": 12 },
+    { "agent.score": false, "queue.quiet_days": 12 },
     "moved out of settings.json",
   );
   assert.deepEqual(JSON.parse(fs.readFileSync(secrets, "utf8")), { "agent.decision_key": KEY });
   if (process.platform !== "win32") assert.equal(fs.statSync(secrets).mode & 0o777, 0o600);
-  assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.settings["queue.cards"]], [KEY, 12]);
+  assert.deepEqual([t.desk.settings["agent.decision_key"], t.desk.settings["queue.quiet_days"]], [KEY, 12]);
   if (process.platform === "win32") return;
   const elsewhere = path.join(t.home, "dotfiles-secrets.json");
   fs.writeFileSync(elsewhere, "{}");
@@ -359,7 +358,7 @@ test("a secret in settings.json moves to secrets.json once, and secrets.json is 
   ]);
   assert.equal(r.ok, false);
   assert.equal(fs.readFileSync(elsewhere, "utf8"), "{}", "nothing written through it");
-  assert.equal(runSync(t.desk.putSettings({ set: { "queue.cards": 9 } })).ok, true, "other settings save as before");
+  assert.equal(runSync(t.desk.putSettings({ set: { "queue.quiet_days": 9 } })).ok, true, "other settings save as before");
 });
 
 test("what sorts and reviews, and your agent, name the agent you chose", () => {

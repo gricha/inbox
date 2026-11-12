@@ -350,14 +350,13 @@ interface QueueView {
   hidden: Card[]; // a rule put it in "hide"
   cleared: Card[]; // done, snoozed, muted
   resolved: Card[]; // newest first (see Resolved)
-  cards: number; // queue.cards: how many show before "more"; 0 = all
   paused: { who: "claude" | "ai"; why: string } | null; // shown once, as a bubble
   stacks: Record<string, Stack>; // each stack a card here carries
   inbox: { urgent: Card[]; standard: Card[]; fyi: Card[] }; // what the window draws (see Urgency)
   first_pass: FirstPass | null; // a new desk's first minutes (see The first pass)
 }
 // FirstPass: { step: "sync" | "sort"; done; total; found; line }, `line` in the desk's words for the Inbox.
-// FocusView: { sessions, sections: { now, today }, reviewing, cards, paused }; never resolved items.
+// FocusView: { sessions, sections: { now, today }, reviewing, paused }; never resolved items.
 // BoardView: { board: BoardSummary & { queries }, sections, hidden, cleared }; every PR, no stacks.
 
 interface Overview {

@@ -48,16 +48,13 @@ export type Variant = "active" | "hidden" | "cleared" | "archive" | "blocked";
 export interface Group {
   key: GroupKey;
   label: string;
-  cards: Card[]; // after the filter, and the fold
+  cards: Card[]; // after the filter
   total: number; // before the filter
   open: boolean;
   forced: boolean; // opened by the filter, not by you
   variant: Variant;
-  fold: number; // Standard's and FYI's: items behind its "n more" line
 }
 
-// The cursor's stop on a group's "n more" line.
-export const foldOf = (k: GroupKey) => `fold:${k}`;
 // Hand off for merge is for a PR that's through its review: your agent gets an approved PR merged, it doesn't get one approved.
 export const awaitsReview = (c: Pick<Card, "review">) => c.review === "required" || c.review === "changes_requested";
 // Nor a draft (Ready for review first), nor one nobody's asked to review (Add reviewers first), unless its repo needs no
@@ -384,37 +381,29 @@ const LABEL: Record<GroupKey, string> = {
   blocked: "Blocked",
 };
 
-// The Inbox's sections in the desk's order; Standard and FYI each fold after their first queue.cards. While filtering, every
-// group with a match opens so nothing that matches stays tucked away, and nothing folds.
-export function groupsOf(
-  view: QueueView | null,
-  open: Record<GroupKey, boolean>,
-  filter: string,
-  unfolded: Partial<Record<GroupKey, boolean>> = {},
-): Group[] {
+// The Inbox's sections in the desk's order, every row shown: all of Urgent before Standard, all of Standard before FYI. While
+// filtering, every group with a match opens so nothing that matches stays tucked away.
+export function groupsOf(view: QueueView | null, open: Record<GroupKey, boolean>, filter: string): Group[] {
   if (!view) return [];
   const q = filter.trim();
-  const group = (key: GroupKey, all: Card[], variant: Variant = "active", cap?: number): Group => {
+  const group = (key: GroupKey, all: Card[], variant: Variant = "active"): Group => {
     const matched = all.filter((c) => matches(c, q));
     const forced = !!q && matched.length > 0 && !open[key];
-    // A fold that would hide one item costs more than the item: it folds only when two or more would go behind it.
-    const n = cap && !q && !unfolded[key] && matched.length - cap >= 2 ? cap : matched.length;
     return {
       key,
       label: LABEL[key],
-      cards: matched.slice(0, n),
+      cards: matched,
       total: all.length,
       open: open[key] || forced,
       forced,
       variant,
-      fold: matched.length - n,
     };
   };
   const s = view.sections;
   return [
     group("urgent", view.inbox.urgent),
-    group("standard", view.inbox.standard, "active", view.cards),
-    group("fyi", view.inbox.fyi, "active", view.cards),
+    group("standard", view.inbox.standard),
+    group("fyi", view.inbox.fyi),
     // What you did that took it off your desk, and what the world dealt with: newest first.
     group(
       "archive",
@@ -434,9 +423,9 @@ export function groupsOf(
   ];
 }
 
-// The list page and group that show a card, folds open: where a permalink to an issue opens it in place.
+// The list page and group that show a card: where a permalink to an issue opens it in place.
 export function whereIs(view: QueueView, id: string): { page: keyof typeof PAGE_GROUPS; group: GroupKey } | null {
-  const group = groupsOf(view, DEFAULT_OPEN, "", { standard: true, fyi: true }).find((g) => g.cards.some((c) => c.id === id))?.key;
+  const group = groupsOf(view, DEFAULT_OPEN, "").find((g) => g.cards.some((c) => c.id === id))?.key;
   const page = group && (Object.keys(PAGE_GROUPS) as (keyof typeof PAGE_GROUPS)[]).find((p) => PAGE_GROUPS[p].includes(group));
   return group && page ? { page, group } : null;
 }
@@ -512,11 +501,8 @@ export function cardFacts(
 export const navigable = (groups: Group[], leaving: Set<string>) =>
   groups.flatMap((g) => (g.open ? g.cards : [])).filter((c) => !leaving.has(c.id));
 
-// The rows on screen, and a group's "n more" line where it folds.
-export const stops = (groups: Group[], leaving: Set<string>): string[] =>
-  groups.flatMap((g) =>
-    g.open ? [...g.cards.filter((c) => !leaving.has(c.id)).map((c) => c.id), ...(g.fold ? [foldOf(g.key)] : [])] : [],
-  );
+// The rows on screen.
+export const stops = (groups: Group[], leaving: Set<string>): string[] => navigable(groups, leaving).map((c) => c.id);
 
 export function removeCard(v: QueueView, id: string): QueueView {
   const drop = (cs: Card[]) => cs.filter((c) => c.id !== id);

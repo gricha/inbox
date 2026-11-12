@@ -1961,7 +1961,6 @@ function focus(): FocusView {
     sessions: activeSessions(),
     sections,
     reviewing: 0,
-    cards: setting("queue.cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
   };
 }
@@ -2024,7 +2023,6 @@ function queue(): QueueView {
     hidden,
     cleared: clearedCards,
     resolved: resolvedCards,
-    cards: setting("queue.cards"),
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
     stacks: stacksOf([...leads, ...hidden, ...clearedCards, ...resolvedCards]),
     inbox: inboxOf([...byPart([...sections.now, ...sections.today]), ...sections.later, ...sections.fyi]),

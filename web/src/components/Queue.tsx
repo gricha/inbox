@@ -1,6 +1,6 @@
 import type { Card, Inquiry, Overview, QueueView, SessionCard } from "../../../src/types.ts";
 import { cls, aiName } from "../format.ts";
-import { foldOf, PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
+import { PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { SessionRow, type SessionCtx } from "./Session.tsx";
@@ -18,8 +18,6 @@ export function Queue({
   sessions,
   ses,
   filter,
-  unfold,
-  selectFold,
   toggle,
 }: {
   view: QueueView | null;
@@ -31,8 +29,6 @@ export function Queue({
   sessions?: SessionCard[]; // none beside a review: two lines a row has no room for one's detail
   ses?: SessionCtx;
   filter: string;
-  unfold: (k: GroupKey, keyboard: boolean) => void;
-  selectFold: (k: GroupKey) => void;
   toggle: (k: GroupKey) => void;
 }) {
   if (!view) {
@@ -60,7 +56,7 @@ export function Queue({
   const parts = groups
     .filter((g) => PAGE_GROUPS.queue.includes(g.key))
     .map((g) => ({ g, lead: g.key === "urgent" ? inquiries.length + shown.length : 0 }))
-    .filter(({ g, lead }) => lead > 0 || g.cards.length > 0 || g.fold > 0);
+    .filter(({ g, lead }) => lead > 0 || g.cards.length > 0);
   // A row you acted on is on its way off: it fades out where it is, and the last one to go leaves the empty line.
   const any = parts.some(({ g, lead }) => lead > 0 || g.cards.some((c) => !ctx.leaving.has(c.id)));
   // A new desk's first minutes, said in the desk's words: where the empty line would be, or above the rows.
@@ -94,25 +90,6 @@ export function Queue({
                   <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
                 ))}
               </div>
-            )}
-            {g.open && g.fold > 0 && (
-              <button
-                type="button"
-                className={cls("fold", ctx.selected === foldOf(g.key) && "sel")}
-                data-id={foldOf(g.key)}
-                // Focus on mousedown would move the selection before the click lands.
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                }}
-                onClick={(e) => {
-                  unfold(g.key, e.detail === 0); // 0: Enter or Space, not a click
-                }}
-                onFocus={() => {
-                  selectFold(g.key);
-                }}
-              >
-                {g.fold} more
-              </button>
             )}
           </section>
         ))

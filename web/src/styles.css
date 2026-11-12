@@ -1111,10 +1111,20 @@ p {
   border-top: 0;
 }
 
-/* A section heading on the rows' text, clearly further from the table above than from its own. */
+/* A section heading on the rows' text, clearly further from the table above than from its own. The section you're in keeps
+   its heading pinned under the page's head; the next section's pushes it off. Opaque, so rows don't show through. */
 .queue .group-head {
+  position: sticky;
+  top: 52px;
+  z-index: 5;
   margin: 0;
   padding: 24px var(--pad) 8px;
+  background: var(--paper);
+}
+
+.beside .queue .group-head {
+  top: 0;
+  background: var(--sheet);
 }
 
 /* A tight table drops the stage column first, then who it's from, before a repo or a why is cut to a few letters; a review
@@ -1694,29 +1704,12 @@ p {
   font-size: 14px;
 }
 
-.queue .fold {
-  margin: 0;
-  padding: 10px var(--pad);
-  border-radius: 0;
-  font-size: 14px;
-}
-
-.queue .fold.sel {
-  box-shadow: none;
-}
-
-/* PRs held back until Claude has reviewed them: said once, under the queue, as quiet as its "n more". */
+/* PRs held back until Claude has reviewed them: said once, under the queue, quietly. */
 .queue-reviewing {
   margin: 0;
   padding: 14px var(--pad) 0;
   color: var(--pencil);
   font-size: 14px;
-}
-
-/* Its fill is its cursor, and keyboard focus the rows' own ring. */
-.queue .fold:focus-visible {
-  outline: 2px solid var(--accent-ink);
-  outline-offset: -2px;
 }
 
 /* Later's groups open and close on their heading. */
@@ -1901,10 +1894,6 @@ p {
 .beside .group-head {
   padding-top: 18px;
   font-size: 13.5px;
-}
-
-.beside .queue .fold {
-  font-size: 13px;
 }
 
 .beside .queue-empty,
@@ -2185,33 +2174,6 @@ p {
   font-size: 13px;
   font-weight: 450;
   font-variant-numeric: tabular-nums;
-}
-
-/* The queue's "n more": a click opens it in place. */
-.fold {
-  display: block;
-  width: 100%;
-  margin-top: 2px;
-  border: 0;
-  border-radius: 10px;
-  background: none;
-  color: var(--pencil);
-  font-size: 13.5px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.fold:hover {
-  color: var(--ink);
-}
-
-.fold:focus-visible {
-  outline-offset: -2px;
-}
-
-.fold.sel {
-  background: var(--sel);
-  box-shadow: inset 0 0 0 1.5px var(--pencil);
 }
 
 @keyframes leave {

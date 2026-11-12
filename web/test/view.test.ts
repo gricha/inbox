@@ -31,7 +31,6 @@ import {
   DISABLED,
   drawUpTo,
   draftOf,
-  foldOf,
   groupsOf,
   hotkeyHelp,
   macKeys,
@@ -124,7 +123,6 @@ const queue = (): QueueView => ({
   hidden: [card("acme/api#4")],
   cleared: [card("acme/api#5", { status: "muted" })],
   resolved: [card("acme/api#6", { resolved: "merged", why: "merged" })],
-  cards: 10,
   paused: null,
   stacks: {},
   inbox: { urgent: [card("acme/api#1")], standard: [card("acme/web#2", { author: "priya" })], fyi: [card("acme/api#3")] },
@@ -341,7 +339,7 @@ test("Settings draws a row only where it does something, and greys quiet hours w
   }
   assert.equal(drawn("agent.coordinator_bypass", values()), true);
   assert.equal(drawn("agent.coordinator_bypass", values({ "agent.coordinator": false })), false);
-  assert.equal(drawn("queue.cards", values()), true);
+  assert.equal(drawn("queue.quiet_days", values()), true);
   const greyed = (key: string, v: Record<string, SettingValue>) => DISABLED[key]?.(v) ?? false;
   assert.equal(greyed("notify.quiet", values()), false);
   assert.equal(greyed("notify.quiet", values({ "notify.enabled": false })), true);
@@ -591,29 +589,26 @@ test("the Inbox and the Archive are pages of their own: the Inbox's sections ope
   assert.deepEqual(groupsOf(null, DEFAULT_OPEN, ""), []);
 });
 
-test("Standard folds after queue.cards, Urgent never does: j/k stop on its line", () => {
+test("every row of each section shows, Urgent before Standard: the cursor stops on each", () => {
   const standard = ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13", "acme/web#14", "acme/web#15"].map((id) =>
     card(id, { bucket: "today", author: id }),
   );
   const urgent = ["acme/api#1", "acme/api#2", "acme/api#7", "acme/api#8", "acme/api#9"].map((id) => card(id));
-  const v = { ...queue(), inbox: { urgent, standard, fyi: [] }, cards: 3 };
+  const v = { ...queue(), inbox: { urgent, standard, fyi: [] } };
   const t = (g: ReturnType<typeof groupsOf>) => g.find((x) => x.key === "standard")!;
-  const folded = groupsOf(v, DEFAULT_OPEN, "");
-  assert.equal(folded.find((x) => x.key === "urgent")!.fold, 0);
+  const all = groupsOf(v, DEFAULT_OPEN, "");
   assert.deepEqual(
-    [t(folded).cards.map((c) => c.id), t(folded).fold, t(folded).total],
-    [["acme/web#10", "acme/web#11", "acme/web#12"], 3, 6],
+    [t(all).cards.map((c) => c.id), t(all).total],
+    [standard.map((c) => c.id), 6],
     "as the desk sent them: it orders them, the page only shows them",
   );
-  assert.deepEqual(stops(main(folded), new Set()).slice(5), ["acme/web#10", "acme/web#11", "acme/web#12", foldOf("standard")]);
-
-  assert.equal(t(groupsOf(v, DEFAULT_OPEN, "", { standard: true })).cards.length, 6);
-  assert.ok(!stops(main(groupsOf(v, DEFAULT_OPEN, "", { standard: true })), new Set()).includes(foldOf("standard")));
-  assert.equal(t(groupsOf({ ...v, cards: 0 }, DEFAULT_OPEN, "")).fold, 0);
-  assert.equal(t(groupsOf({ ...v, cards: 5 }, DEFAULT_OPEN, "")).fold, 0, "a fold never hides just one");
+  assert.deepEqual(
+    stops(main(all), new Set()),
+    [...urgent, ...standard].map((c) => c.id),
+  );
   assert.deepEqual(
     t(groupsOf(v, DEFAULT_OPEN, "web#1")).cards.map((c) => c.id),
-    ["acme/web#10", "acme/web#11", "acme/web#12", "acme/web#13", "acme/web#14", "acme/web#15"],
+    standard.map((c) => c.id),
     "every match shows while filtering",
   );
 });

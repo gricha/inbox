@@ -80,7 +80,7 @@ In a window 1160px or wider, a review or a question keeps the list it came from 
 
 - Same rows, order, group headings and filter as that page. A question's list is the Inbox.
 - Two lines a row: the title (two lines at most), then one pencil line: PR, Issue or Question, repo#number, a sorted-away row's why, who it's from, the stage, the call to action as accent text, and the age.
-- The open item's row is marked, even when it's behind a "n more" fold (the fold opens).
+- The open item's row is marked.
 - A click or right-click does what it does on the full page. An issue opens in place under its row; Esc closes it first.
 - A review opened from the list goes back to the list's page. One opened beside a question goes back to the question.
 - A chevron on the list's divider folds it to a rail ("Hide the list", "Show the list"). The choice is kept per device.
@@ -107,7 +107,7 @@ The main page: what the desk put on your desk, in three sections. `src/urgency.t
 
 Each section is a heading with its count; a click opens or closes it. Within a section: higher score first, then the desk's order (`group` on each card): hand-backs, other people's PRs waiting on your review, issues and the rest, then your own PRs.
 
-Standard and FYI fold after `queue.cards` rows (10) behind one "n more" line; a click opens it. They fold only when two or more would hide. Urgent never folds.
+Every row shows: all of Urgent, then all of Standard, then all of FYI, nothing behind a "more". Scrolling, the section you're in keeps its heading pinned under the page's head until the next one's pushes it off.
 
 The quiet rule: an item nobody has touched for `queue.quiet_days` (14) moves to FYI, unless pinned or a review you were asked for in that time.
 
@@ -458,7 +458,6 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 ### Inbox and notifications
 
 - Move untouched items to FYI after (days).
-- Show the first (rows before Standard's and FYI's fold).
 - Urgent from a score of (8), FYI up to a score of (3).
 - Notify me when something needs me.
 - Quiet hours: two times (in this computer's 12- or 24-hour clock) and a switch. Off saves `""` and greys the times, keeping them; on saves `19:00-09:00`. A time saves when you leave its field. The row greys while notifications are off.

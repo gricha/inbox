@@ -1811,7 +1811,6 @@ export class Desk {
         sessions: this.sessions.active(),
         sections,
         reviewing: this.reviewing(snap),
-        cards: this.settings["queue.cards"],
         paused: this.paused(),
       };
     });
@@ -1933,7 +1932,6 @@ export class Desk {
         hidden: kept,
         cleared,
         resolved: resolved.sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? "")),
-        cards: this.settings["queue.cards"],
         paused: this.paused(),
         stacks: this.stacksOf([...leads, ...merging, ...hidden, ...cleared, ...resolved], snap),
         inbox,

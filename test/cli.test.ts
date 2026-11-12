@@ -429,7 +429,7 @@ test("settings lists effective values by section and stars overrides", async () 
   assert.match(r.out, /\n\nAgent\n {2}agent\.harness +claude-code\n {2}policy\.judge +true\n/);
   assert.match(
     r.out,
-    /\n\nInbox and notifications\n {2}queue\.quiet_days +14\n {2}queue\.cards +10\n {2}queue\.urgent_at +8\n {2}queue\.fyi_at +3\n {2}notify\.enabled +true\n {2}notify\.quiet +19:00-09:00\n/,
+    /\n\nInbox and notifications\n {2}queue\.quiet_days +14\n {2}queue\.urgent_at +8\n {2}queue\.fyi_at +3\n {2}notify\.enabled +true\n {2}notify\.quiet +19:00-09:00\n/,
   );
   assert.match(r.out, /\n\nThis device\n {2}app\.hotkey +/);
   assert.deepEqual(

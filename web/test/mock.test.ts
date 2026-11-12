@@ -86,7 +86,7 @@ test("overview, focus and every board", async () => {
 });
 
 // Before the tests below act on cards, while the queue is as the mock starts.
-test("the queue's cards carry pre-flight in every state, and the queue folds", async () => {
+test("the queue's cards carry pre-flight in every state", async () => {
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   const top = [...q.sections.now, ...q.sections.today];
   const of = (id: string) => top.find((c) => c.id === id)!;
@@ -114,9 +114,8 @@ test("the queue's cards carry pre-flight in every state, and the queue folds", a
 
   const quiet = q.sections.later.find((c) => c.id === "acme/api#4040")!;
   assert.equal(quiet.demoted, "quiet for 3 weeks");
-  assert.ok(top.length > 12 && q.cards === 10, "the queue folds");
+  assert.ok(top.length > 12);
   assert.equal(q.paused, null);
-  assert.equal((await call<FocusView>("GET", "/api/focus")).data.cards, 10);
 });
 
 test("logged out: the queue says Claude is paused once, cards wait, every agent says why, and resuming runs them again", async () => {

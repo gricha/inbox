@@ -44,7 +44,6 @@ import {
   type Acted,
   type ListPage,
   stops,
-  type Group,
   type GroupKey,
   type Route,
   whereIs,
@@ -165,7 +164,6 @@ export function App() {
   const actedRef = useRef(acted);
   // Later's groups other than its own open on a click on their heading, and close again on reload.
   const [open, setOpen] = useState(DEFAULT_OPEN);
-  const [unfolded, setUnfolded] = useState<Partial<Record<GroupKey, boolean>>>({}); // the queue's "n more" line
   const [filter, setFilter] = useState("");
   const [toast, setToast] = useState<Toast | null>(null);
   const [failures, setFailures] = useState<Notice[]>([]); // actions that failed, as bubbles that fade
@@ -468,7 +466,7 @@ export function App() {
     stay.current = null;
     setMenuAt(null);
   }, [route]);
-  const groups = useMemo(() => groupsOf(view, open, filter, unfolded), [view, open, filter, unfolded]);
+  const groups = useMemo(() => groupsOf(view, open, filter), [view, open, filter]);
   // The selection goes through the page on screen: the queue, or Later's groups; in a review, the page it came from.
   const list = route.name === "review" ? reviewFrom : route.name;
   const page = useMemo(() => {
@@ -522,7 +520,6 @@ export function App() {
     if (at) {
       opening.current = route.id;
       setOpen((o) => ({ ...o, [at.group]: true }));
-      setUnfolded((u) => ({ ...u, [at.group]: true }));
     }
     location.replace(routeHash(at ? { name: at.page } : { name: "review", id: route.id }));
   }, [route, view, known]);
@@ -1200,29 +1197,6 @@ export function App() {
     }
   }
 
-  // Focus follows the selection, without a scroll of its own.
-  function focusRow(id: string) {
-    const el = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
-    const target = el instanceof HTMLButtonElement ? el : el?.querySelector(".row-main");
-    if (target instanceof HTMLElement) target.focus({ preventScroll: true });
-  }
-
-  // A group's "n more" line opens in place; from the keyboard, the selection and focus go on to the first card it showed (a
-  // click leaves both where they were: focus there would draw Tab's ring on a row nobody touched).
-  function unfold(k: GroupKey, keyboard: boolean) {
-    const shown = new Set(groups.find((g) => g.key === k)?.cards.map((c) => c.id));
-    const first = groupsOf(view, open, filter, { ...unfolded, [k]: true })
-      .find((g) => g.key === k)
-      ?.cards.find((c) => !shown.has(c.id));
-    setUnfolded((u) => ({ ...u, [k]: true }));
-    if (first && keyboard) {
-      setSelected(first.id);
-      requestAnimationFrame(() => {
-        focusRow(first.id);
-      });
-    }
-  }
-
   function toggleGroup(k: GroupKey) {
     setOpen((o) => ({ ...o, [k]: !o[k] }));
   }
@@ -1442,25 +1416,16 @@ export function App() {
   // while it is); focusing a row leaves the selection on it.
   const listSel = menuAt?.id ?? openSel;
   const compact: RowCtx = { ...ctx, compact: true, selected: listSel, select: ignore };
-  // The open item's row is always in the list beside, marked: one behind the Inbox's "n more" opens that line there.
-  const besideGroups = useMemo(() => {
-    const shows = (gs: Group[]) => gs.some((g) => PAGE_GROUPS.queue.includes(g.key) && g.cards.some((c) => c.id === openSel));
-    if (!openSel || shows(groups)) return groups;
-    const all = groupsOf(view, open, filter, { ...unfolded, standard: true, fyi: true });
-    return shows(all) ? all : groups;
-  }, [groups, openSel, view, open, filter, unfolded]);
   const besideRows =
     side !== "open" || !listPage ? null : listPage === "queue" ? (
       <Queue
         view={view}
         overview={overview}
-        groups={besideGroups}
+        groups={groups}
         ctx={compact}
         inquiries={inquiries}
         inq={{ ...inq, compact: true, selected: listSel, select: ignore }}
         filter={filter}
-        unfold={unfold}
-        selectFold={ignore}
         toggle={toggleGroup}
       />
     ) : listPage === "inflight" ? (
@@ -1550,10 +1515,6 @@ export function App() {
               sessions={sessions}
               ses={ses}
               filter={filter}
-              unfold={unfold}
-              selectFold={(k) => {
-                setSelected(`fold:${k}`);
-              }}
               toggle={toggleGroup}
             />
           )}
