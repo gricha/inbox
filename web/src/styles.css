@@ -2176,6 +2176,33 @@ p {
   font-variant-numeric: tabular-nums;
 }
 
+/* A review's "Not worth reviewing" line: a click opens it in place. */
+.fold {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--pencil);
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fold:hover {
+  color: var(--ink);
+}
+
+.fold:focus-visible {
+  outline-offset: -2px;
+}
+
+.fold.sel {
+  background: var(--sel);
+  box-shadow: inset 0 0 0 1.5px var(--pencil);
+}
+
 @keyframes leave {
   to {
     opacity: 0;
