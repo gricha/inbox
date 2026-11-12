@@ -4772,33 +4772,8 @@ fieldset.au-field > legend {
   font-size: 13px;
 }
 
-/* A part of the sidebar (the checks, the reviewers, the merge): one line saying where it stands, its chevron at the
-   sidebar's edge so its words start where the other headings do; open, each row's name and, in words, its state. */
-.rv-part.shut .rv-side-head {
-  margin-bottom: 0;
-}
-
-.rv-part-lead {
-  display: flex;
-  flex: 1;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.rv-part-lead:hover,
-.rv-part-lead:hover .rv-chev {
-  color: var(--ink);
-}
-
+/* A part of the sidebar (the checks, the reviewers, the merge): its name, where it stands in one line that reads first,
+   then its rows, each one's name and, in words, its state. */
 .rv-part-row {
   display: flex;
   gap: 8px;
@@ -4830,21 +4805,83 @@ a.rv-part-row:hover {
   color: var(--pencil);
 }
 
-/* One line each, closed: a long one is cut at its end, whole in its tooltip and in its rows. */
 .rv-part-line {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin: 0 0 4px;
+  padding: 0 8px;
+  font-size: 14px;
+  font-weight: 550;
+  line-height: 1.35;
+}
+
+.rv-part-line:not(.t-bad, .t-warn) {
+  color: var(--ink);
 }
 
 .rv-part-err {
   padding: 0 8px;
 }
 
-/* The parts are one group: closer to each other than to the stack above them and the files below. */
-.rv-part + .rv-part {
-  margin-top: -14px;
+.rv-dot {
+  flex: none;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--rule-strong);
+}
+
+.rv-dot.d-red {
+  background: var(--red);
+}
+
+/* Failing but not required: red, hollow. */
+.rv-dot.d-amber {
+  box-shadow: inset 0 0 0 2px var(--red);
+  background: none;
+}
+
+.rv-dot.d-yellow {
+  background: var(--amber);
+}
+
+.rv-dot.d-green {
+  background: var(--green);
+}
+
+/* Shards of one check: one row, a count, open to list them. */
+.rv-check-group {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rv-check-group:hover {
+  background: var(--side-hover);
+}
+
+.rv-check-group[aria-expanded="true"] .rv-chev {
+  transform: rotate(90deg);
+}
+
+.rv-side ol.rv-check-shards {
+  padding-left: 16px;
+}
+
+.rv-part-more {
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: var(--pencil);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rv-part-more:hover {
+  color: var(--ink);
 }
 
 .back {
@@ -5105,7 +5142,31 @@ a.rv-part-row:hover {
   color: var(--pencil);
 }
 
-/* Who's asked to review it, after its author: faces and names, a verdict's mark in its colour. */
+/* Under the title: its size, + green and − red, then who reviews it. */
+.rv-size-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  align-items: center;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: clamp(13px, 11.5px + 0.2vw, 14.5px);
+}
+
+.rv-size {
+  font-variant-numeric: tabular-nums;
+  font-weight: 550;
+}
+
+.rv-size .add {
+  color: var(--green);
+}
+
+.rv-size .del {
+  color: var(--red);
+}
+
+/* Who reviews it: faces and names, a verdict's mark in its colour. */
 .rv-revs {
   display: inline-flex;
   flex-wrap: wrap;

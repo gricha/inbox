@@ -244,16 +244,24 @@ Esc or the back link goes back to the page it was opened from.
 ### Header
 
 - The ref, a stack's place ("3/6"), the author with their picture ("by you" on yours), the title.
-- One line of facts: why it's on the desk (only what the row doesn't already say), CI, the review state ("approved by marco"), a merge conflict while open, size.
-- Where the PR has checks, the CI fact is a button: it opens the review's sidebar at the checks.
-- A resolved PR says so in place of the why: "Resolved: merged by li-wei · 2h".
+- Under the title, one line: its size, + in green and − in red, then who reviews it, each with their picture (a team "@") and a verdict's mark (✓ approved in green, "changes" in amber). Someone who only commented is in the sidebar's Reviewers.
+- Nothing else: why it's on the desk is the row's; CI, the review state, a conflict and what it blocks are the sidebar's.
+- A resolved PR says so under the title: "Resolved: merged by li-wei · 2h".
 - Your PR in Merging says "Merging", with what it waits on and your agent's latest note.
 - Your own PR with no AI review shows the first paragraph of its description under the title.
 - Problems are coloured words; pencil once the PR is sorted away, resolved, or calm in Merging.
 
+### The review's sidebar
+
+Sections, each open: its name, where it stands in one line that reads first (red when a required check fails, amber for changes requested), then its rows.
+
+- **Checks**: a row each, with a dot: red failing, red hollow failing but not required, yellow running, green passing, grey skipped. Shards of one check (`backend test (0)`, `(1)`, `[2/3]`, `#4`) are one row with a count and their worst dot; a click lists them. What's wrong comes first; past six rows the green and grey ones wait behind "N more passing". `checkGroups()` in `web/src/view.ts`.
+- **Reviewers**: everyone, with their picture and where they stand.
+- **Merge**: a conflict. **Depends**: what it's blocked by or blocks, when it isn't in a stack (a stack has its own section).
+
 ### The AI review
 
-No heading; right under the facts.
+No heading; right under the header.
 
 - **Verdict**: "Look closely" (a step larger, semibold), "Skim it" or "Skip it". The model and time are in its tooltip.
 - **Risk**: in colour with a three-step meter. "on an earlier commit" in pencil when it is.

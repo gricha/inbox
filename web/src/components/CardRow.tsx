@@ -30,24 +30,6 @@ const CTA = {
   merge: { label: "Merge", title: "Approved, green and mergeable: merges it on GitHub with its repo's merge method" },
 };
 
-// Your own PR's why is what you owe ("handed back: …"): a real "label:" leads in ink, the rest is regular, and the
-// problem it names takes its colour.
-export function Owed({ why, tone }: { why: string; tone?: string | undefined }) {
-  const [head = "", tail] = why.split(/: (.*)/s);
-  const t = cls("owed-text", tone && `t-${tone}`);
-  return (
-    <span className="why owed">
-      {tail === undefined ? (
-        <span className={t}>{why.charAt(0).toUpperCase() + why.slice(1)}</span>
-      ) : (
-        <>
-          <b>{head.charAt(0).toUpperCase() + head.slice(1)}:</b> <span className={t}>{tail}</span>
-        </>
-      )}
-    </span>
-  );
-}
-
 // What a row on Blocked or in the Archive says after its ref: why it's there. The Inbox's rows say their `reason`.
 function noteOf(card: Card, variant: Variant): string {
   if (variant === "cleared") return clearedText(card);

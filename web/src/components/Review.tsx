@@ -6,6 +6,8 @@ import {
   JOB_ATTEMPTS,
   type AiReview,
   type Card,
+  type Check,
+  type Checks,
   type Conversation as Convo,
   type GitHubAction,
   type InflightRow,
@@ -42,6 +44,8 @@ import {
   type Kept,
 } from "../drafts.ts";
 import {
+  checkDot,
+  checkGroups,
   currentFile,
   diffRows,
   drawUpTo,
@@ -52,17 +56,17 @@ import {
   sectionOf,
   resolvedHead,
   routeHash,
-  says,
   splitPath,
   threadsOn,
   type Acted,
+  type CheckGroup,
+  type Dot,
 } from "../view.ts";
 import { FIT, isTestPath, LEVEL, onLines, STATUS, traditional, VERDICT, walk, type Section } from "../../../src/sections.ts";
 import "../diffThemes.ts";
 import { getStored, setStored } from "../storage.ts";
 import { diffTheme, omarchyTheme, onOmarchy } from "../theme.ts";
 import { Avatar } from "./Avatar.tsx";
-import { Owed } from "./CardRow.tsx";
 import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
 import type { Spot } from "./Chat.tsx";
 import { Conversation, threadOf } from "./Conversation.tsx";
@@ -106,6 +110,7 @@ interface Fact {
 // Sorted away, resolved or calm in Merging, a PR's problems go grey: its header's facts, and its checks in the sidebar.
 const calm = (c: Card) => cls(`b-${c.bucket}`, (c.status !== "active" || c.resolved !== null || c.bucket === "hide") && "dim");
 
+const SIDE_ROWS = 6; // a sidebar part longer than this folds its quiet rows
 const LINE = 96; // px below the window's top where "the section you're in" is read off
 const REST = "Not worth reviewing"; // the fold's line
 const STACK_SHOWN = 4; // the PR below this one, this one and two above; the rest of a long stack is a click away
@@ -208,7 +213,6 @@ export function Review({
   const [more, setMore] = useState(false); // the More menu
   // The sidebar's checks and reviewers, listed: every PR opens with each in one line.
   const [checksOpen, setChecksOpen] = useState(false);
-  const [reviewersOpen, setReviewersOpen] = useState(false);
   const [writing, setWriting] = useState(false); // Request changes, being written
   // Your comment on the PR, unsent: kept here, not in its box, so a refusal, acting on the PR or its closing never loses it,
   // and per PR for this window, as a line's is, so leaving the review and coming back finds it; sent, it's cleared.
@@ -558,15 +562,6 @@ export function Review({
     setStored(SIDE, show ? "open" : "folded");
   }
 
-  // The facts' "CI failing": the sidebar, opened if it's folded, with the checks listed.
-  function showChecks() {
-    if (!showSide) toggleSide();
-    setChecksOpen(true);
-    requestAnimationFrame(() => {
-      document.querySelector(".rv-side")?.scrollTo({ top: 0 });
-    });
-  }
-
   function askAi() {
     if (!v || busy === "ai") return;
     if (v.generating) {
@@ -671,32 +666,8 @@ export function Review({
   const { card, item, files } = view;
   const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
   const mine = item.state === "open" && isMine;
-  const approvers = item.reviews.filter((r) => r.state === "approved").map((r) => r.author);
-  const approvals = approvers.length;
-  // Problems are coloured words, as in the queue, and greyed by the same rules once the PR is sorted away.
-  const facts: Fact[] = [
-    { text: `CI ${CI[item.ci]}`, tone: item.ci === "red" ? "t-bad" : "", go: view.checks ? showChecks : undefined },
-    {
-      text:
-        item.review_decision === "approved" && approvals
-          ? `approved by ${approvers.join(", ")}`
-          : `${REVIEW[item.review_decision]}${approvals ? `, ${approvals} ${approvals === 1 ? "approval" : "approvals"}` : ""}`,
-      tone: item.review_decision === "changes_requested" ? "t-warn" : "",
-    },
-    // Merged or closed, a conflict no longer matters.
-    ...(item.state === "open" && item.mergeable === "conflict" ? [{ text: "merge conflict", tone: "t-warn" }] : []),
-    ...(item.draft ? [{ text: "draft", tone: "" }] : []),
-    ...depFacts(card),
-    // No size to speak of where nothing changed: "No files changed." says so under it.
-    ...(item.changed_files
-      ? [
-          {
-            text: `+${item.additions} −${item.deletions} in ${item.changed_files} ${item.changed_files === 1 ? "file" : "files"}`,
-            tone: "",
-          },
-        ]
-      : []),
-  ];
+  const size = item.changed_files ? { add: item.additions, del: item.deletions } : null;
+  const deps = depFacts(card);
   const resolved = card.resolved ? resolvedHead(view.activity, card.resolved, me) : null;
   // The one box you write in, wherever it's drawn: under its line, or above the diff once a push took its line off it.
   const composer = (label: string) =>
@@ -784,16 +755,7 @@ export function Review({
       {toggle}
       <div className="rv-main">
         <div className="rv-top">
-          <Head
-            card={card}
-            me={me}
-            now={now}
-            facts={facts}
-            owed={mine}
-            resolved={resolved?.line ?? null}
-            row={row}
-            reviewers={view.reviewers.list}
-          />
+          <Head card={card} me={me} now={now} size={size} resolved={resolved?.line ?? null} row={row} reviewers={view.reviewers.list} />
           {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
           {isMine && !view.ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
           {/* Your own PR gets no AI review unless one was asked for; More still asks. */}
@@ -1085,20 +1047,12 @@ export function Review({
             </section>
           )}
           {view.checks && (
-            <SidePart
-              id="checks"
-              name="Checks"
-              line={view.checks.line}
+            <ChecksPart
+              checks={view.checks}
               bad={view.checks.failing ? "t-bad" : ""}
               tone={calm(card)}
               open={checksOpen}
               setOpen={setChecksOpen}
-              rows={view.checks.list.map((c) => ({
-                name: c.name,
-                state: c.state === "failing" && c.optional ? "failing, not required" : c.state,
-                bad: c.state === "failing" && !c.optional ? "t-bad" : "",
-                url: c.url,
-              }))}
             />
           )}
           <SidePart
@@ -1107,17 +1061,17 @@ export function Review({
             line={view.reviewers.line}
             bad={view.reviewers.changes ? "t-warn" : ""}
             tone={calm(card)}
-            open={reviewersOpen}
-            setOpen={setReviewersOpen}
             rows={view.reviewers.list.map((r) => ({
               name: r.who,
               ...(r.who !== "you" && !r.who.startsWith("@") && { login: r.who }),
               state: r.state,
               bad: r.state === "changes requested" ? "t-warn" : "",
-              url: "",
             }))}
           />
           {view.merge && <SidePart id="merge" name="Merge" line={view.merge} bad="t-warn" tone={calm(card)} />}
+          {!view.stack && deps.length > 0 && (
+            <SidePart id="deps" name="Depends" line={deps.map((d) => d.text).join(" · ")} bad="" tone={calm(card)} />
+          )}
           {steps.length > 0 && <StepList stops={stops} on={secIdx} onGo={goTo} />}
           {list.length > 0 && !steps.length && (
             <nav className="rv-files" aria-label="Files">
@@ -1230,13 +1184,13 @@ function HeadReviewers({ list, me }: { list: Standing[]; me: string }) {
   );
 }
 
-// The header: the ref, the title, and one line of why and facts; a resolved PR's line, and Merging's for your PR there.
+// The header: the ref, the title, then how big it is and who reviews it; what stands in its way is the sidebar's. A resolved
+// PR's line, and Merging's for your PR there.
 function Head({
   card,
   me,
   now,
-  facts,
-  owed,
+  size,
   resolved,
   row,
   reviewers,
@@ -1244,16 +1198,12 @@ function Head({
   card: Card;
   me: string;
   now: number;
-  facts: Fact[];
-  owed: boolean; // your open PR: its why is what you owe
+  size: { add: number; del: number } | null;
   resolved: string | null;
   row: InflightRow | null;
   reviewers: Standing[];
 }) {
   const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
-  // The why leaves out a fact it already says, as on the card ("conflicts with main" says "merge conflict").
-  const why = card.why && !card.resolved && !facts.some((f) => f.text.toLowerCase() === card.why.toLowerCase()) ? card.why : "";
-  const shownFacts = why ? facts.filter((f) => !says(why, f.text)) : facts;
   // What it waits on and the coordinator's latest note, as Merging says it.
   const lane = row?.state === "open" && (row.waits_on || row.note) ? row : null;
   return (
@@ -1274,23 +1224,18 @@ function Head({
           {isMine ? "you" : card.author}
           {card.author_bot ? " (bot)" : ""}
         </span>
-        <HeadReviewers list={reviewers} me={me} />
       </p>
       <h1 className="rv-title">{card.title}</h1>
-      <p className="rv-meta">
-        {why && (owed ? <Owed why={why} /> : <span className="why">{why}</span>)}
-        {shownFacts.map((f) => (
-          <span key={f.text} className={cls("fact-word", f.tone)}>
-            {f.go ? (
-              <button type="button" className="rv-fact-btn" title="Show its checks" onClick={f.go}>
-                {f.text}
-              </button>
-            ) : (
-              f.text
-            )}
-          </span>
-        ))}
-      </p>
+      {(!!size || reviewers.some((r) => r.state !== "commented")) && (
+        <p className="rv-size-line">
+          {size && (
+            <span className="rv-size" title={`${size.add} lines added, ${size.del} removed`}>
+              <span className="add">+{size.add}</span> <span className="del">−{size.del}</span>
+            </span>
+          )}
+          <HeadReviewers list={reviewers} me={me} />
+        </p>
+      )}
       {card.handoff && (
         <p className="rv-meta rv-handoff">
           <span>
@@ -1328,17 +1273,10 @@ function depFacts(c: Card): Fact[] {
   ];
 }
 
-// The header's facts as its row has them, until the review brings who approved and how many files.
-function rowFacts(c: Card): Fact[] {
-  const size = c.chips.find((x) => x.startsWith("+"));
-  return [
-    { text: `CI ${CI[c.ci]}`, tone: c.ci === "red" ? "t-bad" : "" },
-    { text: REVIEW[c.review], tone: c.review === "changes_requested" ? "t-warn" : "" },
-    ...(!c.resolved && c.chips.includes("conflict") ? [{ text: "merge conflict", tone: "t-warn" }] : []),
-    ...(c.draft ? [{ text: "draft", tone: "" }] : []),
-    ...depFacts(c),
-    ...(size ? [{ text: size, tone: "" }] : []),
-  ];
+// The header's size as its row has it, until the review lands.
+function rowSize(c: Card): { add: number; del: number } | null {
+  const m = /^\+(\d+) −(\d+)/.exec(c.chips.find((x) => x.startsWith("+")) ?? "");
+  return m ? { add: Number(m[1]), del: Number(m[2]) } : null;
 }
 
 // The review before it lands: what its row knows, and quiet placeholders where the rest will be, so nothing moves.
@@ -1376,8 +1314,7 @@ function Shell({
               card={card}
               me={me}
               now={now}
-              facts={rowFacts(card)}
-              owed={isMine && !card.resolved}
+              size={rowSize(card)}
               resolved={card.resolved ? resolvedHead([], card.resolved, me).line : null}
               reviewers={[]}
               row={row}
@@ -1463,79 +1400,145 @@ function SidePart({
   line,
   bad,
   tone = "",
-  open = false,
-  setOpen,
   rows,
 }: {
   id: string; // data-part, for a check to find it by
   name: string;
   line: string;
-  bad: string; // t-bad, t-warn, or "" for pencil
-  tone?: string; // calm(): on a sorted-away PR its problems are grey, as the header's facts are
-  open?: boolean;
-  setOpen?: (open: boolean) => void;
-  rows?: { name: string; login?: string; state: string; bad: string; url: string }[];
+  bad: string; // t-bad, t-warn, or "" for ink
+  tone?: string; // calm(): on a sorted-away PR its problems are grey
+  rows?: { name: string; login?: string; state: string; bad: string }[];
 }) {
-  const words = (
-    <span className={cls("rv-part-line", "fact-word", bad)} title={line}>
-      {line}
-    </span>
-  );
   return (
-    <section className={cls("rv-part", tone, !open && "shut")} data-part={id} aria-label={name}>
+    <section className={cls("rv-part", tone)} data-part={id} aria-label={name}>
       <h2 className="rv-side-head">
-        {setOpen && rows?.length ? (
-          <button
-            type="button"
-            className="rv-part-lead"
-            aria-expanded={open}
-            onClick={() => {
-              setOpen(!open);
-            }}
-          >
-            {words}
-            <span className="rv-chev" aria-hidden="true">
-              ›
-            </span>
-          </button>
-        ) : (
-          words
-        )}
+        <span>{name}</span>
       </h2>
-      {open && (
+      <p className={cls("rv-part-line", "fact-word", bad)} title={line}>
+        {line}
+      </p>
+      {!!rows?.length && (
         <ol>
-          {rows?.map((r, i) => {
-            const row = (
-              <>
+          {rows.map((r) => (
+            <li key={r.name}>
+              <span className="rv-part-row">
                 <span className="rv-part-name">
                   {r.login && <Avatar login={r.login} />}
                   {r.name}
                 </span>
                 <span className={cls("rv-part-state", "fact-word", r.bad)}>{r.state}</span>
-              </>
-            );
-            return (
-              // oxlint-disable-next-line react/no-array-index-key -- two checks can share a name, and the list never reorders in place
-              <li key={i}>
-                {r.url ? (
-                  <a
-                    className="rv-part-row"
-                    href={r.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={`${r.name}: ${r.state}\n${urlPlace(r.url)}`}
-                  >
-                    {row}
-                  </a>
-                ) : (
-                  <span className="rv-part-row" title={`${r.name}: ${r.state}`}>
-                    {row}
-                  </span>
-                )}
-              </li>
-            );
-          })}
+              </span>
+            </li>
+          ))}
         </ol>
+      )}
+    </section>
+  );
+}
+
+const DOT_WORDS: Record<Dot, string> = {
+  red: "failing",
+  amber: "failing, not required",
+  yellow: "running",
+  green: "passing",
+  grey: "skipped",
+};
+
+// The checks: where they stand, then a row each, shards of one check folded into one; a dot says how each is doing. Over
+// SIDE_ROWS rows, the green and grey ones wait behind one line.
+function ChecksPart({
+  checks,
+  bad,
+  tone,
+  open,
+  setOpen,
+}: {
+  checks: Checks;
+  bad: string;
+  tone: string;
+  open: boolean; // the green ones shown too
+  setOpen: (open: boolean) => void;
+}) {
+  const [nested, setNested] = useState<Set<string>>(new Set());
+  const groups = checkGroups(checks.list);
+  const folds = groups.length > SIDE_ROWS;
+  const quiet = (g: CheckGroup) => g.dot === "green" || g.dot === "grey";
+  const shown = folds && !open ? groups.filter((g) => !quiet(g)) : groups;
+  const hidden = groups.length - shown.length;
+  const dot = (d: Dot) => <span className={cls("rv-dot", `d-${d}`)} aria-label={DOT_WORDS[d]} title={DOT_WORDS[d]} />;
+  const link = (c: Check, label: string, cls_ = "rv-part-row") =>
+    c.url ? (
+      <a
+        className={cls_}
+        href={c.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={`${c.name}: ${DOT_WORDS[checkDot(c)]}\n${urlPlace(c.url)}`}
+      >
+        {dot(checkDot(c))}
+        <span className="rv-part-name">{label}</span>
+      </a>
+    ) : (
+      <span className={cls_} title={`${c.name}: ${DOT_WORDS[checkDot(c)]}`}>
+        {dot(checkDot(c))}
+        <span className="rv-part-name">{label}</span>
+      </span>
+    );
+  return (
+    <section className={cls("rv-part", tone)} data-part="checks" aria-label="Checks">
+      <h2 className="rv-side-head">
+        <span>Checks</span>
+      </h2>
+      <p className={cls("rv-part-line", "fact-word", bad)} title={checks.line}>
+        {checks.line}
+      </p>
+      <ol>
+        {shown.map((g) => {
+          if (g.checks.length === 1) return <li key={g.name}>{link(g.checks[0]!, g.name)}</li>;
+          const isOpen = nested.has(g.name);
+          return (
+            <li key={g.name}>
+              <button
+                type="button"
+                className="rv-part-row rv-check-group"
+                aria-expanded={isOpen}
+                onClick={() => {
+                  const next = new Set(nested);
+                  if (isOpen) next.delete(g.name);
+                  else next.add(g.name);
+                  setNested(next);
+                }}
+              >
+                {dot(g.dot)}
+                <span className="rv-part-name">{g.name}</span>
+                <span className="rv-part-state">{g.checks.length}</span>
+                <span className="rv-chev" aria-hidden="true">
+                  ›
+                </span>
+              </button>
+              {isOpen && (
+                <ol className="rv-check-shards">
+                  {g.checks.map((c, i) => (
+                    // oxlint-disable-next-line react/no-array-index-key -- two shards can share a name, and the list never reorders in place
+                    <li key={i}>{link(c, c.name.slice(g.name.length).trim() || c.name)}</li>
+                  ))}
+                </ol>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      {folds && (hidden > 0 || open) && (
+        <button
+          type="button"
+          className="rv-part-more"
+          aria-expanded={open}
+          onClick={() => {
+            setOpen(!open);
+          }}
+        >
+          {open ? "Show less" : `${hidden} more passing`}
+        </button>
       )}
     </section>
   );

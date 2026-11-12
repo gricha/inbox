@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkSetting, DEFAULTS, settingDef } from "../../src/settings.ts";
-import type { ActivityEvent, Card, Conversation, JudgeStatus, QueueView, ReviewHunk, ReviewOrder, SettingValue } from "../../src/types.ts";
+import type {
+  ActivityEvent,
+  Card,
+  Check,
+  Conversation,
+  JudgeStatus,
+  QueueView,
+  ReviewHunk,
+  ReviewOrder,
+  SettingValue,
+} from "../../src/types.ts";
 import {
   age,
   ago,
@@ -68,6 +78,8 @@ import {
   whereIs,
   type KeyLike,
   handsOff,
+  checkDot,
+  checkGroups,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
 import { isTestPath, onLines, sections, traditional, walk } from "../../src/sections.ts";
@@ -1272,4 +1284,29 @@ test("asking your agent to change an automation or a criterion names it, its too
   assert.match(built, /^Change my urgency criterion "Your draft" \(id github.draft\): only when CI is green/);
   assert.match(built, /built in, so it can't be edited: with desk_criteria, .*write my own criterion/);
   assert.doesNotMatch(built, /stays off/, "a criterion isn't an automation");
+});
+
+test("checks: shards of one check are one row with its worst dot, what's wrong first; one alone keeps its whole name", () => {
+  const c = (name: string, state: Check["state"], optional = false): Check => ({ name, state, optional, url: "" });
+  const groups = checkGroups([
+    c("backend test (0)", "passing"),
+    c("backend test (1)", "running"),
+    c("backend test (2)", "passing"),
+    c("lint", "passing"),
+    c("acceptance [1/2]", "failing"),
+    c("acceptance [2/2]", "skipped"),
+    c("codecov", "failing", true),
+    c("docs", "skipped"),
+  ]);
+  assert.deepEqual(
+    groups.map((g) => [g.name, g.dot, g.checks.length]),
+    [
+      ["acceptance", "red", 2],
+      ["codecov", "amber", 1],
+      ["backend test", "yellow", 3],
+      ["lint", "green", 1],
+      ["docs", "grey", 1],
+    ],
+  );
+  assert.equal(checkDot(c("x", "cancelled")), "red");
 });

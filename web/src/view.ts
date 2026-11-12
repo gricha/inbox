@@ -4,6 +4,7 @@ import type {
   AgentName,
   AskLines,
   Card,
+  Check,
   Conversation,
   InlineAt,
   JudgeStatus,
@@ -696,4 +697,42 @@ export function changeAsk(what: { kind: "automation" | "criterion"; id: string; 
   return what.builtIn
     ? `Change ${it}: ${words}\n\nIt's built in, so it can't be edited: with ${tool}, read its definition and write my own ${what.kind} that does this instead${what.kind === "automation" ? " (it stays off until I turn it on)" : ""}. Then tell me what you wrote and whether I should switch the built-in off.`
     : `Change ${it}: ${words}\n\nWith ${tool}, read its whole definition, change only what I asked, and save it. Then tell me what you changed.`;
+}
+
+// A check's colour in the review's sidebar: red failing, amber failing but not required, yellow running, green passing, grey skipped.
+export type Dot = "red" | "amber" | "yellow" | "green" | "grey";
+const DOTS: Dot[] = ["red", "amber", "yellow", "green", "grey"];
+export const checkDot = (c: Check): Dot =>
+  c.state === "failing" || c.state === "cancelled"
+    ? c.optional
+      ? "amber"
+      : "red"
+    : c.state === "running"
+      ? "yellow"
+      : c.state === "passing"
+        ? "green"
+        : "grey";
+
+export interface CheckGroup {
+  name: string;
+  dot: Dot; // its worst check's, skipped ones aside
+  checks: Check[];
+}
+
+// A shard's mark at a name's end: "(1/3)", "[2]", "#4", " 3", "shard 2 of 5".
+const SHARD = /\s*(?:\([^()]*\)|\[[^\]]*\]|#?\d+(?:\s*(?:\/|of)\s*\d+)?|shard\s*\d+(?:\s*(?:\/|of)\s*\d+)?)$/i;
+
+// Checks that share a name but for a shard's mark are one row, worst first; one alone keeps its whole name.
+export function checkGroups(list: Check[]): CheckGroup[] {
+  const by = new Map<string, Check[]>();
+  for (const c of list) {
+    const key = c.name.replace(SHARD, "").trim() || c.name;
+    by.set(key, [...(by.get(key) ?? []), c]);
+  }
+  const groups = [...by].map(([name, checks]) => {
+    const dots = new Set(checks.map(checkDot));
+    const dot = DOTS.find((d) => d !== "grey" && dots.has(d)) ?? "grey";
+    return { name: checks.length === 1 ? checks[0]!.name : name, dot, checks };
+  });
+  return groups.toSorted((a, b) => DOTS.indexOf(a.dot) - DOTS.indexOf(b.dot));
 }
