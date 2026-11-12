@@ -340,6 +340,7 @@ export interface SetupView {
   // login: who GitHub says you are; else why it can't be read and what to run (null: nothing to run, just Retry)
   github: { login: string | null; error: string | null; fix: string | null };
   agent: string; // agent.harness
+  picked: SetupAgent["id"] | null; // the agent picked here, connected already; the page waits on GitHub alone
   agents: SetupAgent[];
 }
 

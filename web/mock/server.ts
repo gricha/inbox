@@ -3705,13 +3705,14 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
 const linked = new Set(["claude-code mcp"]);
 
 // The first-run page: Claude Code ready, Codex logged out, OpenCode not installed.
-const firstRun = { needed: false, github: true };
+const firstRun: { needed: boolean; github: boolean; picked: SetupView["picked"] } = { needed: false, github: true, picked: null };
 function setupView(): SetupView {
   const signedOut = new GitHubAuthError({ reason: "no_token", message: "no GitHub token: run `gh auth login`" });
   return {
     needed: firstRun.needed,
     github: githubView(ME, firstRun.github ? null : signedOut),
     agent: setting("agent.harness"),
+    picked: firstRun.picked,
     agents: [
       agentView("claude-code", "Claude Code", true, true),
       agentView("codex", "Codex", true, false),
@@ -4131,17 +4132,16 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "GET /api/setup" || route === "POST /api/setup/check") return setupView();
   if (route === "POST /api/setup") {
     const agent = String((await readBody(req)).agent);
-    if (!firstRun.github)
-      throw new HttpError(409, "connect GitHub first: You're not signed in to GitHub. Run gh auth login", { tag: "Conflict" });
-    if (setupView().agents.find((a) => a.id === agent)?.fix) throw new HttpError(409, `${agent} isn't ready`, { tag: "Conflict" });
+    const a = setupView().agents.find((x) => x.id === agent);
+    if (!a || a.fix) throw new HttpError(409, `${agent} isn't ready`, { tag: "Conflict" });
     putSettings({ "agent.harness": agent }, []);
-    firstRun.needed = false;
+    Object.assign(firstRun, { picked: a.id, needed: !firstRun.github });
     bump();
     return setupView();
   }
   if (route === "POST /api/mock/setup") {
     const body = await readBody(req);
-    Object.assign(firstRun, { needed: body.needed !== false, github: body.github !== false });
+    Object.assign(firstRun, { needed: body.needed !== false, github: body.github !== false, picked: null });
     return setupView();
   }
   if (route === "GET /api/remote") return remoteView();

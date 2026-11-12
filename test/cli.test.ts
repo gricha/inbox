@@ -525,7 +525,7 @@ test("setup shows GitHub and each agent with what to run, and naming one picks i
     "",
   ]);
   const picked = await run(["setup", "claude"]);
-  assert.equal(picked.out, "✓ GitHub: signed in as @you\n✓ Claude Code is your agent: MCP tools and skill connected\n");
+  assert.equal(picked.out, "✓ GitHub: signed in as @you\n✓ Claude Code is your agent: Inbox's MCP tools and skill are installed in it\n");
   assert.deepEqual(fake.calls.at(-1), { method: "POST", path: "/api/setup", body: { agent: "claude-code" } });
   const refused = await run(["setup", "opencode"]);
   assert.deepEqual(

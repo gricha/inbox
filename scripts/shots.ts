@@ -691,37 +691,52 @@ const setupSays = (page: Page) =>
     buttons: [...document.querySelectorAll(".setup button")].map((b) => b.textContent),
     go: [...document.querySelectorAll(".setup .act.primary.go")].map((b) => b.textContent),
   }))()`);
-const setupShot = (name: string, github: boolean, viewport?: { width: number; height: number }): Shot => ({
+// pick: Use Claude Code pressed first, as the installer does when Claude Code runs it.
+const setupShot = (name: string, github: boolean, viewport?: { width: number; height: number }, pick = false): Shot => ({
   name,
   writes: true,
   ...(viewport && { sizes: ["wide"] }),
   go: async (page) => {
     if (viewport) await page.setViewportSize(viewport);
     await firstRun(github)(page);
+    if (pick) {
+      await page.getByRole("button", { name: "Use Claude Code" }).click();
+      await page.getByText("Your agent:").waitFor({ timeout: 15_000 });
+    }
     const s = await setupSays(page);
-    const want = github
+    const want = pick
       ? {
           rows: [
-            "Signed in as @me | ",
-            "Claude Code | Installed and logged in.",
+            "You're not signed in to GitHub. | Run gh auth login in a terminal, then Retry.",
+            "Claude Code | Your agent: Inbox's MCP tools and skill are installed in it.",
             "Codex | Not logged in. Run codex login in a terminal, then Retry.",
             "OpenCode | Not installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login in a terminal, then Retry.",
           ],
-          buttons: ["Use Claude Code", "Retry", "Retry"],
+          buttons: ["Retry", "Retry", "Retry"],
         }
-      : {
-          rows: [
-            "You're not signed in to GitHub. | Run gh auth login in a terminal, then Retry.",
-            "Claude Code | Installed and logged in.",
-            "Codex | Not logged in. Run codex login in a terminal.",
-            "OpenCode | Not installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login in a terminal.",
-          ],
-          buttons: ["Retry"],
-        };
+      : github
+        ? {
+            rows: [
+              "Signed in as @me | ",
+              "Claude Code | Installed and logged in.",
+              "Codex | Not logged in. Run codex login in a terminal, then Retry.",
+              "OpenCode | Not installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login in a terminal, then Retry.",
+            ],
+            buttons: ["Use Claude Code", "Retry", "Retry"],
+          }
+        : {
+            rows: [
+              "You're not signed in to GitHub. | Run gh auth login in a terminal, then Retry.",
+              "Claude Code | Installed and logged in.",
+              "Codex | Not logged in. Run codex login in a terminal, then Retry.",
+              "OpenCode | Not installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login in a terminal, then Retry.",
+            ],
+            buttons: ["Retry", "Use Claude Code", "Retry", "Retry"],
+          };
     const got = { rows: s.rows, buttons: s.buttons };
     if (s.side || s.title !== "Set up Inbox" || JSON.stringify(got) !== JSON.stringify(want))
       failures.push(`${name}: the page reads ${JSON.stringify(s)}`);
-    if (s.go.length !== (github ? 1 : 0)) failures.push(`${name}: its green buttons are ${JSON.stringify(s.go)}`);
+    if (s.go.length !== (pick ? 0 : 1)) failures.push(`${name}: its green buttons are ${JSON.stringify(s.go)}`);
   },
   after: async (page) => {
     if (viewport) {
@@ -775,6 +790,7 @@ const SORTING: FirstPass = { step: "sort", done: 40, total: 120, found: 120, lin
 const SHOTS: Shot[] = [
   setupShot("setup", true),
   setupShot("setup-github", false),
+  setupShot("setup-picked", false, undefined, true),
   setupShot("setup-narrow", true, { width: 390, height: 760 }),
   {
     // Picking your agent: one press, then the Inbox.

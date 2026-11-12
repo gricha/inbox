@@ -123,13 +123,34 @@ test("picking a ready agent sets it, connects it like Settings' Connect, and the
   again.stop();
 });
 
-test("GitHub not connected: picking an agent waits for it", async () => {
+test("GitHub not connected: the agent is picked and connected, and the page finishes when GitHub is", async () => {
+  fake("claude");
   const t = await fresh({ "claude-code": "ready" }, true);
   try {
-    const e = await failure(t.desk.chooseAgent("claude-code", MCP));
-    assert.deepEqual([e._tag, e.message], ["Conflict", "connect GitHub first: You're not signed in to GitHub. Run gh auth login"]);
+    const s = await run(t.desk.chooseAgent("claude-code", MCP));
+    assert.deepEqual([s.needed, s.picked], [true, "claude-code"]);
+    assert.match(readFileSync(join(home, "claude-args"), "utf8"), /^mcp\nadd\n--transport\nhttp\n--scope\nuser\ninbox\n/);
+    assert.ok(existsSync(join(home, ".claude", "skills", "inbox", "SKILL.md")));
+    t.signIn();
+    const after = await run(t.desk.checkSetup());
+    assert.deepEqual([after.needed, after.github.login], [false, "me"]);
   } finally {
     t.desk.stop();
+  }
+});
+
+test("a desk restarted between the pick and the GitHub login finishes the page once GitHub answers", async () => {
+  fake("claude");
+  const t = await fresh({ "claude-code": "ready" }, true);
+  await run(t.desk.chooseAgent("claude-code", MCP));
+  t.desk.stop();
+  t.signIn();
+  const again = new Desk({ home: t.dir, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
+  await run(again.init());
+  try {
+    assert.equal((await run(again.setupView())).needed, false);
+  } finally {
+    again.stop();
   }
 });
 

@@ -2,8 +2,9 @@
 # Installs Inbox, or updates it in place: the app from the latest GitHub release (from source until there is one, or with
 # --source), a GitHub CLI login for it to read GitHub with, and `desk` on your PATH. Then it opens the app.
 #   curl -fsSL https://raw.githubusercontent.com/gricha/inbox/main/install.sh | bash
+# Run by Claude Code, Codex or OpenCode, it installs Inbox's MCP tools and skill in that agent and picks it as yours.
 # Settings: INBOX_APPS (where the app goes), INBOX_DIR (the source checkout), INBOX_BIN (where `desk` goes), INBOX_NO_OPEN=1
-# (don't open it). INBOX_API, INBOX_DOWNLOADS and INBOX_GIT point it at another release or clone (for testing it).
+# (don't open it), INBOX_AGENT=claude|codex|opencode|none (the agent to set up, in place of the one running this). INBOX_API, INBOX_DOWNLOADS and INBOX_GIT point it at another release or clone (for testing it).
 set -euo pipefail
 
 REPO=gricha/inbox
@@ -162,6 +163,45 @@ on_path() {
   say "Added $BIN to your PATH in $rc: open a new terminal to run desk."
 }
 
+# The agent running this, from what each sets for the commands it runs.
+agent_of() {
+  case "${INBOX_AGENT:-}" in
+    claude | codex | opencode)
+      echo "$INBOX_AGENT"
+      return
+      ;;
+    none) return ;;
+  esac
+  if [ -n "${CLAUDECODE:-}" ]; then
+    echo claude
+  elif [ -n "${CODEX_THREAD_ID:-}${CODEX_SANDBOX:-}${CODEX_CI:-}" ]; then
+    echo codex
+  elif [ -n "${OPENCODE:-}" ]; then
+    echo opencode
+  fi
+}
+label() { case "$1" in claude) echo "Claude Code" ;; codex) echo Codex ;; opencode) echo OpenCode ;; esac }
+
+# Its MCP tools and skill, which need no running desk: the tools answer once the app is open.
+connect_agent() {
+  say "Installing Inbox's MCP tools and skill in $(label "$AGENT")."
+  "$BIN/desk" connect "$AGENT" --apply </dev/null || say "That didn't finish: pick $(label "$AGENT") on Inbox's first page instead."
+}
+
+# Once the desk answers, the agent is picked as yours, so the first page waits on GitHub alone.
+pick_agent() {
+  local health="http://localhost:${DESK_PORT:-47823}/health" i
+  for i in $(seq 1 90); do
+    curl -fsS -o /dev/null "$health" </dev/null 2>/dev/null && break
+    [ "$i" = 90 ] && {
+      say "Inbox didn't answer yet: pick $(label "$AGENT") on its first page."
+      return
+    }
+    sleep 1
+  done
+  "$BIN/desk" setup "$AGENT" </dev/null || say "Pick $(label "$AGENT") on Inbox's first page."
+}
+
 open_app() {
   [ -z "${INBOX_NO_OPEN:-}" ] || return 0
   say "Opening Inbox."
@@ -178,6 +218,7 @@ open_app() {
 
 main() {
   local found=""
+  AGENT=$(agent_of)
   case "$OS" in Darwin | Linux) ;; *) die "on Windows, run the installer from https://github.com/$REPO/releases" ;; esac
   [ "${1:-}" = --source ] || found=$(release_asset)
   github
@@ -189,7 +230,10 @@ main() {
     from_source
   fi
   [ -z "${CLI:-}" ] || on_path
+  [ -z "$AGENT" ] || [ -z "${CLI:-}" ] || connect_agent
   open_app
+  if [ -n "$AGENT" ] && [ -n "${CLI:-}" ] && [ -z "${INBOX_NO_OPEN:-}" ]; then pick_agent; fi
+  [ -z "$AGENT" ] || say "$(label "$AGENT") loads Inbox's tools and skill in a new session: start one to use them."
 }
 
 main "$@"

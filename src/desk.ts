@@ -512,6 +512,7 @@ export class Desk {
       yield* this.migrateSecrets();
       this.oldPolicy();
       if (!this.githubError) yield* this.loadConfig();
+      this.finishSetup(false); // a desk restarted between your pick and your GitHub login; its loops sync it
       fs.watchFile(this.settingsPath, { interval: 2000 }, () => {
         this.edited("settings.json");
       });
@@ -1000,6 +1001,7 @@ export class Desk {
         needed: this.store.get("setup") === "pending",
         github: githubView(this.me(), this.githubError),
         agent: this.agent(),
+        picked: AGENTS.find((a) => a.id === this.store.get("setup_agent"))?.id ?? null,
         agents: yield* this.agentChecks(fresh),
       };
     });
@@ -1030,32 +1032,37 @@ export class Desk {
       if (this.githubError) {
         yield* this.connectGitHub();
         if (!this.githubError) yield* this.loadConfig(true);
+        this.finishSetup();
         this.changed();
       }
       return yield* this.setupView(true);
     });
   }
 
-  // The first-run page's choice: your agent, connected as Settings → Agent's Connect does it. Then the page is done for good.
+  // The first-run page's choice: your agent, connected as Settings → Agent's Connect does it. The page is then done for good,
+  // or once GitHub is connected: the installer picks the agent that ran it before you've signed in.
   chooseAgent(id: string, mcpUrl: string): Effect.Effect<SetupView, BadRequest | Conflict | Upstream | FsError> {
     return Effect.gen({ self: this }, function* () {
       if (!AGENTS.some((a) => a.id === id))
         return yield* new BadRequest({ message: `unknown agent: ${id} (claude-code, codex or opencode)` });
-      if (this.githubError) {
-        const g = githubView("", this.githubError);
-        return yield* new Conflict({ message: `connect GitHub first: ${g.error}${g.fix ? ` Run ${g.fix}` : ""}` });
-      }
       const a = (yield* this.agentChecks(true)).find((x) => x.id === id)!;
       if (a.fix) return yield* new Conflict({ message: `${a.name} ${a.installed ? "isn't logged in" : "isn't installed"}. Run ${a.fix}` });
       const saved = yield* this.putSettings({ set: { "agent.harness": id } });
       if (!saved.ok) return yield* new Conflict({ message: saved.errors.map((e) => e.message).join("; ") });
       yield* this.connectAgent(mcpUrl);
-      this.store.set("setup", "done");
+      this.store.set("setup_agent", id);
       this.log(`set up with ${a.name}`);
-      if (!this.syncedAt && !this.syncing) this.runner.fork("sync", this.sync());
+      this.finishSetup();
       this.changed();
       return yield* this.setupView();
     });
+  }
+
+  // The first-run page is done once an agent is picked and GitHub is connected.
+  private finishSetup(sync = true): void {
+    if (this.store.get("setup") !== "pending" || this.store.get("setup_agent") === null || this.githubError) return;
+    this.store.set("setup", "done");
+    if (sync && !this.syncedAt && !this.syncing) this.runner.fork("sync", this.sync());
   }
 
   // ---------------------------------------------------------------- sync and the event log

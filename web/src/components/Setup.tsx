@@ -5,8 +5,8 @@ import { api, runUi } from "../api.ts";
 import { cls } from "../format.ts";
 import { Mark } from "./Mark.tsx";
 
-// The first-run page, in the window's place until you pick your agent: GitHub, then the agent. The desk decides what it
-// says (GET /api/setup); Retry asks it again, and Use connects that agent as Settings → Agent's Connect does.
+// The first-run page, in the window's place until GitHub is connected and you've picked your agent. The desk decides what
+// it says (GET /api/setup); Retry asks it again, and Use connects that agent as Settings → Agent's Connect does.
 export function Setup({ view, onChange }: { view: SetupView; onChange: (v: SetupView) => void }) {
   const [busy, setBusy] = useState<string | null>(null); // "check", or the agent being connected
   const [error, setError] = useState<{ at: string; text: string } | null>(null);
@@ -69,7 +69,10 @@ export function Setup({ view, onChange }: { view: SetupView; onChange: (v: Setup
         </div>
 
         <h2 className="setup-head">Your agent</h2>
-        <p className="setup-help">It reviews PRs before you open them and gets the PRs you hand off merged, on your own login.</p>
+        <p className="setup-help">
+          Picking one installs Inbox's MCP tools and skill in it, so it can read and sort your desk. It also reviews PRs before you open
+          them and gets the PRs you hand off merged, on your own login.
+        </p>
         <div className="lines s-sheet">
           {view.agents.map((a) => (
             <div className="setting s-status" key={a.id}>
@@ -78,36 +81,31 @@ export function Setup({ view, onChange }: { view: SetupView; onChange: (v: Setup
                 <p className={cls("s-help", error?.at === a.id && "t-bad")}>
                   {error?.at === a.id ? (
                     error.text
+                  ) : view.picked === a.id ? (
+                    "Your agent: Inbox's MCP tools and skill are installed in it."
                   ) : a.fix ? (
                     <>
-                      {a.installed ? "Not logged in." : "Not installed."}{" "}
-                      {github.login ? (
-                        run(a.fix)
-                      ) : (
-                        <>
-                          Run <code>{a.fix}</code> in a terminal.
-                        </>
-                      )}
+                      {a.installed ? "Not logged in." : "Not installed."} {run(a.fix)}
                     </>
                   ) : (
                     "Installed and logged in."
                   )}
                 </p>
               </div>
-              {github.login && (
+              {view.picked !== a.id && (
                 <div className="s-control">
                   {a.fix ? (
                     retry
                   ) : (
                     <button
                       type="button"
-                      className="act primary go"
+                      className={cls("act", !view.picked && "primary go")}
                       disabled={!!busy}
                       onClick={() => {
                         send(a.id, api.chooseAgent(a.id));
                       }}
                     >
-                      {busy === a.id ? "Connecting…" : `Use ${a.name}`}
+                      {busy === a.id ? "Installing…" : `Use ${a.name}`}
                     </button>
                   )}
                 </div>

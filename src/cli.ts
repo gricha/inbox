@@ -552,7 +552,8 @@ const setup = Effect.fnUntraced(function* (x: Ctx) {
   const g = s.github;
   x.out(g.login ? `${x.c.green("✓")} GitHub: signed in as @${g.login}` : `GitHub: ${g.error}${g.fix ? ` Run: ${g.fix}` : ""}`);
   if (driver) {
-    x.out(`${x.c.green("✓")} ${driver.label} is your agent: MCP tools and skill connected`);
+    x.out(`${x.c.green("✓")} ${driver.label} is your agent: Inbox's MCP tools and skill are installed in it`);
+    if (s.needed) x.out(`Inbox opens once GitHub is connected: run ${g.fix ?? "desk setup"}, then press Retry in the app`);
     return 0;
   }
   for (const a of s.agents) {

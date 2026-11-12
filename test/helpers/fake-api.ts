@@ -386,6 +386,7 @@ function setupView(needed: boolean, agent: string): SetupView {
     needed,
     github: { login: "you", error: null, fix: null },
     agent,
+    picked: needed ? null : (agent as SetupView["picked"]),
     agents: [
       { id: "claude-code", name: "Claude Code", installed: true, logged_in: true, fix: null },
       { id: "codex", name: "Codex", installed: true, logged_in: false, fix: "codex login" },

@@ -20,11 +20,12 @@ On macOS and Linux, that one command:
 - installs the app from the latest release: `/Applications/Inbox.app`, or `~/.local/bin/Inbox.AppImage` on Linux. It updates itself from then on. Until there's a release (or with `bash -s -- --source`), it installs from source in `~/.local/share/inbox`, which needs Node 22.18+ and git;
 - signs you in to GitHub with the GitHub CLI (`gh auth login`), offering to install `gh` with Homebrew;
 - puts `desk` in `~/.local/bin` and that on your PATH (not with Linux's AppImage: there `npm install -g @gricha/inbox` brings it);
-- opens Inbox.
+- opens Inbox;
+- run by Claude Code, Codex or OpenCode (ask it to install Inbox with that command), installs Inbox's MCP tools and skill in that agent and picks it as yours. Start a new session of it to use them.
 
 Run it again to update. On Windows, run the installer from [Releases](https://github.com/gricha/inbox/releases).
 
-**The first open** is one page: GitHub, signed in as you or what to run, and your agent. Claude Code, Codex and OpenCode each say whether they're installed and logged in, or the command that gets them there. Press **Use Claude Code** (or yours) and you're on your Inbox while the first sync runs, about 30 seconds. That also connects the agent to the desk: its MCP tools and the Inbox skill. Settings → Agent changes it later; `desk setup` does the same from a terminal.
+**The first open** is one page: GitHub, signed in as you or what to run, and your agent. Claude Code, Codex and OpenCode each say whether they're installed and logged in, or the command that gets them there. Press **Use Claude Code** (or yours): that installs Inbox's MCP tools and skill in it, and you're on your Inbox while the first sync runs, about 30 seconds. Settings → Agent changes it later; `desk setup` does the same from a terminal.
 
 Every agent run is your own CLI, on your own login.
 
