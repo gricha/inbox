@@ -132,13 +132,13 @@ No top bar: the sidebar is the window's only global chrome, and each page has it
              a review
 ```
 
-| Region                                            | Width                                                                                                                                      | Scrolls                            |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------- |
-| The sidebar (`Sidebar.tsx`)                       | 200px; 148px at 641–1000px; one row across the top at 640px and below                                                                      | inside itself; sideways in its row |
-| The list beside a review (`Beside.tsx`)           | 320–360px (28vw), or a 28px rail; only for a review or a question, at 1160px and wider                                                     | inside itself                      |
-| The page's column (`.col`, `PageHead.tsx` on top) | the rest: a list edge to edge, a review with the page's padding, Settings 760px, Searches and rules 1180px, a question 880px               | the window                         |
-| The chat (`Chat.tsx`)                             | 320–420px (25vw): a third column above 1100px, over the page's right edge at 1100px and below                                              | inside itself                      |
-| A review's sidebar (`.rv-side`)                   | 280px beside the diff while the page's column is 1000px or wider (container query `pane`), else over the diff's edge; its toggle is pinned | inside itself                      |
+| Region                                            | Width                                                                                                                                                                               | Scrolls                            |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| The sidebar (`Sidebar.tsx`)                       | 200px; 148px at 641–1000px; one row across the top at 640px and below                                                                                                               | inside itself; sideways in its row |
+| The list beside a review (`Beside.tsx`)           | 320–360px (28vw), or as wide as you drag its edge (260px to half the window, kept per device); folded, nothing but its button; only for a review or a question, at 1160px and wider | inside itself                      |
+| The page's column (`.col`, `PageHead.tsx` on top) | the rest: a list edge to edge, a review with the page's padding, Settings 760px, Searches and rules 1180px, a question 880px                                                        | the window                         |
+| The chat (`Chat.tsx`)                             | 320–420px (25vw): a third column above 1100px, over the page's right edge at 1100px and below                                                                                       | inside itself                      |
+| A review's sidebar (`.rv-side`)                   | 280px beside the diff while the page's column is 1000px or wider (container query `pane`), else over the diff's edge; its toggle is pinned                                          | inside itself                      |
 
 ### The sidebar
 
@@ -184,7 +184,7 @@ The Inbox, Blocked, Merging and the Archive.
   row, as the Inbox and Merging do). Always there, a 28px target across the divider, clear of both heads and of Back.
   Labelled "Hide the list" / "Show the list", with `aria-expanded` and `aria-controls`. Folded is kept per device
   (`desk.list`).
-- With the chat open in a window under 1600px it folds to its rail without changing that saved choice.
+- With the chat open in a window under 1600px it folds away without changing that saved choice.
 - **It's a sibling of the page's column in `App.tsx`, never wrapped round the review.** Why: folding, a resize or the
   list coming and going must never redraw or refetch the review. Keep it that way.
 
@@ -209,7 +209,7 @@ What's wrong with the system (`Bubbles.tsx`; which conditions and words: `web/sr
 | 641–1000px       | the sidebar compacts to 148px; Ask your agent reads "Ask"; the mark stands alone |
 | 1100px and below | the chat lies over the page                                                      |
 | 1160px and up    | a review or a question keeps its list beside it                                  |
-| under 1600px     | the chat folds that list to its rail                                             |
+| under 1600px     | the chat folds that list away                                                    |
 
 ### Scrolling
 

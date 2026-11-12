@@ -1669,7 +1669,7 @@ const SHOTS: Shot[] = [
       if (left.open) await page.locator(".beside .line.open .card-keys .act", { hasText: "Close" }).last().click();
     },
   },
-  // Folded to its rail: the review's sidebar has room beside the diff again; the choice is kept on this device.
+  // Folded, nothing's left of it but its button: the review's sidebar has room beside the diff again; kept on this device.
   {
     name: "beside-folded",
     sizes: ["wide", "mac", "xl"],
@@ -1679,8 +1679,8 @@ const SHOTS: Shot[] = [
       await page.locator(".beside-fold").click();
       await page.waitForTimeout(300);
       const b = await besideSays(page);
-      if (!b || b.width !== 28 || b.open !== "false" || b.label !== "Show the list" || !b.controls)
-        failures.push(`beside-folded: the rail reads ${JSON.stringify(b)}`);
+      if (!b || b.width !== 0 || b.open !== "false" || b.label !== "Show the list" || !b.controls)
+        failures.push(`beside-folded: folded, the list reads ${JSON.stringify(b)}`);
       if (!b?.sideInline) failures.push("beside-folded: the review's sidebar isn't beside the diff with the list folded");
       if ((await page.evaluate<string | null>(`localStorage.getItem("desk.list")`)) !== "folded")
         failures.push("beside-folded: folding the list isn't kept on this device");
@@ -1692,7 +1692,38 @@ const SHOTS: Shot[] = [
         failures.push("beside-folded: showing the list again isn't kept on this device");
     },
   },
-  // The chat open in a window under 1600px: the list folds to its rail, the saved choice untouched, and comes back with the chat gone.
+  // Its edge dragged: the list takes that width, kept on this device; a double-click gives back its usual one.
+  {
+    name: "beside-resize",
+    sizes: ["wide", "xl"],
+    go: async (page) => {
+      await at("#/")(page);
+      await review("acme/api#4127")(page);
+      const edge = page.locator(".beside-resize");
+      const box = await edge.boundingBox();
+      if (!box) {
+        failures.push("beside-resize: the list has no edge to drag");
+        return;
+      }
+      const width = () => page.evaluate<number>(`Math.round(document.querySelector(".beside").getBoundingClientRect().width)`);
+      const was = await width();
+      await page.mouse.move(box.x + box.width / 2, box.y + 300);
+      await page.mouse.down();
+      await page.mouse.move(box.x + 140, box.y + 300, { steps: 6 });
+      await page.mouse.up();
+      const now = await width();
+      if (now < was + 100) failures.push(`beside-resize: dragged 140px wider, the list went ${was} → ${now}`);
+      if (!(await page.evaluate<string | null>(`localStorage.getItem("desk.beside.width")`)))
+        failures.push("beside-resize: the width isn't kept on this device");
+    },
+    after: async (page) => {
+      await page.locator(".beside-resize").dblclick();
+      await page.waitForTimeout(100);
+      if (await page.evaluate<string | null>(`localStorage.getItem("desk.beside.width")`))
+        failures.push("beside-resize: a double-click doesn't give back the usual width");
+    },
+  },
+  // The chat open in a window under 1600px: the list folds away to its button, the saved choice untouched, and comes back with the chat gone.
   {
     name: "beside-chat",
     sizes: ["wide", "mac", "xl"],
@@ -1703,7 +1734,7 @@ const SHOTS: Shot[] = [
       await page.locator(".chat-input").waitFor();
       await page.waitForTimeout(300);
       const b = await besideSays(page);
-      if (!b || b.width !== 28 || b.open !== "false") failures.push(`beside-chat: beside the chat, the list reads ${JSON.stringify(b)}`);
+      if (!b || b.width !== 0 || b.open !== "false") failures.push(`beside-chat: beside the chat, the list reads ${JSON.stringify(b)}`);
       if (await page.evaluate<string | null>(`localStorage.getItem("desk.list")`))
         failures.push("beside-chat: the chat folding the list changed the saved choice");
     },

@@ -1747,13 +1747,23 @@ p {
 
 /* A column of its own between the sidebar and the page's, never around the page: open, 320 to 360px; folded, a 28px rail. */
 .app:has(> .beside) {
-  --list-w: clamp(320px, 28vw, 360px);
+  --list-w: var(--list-w-user, clamp(320px, 28vw, 360px));
 
   grid-template-columns: var(--side-w) var(--list-w) minmax(0, 1fr);
 }
 
+/* Folded, it leaves nothing but its button, at the page's edge. */
 .app:has(> .beside.folded) {
-  --list-w: 28px;
+  --list-w: 0px;
+}
+
+.beside.folded {
+  border-right: 0;
+  background: none;
+}
+
+.beside.folded .beside-fold {
+  right: -28px;
 }
 
 .app:has(> .beside):has(> .chat) {
@@ -1834,6 +1844,32 @@ p {
 
 /* On the divider just under the heads, always there: a small circle in a 28px target that reaches across the divider, clear
    of both heads (the window's drag handles) and of Back. */
+
+/* Its right edge, to drag: a hairline in the accent under the pointer and while dragging. */
+.beside-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  z-index: 5;
+  width: 6px;
+  cursor: col-resize;
+  -webkit-app-region: no-drag;
+}
+
+.beside-resize:hover,
+.beside-resize:focus-visible,
+.resizing .beside-resize {
+  outline: none;
+  background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat;
+}
+
+.resizing,
+.resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+
 .beside-fold {
   position: absolute;
   top: 60px;

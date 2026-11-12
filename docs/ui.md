@@ -83,11 +83,12 @@ In a window 1160px or wider, a review or a question keeps the list it came from 
 - The open item's row is marked.
 - A click or right-click does what it does on the full page. An issue opens in place under its row; Esc closes it first.
 - A review opened from the list goes back to the list's page. One opened beside a question goes back to the question.
-- A chevron on the list's divider folds it to a rail ("Hide the list", "Show the list"). The choice is kept per device.
-- While the chat is open in a window under 1600px, the list folds to its rail on its own without changing that choice.
+- A chevron on the list's divider folds it away, leaving only the chevron at the page's edge ("Hide the list", "Show the list"). The choice is kept per device.
+- Its right edge drags to resize it (or ←/→ with the edge focused); a double-click gives back its usual width. The width is kept per device.
+- While the chat is open in a window under 1600px, the list folds away on its own without changing that choice.
 - Folding, resizing or the list appearing never redraws or refetches the review. Your typing, folded files and scroll stay.
 - Moving to another review scrolls its row into the middle if it's out of sight.
-- Below 1160px there's no list and no rail.
+- Below 1160px there's no list.
 
 ### Loading, empty, scroll
 
@@ -637,7 +638,7 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 ### Where the chat sits
 
 - Above 1100px it's a third column and the page narrows. At 1100px and below it lies over the page's right edge.
-- Beside a review in a window under 1600px, the list beside the review folds to its rail.
+- Beside a review in a window under 1600px, the list beside the review folds away.
 - In a review it takes the review sidebar's place. The sidebar's toggle closes the chat and brings it back.
 
 ### The chat
