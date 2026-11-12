@@ -6020,6 +6020,17 @@ p.rv-next {
   white-space: normal;
 }
 
+/* A concern: a potential bug, its edge in amber and its label first. */
+.rv-note.bug {
+  border-left-color: var(--amber);
+}
+
+.rv-bug {
+  margin-right: 6px;
+  color: var(--amber);
+  font-weight: 600;
+}
+
 /* A look range: the lines to read even if nothing else, marked in ink. */
 .rv-look {
   border-left-color: var(--ink);

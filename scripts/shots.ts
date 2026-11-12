@@ -2489,6 +2489,19 @@ const SHOTS: Shot[] = [
     sizes: ["wide", "mid", "min", "mac", "xl"],
   })),
   {
+    // A concern is marked on its line as a potential bug, its evidence in its words.
+    name: "review-bug",
+    go: async (page) => {
+      await review("oss/tinyhttp#212")(page);
+      const bug = page.locator(".rv-note.bug").first();
+      if (!(await bug.count())) failures.push("review-bug: no concern marked Potential bug");
+      else {
+        await bug.scrollIntoViewIfNeeded();
+        if ((await bug.locator(".rv-bug").textContent()) !== "Potential bug") failures.push("review-bug: its label reads otherwise");
+      }
+    },
+  },
+  {
     // A review without steps has no switch: the page is as it was.
     name: "review-guided-none",
     go: async (page) => {

@@ -99,7 +99,7 @@ const SECTIONS: readonly { id: string; text: (c: SkillContext) => string }[] = [
   {
     id: "concerns",
     text: (c) =>
-      `- concerns: defects or risky behaviour changes you'd bet on: code in this diff that does the wrong thing for a concrete input or caller.${c.mine ? ` Write them for the author: what a reviewer would stop on, worth fixing before asking for review.` : ""} No style; no "add tests" unless a specific path this diff adds is untested and that is what makes it risky. Each: body, two to four sentences: what goes wrong, when (a concrete input, caller or path through this code), and what would fix it; anchored (path, side, line, quote: the line or lines that show it).` +
+      `- concerns: defects or risky behaviour changes you'd bet on: code in this diff that does the wrong thing for a concrete input or caller.${c.mine ? ` Write them for the author: what a reviewer would stop on, worth fixing before asking for review.` : ""} No style; no "add tests" unless a specific path this diff adds is untested and that is what makes it risky. Each: body, three to six sentences: what goes wrong, when (a concrete input, caller or path through this code), and what would fix it; then "Evidence:" what in this diff shows it (the lines, and the values that flow through them to the failure) and how to confirm it (an input to try, a test to write, or the caller to read); anchored (path, side, line, quote: the line or lines that show it). A suspicion you can't back with evidence from this diff isn't a concern: write it as a note saying what to check.` +
       ` The desk shows each concern on its line in the code, so don't also write it as a note.`,
   },
   {

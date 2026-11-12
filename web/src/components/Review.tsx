@@ -308,13 +308,18 @@ export function Review({
   const guided = !!order?.steps?.length;
   // The guided review is only its steps: what no step covers is left to Traditional, so the guide holds your attention.
   const guiding = guided && walking;
-  const { list, rest, steps, left } = useMemo(() => {
-    if (!order) return { list: [], rest: 0, steps: [], left: [] };
-    if (!guiding) return { ...traditional(order), steps: [], left: [] };
+  // The AI review's concerns are its first notes: each is a potential bug, marked on its line.
+  const bugs = v && !v.ai_stale ? (v.ai?.concerns.length ?? 0) : 0;
+  const { list, rest, steps, left, beyond } = useMemo(() => {
+    if (!order) return { list: [], rest: 0, steps: [], left: [], beyond: 0 };
+    if (!guiding) return { ...traditional(order), steps: [], left: [], beyond: 0 };
     const w = walk(order);
-    return { list: w.list.slice(0, w.beyond), rest: w.beyond, steps: w.steps, left: w.list.slice(w.beyond) };
-  }, [order, guiding]);
-  const beyond = list.length;
+    // A potential bug the steps leave out still shows, after them.
+    const after = w.list.slice(w.beyond);
+    const flagged = after.filter((y) => y.notes.some((n) => n < bugs));
+    const shown = [...w.list.slice(0, w.beyond), ...flagged];
+    return { list: shown, rest: shown.length, steps: w.steps, left: after.filter((y) => !flagged.includes(y)), beyond: w.beyond };
+  }, [order, guiding, bugs]);
   const leftFiles = new Set(left.map((y) => y.path)).size;
   // Guided, a test file stays folded until you open it.
   const isShut = (path: string) => shut.has(path) || (guiding && isTestPath(path) && !testsOpen.has(path));
@@ -744,6 +749,7 @@ export function Review({
       notes={view.ai?.notes ?? []}
       looks={view.ai_stale ? [] : (view.ai?.look ?? [])}
       order={notes}
+      bugs={bugs}
       now={now}
       shut={isShut(x.path)}
       onFold={() => {
@@ -990,6 +996,11 @@ export function Review({
                       {steps[k]!.note && <p className="rv-step-body rv-step-note">{spans(unlinked(inline(steps[k]!.note)))}</p>}
                       {figure(steps[k]!.diagram)}
                     </header>
+                  )}
+                  {steps.length > 0 && i === beyond && (
+                    <h2 className="rv-step rv-step-head" id="rv-bugs">
+                      Potential bugs outside the guide
+                    </h2>
                   )}
                   {section(x, i)}
                   {end >= 0 &&
@@ -1882,6 +1893,7 @@ function SectionView({
   notes,
   looks,
   order,
+  bugs,
   now,
   shut,
   onFold,
@@ -1901,6 +1913,7 @@ function SectionView({
   notes: ReviewNote[]; // the AI review's
   looks: ReviewLook[]; // the AI review's: where correctness hinges
   order: number[]; // ReviewView.order.notes: a note's place in it is its place in reading order
+  bugs: number; // the notes before this one are the AI review's concerns: potential bugs
   now: number;
   shut: boolean; // you folded this file
   onFold: () => void;
@@ -2028,7 +2041,7 @@ function SectionView({
         )}
         {x.hunks.length > 0 && <span className="rv-delta">{`+${adds} −${dels}`}</span>}
       </h3>
-      {!shut && mine.filter((n) => !n.inline).map((n) => <Note key={n.index} index={n.index} body={n.note.body} />)}
+      {!shut && mine.filter((n) => !n.inline).map((n) => <Note key={n.index} index={n.index} body={n.note.body} bug={n.index < bugs} />)}
       {!shut && fileDiff && (
         <FileDiff<Meta>
           className="rv-diff"
@@ -2040,7 +2053,7 @@ function SectionView({
           lineAnnotations={annotations}
           renderAnnotation={(a) => {
             const m = a.metadata;
-            if (m.kind === "note") return <Note key={`n${m.index}`} index={m.index} body={m.body} />;
+            if (m.kind === "note") return <Note key={`n${m.index}`} index={m.index} body={m.body} bug={m.index < bugs} />;
             if (m.kind === "look") return <Look key={`l${m.line}`} line={m.line} end={m.end} why={m.why} />;
             if (m.kind === "draft") return composer(writing?.thread ? "Reply" : rangeLabel(writing?.at));
             if (m.kind === "sent") return <Yours key={`s${m.url}`} body={m.body} url={m.url} />;
@@ -2323,9 +2336,11 @@ function Look({ line, end, why }: { line: number; end: number; why: string }) {
 }
 
 // Claude's words on the PR's code, drawn as the AI review's are: code as code, a URL as text.
-function Note({ index, body }: { index: number; body: string }) {
+// The AI review's note on a line; a concern says so first: it's a potential bug, with what shows it and how to confirm it.
+function Note({ index, body, bug }: { index: number; body: string; bug: boolean }) {
   return (
-    <div className="rv-note" data-note={index}>
+    <div className={cls("rv-note", bug && "bug")} data-note={index}>
+      {bug && <b className="rv-bug">Potential bug</b>}
       {spans(unlinked(inline(body)))}
     </div>
   );
