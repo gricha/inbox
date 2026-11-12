@@ -3318,6 +3318,23 @@ p {
   gap: 6px;
 }
 
+/* Asking your agent to change an automation or a criterion: your words, then Ask your agent, in the page's column. */
+.ask-change {
+  display: grid;
+  flex: 1;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.ask-change-text {
+  width: 100%;
+  resize: vertical;
+}
+
+.cr-ask .ask-change {
+  margin-top: 0;
+}
+
 /* The note box's reminder: under its words, quiet until you pick one. */
 .note-when {
   display: flex;

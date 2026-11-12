@@ -3,6 +3,7 @@
 // and what it may do, with its editor and its runs. A run's summary and whys are an agent's words: shown as text, never markup.
 import { Effect } from "effect";
 import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { AskChange } from "./AskChange.tsx";
 import {
   ACTIVITY_KINDS,
   EVENT,
@@ -20,7 +21,7 @@ import {
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { ago, cls, copyText, issueUrl, MOD, when, aiName } from "../format.ts";
-import { resumeCommand, routeHash } from "../view.ts";
+import { changeAsk, resumeCommand, routeHash } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
 
 type Run = Auto["runs"][number];
@@ -405,14 +406,17 @@ export function AutomationView({
   settingsPath,
   model,
   flash,
+  onAsked,
 }: {
   au: Automations;
   id: string;
   settingsPath: string | null; // settings.json's: the runs' folder is beside it, in the desk's home
   model: string | null; // the decision model that answers questions, once its key is set; else Claude does
   flash: (text: string, error?: boolean) => void;
+  onAsked: () => void; // your agent has your words: its chat opens
 }) {
   const draft = au.edits[id] ?? null;
+  const [changing, setChanging] = useState(false);
   const setDraft = (d: Draft | null) => {
     au.keep(id, d);
   };
@@ -570,7 +574,28 @@ export function AutomationView({
                   {a.on ? "Turn off" : "Turn on"}
                 </button>
               )}
+              {!changing && (
+                <button
+                  type="button"
+                  className="act"
+                  onClick={() => {
+                    setChanging(true);
+                  }}
+                >
+                  Change with your agent
+                </button>
+              )}
             </div>
+            {changing && (
+              <AskChange
+                ask={(words) => changeAsk({ kind: "automation", id: a.id, name: a.name, builtIn: !!a.plugin }, words)}
+                onSent={onAsked}
+                onClose={() => {
+                  setChanging(false);
+                }}
+                flash={flash}
+              />
+            )}
           </>
         )}
       </div>

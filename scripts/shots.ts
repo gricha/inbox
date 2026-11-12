@@ -873,6 +873,31 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Change with your agent on a criterion: your words go to your agent told which tool to use, and its chat opens.
+    name: "settings-criteria-ask",
+    go: async (page) => {
+      await at("#/settings/criteria")(page);
+      const sent: string[] = [];
+      const seen = (r: Sent) => {
+        if (r.method() === "POST" && r.url().endsWith("/api/ask")) sent.push(r.postData() ?? "");
+      };
+      page.on("request", seen);
+      await page.locator(".cr-row .link-btn", { hasText: "Change with your agent" }).first().click();
+      await page.locator(".ask-change textarea").fill("Only when its CI is green");
+      await page.locator(".ask-change .act.primary").click();
+      await page.waitForTimeout(500);
+      page.off("request", seen);
+      const text = sent.length ? (JSON.parse(sent[0]!) as { text: string }).text : "";
+      if (!text.includes("Only when its CI is green") || !text.includes("desk_criteria"))
+        failures.push(`settings-criteria-ask: your agent was sent ${JSON.stringify(text)}`);
+      if (!(await page.locator(".chat").count())) failures.push("settings-criteria-ask: the chat didn't open");
+    },
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+      await at("#/")(page);
+    },
+  },
+  {
     // Sessions that need you, after the agents' questions and before every PR: rows like the others (Session, its name,
     // quietly its folder, its call to action, its kind where a PR's author goes and why where its stage goes), and the
     // blocked one opened in place with what it said, where it runs and its buttons.
@@ -3824,7 +3849,7 @@ const SHOTS: Shot[] = [
       const says = await settingsSays(page);
       if (says !== onPart("Urgency")) failures.push(`settings-criteria: the head and the sidebar read ${JSON.stringify(says)}`);
       const rows = await page.locator("#s-criteria .cr-row").count();
-      if (rows !== 6) failures.push(`settings-criteria: ${rows} rows, not the mock's one and GitHub's five`);
+      if (rows !== 7) failures.push(`settings-criteria: ${rows} rows, not the mock's one and GitHub's six`);
       if ((await page.locator("#s-criteria .switch:checked").count()) !== rows) failures.push("settings-criteria: a criterion is off");
     },
   },
@@ -3980,7 +4005,7 @@ const SHOTS: Shot[] = [
         failures.push(`settings-automations-draft: the view's line reads ${JSON.stringify(seen.line)}`);
       if (!seen.prompt.startsWith("Check the open release-blocker issues"))
         failures.push(`settings-automations-draft: the instruction reads ${JSON.stringify(seen.prompt)}`);
-      if (seen.filled.join() !== "Turn on" || seen.buttons.join() !== "Turn on,Edit")
+      if (seen.filled.join() !== "Turn on" || seen.buttons.join() !== "Turn on,Edit,Change with your agent")
         failures.push(`settings-automations-draft: its buttons are ${JSON.stringify(seen)}`);
     },
     after: at("#/"),
@@ -4054,7 +4079,7 @@ const SHOTS: Shot[] = [
           "Only when: me.author && pr.ci == 'red'",
           "Decides: A rule, with no model: snooze until CI passes, saying \u201cCI is red: back when it passes\u201d",
         ],
-        buttons: "Run now,Edit,Turn off",
+        buttons: "Run now,Edit,Turn off,Change with your agent",
         runs: ["on an event · snoozed 1"],
         outcomes: ["Snoozed until CI passes"],
       };
@@ -4095,7 +4120,7 @@ const SHOTS: Shot[] = [
           "Decides: A question: Claude answers, without tools",
           "May: Sort to Today and sort to FYI",
         ],
-        buttons: "Run now,Edit,Turn off",
+        buttons: "Run now,Edit,Turn off,Change with your agent",
         outcomes: ["Sorted to FYI", "Sorted to FYI", "Sorted to Today", "Held where it is"],
       };
       const got = { prompt: seen.prompt, facts: seen.facts, buttons: seen.buttons, outcomes: seen.outcomes };

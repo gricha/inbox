@@ -687,3 +687,13 @@ export function judgeStatusText(j: JudgeStatus, now: number): string {
     return `${sentence(placed)} The hour's limit is reached (${j.max_per_hour}); next batch in ${until(j.retry_at, now)}.`;
   return j.state === "running" ? `Sorting now. ${sentence(placed)} ${sentence(hour)}` : `${sentence(placed)} ${sentence(hour)}`;
 }
+
+// What your agent is told with your words, so it changes the right thing the right way: an automation through
+// desk_automations, a criterion through desk_criteria; a built-in one can't be edited, so it writes your own instead.
+export function changeAsk(what: { kind: "automation" | "criterion"; id: string; name: string; builtIn: boolean }, words: string): string {
+  const tool = what.kind === "automation" ? "desk_automations" : "desk_criteria";
+  const it = `my ${what.kind === "automation" ? "automation" : "urgency criterion"} "${what.name}" (id ${what.id})`;
+  return what.builtIn
+    ? `Change ${it}: ${words}\n\nIt's built in, so it can't be edited: with ${tool}, read its definition and write my own ${what.kind} that does this instead${what.kind === "automation" ? " (it stays off until I turn it on)" : ""}. Then tell me what you wrote and whether I should switch the built-in off.`
+    : `Change ${it}: ${words}\n\nWith ${tool}, read its whole definition, change only what I asked, and save it. Then tell me what you changed.`;
+}

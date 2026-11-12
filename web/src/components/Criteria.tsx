@@ -1,10 +1,12 @@
 // Settings → Urgency: your criteria and the plugins', each a yes or no about an item that orders the Inbox and never acts on
 // it. Yours first, with New criterion; then what GitHub comes with, which you only switch.
 import { Effect } from "effect";
-import { useCallback, useEffect, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useState, type KeyboardEvent } from "react";
 import type { CriteriaView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { ago, aiName, MOD } from "../format.ts";
+import { AskChange } from "./AskChange.tsx";
+import { changeAsk } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
 
 type Crit = CriteriaView["criteria"][number];
@@ -31,12 +33,15 @@ export function Criteria({
   refresh,
   now,
   flash,
+  onAsked,
 }: {
   active: boolean;
   refresh: number;
   now: number;
   flash: (text: string, error?: boolean) => void;
+  onAsked: () => void; // your agent has your words: its chat opens
 }) {
+  const [changing, setChanging] = useState<string | null>(null); // the criterion you're asking your agent to change
   const [view, setView] = useState<CriteriaView | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -127,44 +132,72 @@ export function Criteria({
   const own = view.criteria.filter((c) => !c.plugin);
   const plugins = [...new Set(view.criteria.flatMap((c) => (c.plugin ? [c.plugin] : [])))];
   const row = (c: Crit) => (
-    <div key={c.id} className="setting cr-row">
-      <div className="s-label-col">
-        {c.plugin ? (
-          <p className="s-label">{c.name}</p>
-        ) : (
-          <button
-            type="button"
-            className="s-label s-name cr-name"
-            onClick={() => {
-              setDraft({ id: c.id, name: c.name, when: c.when ?? "", ask: c.ask ?? "", urgent: c.urgent });
+    <Fragment key={c.id}>
+      <div className="setting cr-row">
+        <div className="s-label-col">
+          {c.plugin ? (
+            <p className="s-label">{c.name}</p>
+          ) : (
+            <button
+              type="button"
+              className="s-label s-name cr-name"
+              onClick={() => {
+                setDraft({ id: c.id, name: c.name, when: c.when ?? "", ask: c.ask ?? "", urgent: c.urgent });
+              }}
+            >
+              {c.name}
+            </button>
+          )}
+          <p className="s-help">
+            {whatOf(c)}
+            {c.urgent ? " · a yes is urgent" : ""}
+            {c.on ? ` · yes for ${c.yes} on your Inbox` : ""}
+            {c.on && c.waiting ? ` · ${c.waiting} waiting for an answer` : ""}
+            {!c.plugin && c.by === "an agent" ? " · an agent wrote it" : ""}
+            {changing !== c.id && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  className="link-btn"
+                  onClick={() => {
+                    setChanging(c.id);
+                  }}
+                >
+                  Change with your agent
+                </button>
+              </>
+            )}
+          </p>
+        </div>
+        <div className="s-control">
+          <input
+            className="switch"
+            type="checkbox"
+            // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked
+            role="switch"
+            checked={c.on}
+            disabled={busy}
+            aria-label={`Order the Inbox by ${c.name}`}
+            onChange={() => {
+              turn(c);
             }}
-          >
-            {c.name}
-          </button>
-        )}
-        <p className="s-help">
-          {whatOf(c)}
-          {c.urgent ? " · a yes is urgent" : ""}
-          {c.on ? ` · yes for ${c.yes} on your Inbox` : ""}
-          {c.on && c.waiting ? ` · ${c.waiting} waiting for an answer` : ""}
-          {!c.plugin && c.by === "an agent" ? " · an agent wrote it" : ""}
-        </p>
+          />
+        </div>
       </div>
-      <div className="s-control">
-        <input
-          className="switch"
-          type="checkbox"
-          // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked
-          role="switch"
-          checked={c.on}
-          disabled={busy}
-          aria-label={`Order the Inbox by ${c.name}`}
-          onChange={() => {
-            turn(c);
-          }}
-        />
-      </div>
-    </div>
+      {changing === c.id && (
+        <div className="setting cr-ask">
+          <AskChange
+            ask={(words) => changeAsk({ kind: "criterion", id: c.id, name: c.name, builtIn: !!c.plugin }, words)}
+            onSent={onAsked}
+            onClose={() => {
+              setChanging(null);
+            }}
+            flash={flash}
+          />
+        </div>
+      )}
+    </Fragment>
   );
   const fresh = () => {
     setDraft({ id: null, name: "", when: "", ask: "", urgent: false });

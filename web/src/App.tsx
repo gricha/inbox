@@ -1701,6 +1701,9 @@ export function App() {
               onRulesDirty={(d) => {
                 rulesDirty.current = d;
               }}
+              onAsked={() => {
+                setAsking({ item: null, spot: null });
+              }}
             />
           )}
         </main>

@@ -1018,6 +1018,7 @@ export function Settings({
   flash,
   onRulesSaved,
   onRulesDirty,
+  onAsked,
 }: {
   active: boolean;
   section: string; // a part's id (automations: yours), or a view's (rules, automations/<id>)
@@ -1029,6 +1030,7 @@ export function Settings({
   flash: (text: string, error?: boolean) => void;
   onRulesSaved: () => void;
   onRulesDirty: (dirty: boolean) => void;
+  onAsked: () => void; // your agent has your words about an automation or a criterion: its chat opens
 }) {
   const [live, setLive] = useState<DesktopStatus | null>(null);
   const [more, setMore] = useState<Record<string, boolean>>({});
@@ -1218,7 +1220,7 @@ export function Settings({
       </div>
       <div className="s-page" hidden={section !== "criteria"}>
         <section id="s-criteria" className="s-part" aria-label="Urgency">
-          <Criteria active={active && section === "criteria"} refresh={loads} now={now} flash={flash} />
+          <Criteria active={active && section === "criteria"} refresh={loads} now={now} flash={flash} onAsked={onAsked} />
         </section>
       </div>
       <section className="s-view" hidden={section !== "rules"} aria-labelledby="s-view-rules">
@@ -1241,6 +1243,7 @@ export function Settings({
             settingsPath={view?.path ?? null}
             model={decisionModel}
             flash={flash}
+            onAsked={onAsked}
           />
         )}
       </section>

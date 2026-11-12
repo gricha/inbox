@@ -58,6 +58,7 @@ import {
   settingsPart,
   partName,
   SETTINGS_PARTS,
+  changeAsk,
   SETTINGS_VIEWS,
   SHOWN,
   stops,
@@ -1259,4 +1260,16 @@ test("Hand off for merge waits for the review: not a PR whose review is required
   assert.equal(handsOff(pr({ review: "none", cta: "reviewers" })), false, "stacked: where it lands may need a review");
   assert.equal(handsOff(pr({ review: "none", cta: "reviewers", review_optional: true })), true, "terraform-sandboxes: none needed");
   assert.equal(handsOff(pr({ review: "none", cta: "reviewers", review_optional: true, draft: true })), false, "Ready for review first");
+});
+
+test("asking your agent to change an automation or a criterion names it, its tool, and what to do with a built-in", () => {
+  const own = changeAsk({ kind: "automation", id: "warden-issues", name: "Warden issues", builtIn: false }, "run it at 10 too");
+  assert.match(
+    own,
+    /^Change my automation "Warden issues" \(id warden-issues\): run it at 10 too\n\nWith desk_automations, read its whole definition, change only what I asked/,
+  );
+  const built = changeAsk({ kind: "criterion", id: "github.draft", name: "Your draft", builtIn: true }, "only when CI is green");
+  assert.match(built, /^Change my urgency criterion "Your draft" \(id github.draft\): only when CI is green/);
+  assert.match(built, /built in, so it can't be edited: with desk_criteria, .*write my own criterion/);
+  assert.doesNotMatch(built, /stays off/, "a criterion isn't an automation");
 });

@@ -514,6 +514,7 @@ Each row:
 
 ### Urgency
 
+**Change with your agent**, on each criterion's line and under an automation's buttons: a box for what should change, in your words. **Ask your agent** sends them to your agent with what to do (`changeAsk()` in `web/src/view.ts`): change it with `desk_criteria` or `desk_automations`, only what you asked, and say what changed; a built-in can't be edited, so it writes your own instead (an automation saved off) and says whether to switch the built-in off. The chat opens on it.
 `#/settings/criteria`: your criteria on one sheet ([api.md → Urgency](api.md#urgency)).
 
 - Each row: its name, what it says yes to, whether a yes is urgent, how many Inbox items it says yes to now, who wrote it, and its switch.
