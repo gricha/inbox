@@ -4970,6 +4970,40 @@ const SHOTS: Shot[] = [
     after: fresh, // its toast gone, so the next shot doesn't show it
   },
   {
+    // The filter's people: a name typed offers who it is as author and as anyone involved, each with their picture.
+    name: "filter-suggest",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".page-head .search input").click();
+      const starters = await page.locator(".search-pop .search-pop-key").allTextContents();
+      if (starters.join(" ") !== "Author Involves") failures.push(`filter-suggest: an empty filter offers ${JSON.stringify(starters)}`);
+      await page.keyboard.type("da");
+      await page.locator(".search-pop .pop-item").first().waitFor();
+      const offered = await page.locator(".search-pop .pop-item").allTextContents();
+      if (!offered.includes("Authordana") || !offered.includes("Involvesdana"))
+        failures.push(`filter-suggest: "da" offers ${JSON.stringify(offered)}`);
+      await page.waitForTimeout(300);
+    },
+    after: fresh,
+  },
+  {
+    // Picked, a pill: only dana's rows, and × takes it off.
+    name: "filter-pill",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".page-head .search input").click();
+      await page.keyboard.type("da");
+      await page.locator(".search-pop .pop-item", { hasText: "Author" }).first().click();
+      const pill = await page.locator(".page-head .search-pill").textContent();
+      if (pill !== "Authordana×") failures.push(`filter-pill: the pill reads ${JSON.stringify(pill)}`);
+      const by = await page.locator(".queue .line:not(.inq) .line-by").allTextContents();
+      if (!by.length || by.some((b) => b.trim() !== "by dana")) failures.push(`filter-pill: rows by ${JSON.stringify(by)}`);
+      await page.locator(".page-head .search input").blur();
+      await page.waitForTimeout(300);
+    },
+    after: fresh,
+  },
+  {
     // Copy GitHub link in a row's menu: the PR's GitHub URL on the clipboard (stubbed), and a quiet toast.
     name: "row-menu-copy-github-link",
     go: async (page) => {

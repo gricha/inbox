@@ -70,7 +70,7 @@ The window's only global chrome. There's no top bar.
 
 Sticky, and the desktop app's drag handle. It holds only the page's own controls:
 
-- Inbox, Blocked, Archive: the filter. In the filter, Esc clears it; Enter or ↓ leaves it.
+- Inbox, Blocked, Archive: the filter. Words match a row's title, repo or author. **author:dana** keeps who opened it (a bot's PR counts as the person it was opened for; author:you, yours) and **involves:dana** anyone on it: its author, assignees, who was asked, who reviewed, commented or answered a thread. Clicking in the box offers both; typing a name offers who it matches as Author and as Involves, with their pictures. A pick becomes a pill: × or Backspace at the start takes it off. In the filter, ↑↓ and Enter pick a suggestion, Esc clears it all; Enter or ↓ with nothing to pick leaves it.
 - Merging and a Settings part: the page's name.
 - A review, a question, a Settings view: the way back ("‹ Inbox", "‹ Blocked", "‹ Merging", "‹ Archive", "‹ GitHub", "‹ Agent", "‹ Your automations"). Its tooltip names Esc, and for a review or question, ⌘[ and ⌘].
 

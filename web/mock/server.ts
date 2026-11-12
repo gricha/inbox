@@ -27,7 +27,7 @@ import { capText, floorOf, placedBy, queueOrder, quietText, weightOf } from "../
 import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
-import { mergeLine, stage, standings } from "../../src/stage.ts";
+import { mergeLine, peopleOf, stage, standings } from "../../src/stage.ts";
 import { agentDefs, agentName, checkSetting, DEFAULTS, LEGACY_TABLES, masked, SECTIONS, settingDef } from "../../src/settings.ts";
 import { GitHubAuthError, type ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
@@ -1845,6 +1845,7 @@ function cardOf(r: Rec, p: Placement): Card {
     author: s.author,
     author_bot: sig.author.bot,
     by: me.author ? "you" : s.author,
+    people: peopleOf(itemOf(r)),
     ...(st && { stage: st }),
     bucket: p.bucket,
     why: s.resolved ?? p.why,

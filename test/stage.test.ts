@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { andMore, askedAt, mergeLine, stage, standings } from "../src/stage.ts";
+import { andMore, askedAt, mergeLine, peopleOf, stage, standings } from "../src/stage.ts";
 import type { Item } from "../src/types.ts";
 import { reviewAsk, myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
@@ -194,4 +194,22 @@ test("a review carries who reviews its PR and what stands in its merge, as the d
     { who: "you", state: "asked" },
     { who: "marco", state: "approved" },
   ]);
+});
+
+test("peopleOf: everyone on an item, bots and teams aside, first seen first", () => {
+  const it = makeItem({
+    author: "dana",
+    via: "@greg",
+    assignees: ["priya"],
+    review_requests: [
+      { reviewer: "marco", type: "user", codeowner: false },
+      { reviewer: "ml-team", type: "team", codeowner: true },
+    ],
+    reviews: [{ author: "cursor[bot]", author_bot: true, state: "commented", at: hoursAgo(1), commit: "a" }],
+    comments: [
+      { author: "li-wei", author_bot: false, at: hoursAgo(1) },
+      { author: "dana", author_bot: false, at: hoursAgo(1) },
+    ],
+  });
+  assert.deepEqual(peopleOf(it), ["dana", "greg", "priya", "marco", "li-wei"]);
 });

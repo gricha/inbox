@@ -39,7 +39,7 @@ import { linkRef, permalink } from "./links.ts";
 import { renderDoc, renderText } from "./render.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
-import { askedAt, mergeLine, owesReply, reviewOptional, rerequestable, stage, standings, verdicts } from "./stage.ts";
+import { askedAt, mergeLine, owesReply, peopleOf, reviewOptional, rerequestable, stage, standings, verdicts } from "./stage.ts";
 import { blockedOrder, dependencies, type DepFacts } from "./deps.ts";
 import type {
   DocSaved,
@@ -1614,6 +1614,7 @@ export class Desk {
       author: it.author,
       author_bot: e.analysis.signals.author.bot,
       by: me.author ? "you" : via || it.author,
+      people: peopleOf(it),
       ...(shown && { stage: shown }),
       bucket: p?.bucket ?? "fyi",
       why: e.resolved?.reason ?? snap.acted.get(it.id) ?? p?.why ?? "",

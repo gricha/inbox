@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { MOD } from "../format.ts";
 import { partName, routeHash, settingsBack, type ListPage, type Route } from "../view.ts";
 
@@ -16,15 +17,13 @@ export function PageHead({
   route,
   from,
   question,
-  filter,
-  setFilter,
+  search,
   onNote,
 }: {
   route: Route;
   from: ListPage; // where a review goes back to
   question: string | null; // a review opened from an agent's question goes back to it
-  filter: string;
-  setFilter: (s: string) => void;
+  search: ReactNode; // the list's Filter
   onNote: () => void;
 }) {
   const inSettings = route.name === "settings";
@@ -56,7 +55,7 @@ export function PageHead({
         </a>
       ) : (
         <>
-          <Filter filter={filter} setFilter={setFilter} />
+          {search}
           <button
             type="button"
             className="act head-note"
@@ -68,32 +67,5 @@ export function PageHead({
         </>
       )}
     </header>
-  );
-}
-
-// A list's filter: on its page's head, or the head of the list beside a review.
-export function Filter({ filter, setFilter }: { filter: string; setFilter: (s: string) => void }) {
-  return (
-    <label className="search">
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <circle cx="7" cy="7" r="4.5" />
-        <path d="m10.5 10.5 3 3" />
-      </svg>
-      <input
-        type="search"
-        placeholder="Filter"
-        aria-label="Filter by title, repo or author"
-        value={filter}
-        onChange={(e) => {
-          setFilter(e.target.value);
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            setFilter("");
-            e.currentTarget.blur();
-          } else if (e.key === "Enter" || e.key === "ArrowDown") e.currentTarget.blur();
-        }}
-      />
-    </label>
   );
 }

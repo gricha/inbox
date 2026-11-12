@@ -32,6 +32,7 @@ import {
   beside,
   awaitsReview,
   DEFAULT_OPEN,
+  filterPeople,
   groupsOf,
   inboxCount,
   inquiryOf,
@@ -63,6 +64,7 @@ import type { SessionCtx } from "./components/Session.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { Setup } from "./components/Setup.tsx";
+import { Filter } from "./components/Filter.tsx";
 import { PageHead, PAGE_NAME } from "./components/PageHead.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { useSourceDown } from "./components/Source.tsx";
@@ -471,7 +473,16 @@ export function App() {
     stay.current = null;
     setMenuAt(null);
   }, [route]);
-  const groups = useMemo(() => groupsOf(view, open, filter), [view, open, filter]);
+  const groups = useMemo(() => groupsOf(view, open, filter, me), [view, open, filter, me]);
+  const people = useMemo(
+    () =>
+      filterPeople(
+        groupsOf(view, DEFAULT_OPEN, "").flatMap((g) => g.cards),
+        me,
+      ),
+    [view, me],
+  );
+  const search = <Filter filter={filter} setFilter={setFilter} people={people} me={me} />;
   // The selection goes through the page on screen: the queue, or Later's groups; in a review, the page it came from.
   const list = route.name === "review" ? reviewFrom : route.name;
   const page = useMemo(() => {
@@ -1572,8 +1583,7 @@ export function App() {
           name={PAGE_NAME[listPage]}
           count={listPage === "queue" ? inbox : null}
           open={side === "open"}
-          filter={filter}
-          setFilter={laneList ? null : setFilter}
+          search={laneList ? null : search}
           selected={openSel}
           onFold={foldList}
         >
@@ -1585,8 +1595,7 @@ export function App() {
           route={route}
           from={reviewFrom}
           question={route.name === "review" ? reviewQuestion : null}
-          filter={filter}
-          setFilter={setFilter}
+          search={search}
           onNote={() => {
             setCommenting(null);
             setNoting("new");

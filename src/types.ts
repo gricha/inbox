@@ -532,6 +532,7 @@ export interface Card {
   author: string;
   author_bot: boolean;
   by: string; // as its row says who it's from: "you" (yours, or a bot's for you), the person a bot opened it for, else its author
+  people?: string[]; // everyone it involves (peopleOf()), for the filter's involves:
   stage?: Stage; // a PR's, from stage() in src/stage.ts, or that your agent handed it back; an issue has none
   bucket: Bucket;
   why: string;

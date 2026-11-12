@@ -84,6 +84,7 @@ import {
   wholeFor,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
+import { filterOf, filterPeople, filterRest, parseFilter } from "../src/view.ts";
 import { isTestPath, onLines, sections, traditional, walk } from "../../src/sections.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
 
@@ -1340,4 +1341,38 @@ test("wholeFor cuts a section's files at the file's next hunk, so what's after i
   const second = wholeFor(w, patch, [h2]);
   assert.deepEqual(second, w, "the last hunk: both files whole");
   assert.equal(wholeFor(w, patch, ["@@ -1,1 +1,1 @@\n-x\n+y"]), null, "not this file's hunk");
+});
+
+test("the filter's people: author: and involves: as pills once a space follows, matched as you type them", () => {
+  assert.deepEqual(parseFilter("author:dana fix involves:@pri"), {
+    terms: [
+      { key: "author", who: "dana", done: true },
+      { key: "involves", who: "pri", done: false },
+    ],
+    text: "fix",
+  });
+  assert.equal(filterRest("author:dana fix involves:pri"), "fix involves:pri");
+  assert.equal(filterRest("Author:dana "), "");
+  assert.equal(filterOf([{ key: "author", who: "dana" }], "fix "), "author:dana fix ");
+
+  const rows = [
+    card("acme/api#1", { author: "dana", by: "dana", people: ["dana", "priya"] }),
+    card("acme/api#7", { author: "renovate[bot]", author_bot: true, by: "priya", people: ["priya", "marco"] }),
+    card("acme/web#8", { author: "me", by: "you", people: ["me", "dana"] }),
+  ];
+  const view = { ...queue(), inbox: { urgent: rows, standard: [], fyi: [] } };
+  const ids = (f: string) => navigable(main(groupsOf(view, DEFAULT_OPEN, f, "me")), new Set()).map((c) => c.id);
+  assert.deepEqual(ids("author:dana "), ["acme/api#1"]);
+  assert.deepEqual(ids("author:pri"), ["acme/api#7"], "a bot's PR is by whom it was opened for");
+  assert.deepEqual(ids("involves:dana "), ["acme/api#1", "acme/web#8"]);
+  assert.deepEqual(ids("involves:marco api#7"), ["acme/api#7"], "with words too");
+  assert.deepEqual(ids("author:you "), ["acme/web#8"]);
+  assert.deepEqual(ids("involves:"), ["acme/api#1", "acme/api#7", "acme/web#8"], "a key with no one yet filters nothing");
+
+  assert.deepEqual(filterPeople(rows, "me"), [
+    { login: "dana", author: true },
+    { login: "priya", author: true },
+    { login: "marco", author: false },
+    { login: "me", author: true },
+  ]);
 });

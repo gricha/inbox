@@ -74,6 +74,25 @@ export function standings(it: Item, me: string): Standings {
 }
 
 // Who GitHub's re-request would ask again: people other than its author who reviewed it, not bots, not asked now.
+// Everyone an item involves, for the filter's involves:: its author, who it was opened for, assignees, who was asked, who
+// reviewed, commented or answered a thread; bots aside, first seen first.
+export function peopleOf(it: Item): string[] {
+  const out = new Set<string>();
+  const add = (login: string | undefined, bot = false) => {
+    const l = login?.replace(/^@/, "");
+    if (l && !bot && l !== "ghost" && !/\s/.test(l)) out.add(l);
+  };
+  add(it.author, it.author_bot);
+  add(it.via);
+  add(it.requester);
+  for (const a of it.assignees) add(a);
+  for (const r of it.review_requests) add(r.reviewer, r.type === "team" || r.bot);
+  for (const r of it.reviews) add(r.author, r.author_bot);
+  for (const c of it.comments) add(c.author, c.author_bot);
+  for (const t of it.thread_last) add(t.author, t.author_bot);
+  return [...out];
+}
+
 export function rerequestable(it: Item): string[] {
   const asked = new Set(it.review_requests.map((r) => lc(r.reviewer)));
   const seen = new Map<string, string>();

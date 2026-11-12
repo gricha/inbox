@@ -1,7 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { cls } from "../format.ts";
 import { getStored, setStored } from "../storage.ts";
-import { Filter } from "./PageHead.tsx";
 
 // The list a review or a question was opened from, beside it: its name, its filter and its rows, scrolling on their own; or,
 // folded, a thin rail with the same button. App keeps the review where it is in the tree, so this coming and going never
@@ -10,8 +9,7 @@ export function Beside({
   name,
   count,
   open,
-  filter,
-  setFilter,
+  search,
   selected,
   onFold,
   children,
@@ -19,8 +17,7 @@ export function Beside({
   name: string;
   count: number | null; // the Inbox's, as the sidebar has it
   open: boolean;
-  filter: string;
-  setFilter: ((s: string) => void) | null; // Merging has no filter
+  search: ReactNode; // its Filter; Merging has none
   selected: string | null; // the open item's row
   onFold: () => void;
   children: ReactNode;
@@ -100,7 +97,7 @@ export function Beside({
           <h2 className="beside-name">
             {name} {!!count && <span className="count">{count}</span>}
           </h2>
-          {setFilter && <Filter filter={filter} setFilter={setFilter} />}
+          {search}
         </div>
       )}
       <button

@@ -897,11 +897,19 @@ p {
   fill: currentcolor;
 }
 
-.search {
+/* The filter and its list of people under it. */
+.search-box {
+  position: relative;
   display: flex;
   flex: 0 1 380px;
-  align-items: center;
   min-width: 120px;
+}
+
+.search {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
   gap: 8px;
   height: 32px;
   padding: 0 8px 0 10px;
@@ -943,6 +951,107 @@ p {
 
 .search input::-webkit-search-cancel-button {
   display: none;
+}
+
+/* A picked person: who the rows are by, or involve; × takes it off. */
+.search-pill {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  height: 22px;
+  padding: 0 2px 0 7px;
+  border-radius: 6px;
+  background: var(--rule);
+  color: var(--ink);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.search:focus-within .search-pill {
+  background: var(--wash);
+}
+
+.search-pill-key {
+  color: var(--pencil);
+}
+
+.search-pill .avatar {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.search-pill-who {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
+
+.search-pill-x {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--pencil);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.search-pill-x:hover {
+  background: var(--rule-strong);
+  color: var(--ink);
+}
+
+.search-pop {
+  left: 0;
+  width: max(100%, 300px);
+}
+
+.search-pop .pop-head {
+  margin: 0;
+  padding: 6px 8px 4px;
+  color: var(--pencil);
+  font-size: 12px;
+}
+
+.search-pop .pop-item {
+  gap: 8px;
+}
+
+.search-pop .pop-item.hi {
+  background: var(--wash);
+}
+
+.search-pop .avatar {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+
+.search-pop-key {
+  flex: none;
+  width: 4.6em;
+  color: var(--pencil);
+}
+
+.search-pop-who {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.search-pop-help {
+  overflow: hidden;
+  color: var(--pencil);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .i {
@@ -1821,7 +1930,7 @@ p {
   font-variant-numeric: tabular-nums;
 }
 
-.beside-head .search {
+.beside-head .search-box {
   flex: 1 1 auto;
 }
 
