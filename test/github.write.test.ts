@@ -26,6 +26,7 @@ test("the allowlist is exactly these mutations: approve, a reply or comment, one
     "inline_comment",
     "ready",
     "request_reviews",
+    "rerequest",
     "close",
     "draft",
     "merge",
@@ -50,6 +51,10 @@ test("the allowlist is exactly these mutations: approve, a reply or comment, one
   assert.match(
     ALLOWED.request_reviews,
     /^mutation DeskRequestReviews[^{]*\{\s*requestReviews\(input: \{ pullRequestId: \$pr, userIds: \$users, teamIds: \$teams, union: true \}\)/,
+  );
+  assert.match(
+    ALLOWED.rerequest,
+    /^mutation DeskRerequest[^{]*\{\s*requestReviewsByLogin\(input: \{ pullRequestId: \$pr, userLogins: \$users, union: true \}\)/,
   );
   assert.match(ALLOWED.close, /^mutation DeskClose[^{]*\{\s*closePullRequest\(input: \{ pullRequestId: \$pr \}\)/);
   assert.match(ALLOWED.draft, /^mutation DeskDraft[^{]*\{\s*convertPullRequestToDraft\(input: \{ pullRequestId: \$pr \}\)/);
@@ -172,6 +177,7 @@ test("the More menu's writes send their mutation once each, a merge pinned to it
   await run(w.draft("PR_1"));
   await run(w.merge("PR_1", "h1", "SQUASH"));
   await run(w.reopen("PR_1"));
+  await run(w.rerequest("PR_1", ["sam"]));
   assert.deepEqual(await run(w.requestChanges("PR_1", "h1", "Add a test")), { url: "https://github.com/a/b/pull/1#r2" });
   await run(w.closeIssue("I_1"));
   const sent = f.calls.map((c) => JSON.parse(c.body) as { query: string; variables: unknown });
@@ -182,6 +188,7 @@ test("the More menu's writes send their mutation once each, a merge pinned to it
       [ALLOWED.draft, { pr: "PR_1" }],
       [ALLOWED.merge, { pr: "PR_1", head: "h1", method: "SQUASH" }],
       [ALLOWED.reopen, { pr: "PR_1" }],
+      [ALLOWED.rerequest, { pr: "PR_1", users: ["sam"] }],
       [ALLOWED.request_changes, { pr: "PR_1", commit: "h1", body: "Add a test" }],
       [ALLOWED.close_issue, { issue: "I_1" }],
     ],
@@ -191,6 +198,7 @@ test("the More menu's writes send their mutation once each, a merge pinned to it
     "github write: draft PR_1",
     "github write: merge PR_1 at h1",
     "github write: reopen PR_1",
+    "github write: rerequest PR_1",
     "github write: request_changes PR_1 at h1",
     "github write: close_issue I_1",
   ]);

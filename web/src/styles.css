@@ -4881,6 +4881,40 @@ a.rv-part-row:hover {
   font-size: 13.5px;
 }
 
+.rv-reviewers-help {
+  flex-basis: 100%;
+  margin: 0 0 2px;
+  color: var(--ink-2);
+}
+
+.rv-reviewer .avatar,
+.rv-reviewers-pop .avatar {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  vertical-align: middle;
+}
+
+.rv-team-face {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--rule-strong);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.rv-reviewers-pop .pop-head {
+  margin: 0;
+  padding: 8px 8px 4px;
+  color: var(--pencil);
+  font-size: 12px;
+}
+
 .rv-reviewers-label {
   margin-right: 4px;
   color: var(--pencil);
@@ -4891,7 +4925,7 @@ a.rv-part-row:hover {
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 0 4px 0 10px;
+  padding: 0 4px;
   border-radius: 999px;
   background: var(--wash);
   color: var(--ink);
@@ -4986,7 +5020,7 @@ a.rv-part-row:hover {
 
 .rv-reviewers-pop {
   left: 0;
-  width: 300px;
+  width: 340px;
 }
 
 .rv-reviewers-pop .pop-item {
@@ -5069,6 +5103,28 @@ a.rv-part-row:hover {
 
 .rv-by {
   color: var(--pencil);
+}
+
+/* Who's asked to review it, after its author: faces and names, a verdict's mark in its colour. */
+.rv-revs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  min-width: 0;
+}
+
+.rv-revs .avatar {
+  width: 1.4em;
+  height: 1.4em;
+}
+
+.rv-rev {
+  white-space: nowrap;
+}
+
+.rv-rev-mark {
+  margin-left: 4px;
+  font-weight: 500;
 }
 
 .rv-title {

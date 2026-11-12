@@ -73,6 +73,16 @@ export function standings(it: Item, me: string): Standings {
   return { line: line.charAt(0).toUpperCase() + line.slice(1), changes: changes_by.length > 0, list };
 }
 
+// Who GitHub's re-request would ask again: people other than its author who reviewed it, not bots, not asked now.
+export function rerequestable(it: Item): string[] {
+  const asked = new Set(it.review_requests.map((r) => lc(r.reviewer)));
+  const seen = new Map<string, string>();
+  for (const r of it.reviews)
+    if (!r.author_bot && r.state !== "pending" && lc(r.author) !== lc(it.author) && !asked.has(lc(r.author)))
+      seen.set(lc(r.author), r.author);
+  return [...seen.values()];
+}
+
 // What stands in an open PR's merge, in one line; null when nothing does, or the desk doesn't know (it asks only of your own PRs).
 export const mergeLine = (it: Item): string | null =>
   it.kind === "pr" && it.state === "open" && it.mergeable === "conflict" ? `Merge conflict with ${it.base}` : null;

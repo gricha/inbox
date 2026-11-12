@@ -17,6 +17,7 @@ import {
   type Reviewer,
   type ReviewView,
   type Stack,
+  type Standing,
   type StackMember,
 } from "../../../src/types.ts";
 import { andMore } from "../../../src/stage.ts";
@@ -783,7 +784,16 @@ export function Review({
       {toggle}
       <div className="rv-main">
         <div className="rv-top">
-          <Head card={card} me={me} now={now} facts={facts} owed={mine} resolved={resolved?.line ?? null} row={row} />
+          <Head
+            card={card}
+            me={me}
+            now={now}
+            facts={facts}
+            owed={mine}
+            resolved={resolved?.line ?? null}
+            row={row}
+            reviewers={view.reviewers.list}
+          />
           {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
           {isMine && !view.ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
           {/* Your own PR gets no AI review unless one was asked for; More still asks. */}
@@ -811,7 +821,13 @@ export function Review({
         </div>
 
         {picking && !acted && (
-          <Reviewers id={card.id} asked={item.review_requests.map((r) => r.reviewer)} picked={picked} setPicked={setPicked} />
+          <Reviewers
+            id={card.id}
+            asked={item.review_requests.map((r) => ({ login: r.reviewer, team: r.type === "team" }))}
+            picked={picked}
+            setPicked={setPicked}
+            ready={readying}
+          />
         )}
         {/* What finishes it first (its call to action, or Hand off or Back to desk on yours), then the rest, then your
             comment's box on the same row; done from here, what you did and where it went, in place of the button you pressed. */}
@@ -879,7 +895,7 @@ export function Review({
             {more && (
               <MoreMenu
                 card={card}
-                actions={(card.actions ?? []).filter((a) => a === "close" || a === "request_changes")}
+                actions={(card.actions ?? []).filter((a) => a === "close" || a === "request_changes" || a === "rerequest")}
                 links={[
                   // As the row's menu says it: Done, or Back on the desk once it's done, snoozed or muted.
                   ...(!card.inflight && !acted
@@ -1182,6 +1198,38 @@ function StepList({
   );
 }
 
+const MARK: Partial<Record<Standing["state"], { mark: string; tone: string }>> = {
+  approved: { mark: "✓", tone: "t-good" },
+  "changes requested": { mark: "changes", tone: "t-warn" },
+};
+
+// Who's asked to review it, beside its author: a face and a name each, a mark for a verdict, the rest in the tooltip.
+// Someone who only commented isn't a reviewer here; the sidebar's Reviewers lists them.
+function HeadReviewers({ list, me }: { list: Standing[]; me: string }) {
+  const shown = list.filter((r) => r.state !== "commented");
+  if (!shown.length) return null;
+  return (
+    <span className="rv-by rv-revs" aria-label="Reviewers">
+      reviewers
+      {shown.map((r) => {
+        const m = MARK[r.state];
+        const login = r.who === "you" ? me : r.who.startsWith("@") ? "" : r.who;
+        return (
+          <span key={r.who} className="rv-rev" title={`${r.who}: ${r.state === "asked" ? "asked, hasn't reviewed yet" : r.state}`}>
+            {login && <Avatar login={login} />}
+            {r.who}
+            {m && (
+              <span className={cls("rv-rev-mark", m.tone)} aria-label={r.state}>
+                {m.mark}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
 // The header: the ref, the title, and one line of why and facts; a resolved PR's line, and Merging's for your PR there.
 function Head({
   card,
@@ -1191,6 +1239,7 @@ function Head({
   owed,
   resolved,
   row,
+  reviewers,
 }: {
   card: Card;
   me: string;
@@ -1199,6 +1248,7 @@ function Head({
   owed: boolean; // your open PR: its why is what you owe
   resolved: string | null;
   row: InflightRow | null;
+  reviewers: Standing[];
 }) {
   const isMine = !!me && card.author.toLowerCase() === me.toLowerCase();
   // The why leaves out a fact it already says, as on the card ("conflicts with main" says "merge conflict").
@@ -1224,6 +1274,7 @@ function Head({
           {isMine ? "you" : card.author}
           {card.author_bot ? " (bot)" : ""}
         </span>
+        <HeadReviewers list={reviewers} me={me} />
       </p>
       <h1 className="rv-title">{card.title}</h1>
       <p className="rv-meta">
@@ -1328,6 +1379,7 @@ function Shell({
               facts={rowFacts(card)}
               owed={isMine && !card.resolved}
               resolved={card.resolved ? resolvedHead([], card.resolved, me).line : null}
+              reviewers={[]}
               row={row}
             />
           ) : (

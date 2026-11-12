@@ -1890,7 +1890,15 @@ function actionsOf(r: Rec): GitHubAction[] {
   if (it.state === "closed") return ["reopen"];
   if (it.state !== "open") return [];
   const ready = it.review_decision === "approved" && it.ci === "green" && it.mergeable === "clean" && !it.draft;
-  return ["close", ...(it.draft ? (["ready"] as const) : (["draft"] as const)), ...(ready ? (["merge"] as const) : [])];
+  const reviewed = it.reviews.some(
+    (x) => !x.author_bot && x.author !== it.author && !it.review_requests.some((q) => q.reviewer === x.author),
+  );
+  return [
+    "close",
+    ...(it.draft ? (["ready"] as const) : (["draft"] as const)),
+    ...(!it.draft && reviewed ? (["rerequest"] as const) : []),
+    ...(ready ? (["merge"] as const) : []),
+  ];
 }
 
 // As Desk.seat(): where a stack's member is on the queue.

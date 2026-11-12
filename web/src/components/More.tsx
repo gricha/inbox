@@ -11,6 +11,7 @@ export const MORE: Record<GitHubAction, string> = {
   merge: "Merge now",
   reopen: "Reopen",
   request_changes: "Request changes",
+  rerequest: "Re-request review",
 };
 
 // A row has no room to write in: requesting changes is in the PR's review.

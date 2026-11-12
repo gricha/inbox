@@ -337,10 +337,11 @@ Every GitHub write is listed in [api.md → Security model](api.md#security-mode
 
 ### Your draft's reviewers
 
-A line above Ready for review on your draft:
+A line above Ready for review on your draft (and above Ask reviewers on your ready PR nobody's asked), under one line saying what the button will send:
 
+- Each person shows their GitHub picture; a team shows "@".
 - Those already asked show first and stay.
-- A box adds more: GitHub's suggestions, then people with access and the org's teams as you type (↑/↓, Enter adds, Backspace on empty removes the last, Esc leaves).
+- A box adds more: GitHub's suggestions under "Suggested by GitHub, from who changed these files", then people with access and the org's teams as you type (↑/↓, Enter adds, Backspace on empty removes the last, Esc leaves).
 - After it, "Suggested": up to four of GitHub's suggestions as dashed pills; a click adds one.
 - Ready for review asks them right after marking it ready. With nobody picked it only marks it ready and the PR stays for Add reviewers.
 

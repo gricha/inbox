@@ -1,8 +1,19 @@
 import { Effect } from "effect";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Reviewer } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { cls } from "../format.ts";
+import { Avatar } from "./Avatar.tsx";
+
+// A person's face, or a team's mark (GitHub has no avatar by team slug).
+const Face = ({ r }: { r: { login: string; team: boolean } }) =>
+  r.team ? (
+    <span className="rv-team-face" aria-hidden="true">
+      @
+    </span>
+  ) : (
+    <Avatar login={r.login} />
+  );
 
 // The box with the cursor and its list closed, as a review opened to ask reviewers starts: the Suggested on its line offer
 // GitHub's picks, and the list opens as you type, press ↓ or click the box, never over Ask reviewers unasked.
@@ -21,9 +32,11 @@ export function Reviewers({
   asked,
   picked,
   setPicked,
+  ready,
 }: {
   id: string;
-  asked: string[]; // logins and team slugs already asked on GitHub
+  ready: boolean; // a draft: Ready for review asks them; else Ask reviewers does
+  asked: { login: string; team: boolean }[]; // already asked on GitHub
   picked: Reviewer[];
   setPicked: (r: Reviewer[]) => void;
 }) {
@@ -77,7 +90,7 @@ export function Reviewers({
     };
   }, [id, q, open]);
 
-  const taken = new Set([...asked, ...picked.map((p) => p.login)].map((x) => x.toLowerCase()));
+  const taken = new Set([...asked.map((a) => a.login), ...picked.map((p) => p.login)].map((x) => x.toLowerCase()));
   // Until GitHub answers what's typed now, only the last answer's names that match it show, so Enter never adds a stale one.
   const now = typeof found === "object" && found?.q === q;
   const needle = q.trim().toLowerCase();
@@ -87,6 +100,7 @@ export function Reviewers({
           .filter((r) => !taken.has(r.login.toLowerCase()))
           .filter((r) => now || r.login.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle))
           .slice(0, 8)
+          .toSorted((a, b) => Number(b.suggested) - Number(a.suggested))
       : [];
   const offered = suggested.filter((r) => !taken.has(r.login.toLowerCase())).slice(0, 4);
 
@@ -115,16 +129,25 @@ export function Reviewers({
     }
   }
 
+  const sending = picked.length
+    ? `${ready ? "Ready for review" : "Ask reviewers"} sends GitHub a review request for ${picked.length === 1 ? picked[0]?.login : `these ${picked.length}`}.`
+    : ready
+      ? "Pick who should review it: Ready for review takes it out of draft and asks them on GitHub."
+      : "Nobody's asked to review it yet: pick who should, then Ask reviewers sends each a request on GitHub.";
+
   return (
     <div className="rv-reviewers">
+      <p className="rv-reviewers-help">{sending}</p>
       <span className="rv-reviewers-label">Reviewers</span>
       {asked.map((a) => (
-        <span key={a} className="rv-reviewer asked" title="Already asked on GitHub">
-          {a}
+        <span key={a.login} className="rv-reviewer asked" title="Already asked on GitHub">
+          <Face r={a} />
+          {a.login}
         </span>
       ))}
       {picked.map((p) => (
         <span key={p.id} className="rv-reviewer">
+          <Face r={p} />
           {p.login}
           {p.team && <span className="rv-reviewer-team">team</span>}
           <button
@@ -172,20 +195,27 @@ export function Reviewers({
               <p className="rv-reviewers-note">{q ? `No one matches “${q}”` : "No suggestions: type a name"}</p>
             ) : (
               list.map((r, i) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  className={cls("pop-item", i === hi && "hi")}
-                  // Before the input's blur closes the list.
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    add(r);
-                  }}
-                >
-                  <span className="rv-reviewer-login">{r.login}</span>
-                  {r.name && <span className="rv-reviewer-name">{r.name}</span>}
-                  <span className="rv-reviewer-why">{r.team ? "team" : r.suggested ? "suggested" : ""}</span>
-                </button>
+                <Fragment key={r.id}>
+                  {(i === 0 || list[i - 1]?.suggested !== r.suggested) && (
+                    <p className="pop-head">
+                      {r.suggested ? "Suggested by GitHub, from who changed these files" : q ? "People and teams" : "Others"}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    className={cls("pop-item", i === hi && "hi")}
+                    // Before the input's blur closes the list.
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      add(r);
+                    }}
+                  >
+                    <Face r={r} />
+                    <span className="rv-reviewer-login">{r.login}</span>
+                    {r.name && <span className="rv-reviewer-name">{r.name}</span>}
+                    {r.team && <span className="rv-reviewer-why">team</span>}
+                  </button>
+                </Fragment>
               ))
             )}
           </div>
@@ -205,6 +235,7 @@ export function Reviewers({
               }}
             >
               <span aria-hidden>+</span>
+              <Face r={r} />
               {r.login}
             </button>
           ))}

@@ -94,6 +94,7 @@ const DID: Record<GitHubAction, string> = {
   merge: "Merged on GitHub",
   reopen: "Reopened on GitHub",
   request_changes: "Requested changes on GitHub",
+  rerequest: "Asked them to review it again on GitHub",
 };
 const go = (r: Route) => {
   location.hash = routeHash(r);

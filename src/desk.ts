@@ -39,7 +39,7 @@ import { linkRef, permalink } from "./links.ts";
 import { renderDoc, renderText } from "./render.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
-import { askedAt, mergeLine, owesReply, reviewOptional, stage, standings, verdicts } from "./stage.ts";
+import { askedAt, mergeLine, owesReply, reviewOptional, rerequestable, stage, standings, verdicts } from "./stage.ts";
 import { blockedOrder, dependencies, type DepFacts } from "./deps.ts";
 import type {
   DocSaved,
@@ -196,6 +196,7 @@ const GITHUB_VERB: Record<GitHubAction, [string, string]> = {
   merge: ["merge %", "merged %"],
   reopen: ["reopen %", "reopened %"],
   request_changes: ["request changes on %", "requested changes on %"],
+  rerequest: ["re-request review on %", "re-requested review on %"],
 };
 const MAX_ASK = 2_000; // your words to the coordinator, and your answer to an agent's question
 const MAX_ANSWER = 6_000; // the coordinator's answer: room for a list and a few lines of code, as an inquiry's context
@@ -2598,6 +2599,7 @@ export class Desk {
     return [
       "close",
       ...(it.draft ? (["ready"] as const) : (["draft"] as const)),
+      ...(!it.draft && rerequestable(it).length ? (["rerequest"] as const) : []),
       // Stacked: it would merge into the PR below, which Merging says it waits on.
       ...(readyToMerge(it, this.me()) && !e.analysis.signals.pr.stacked && it.merge_method && it.head_oid ? (["merge"] as const) : []),
     ];
@@ -2629,6 +2631,7 @@ export class Desk {
         if (action === "ready") return Effect.as(w.ready(it.node_id), none);
         if (action === "merge") return Effect.as(w.merge(it.node_id, it.head_oid, it.merge_method!), none);
         if (action === "reopen") return Effect.as(w.reopen(it.node_id), none);
+        if (action === "rerequest") return Effect.as(w.rerequest(it.node_id, rerequestable(it)), none);
         return w.requestChanges(it.node_id, it.head_oid, body);
       };
       const write = Effect.gen({ self: this }, function* () {

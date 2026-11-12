@@ -13,7 +13,8 @@ const ENDPOINT = "https://api.github.com/graphql";
 // to the commit the review showed.
 // ready: your own draft's "Ready for review" (on its row or in its review); request_reviews: the reviewers you picked with
 // it, added to any already asked (union).
-// The rest are the More menu's: close, draft, mark ready, merge and reopen your own PR, request changes on someone else's, close an issue.
+// The rest are the More menu's: close, draft, mark ready, merge and reopen your own PR, re-request review from who reviewed it,
+// request changes on someone else's, close an issue.
 // expectedHeadOid pins a merge to the commit the desk judged ready, so a push since then isn't merged unseen.
 export const ALLOWED = {
   approve: `mutation DeskApprove($pr: ID!, $commit: GitObjectID!, $body: String) {
@@ -33,6 +34,9 @@ export const ALLOWED = {
 }`,
   request_reviews: `mutation DeskRequestReviews($pr: ID!, $users: [ID!], $teams: [ID!]) {
   requestReviews(input: { pullRequestId: $pr, userIds: $users, teamIds: $teams, union: true }) { pullRequest { id } }
+}`,
+  rerequest: `mutation DeskRerequest($pr: ID!, $users: [String!]) {
+  requestReviewsByLogin(input: { pullRequestId: $pr, userLogins: $users, union: true }) { pullRequest { id } }
 }`,
   close: `mutation DeskClose($pr: ID!) {
   closePullRequest(input: { pullRequestId: $pr }) { pullRequest { state } }
@@ -71,6 +75,7 @@ export interface GitHubWriter {
   inlineComment(prNodeId: string, commit: string, thread: InlineThread): Effect.Effect<{ url: string }, GitHubWriteError>; // on a line of its diff
   ready(prNodeId: string): Effect.Effect<void, GitHubWriteError>; // a draft, ready for review
   requestReviews(prNodeId: string, users: string[], teams: string[]): Effect.Effect<void, GitHubWriteError>; // node ids
+  rerequest(prNodeId: string, logins: string[]): Effect.Effect<void, GitHubWriteError>; // who reviewed it, asked again
   close(prNodeId: string): Effect.Effect<void, GitHubWriteError>;
   draft(prNodeId: string): Effect.Effect<void, GitHubWriteError>; // back to draft
   merge(prNodeId: string, head: string, method: "MERGE" | "SQUASH" | "REBASE"): Effect.Effect<void, GitHubWriteError>;
@@ -163,6 +168,7 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
       ),
     ready: (pr) => send("ready", pr, { pr }).pipe(Effect.asVoid),
     requestReviews: (pr, users, teams) => send("request_reviews", pr, { pr, users, teams }).pipe(Effect.asVoid),
+    rerequest: (pr, users) => send("rerequest", pr, { pr, users }).pipe(Effect.asVoid),
     close: (pr) => send("close", pr, { pr }).pipe(Effect.asVoid),
     draft: (pr) => send("draft", pr, { pr }).pipe(Effect.asVoid),
     merge: (pr, head, method) => send("merge", pr, { pr, head, method }).pipe(Effect.asVoid),

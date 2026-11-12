@@ -57,6 +57,11 @@ function fakeWriter(t: () => Awaited<ReturnType<typeof setup>>) {
         calls.push(["merge", pr, head, method]);
         land(pr, { state: "merged", closed_at: hoursAgo(0), merged_by: "me" });
       }),
+    rerequest: (pr, logins) =>
+      Effect.sync(() => {
+        calls.push(["rerequest", pr, ...logins]);
+        land(pr, { review_requests: logins.map((reviewer) => ({ reviewer, type: "user" as const, codeowner: false })) });
+      }),
     requestChanges: (pr, commit, body) =>
       Effect.sync(() => {
         calls.push(["requestChanges", pr, commit, body]);
@@ -402,4 +407,30 @@ test("a write whose refresh reads nothing isn't offered again until a read shows
   await run(t.desk.sync());
   assert.deepEqual(runSync(t.desk.item("web#4")).card.actions, ["reopen"], "a read shows it closed");
   assert.deepEqual(runSync(t.desk.item("web#3")).card.actions, ["reopen"]);
+});
+
+test("Re-request review asks again whoever reviewed your PR and isn't asked now: not bots, not you, not a draft", async (c) => {
+  const said = (author: string, state: "approved" | "changes_requested" | "commented", bot = false) => ({
+    author,
+    author_bot: bot,
+    state,
+    at: hoursAgo(5),
+    commit: "h1",
+  });
+  const { t, w } = await withWriter(c, [
+    myPr(3, {
+      ci: "green",
+      reviews: [said("sam", "changes_requested"), said("dana", "commented"), said("sam", "commented"), said("bugbot", "commented", true)],
+      review_requests: [{ reviewer: "dana", type: "user", codeowner: false }],
+    }),
+    myPr(4, { ci: "green", draft: true, reviews: [said("sam", "commented")] }),
+    myPr(5, { ci: "green", reviews: [said("me", "commented")] }),
+  ]);
+  const actions = (ref: string) => runSync(t.desk.item(ref)).card.actions;
+  assert.deepEqual(actions("web#3"), ["close", "draft", "rerequest"]);
+  assert.deepEqual(actions("web#4"), ["close", "ready"], "a draft: Ready for review asks");
+  assert.deepEqual(actions("web#5"), ["close", "draft"], "only you reviewed it");
+  await run(t.desk.githubAct("web#3", "rerequest"));
+  assert.deepEqual(w.calls, [["rerequest", "PR_acme/web_3", "sam"]], "dana is asked already");
+  assert.deepEqual(writes(t, "acme/web#3"), ["rerequest"]);
 });
