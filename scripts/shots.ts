@@ -2240,6 +2240,31 @@ const SHOTS: Shot[] = [
         failures.push("review-mine: the review of a PR waiting on its review has Hand off for merge");
     },
   },
+  // Your PR with reviewers already: the sidebar lists them with no line over them, and Add reviewers opens the box to ask more.
+  {
+    name: "review-add-reviewers",
+    go: async (page) => {
+      await review("acme/api#4154")(page);
+      const side = page.locator(".rv-side");
+      if (!(await side.isVisible())) await page.locator(".rv-side-show").click();
+      if (await page.locator("[data-part=reviewers] .rv-part-line").count())
+        failures.push("review-add-reviewers: the reviewers have a line over their rows");
+      const add = page.locator("[data-part=reviewers] .rv-part-more", { hasText: "Add reviewers" });
+      if (!(await add.count())) {
+        failures.push("review-add-reviewers: no Add reviewers on your PR");
+        return;
+      }
+      await add.click();
+      await page.waitForTimeout(300);
+      const focused = await page.evaluate<boolean>(`document.activeElement?.classList.contains("rv-reviewers-input") ?? false`);
+      if (!focused || !(await page.locator("button", { hasText: "Ask reviewers" }).count()))
+        failures.push("review-add-reviewers: Add reviewers doesn't open the box with Ask reviewers");
+    },
+    after: async (page) => {
+      await sideDefault(page);
+      await fresh(page);
+    },
+  },
   // Your PR where reviewers wait on you: Claude's read and a reply box each, the rest one quiet line, opened here.
   {
     name: "review-conversation",
@@ -2633,7 +2658,7 @@ const SHOTS: Shot[] = [
         const side = document.querySelector(".rv-side"), lines = {};
         for (const part of side.querySelectorAll(".rv-part")) {
           const words = part.querySelector(".rv-part-line");
-          lines[part.getAttribute("aria-label")] = { text: words.textContent, amber: getComputedStyle(words).color === amber };
+          lines[part.getAttribute("aria-label")] = { text: words?.textContent ?? "", amber: !!words && getComputedStyle(words).color === amber };
         }
         return { names: [...side.querySelectorAll("section, nav")].map((el) => el.getAttribute("aria-label")), text: side.textContent, lines };
       })()`);
@@ -2642,7 +2667,7 @@ const SHOTS: Shot[] = [
       if (/recent activity/i.test(parts.text)) failures.push("review-panel: the sidebar still lists recent activity");
       const want = {
         Checks: { text: "CI passing · 11 checks", amber: false },
-        Reviewers: { text: "Changes requested by sam", amber: true },
+        Reviewers: { text: "", amber: false }, // its rows say it
         Merge: { text: "Merge conflict with main", amber: true },
       };
       if (JSON.stringify(parts.lines) !== JSON.stringify(want))

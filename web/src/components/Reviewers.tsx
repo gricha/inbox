@@ -33,9 +33,11 @@ export function Reviewers({
   picked,
   setPicked,
   ready,
+  unasked,
 }: {
   id: string;
   ready: boolean; // a draft: Ready for review asks them; else Ask reviewers does
+  unasked: boolean; // nobody's asked to review it yet
   asked: { login: string; team: boolean }[]; // already asked on GitHub
   picked: Reviewer[];
   setPicked: (r: Reviewer[]) => void;
@@ -133,7 +135,9 @@ export function Reviewers({
     ? `${ready ? "Ready for review" : "Ask reviewers"} sends GitHub a review request for ${picked.length === 1 ? picked[0]?.login : `these ${picked.length}`}.`
     : ready
       ? "Pick who should review it: Ready for review takes it out of draft and asks them on GitHub."
-      : "Nobody's asked to review it yet: pick who should, then Ask reviewers sends each a request on GitHub.";
+      : unasked
+        ? "Nobody's asked to review it yet: pick who should, then Ask reviewers sends each a request on GitHub."
+        : "Pick who else should review it: Ask reviewers sends each a request on GitHub.";
 
   return (
     <div className="rv-reviewers">

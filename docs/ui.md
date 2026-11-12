@@ -256,7 +256,7 @@ Esc or the back link goes back to the page it was opened from.
 Sections, each open: its name, where it stands in one line that reads first (red when a required check fails, amber for changes requested), then its rows.
 
 - **Checks**: a row each, with a dot: red failing, red hollow failing but not required, yellow running, green passing, grey skipped. Shards of one check (`backend test (0)`, `(1)`, `[2/3]`, `#4`) are one row with a count and their worst dot; a click lists them. What's wrong comes first; past six rows the green and grey ones wait behind "N more passing". `checkGroups()` in `web/src/view.ts`.
-- **Reviewers**: everyone, with their picture and where they stand.
+- **Reviewers**: everyone, with their picture and where they stand; no line over them ("Nobody's asked" when there's no one). On your open PR, **+ Add reviewers** (also in More) opens the reviewers box above the buttons with **Ask reviewers**, which asks who you pick, added to who's asked.
 - **Merge**: a conflict. **Depends**: what it's blocked by or blocks, when it isn't in a stack (a stack has its own section).
 
 ### The AI review

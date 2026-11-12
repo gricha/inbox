@@ -253,8 +253,10 @@ export function Review({
   const canApprove = !!v?.approve.ok;
   // Your own open draft: Ready for review instead of Approve.
   const readying = v?.card.cta === "ready";
-  // Your ready PR nobody's asked to review: Ask reviewers asks who you pick.
-  const asking = v?.card.cta === "reviewers";
+  // Your ready PR nobody's asked to review, or one you add reviewers to: Ask reviewers asks who you pick.
+  const [adding, setAdding] = useState("");
+  const yoursOpen = !!v && !!me && v.card.author.toLowerCase() === me.toLowerCase() && v.item.state === "open" && !v.item.draft;
+  const asking = v?.card.cta === "reviewers" || (adding === id && yoursOpen);
   const picking = readying || asking;
   // A PR in Merging is the coordinator's: no AI review to ask for.
   const flying = !!row && row.state === "open";
@@ -304,6 +306,11 @@ export function Review({
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
   }, [id, loads]);
+
+  function addReviewers() {
+    setAdding(id);
+    requestAnimationFrame(focusReviewers);
+  }
 
   // Opened to ask reviewers (its row's Add reviewers): the box has the cursor, once per PR.
   const askedFocus = useRef("");
@@ -823,6 +830,7 @@ export function Review({
             picked={picked}
             setPicked={setPicked}
             ready={readying}
+            unasked={card.cta === "reviewers"}
           />
         )}
         {/* What finishes it first (its call to action, or Hand off or Back to desk on yours), then the rest, then your
@@ -904,6 +912,7 @@ export function Review({
                         },
                       ]
                     : []),
+                  ...(yoursOpen && !asking && !acted ? [{ label: "Add reviewers", run: addReviewers }] : []),
                   {
                     label: "Copy link",
                     run: () => {
@@ -1092,7 +1101,7 @@ export function Review({
           <SidePart
             id="reviewers"
             name="Reviewers"
-            line={view.reviewers.line}
+            line={view.reviewers.list.length ? "" : view.reviewers.line}
             bad={view.reviewers.changes ? "t-warn" : ""}
             tone={calm(card)}
             rows={view.reviewers.list.map((r) => ({
@@ -1101,6 +1110,7 @@ export function Review({
               state: r.state,
               bad: r.state === "changes requested" ? "t-warn" : "",
             }))}
+            add={yoursOpen && !asking && !acted ? addReviewers : undefined}
           />
           {view.merge && <SidePart id="merge" name="Merge" line={view.merge} bad="t-warn" tone={calm(card)} />}
           {!view.stack && deps.length > 0 && (
@@ -1435,22 +1445,26 @@ function SidePart({
   bad,
   tone = "",
   rows,
+  add,
 }: {
   id: string; // data-part, for a check to find it by
   name: string;
-  line: string;
+  line: string; // "" when its rows say it all
   bad: string; // t-bad, t-warn, or "" for ink
   tone?: string; // calm(): on a sorted-away PR its problems are grey
   rows?: { name: string; login?: string; state: string; bad: string }[];
+  add?: (() => void) | undefined; // the reviewers' Add reviewers, on your open PR
 }) {
   return (
     <section className={cls("rv-part", tone)} data-part={id} aria-label={name}>
       <h2 className="rv-side-head">
         <span>{name}</span>
       </h2>
-      <p className={cls("rv-part-line", "fact-word", bad)} title={line}>
-        {line}
-      </p>
+      {line && (
+        <p className={cls("rv-part-line", "fact-word", bad)} title={line}>
+          {line}
+        </p>
+      )}
       {!!rows?.length && (
         <ol>
           {rows.map((r) => (
@@ -1465,6 +1479,11 @@ function SidePart({
             </li>
           ))}
         </ol>
+      )}
+      {add && (
+        <button type="button" className="rv-part-more" onClick={add}>
+          + Add reviewers
+        </button>
       )}
     </section>
   );
