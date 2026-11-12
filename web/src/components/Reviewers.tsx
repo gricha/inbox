@@ -34,13 +34,17 @@ export function Reviewers({
   setPicked,
   ready,
   unasked,
+  compact = false,
+  onPick,
 }: {
+  onPick?: (r: Reviewer) => void; // compact: a pick is asked at once, and stays as asked
   id: string;
+  compact?: boolean; // in the review's sidebar, under who's asked: the box and what you pick, no words around them
   ready: boolean; // a draft: Ready for review asks them; else Ask reviewers does
   unasked: boolean; // nobody's asked to review it yet
   asked: { login: string; team: boolean }[]; // already asked on GitHub
   picked: Reviewer[];
-  setPicked: (r: Reviewer[]) => void;
+  setPicked: (r: Reviewer[] | ((was: Reviewer[]) => Reviewer[])) => void;
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -108,6 +112,7 @@ export function Reviewers({
 
   function add(r: Reviewer) {
     setPicked([...picked, r]);
+    onPick?.(r);
     setQ("");
     setHi(0);
   }
@@ -121,7 +126,7 @@ export function Reviewers({
       e.preventDefault();
       const r = list[hi];
       if (r) add(r);
-    } else if (e.key === "Backspace" && !q && picked.length) {
+    } else if (e.key === "Backspace" && !q && picked.length && !onPick) {
       setPicked(picked.slice(0, -1));
     } else if (e.key === "Escape") {
       // Its own: Esc here never leaves the review.
@@ -140,32 +145,35 @@ export function Reviewers({
         : "Pick who else should review it: Ask reviewers sends each a request on GitHub.";
 
   return (
-    <div className="rv-reviewers">
-      <p className="rv-reviewers-help">{sending}</p>
-      <span className="rv-reviewers-label">Reviewers</span>
-      {asked.map((a) => (
-        <span key={a.login} className="rv-reviewer asked" title="Already asked on GitHub">
-          <Face r={a} />
-          {a.login}
-        </span>
-      ))}
-      {picked.map((p) => (
-        <span key={p.id} className="rv-reviewer">
-          <Face r={p} />
-          {p.login}
-          {p.team && <span className="rv-reviewer-team">team</span>}
-          <button
-            type="button"
-            className="rv-reviewer-x"
-            aria-label={`Don't ask ${p.login}`}
-            onClick={() => {
-              setPicked(picked.filter((x) => x.id !== p.id));
-            }}
-          >
-            ×
-          </button>
-        </span>
-      ))}
+    <div className={cls("rv-reviewers", compact && "compact")}>
+      {!compact && <p className="rv-reviewers-help">{sending}</p>}
+      {!compact && <span className="rv-reviewers-label">Reviewers</span>}
+      {!compact &&
+        asked.map((a) => (
+          <span key={a.login} className="rv-reviewer asked" title="Already asked on GitHub">
+            <Face r={a} />
+            {a.login}
+          </span>
+        ))}
+      {/* In the sidebar a pick is asked at once and listed above with the others. */}
+      {!onPick &&
+        picked.map((p) => (
+          <span key={p.id} className="rv-reviewer">
+            <Face r={p} />
+            {p.login}
+            {p.team && <span className="rv-reviewer-team">team</span>}
+            <button
+              type="button"
+              className="rv-reviewer-x"
+              aria-label={`Don't ask ${p.login}`}
+              onClick={() => {
+                setPicked(picked.filter((x) => x.id !== p.id));
+              }}
+            >
+              ×
+            </button>
+          </span>
+        ))}
       <span className="rv-reviewers-add">
         <input
           className="rv-reviewers-input"

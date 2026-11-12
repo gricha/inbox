@@ -3946,6 +3946,9 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const { users, teams } = await readBody(req);
     if (!mineOf(r.seed)) throw new HttpError(409, `${r.id} isn't your PR`);
     if (![users, teams].flat().filter(Boolean).length) throw new HttpError(400, "pick someone to ask");
+    // As GitHub would: they're asked now.
+    const ids = new Set([users, teams].flat().map(String));
+    r.seed.asked = [...(r.seed.asked ?? []), ...ROSTER.filter((x) => ids.has(x.id)).map((x) => x.login)];
     bump();
     return { ok: true };
   }

@@ -1040,6 +1040,24 @@ export function App() {
     runUi(finish(c, `Asking ${names} to review ${shortRef(c)}…`, { what: `Asked ${names}`, where: "archive" }, write));
   }
 
+  // One reviewer picked in the review's sidebar: asked at once, and the PR stays where it is. False when GitHub says no.
+  function addReviewer(c: Card, r: Reviewer): Effect.Effect<boolean> {
+    const ask = r.team ? { users: [], teams: [r.id] } : { users: [r.id], teams: [] };
+    return api.askReviewers(c.id, ask, true).pipe(
+      Effect.match({
+        onSuccess: () => {
+          flash(`Asked ${r.login} to review ${shortRef(c)} on GitHub`);
+          return true;
+        },
+        onFailure: (e) => {
+          flash(`Couldn't ask ${r.login}: ${e.message}`, true);
+          return false;
+        },
+      }),
+      Effect.tap(refreshNow),
+    );
+  }
+
   // Your comment on the PR (its review) or the issue (the comment bar). True once GitHub has it, so its box closes; a
   // refusal keeps your words in it.
   function comment(c: Card, body: string): Effect.Effect<boolean> {
@@ -1628,6 +1646,7 @@ export function App() {
               onApprove={approve}
               onReady={markReady}
               onAskReviewers={askReviewers}
+              onAddReviewer={addReviewer}
               onComment={comment}
               onBack={() => {
                 go(reviewQuestion ? { name: "inquiry", id: reviewQuestion } : { name: reviewFrom });

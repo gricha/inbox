@@ -3366,7 +3366,8 @@ export class Desk {
 
   // POST /api/review/:id/reviewers: who reviews your ready PR nobody's asked (Ask reviewers in its review), one of the desk's
   // GitHub writes, on your click. Your part is done, so it leaves your desk until someone reviews.
-  askReviewers(ref: string, ask: { users: string[]; teams: string[] }): Effect.Effect<void, WriteError> {
+  // keep: one picked in the review's sidebar, added to who's asked; the PR stays where it is on your desk.
+  askReviewers(ref: string, ask: { users: string[]; teams: string[] }, keep = false): Effect.Effect<void, WriteError> {
     return Effect.gen({ self: this }, function* () {
       yield* this.notStopped();
       const e = yield* this.pr(ref);
@@ -3383,7 +3384,7 @@ export class Desk {
         this.store.logWrite(id, "request_reviews", this.now().toISOString());
         const n = ask.users.length + ask.teams.length;
         this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
-        yield* this.doneAfterWrite(id);
+        if (!keep) yield* this.doneAfterWrite(id);
       }).pipe(Effect.ensuring(this.refreshed(id)));
       return yield* this.locked(this.approving, id, `already asking on ${id}`, write);
     });

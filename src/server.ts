@@ -478,7 +478,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   // Reviewers for your ready PR nobody's asked to review, from the desk's own window only.
   app.post("/api/review/:id{.+}/reviewers", (c) =>
     write(c, "ask reviewers from the PR's review in the desk's window", (b) =>
-      Effect.flatMap(reviewerIds(b), (ask) => Effect.as(desk.askReviewers(c.req.param("id"), ask), { ok: true })),
+      Effect.flatMap(reviewerIds(b), (ask) => Effect.as(desk.askReviewers(c.req.param("id"), ask, b.keep === true), { ok: true })),
     ),
   );
   // The More menu's GitHub writes (close, draft, ready, merge, reopen, request changes), from the desk's own window only.

@@ -579,6 +579,10 @@ test("your ready PR nobody's asked to review tops your desk with Add reviewers; 
   assert.equal((await ask("acme/web#3", { users: ["U_dana"], teams: ["T_backend"] }, desk)).status, 200);
   assert.deepEqual(w.calls, [["request_reviews", "PR_acme/web_3", ["U_dana"], ["T_backend"]]]);
   assert.equal(card("web#3").status, "done", "your part is done until someone reviews");
+  // One added from the review's sidebar (keep): asked, and the PR stays where it is.
+  assert.equal((await ask("acme/web#5", { users: ["U_kai"], keep: true }, desk)).status, 200);
+  assert.deepEqual(w.calls.slice(-1), [["request_reviews", "PR_acme/web_5", ["U_kai"], []]]);
+  assert.equal(card("web#5").status, "active", "kept on your desk");
   assert.equal(
     [...runSync(t.desk.focus()).sections.now, ...runSync(t.desk.focus()).sections.today].some((x) => x.id === "acme/web#3"),
     false,

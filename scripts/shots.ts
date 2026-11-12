@@ -1473,6 +1473,8 @@ const SHOTS: Shot[] = [
       await page.keyboard.type("The OOM is in the batcher: I'll cap the batch at 500 rows today.");
       await page.waitForTimeout(200);
     },
+    // Left open, the next shot's click on its row would close it.
+    after: fresh,
   },
   {
     // Snooze on an issue opened in place: its row's menu at the button, Snooze open.
@@ -2256,9 +2258,23 @@ const SHOTS: Shot[] = [
       }
       await add.click();
       await page.waitForTimeout(300);
-      const focused = await page.evaluate<boolean>(`document.activeElement?.classList.contains("rv-reviewers-input") ?? false`);
-      if (!focused || !(await page.locator("button", { hasText: "Ask reviewers" }).count()))
-        failures.push("review-add-reviewers: Add reviewers doesn't open the box with Ask reviewers");
+      // The box opens in the section, under who's asked: nothing in the body.
+      const focused = await page.evaluate<boolean>(
+        `!!document.activeElement?.closest("[data-part=reviewers]") && document.activeElement.classList.contains("rv-reviewers-input")`,
+      );
+      if (!focused) failures.push("review-add-reviewers: Add reviewers doesn't open the box in the sidebar");
+      if (await page.locator("[data-part=reviewers] .rv-side-add button", { hasText: /^Ask/ }).count())
+        failures.push("review-add-reviewers: the box has an Ask button: a pick is the ask");
+      if (await page.locator(".rv-main .rv-reviewers").count()) failures.push("review-add-reviewers: a box opened in the body too");
+      // A pick is the ask: no button, it's asked at once and listed with the others.
+      await page.locator("[data-part=reviewers] .rv-reviewers-input").fill("dana");
+      await page.waitForTimeout(400);
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(800);
+      const rows = await page.evaluate<string[]>(
+        `[...document.querySelectorAll("[data-part=reviewers] .rv-part-name")].map((el) => el.textContent.trim())`,
+      );
+      if (!rows.includes("dana")) failures.push(`review-add-reviewers: a pick isn't asked: the reviewers read ${rows.join(" | ")}`);
     },
     after: async (page) => {
       await sideDefault(page);

@@ -169,6 +169,7 @@ export function Review({
   onApprove,
   onReady,
   onAskReviewers,
+  onAddReviewer,
   onComment,
   onBack,
   chat,
@@ -192,6 +193,7 @@ export function Review({
   onApprove: (c: Card, head: string) => void;
   onReady: (c: Card, picked: Reviewer[]) => void;
   onAskReviewers: (c: Card, picked: Reviewer[]) => void; // your ready PR nobody's asked to review: ask who you picked
+  onAddReviewer: (c: Card, r: Reviewer) => Effect.Effect<boolean>; // one picked in the sidebar: asked at once
   onComment: (c: Card, body: string) => Effect.Effect<boolean>; // your comment on the PR; true once GitHub has it
   onBack: () => void;
   chat: boolean; // your chat with your agent is open: it takes the sidebar's place
@@ -256,7 +258,9 @@ export function Review({
   // Your ready PR nobody's asked to review, or one you add reviewers to: Ask reviewers asks who you pick.
   const [adding, setAdding] = useState("");
   const yoursOpen = !!v && v.card.by === "you" && v.item.state === "open" && !v.item.draft;
-  const asking = v?.card.cta === "reviewers" || (adding === id && yoursOpen);
+  const asking = v?.card.cta === "reviewers";
+  // + Add reviewers in the sidebar: the box opens there, under who's asked, with its own Ask.
+  const sideAdding = adding === id && yoursOpen && !asking;
   const picking = readying || asking;
   // A PR in Merging is the coordinator's: no AI review to ask for.
   const flying = !!row && row.state === "open";
@@ -308,8 +312,11 @@ export function Review({
   }, [id, loads]);
 
   function addReviewers() {
+    if (!showSide) toggleSide();
     setAdding(id);
-    requestAnimationFrame(focusReviewers);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(focusReviewers);
+    });
   }
 
   // Opened to ask reviewers (its row's Add reviewers): the box has the cursor, once per PR.
@@ -1112,8 +1119,46 @@ export function Review({
               state: r.state,
               bad: r.state === "changes requested" ? "t-warn" : "",
             }))}
-            add={yoursOpen && !asking && !acted ? addReviewers : undefined}
-          />
+            add={yoursOpen && !asking && !acted && !sideAdding ? addReviewers : undefined}
+          >
+            {sideAdding && !acted && (
+              <div className="rv-side-add">
+                {/* A pick is the ask: GitHub asks them at once, and the box stays for more. */}
+                <Reviewers
+                  id={card.id}
+                  asked={item.review_requests.map((r) => ({ login: r.reviewer, team: r.type === "team" }))}
+                  picked={picked}
+                  setPicked={setPicked}
+                  ready={false}
+                  unasked={false}
+                  compact
+                  onPick={(r) => {
+                    runUi(
+                      onAddReviewer(card, r).pipe(
+                        Effect.tap((ok) =>
+                          Effect.sync(() => {
+                            if (!ok) setPicked((ps) => ps.filter((p) => p.id !== r.id));
+                          }),
+                        ),
+                      ),
+                    );
+                  }}
+                />
+                <div className="actions">
+                  <button
+                    type="button"
+                    className="act"
+                    onClick={() => {
+                      setAdding("");
+                      setPicked([]);
+                    }}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            )}
+          </SidePart>
           {view.merge && <SidePart id="merge" name="Merge" line={view.merge} bad="t-warn" tone={calm(card)} />}
           {!view.stack && deps.length > 0 && (
             <SidePart id="deps" name="Depends" line={deps.map((d) => d.text).join(" · ")} bad="" tone={calm(card)} />
@@ -1448,7 +1493,9 @@ function SidePart({
   tone = "",
   rows,
   add,
+  children,
 }: {
+  children?: ReactNode; // the reviewers' box, while you add some
   id: string; // data-part, for a check to find it by
   name: string;
   line: string; // "" when its rows say it all
@@ -1482,6 +1529,7 @@ function SidePart({
           ))}
         </ol>
       )}
+      {children}
       {add && (
         <button type="button" className="rv-part-more" onClick={add}>
           + Add reviewers

@@ -202,8 +202,9 @@ export const api = {
   // With the reviewers you picked (node ids), asked right after it's marked ready.
   ready: (id: string, ask?: { users: string[]; teams: string[] }) =>
     call<{ ok: true; done: boolean }>("POST", `/api/review/${encodeURIComponent(id)}/ready`, ask ?? {}),
-  askReviewers: (id: string, ask: { users: string[]; teams: string[] }) =>
-    call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/reviewers`, ask),
+  // keep: added from the review's sidebar, so it stays on your desk.
+  askReviewers: (id: string, ask: { users: string[]; teams: string[] }, keep = false) =>
+    call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/reviewers`, { ...ask, keep }),
   inquiry: (id: string) => call<InquiryView>("GET", `/api/inquiries/${encodeURIComponent(id)}`),
   // A session that needs you: Kick or Resume starts it again where it left off, Open follows its own link.
   kickSession: (id: string) => call<{ ok: true; args: string[] }>("POST", `/api/sessions/${encodeURIComponent(id)}/kick`),
