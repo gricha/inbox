@@ -1182,11 +1182,11 @@ export function App() {
   }
 
   // Copy link: the item's inbox:// link, which the desktop app opens it at, and which an agent reads as its ref.
-  function copyLink(c: Card): Effect.Effect<void> {
-    return copyText(permalink({ item: c.id })).pipe(
+  function copyLink(c: Card, onGitHub = false): Effect.Effect<void> {
+    return copyText(onGitHub ? c.url : permalink({ item: c.id })).pipe(
       Effect.tap(() =>
         Effect.sync(() => {
-          flash(`Copied the link to ${shortRef(c)}`);
+          flash(`Copied the ${onGitHub ? "GitHub " : ""}link to ${shortRef(c)}`);
         }),
       ),
       Effect.catch(failed),
@@ -1241,6 +1241,7 @@ export function App() {
   function run(c: Card, k: string) {
     if (k === "enter") openCard(c);
     else if (k === "link") runUi(copyLink(c));
+    else if (k === "github-link") runUi(copyLink(c, true));
     else if (k === "close") setExpanded(null);
     else if (k === "t") openAsk(c.id);
     else if (k === "b") runUi(back(c));

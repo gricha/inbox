@@ -4946,7 +4946,7 @@ const SHOTS: Shot[] = [
       );
       if (
         JSON.stringify(items[0]) !== JSON.stringify(["Done", "Snooze›"]) ||
-        JSON.stringify(items.at(-1)) !== JSON.stringify(["Copy link"])
+        JSON.stringify(items.at(-1)) !== JSON.stringify(["Copy link", "Copy GitHub link"])
       )
         failures.push(`row-menu: it reads ${JSON.stringify(items)}`);
     },
@@ -4968,6 +4968,21 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300); // the toast in, not fading in
     },
     after: fresh, // its toast gone, so the next shot doesn't show it
+  },
+  {
+    // Copy GitHub link in a row's menu: the PR's GitHub URL on the clipboard (stubbed), and a quiet toast.
+    name: "row-menu-copy-github-link",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.evaluate(`navigator.clipboard.writeText = async (t) => { window.__copied = t; }`);
+      await rowMenuPick(page, '.line:has-text("Drop the legacy v1 auth")', "Copy GitHub link");
+      await page.locator(".toast").waitFor();
+      const said = [await page.evaluate<unknown>("window.__copied"), await page.locator(".toast").textContent()];
+      if (said[0] !== "https://github.com/acme/api/pull/4099" || said[1] !== "Copied the GitHub link to api#4099")
+        failures.push(`row-menu-copy-github-link: copied and said ${JSON.stringify(said)}`);
+      await page.waitForTimeout(300);
+    },
+    after: fresh,
   },
   {
     // Right-click an agent's question: what its page offers, Answer, Copy link and Dismiss. Then each: Copy link copies its

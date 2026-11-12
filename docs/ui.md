@@ -167,9 +167,9 @@ Right-click any row (Inbox, Blocked, Merging, Archive) for a menu at the pointer
 - **Done** (or **Back on the desk** once cleared).
 - **Snooze**, opening to the side: a time, until activity, or what the PR can wait on now (`wake_on`: CI passes, new commits, it's approved, it's ready for review, the merge conflict is fixed).
 - **Close on GitHub**, where it can be closed.
-- **Copy link**.
+- **Copy link**, **Copy GitHub link** (the PR or issue on GitHub).
 
-On Merging the menu is **Back to the desk** and **Copy link**. A question's is **Answer**, **Copy link**, **Dismiss**. A session's is **Done**, **Snooze** and its call to action. Arrows move, → opens Snooze, Enter picks, Esc closes.
+On Merging the menu is **Back to the desk**, **Copy link** and **Copy GitHub link**. A question's is **Answer**, **Copy link**, **Dismiss**. A session's is **Done**, **Snooze** and its call to action. Arrows move, → opens Snooze, Enter picks, Esc closes.
 
 ### Agents' questions
 
@@ -405,7 +405,7 @@ What you do on a row takes it off. It comes back when the PR it waits on merges.
 - All ink and pencil, problems included: your agent has it.
 - A stack's rows sit together under "Stack on main · 6 open" when two or more are here.
 - The selected row moves its phrase to a line underneath.
-- Click opens the review; right-click: **Back to the desk**, **Copy link**.
+- Click opens the review; right-click: **Back to the desk**, **Copy link**, **Copy GitHub link**.
 
 **Merged**: PRs merged or closed in the last 3 days, as pencil rows.
 
