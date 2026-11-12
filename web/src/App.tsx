@@ -7,6 +7,7 @@ import type {
   GitHubAction,
   InflightView,
   Inquiry,
+  Note,
   SessionAction,
   SessionCard,
   ItemDetail,
@@ -21,7 +22,7 @@ import type {
 import { permalink } from "../../src/links.ts";
 import { isCoordinator } from "../../src/types.ts";
 import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
-import { cls, copyText, fromName, MAC, shortId, shortRef, SNOOZE, snoozeOptions, aiName, setAiName } from "./format.ts";
+import { cls, copyText, fromName, MAC, shortId, shortRef, SNOOZE, snoozeOptions, aiName, setAiName, when } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop, loadOmarchy, omarchyIs } from "./theme.ts";
@@ -51,6 +52,7 @@ import {
 import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
 import { CommentBar } from "./components/CommentBar.tsx";
+import { NoteBar, type NoteCtx } from "./components/Note.tsx";
 import { Beside } from "./components/Beside.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Inflight } from "./components/Inflight.tsx";
@@ -153,6 +155,7 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, ItemDetail | string>>({});
+  const [noting, setNoting] = useState<Note | "new" | null>(null); // the note box: a new note, or one you opened
   const [commenting, setCommenting] = useState<Card | null>(null); // the issue whose comment bar is open (its Comment, opened in place)
   // A row's menu: at a right-click, or under an issue's Snooze with Snooze open.
   const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number; snooze?: boolean } | null>(null);
@@ -783,6 +786,46 @@ export function App() {
     });
   }
 
+  // A note to yourself, new or changed; true once the desk has it.
+  function saveNote(n: Note | null, text: string, remind: string): Effect.Effect<boolean> {
+    return api.saveNote(n?.id ?? null, { text, remind }).pipe(
+      Effect.match({
+        onSuccess: ({ note }) => {
+          flash(note.remind_at ? `I'll remind you ${when(note.remind_at)}` : n ? "Note changed" : "Noted: it's on your Inbox");
+          return true;
+        },
+        onFailure: (e) => {
+          flash(e.message, true);
+          return false;
+        },
+      }),
+      Effect.tap(refreshNow),
+    );
+  }
+  function doneNote(n: Note) {
+    runUi(
+      api.doneNote(n.id).pipe(
+        Effect.match({
+          onSuccess: () => {
+            flash("Note done");
+          },
+          onFailure: (e) => {
+            flash(e.message, true);
+          },
+        }),
+        Effect.tap(refreshNow),
+      ),
+    );
+  }
+  const note: NoteCtx = {
+    now,
+    selected,
+    open: (n) => {
+      setNoting(n);
+    },
+    done: doneNote,
+  };
+
   // Your answer to an agent's question (or leaving it unanswered): it leaves the main page at once while its page stays,
   // saying so; a refusal brings it back. True once the desk has it.
   function answerInquiry(q: Inquiry, text: string, dismiss = false): Effect.Effect<boolean> {
@@ -1276,6 +1319,16 @@ export function App() {
       e.stopImmediatePropagation();
       return;
     }
+    // ⌘N: a new note to yourself, from anywhere.
+    if (mod && e.code === "KeyN") {
+      if (!e.repeat) {
+        setCommenting(null);
+        setNoting("new");
+      }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (mod && bracket && listed) {
       if (!e.repeat) stepTo(bracket);
       e.preventDefault();
@@ -1286,9 +1339,10 @@ export function App() {
     // comment bar from anywhere, before a review or a page reads it as "go back"; a More menu over it closes first.
     const typing = e.target instanceof HTMLElement && !!e.target.closest("input, textarea, select, [contenteditable='true']");
     const menu = !!document.querySelector(".more-pop");
-    if (((asking && !typing) || commenting) && !menu && e.key === "Escape" && !e.isComposing) {
+    if (((asking && !typing) || commenting || noting) && !menu && e.key === "Escape" && !e.isComposing) {
       setAsking(null);
       setCommenting(null);
+      setNoting(null);
       e.preventDefault();
       e.stopImmediatePropagation();
       return;
@@ -1425,6 +1479,7 @@ export function App() {
         ctx={compact}
         inquiries={inquiries}
         inq={{ ...inq, compact: true, selected: listSel, select: ignore }}
+        note={{ ...note, compact: true, selected: listSel }}
         filter={filter}
         toggle={toggleGroup}
       />
@@ -1502,6 +1557,10 @@ export function App() {
           question={route.name === "review" ? reviewQuestion : null}
           filter={filter}
           setFilter={setFilter}
+          onNote={() => {
+            setCommenting(null);
+            setNoting("new");
+          }}
         />
         <main className="main">
           {route.name === "queue" && !broken && (
@@ -1514,6 +1573,7 @@ export function App() {
               inq={inq}
               sessions={sessions}
               ses={ses}
+              note={note}
               filter={filter}
               toggle={toggleGroup}
             />
@@ -1536,6 +1596,7 @@ export function App() {
               keys={PAGE_GROUPS.archive}
               empty={EMPTY.archive}
               ctx={ctx}
+              note={note}
               filter={filter}
               toggle={toggleGroup}
             />
@@ -1655,6 +1716,17 @@ export function App() {
           onWiden={widen}
           onClose={() => {
             setAsking(null);
+          }}
+        />
+      )}
+      {noting && (
+        <NoteBar
+          key={noting === "new" ? "new" : noting.id}
+          note={noting === "new" ? null : noting}
+          onSave={(text, remind) => saveNote(noting === "new" ? null : noting, text, remind)}
+          onDone={doneNote}
+          onClose={() => {
+            setNoting(null);
           }}
         />
       )}

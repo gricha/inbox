@@ -750,6 +750,7 @@ const firstPassShot = (name: string, pass: FirstPass, viewport?: { width: number
         q.sections.today = [];
         q.inbox = { urgent: [], standard: [], fyi: [] };
         q.inquiries = [];
+        q.notes = { due: [], open: [], later: [] };
         q.sessions = [];
       }
     })(page);
@@ -801,7 +802,8 @@ const SHOTS: Shot[] = [
     sizes: ["wide", "mid", "min", "mac", "xl"],
     go: async (page) => {
       await at("#/")(page);
-      if (await page.evaluate<boolean>("innerWidth >= 1280")) await faces(page, "queue", ".line:not(.c-line, .inq, .session) .line-by");
+      if (await page.evaluate<boolean>("innerWidth >= 1280"))
+        await faces(page, "queue", ".line:not(.c-line, .inq, .session, .memo) .line-by");
       if (await page.locator(".line.sel").count()) failures.push("queue: a row is selected on load");
       if (await page.locator(".line-cta.primary").count()) failures.push("queue: a row's call to action is filled on load");
       const on = await sideOn(page);
@@ -823,7 +825,7 @@ const SHOTS: Shot[] = [
         const text = (el, sel) => el?.querySelector(sel)?.textContent.trim() ?? null;
         const first = document.querySelector(".queue .line");
         const back = document.querySelector('.queue .line[data-id="oss/tinyhttp#205"] .line-stage');
-        const cards = [...document.querySelectorAll(".queue .line[data-id]:not(.inq, .session)")];
+        const cards = [...document.querySelectorAll(".queue .line[data-id]:not(.inq, .session, .memo)")];
         return {
           heads: [...document.querySelectorAll(".queue .group-head span:first-child")].map((h) => h.textContent),
           tables: document.querySelectorAll(".queue .lines").length,
@@ -841,6 +843,33 @@ const SHOTS: Shot[] = [
         failures.push(`queue: an agent's question's row reads ${JSON.stringify(list.first)}`);
       if (list.back !== "handed back") failures.push(`queue: the handed-back PR's stage reads ${JSON.stringify(list.back)}`);
       if (list.fold) failures.push('queue: a section folds behind a "more" line');
+    },
+  },
+  {
+    // Notes to yourself: a due reminder in Urgent, one with no time leading Standard; New note on the head and ⌘N open the
+    // note box, its reminder picked from a list or a time you pick.
+    name: "queue-notes",
+    go: async (page) => {
+      await at("#/")(page);
+      const rows = await page.evaluate<{ urgent: string[]; standard: string[] }>(`(() => ({
+        urgent: [...document.querySelectorAll(".g-urgent .line.memo .line-title")].map((e) => e.textContent),
+        standard: [...document.querySelectorAll(".g-standard .line.memo .line-title")].map((e) => e.textContent),
+      }))()`);
+      if (rows.urgent.length !== 1 || rows.standard.length !== 1) failures.push(`queue-notes: notes drawn ${JSON.stringify(rows)}`);
+      if (!(await page.locator(".page-head .head-note", { hasText: "New note" }).count()))
+        failures.push("queue-notes: no New note on the head");
+      await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+n`);
+      await page.locator(".note-bar textarea").waitFor({ timeout: 3000 });
+      await page.locator(".note-bar textarea").fill("Ping Sam about the holdout set once the reranker eval lands");
+      await page.locator(".note-bar select").selectOption("pick");
+      await page.waitForTimeout(150);
+      if (!(await page.locator('.note-bar input[type="datetime-local"]').count()))
+        failures.push("queue-notes: Pick a time shows no time field");
+    },
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+      if (await page.locator(".note-bar").count()) failures.push("queue-notes: Esc leaves the note box open");
     },
   },
   {
@@ -1163,6 +1192,7 @@ const SHOTS: Shot[] = [
         q.sections.today = [];
         q.inbox = { urgent: [], standard: [], fyi: [] };
         q.inquiries = [];
+        q.notes = { due: [], open: [], later: [] };
         q.sessions = [];
       })(page);
       await top(page);
@@ -1203,6 +1233,7 @@ const SHOTS: Shot[] = [
         q.sections.today = [];
         q.inbox = { urgent: [], standard: [], fyi: [] };
         q.inquiries = [];
+        q.notes = { due: [], open: [], later: [] };
         q.sessions = [];
         q.reviewing = 1;
       })(page);

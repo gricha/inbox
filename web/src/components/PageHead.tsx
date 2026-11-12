@@ -18,12 +18,14 @@ export function PageHead({
   question,
   filter,
   setFilter,
+  onNote,
 }: {
   route: Route;
   from: ListPage; // where a review goes back to
   question: string | null; // a review opened from an agent's question goes back to it
   filter: string;
   setFilter: (s: string) => void;
+  onNote: () => void;
 }) {
   const inSettings = route.name === "settings";
   const part = inSettings ? settingsBack(route.section) : null;
@@ -53,7 +55,17 @@ export function PageHead({
           <span>{question ? "Question" : PAGE_NAME[from]}</span>
         </a>
       ) : (
-        <Filter filter={filter} setFilter={setFilter} />
+        <>
+          <Filter filter={filter} setFilter={setFilter} />
+          <button
+            type="button"
+            className="act head-note"
+            title={`A note to yourself, with a reminder if you like (${MOD}N)`}
+            onClick={onNote}
+          >
+            New note
+          </button>
+        </>
       )}
     </header>
   );

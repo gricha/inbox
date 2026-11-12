@@ -592,6 +592,43 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       { log, read: true },
     ),
   );
+  // Notes to yourself: local only, nothing reaches GitHub.
+  const noteBody = (c: Context) =>
+    Effect.map(bodyOf(c), (b) => ({
+      text: typeof b.text === "string" ? b.text : "",
+      remind: typeof b.remind === "string" ? b.remind : "",
+    }));
+  app.post("/api/notes", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        yield* up;
+        return { ok: true, note: yield* desk.saveNote(null, yield* noteBody(c)) };
+      }),
+      { log },
+    ),
+  );
+  app.post("/api/notes/:id/done", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        yield* up;
+        yield* desk.doneNote(c.req.param("id"));
+        return { ok: true };
+      }),
+      { log },
+    ),
+  );
+  app.post("/api/notes/:id", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        yield* up;
+        return { ok: true, note: yield* desk.saveNote(c.req.param("id"), yield* noteBody(c)) };
+      }),
+      { log },
+    ),
+  );
   // desk_inquire and desk_inquiry: an agent's question for you, and reading your answer. Local only, so agents may call them.
   app.post("/api/inquiries", (c) => {
     const inquire = Effect.gen(function* () {

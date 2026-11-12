@@ -3318,6 +3318,27 @@ p {
   gap: 6px;
 }
 
+/* The note box's reminder: under its words, quiet until you pick one. */
+.note-when {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  color: var(--pencil);
+  font-size: 13px;
+}
+
+.note-when label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* New note: at the head's far end, past the filter. */
+.head-note {
+  margin-left: auto;
+}
+
 .composer-input {
   flex: 1;
   min-width: 0;

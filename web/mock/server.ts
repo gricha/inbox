@@ -79,6 +79,8 @@ import type {
   ReviewDecision,
   ReviewFile,
   Inquiry,
+  Note,
+  NotesView,
   SessionCard,
   ReviewNote,
   Reviewer,
@@ -2017,6 +2019,7 @@ function queue(): QueueView {
   const resolvedCards = [...resolved.values()].sort((a, b) => (b.resolved_at ?? "").localeCompare(a.resolved_at ?? ""));
   return {
     inquiries: INQUIRIES.filter((q) => !q.answer),
+    notes: notesView(),
     sessions: sessionCards(),
     sections,
     reviewing: 0,
@@ -2341,6 +2344,52 @@ const SESSIONS: SessionCard[] = [
 const sessionTriage = new Map<string, SessionCard["status"]>();
 const sessionCards = () => SESSIONS.map((x) => ({ ...x, status: sessionTriage.get(x.id) ?? "active" }));
 const activeSessions = () => sessionCards().filter((x) => x.status === "active");
+
+// Notes to yourself: one reminder that came due, one without a time, one for tomorrow.
+const NOTES: Note[] = [
+  {
+    id: "n1",
+    at: iso(26),
+    text: "Ask Priya whether the planner change needs a migration note",
+    remind_at: iso(0.2),
+    reminded_at: iso(0.2),
+  },
+  { id: "n2", at: iso(3), text: "Write up the tombstone compaction idea for the sync design doc", remind_at: null, reminded_at: null },
+  {
+    id: "n3",
+    at: iso(1),
+    text: "Check the p95 dashboard after the search deploy",
+    remind_at: new Date(Date.now() + 18 * HOUR).toISOString(),
+    reminded_at: null,
+  },
+];
+const notesView = (): NotesView => {
+  const now = new Date().toISOString();
+  const soonest = (a: Note, b: Note) => a.remind_at!.localeCompare(b.remind_at!);
+  return {
+    due: NOTES.filter((n) => n.remind_at && n.remind_at <= now).sort(soonest),
+    open: NOTES.filter((n) => !n.remind_at).sort((a, b) => b.at.localeCompare(a.at)),
+    later: NOTES.filter((n) => n.remind_at && n.remind_at > now).sort(soonest),
+  };
+};
+function saveNote(id: string | null, b: Record<string, unknown>): Note {
+  const text = typeof b.text === "string" ? b.text.trim() : "";
+  if (!text) throw new HttpError(400, "the note is empty");
+  const r = typeof b.remind === "string" ? b.remind : "";
+  const rel = /^(\d+)h$/.exec(r);
+  const t = !r ? null : rel ? Date.now() + Number(rel[1]) * HOUR : r === "tomorrow" ? Date.now() + 18 * HOUR : Date.parse(r);
+  if (t !== null && (Number.isNaN(t) || t <= Date.now())) throw new HttpError(400, `can't read the reminder "${r}": pick a time to come`);
+  const remind_at = t === null ? null : new Date(t).toISOString();
+  const old = id ? NOTES.find((n) => n.id === id) : undefined;
+  if (id && !old) throw new HttpError(404, `no note "${id}"`);
+  const note: Note = old
+    ? { ...old, text, remind_at, reminded_at: remind_at === old.remind_at ? old.reminded_at : null }
+    : { id: `n${NOTES.length + 1}${Date.now() % 1000}`, at: new Date().toISOString(), text, remind_at, reminded_at: null };
+  if (old) NOTES.splice(NOTES.indexOf(old), 1, note);
+  else NOTES.push(note);
+  bump();
+  return note;
+}
 
 const INQUIRIES: Inquiry[] = [
   {
@@ -4037,6 +4086,16 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     }
     throw new HttpError(404, `no criterion "${id}"`);
   }
+  if (route === "POST /api/notes") return { ok: true, note: saveNote(null, await readBody(req)) };
+  const note = /^\/api\/notes\/([^/]+)(\/done)?$/.exec(url.pathname);
+  if (note && req.method === "POST" && note[2]) {
+    const i = NOTES.findIndex((n) => n.id === note[1]);
+    if (i < 0) throw new HttpError(404, `no note "${note[1]}"`);
+    NOTES.splice(i, 1);
+    bump();
+    return { ok: true };
+  }
+  if (note && req.method === "POST") return { ok: true, note: saveNote(note[1]!, await readBody(req)) };
   const inq = /^\/api\/inquiries\/([^/]+)(\/answer)?$/.exec(url.pathname);
   if (inq && req.method === "POST" && inq[2]) return { ok: true, inquiry: answerInquiry(inq[1]!, await readBody(req)) };
   if (inq && req.method === "GET" && !inq[2]) {

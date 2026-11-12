@@ -57,6 +57,8 @@ import type {
   Automation,
   AutomationItem,
   Inquiry,
+  Note,
+  NotesView,
   InquiryLink,
   InquiryOption,
   InquiryView,
@@ -407,6 +409,7 @@ export class Desk {
   waiters = new Set<() => void>(); // long-polls on the event log
   snap: Snapshot | null = null;
   stopped = false;
+  private noteTimer: ReturnType<typeof setInterval> | null = null;
   generating = new Map<string, Deferred.Deferred<AiReview, AiError>>(); // the AI reviews on their way (see shared()), each a running job
   aiFailures = 0; // in a row, across PRs
   aiLastFailed: string | null = null; // the PR of the latest: its retries aren't more in a row
@@ -574,6 +577,17 @@ export class Desk {
     this.sessions.start();
     this.jobs.start();
     this.updates.start();
+    // A reminder due while the desk was off notifies once now; then every half minute.
+    this.remindDue();
+    this.noteTimer = setInterval(() => {
+      this.runner.fork(
+        "reminders",
+        Effect.sync(() => {
+          this.remindDue();
+        }),
+      );
+    }, 30_000);
+    this.noteTimer.unref();
   }
 
   // Kills a judge call in progress.
@@ -590,6 +604,7 @@ export class Desk {
     this.urgency.stop();
     this.jobs.stop();
     this.updates.stop();
+    if (this.noteTimer) clearInterval(this.noteTimer);
     for (const wake of this.waiters) wake();
     fs.unwatchFile(this.configPath);
     fs.unwatchFile(this.settingsPath);
@@ -1926,6 +1941,7 @@ export class Desk {
       }
       return {
         inquiries: this.inquiries().filter((q) => !q.answer),
+        notes: this.notesView(),
         sessions: this.sessions.cards(),
         sections,
         reviewing,
@@ -3591,6 +3607,73 @@ export class Desk {
       }
       return done;
     });
+  }
+
+  notes(): Note[] {
+    return (this.store.get("notes") as Note[] | null) ?? [];
+  }
+
+  notesView(): NotesView {
+    const now = this.now().toISOString();
+    const all = this.notes();
+    const soonest = (a: Note, b: Note) => a.remind_at!.localeCompare(b.remind_at!);
+    return {
+      due: all.filter((n) => n.remind_at && n.remind_at <= now).sort(soonest),
+      open: all.filter((n) => !n.remind_at).sort((a, b) => b.at.localeCompare(a.at)),
+      later: all.filter((n) => n.remind_at && n.remind_at > now).sort(soonest),
+    };
+  }
+
+  // POST /api/notes and /api/notes/:id: a note to yourself, written or changed. Its reminder is a time ("1h", "tomorrow",
+  // "monday", a date or an ISO time, as a snooze reads it) or "" for none; a changed time notifies again when it comes.
+  saveNote(id: string | null, b: { text: string; remind: string }): Effect.Effect<Note, NotFound | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const text = b.text.trim();
+      if (!text) return yield* new BadRequest({ message: "the note is empty" });
+      if (text.length > MAX_ASK) return yield* new BadRequest({ message: `keep a note under ${MAX_ASK} characters` });
+      const now = this.now();
+      const remind_at = b.remind
+        ? (yield* parseUntil(b.remind, now).pipe(
+            Effect.mapError(() => new BadRequest({ message: `can't read the reminder "${b.remind}": pick a time to come` })),
+          )).toISOString()
+        : null;
+      const old = id ? this.notes().find((n) => n.id === id) : undefined;
+      if (id && !old) return yield* new NotFound({ message: `no note "${id}"` });
+      const note: Note = old
+        ? { ...old, text, remind_at, reminded_at: remind_at === old.remind_at ? old.reminded_at : null }
+        : { id: randomBytes(4).toString("hex"), at: now.toISOString(), text, remind_at, reminded_at: null };
+      this.store.set("notes", old ? this.notes().map((n) => (n.id === note.id ? note : n)) : [...this.notes(), note]);
+      this.changed();
+      return note;
+    });
+  }
+
+  // POST /api/notes/:id/done: it leaves your desk for good.
+  doneNote(id: string): Effect.Effect<void, NotFound> {
+    return Effect.suspend((): Effect.Effect<void, NotFound> => {
+      if (!this.notes().some((n) => n.id === id)) return Effect.fail(new NotFound({ message: `no note "${id}"` }));
+      this.store.set(
+        "notes",
+        this.notes().filter((n) => n.id !== id),
+      );
+      this.changed();
+      return Effect.void;
+    });
+  }
+
+  // Each reminder whose time came notifies once, and the Inbox redraws with it in Urgent.
+  remindDue(): void {
+    if (this.stopped) return;
+    const now = this.now().toISOString();
+    const due = this.notes().filter((n) => n.remind_at && n.remind_at <= now && !n.reminded_at);
+    if (!due.length) return;
+    this.store.set(
+      "notes",
+      this.notes().map((n) => (due.some((d) => d.id === n.id) ? Object.assign(n, { reminded_at: now }) : n)),
+    );
+    // A time you picked yourself: quiet hours don't hold it back.
+    if (this.settings["notify.enabled"]) for (const n of due) this.notify("Reminder", n.text);
+    this.changed();
   }
 
   // GET /api/inquiries/unread (desk_inquiry with no id): your answers nobody has picked up yet, in the order they were asked.

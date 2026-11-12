@@ -24,6 +24,7 @@ import type {
   Criterion,
   CriterionBody,
   Inquiry,
+  Note,
   InquiryView,
   ItemDetail,
   ItemState,
@@ -220,6 +221,10 @@ export const api = {
     call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${encodeURIComponent(id)}/on`, { on }),
   deleteAutomation: (id: string) => call<{ ok: true }>("DELETE", `/api/automations/${encodeURIComponent(id)}`),
   runAutomation: (id: string) => call<{ ok: true; running: string }>("POST", `/api/automations/${encodeURIComponent(id)}/run`),
+  // A note to yourself, new or changed; remind: "" for none, else a time ("1h", "tomorrow", an ISO time).
+  saveNote: (id: string | null, b: { text: string; remind: string }) =>
+    call<{ ok: true; note: Note }>("POST", id ? `/api/notes/${encodeURIComponent(id)}` : "/api/notes", b),
+  doneNote: (id: string) => call<{ ok: true }>("POST", `/api/notes/${encodeURIComponent(id)}/done`),
   // Your answer to an agent's question, or leaving it unanswered.
   answerInquiry: (id: string, b: { text: string } | { dismiss: true }) =>
     call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${encodeURIComponent(id)}/answer`, b),

@@ -1,8 +1,9 @@
-import type { Card, Inquiry, Overview, QueueView, SessionCard } from "../../../src/types.ts";
+import type { Card, Inquiry, Note, Overview, QueueView, SessionCard } from "../../../src/types.ts";
 import { cls, aiName } from "../format.ts";
 import { PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
+import { NoteRow, type NoteCtx } from "./Note.tsx";
 import { SessionRow, type SessionCtx } from "./Session.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
@@ -17,6 +18,7 @@ export function Queue({
   inq,
   sessions,
   ses,
+  note,
   filter,
   toggle,
 }: {
@@ -28,6 +30,7 @@ export function Queue({
   inq: InquiryCtx;
   sessions?: SessionCard[]; // none beside a review: two lines a row has no room for one's detail
   ses?: SessionCtx;
+  note: NoteCtx; // your notes: due reminders lead Urgent, the rest lead Standard
   filter: string;
   toggle: (k: GroupKey) => void;
 }) {
@@ -53,9 +56,16 @@ export function Queue({
     );
   }
   const shown = ses ? (sessions ?? []) : [];
+  const words = filter.trim().toLowerCase();
+  const mine = (ns: Note[]) => (words ? ns.filter((n) => n.text.toLowerCase().includes(words)) : ns);
+  const due = mine(view.notes.due);
+  const open = mine(view.notes.open);
   const parts = groups
     .filter((g) => PAGE_GROUPS.queue.includes(g.key))
-    .map((g) => ({ g, lead: g.key === "urgent" ? inquiries.length + shown.length : 0 }))
+    .map((g) => ({
+      g,
+      lead: g.key === "urgent" ? inquiries.length + shown.length + due.length : g.key === "standard" ? open.length : 0,
+    }))
     .filter(({ g, lead }) => lead > 0 || g.cards.length > 0);
   // A row you acted on is on its way off: it fades out where it is, and the last one to go leaves the empty line.
   const any = parts.some(({ g, lead }) => lead > 0 || g.cards.some((c) => !ctx.leaving.has(c.id)));
@@ -86,6 +96,8 @@ export function Queue({
               <div className="lines">
                 {g.key === "urgent" && inquiries.map((q) => <InquiryRow key={q.id} q={q} ctx={inq} />)}
                 {g.key === "urgent" && ses && shown.map((s) => <SessionRow key={s.id} s={s} ctx={ses} />)}
+                {g.key === "urgent" && due.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
+                {g.key === "standard" && open.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
                 {g.cards.map((c) => (
                   <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
                 ))}
@@ -114,6 +126,7 @@ export function Later({
   keys,
   empty,
   ctx,
+  note,
   filter,
   toggle,
 }: {
@@ -121,6 +134,7 @@ export function Later({
   groups: Group[];
   keys: GroupKey[]; // the groups this page shows
   empty: string;
+  note?: NoteCtx; // the Archive's: your reminders still to come, first
   ctx: RowCtx;
   filter: string;
   toggle: (k: GroupKey) => void;
@@ -136,9 +150,26 @@ export function Later({
   // Blocked is a tree in the desk's order; filtered, some of it is missing, so it lies flat.
   const tree = (k: GroupKey, cards: Card[]) => (k === "blocked" && !filtering ? treeGuides(cards.map((c) => c.depth ?? 0)) : []);
   const trees = new Map(away.map((g) => [g.key, tree(g.key, g.cards)]));
+  const words = filter.trim().toLowerCase();
+  const coming = note ? view.notes.later.filter((n) => !words || n.text.toLowerCase().includes(words)) : [];
   return (
     <div className="queue later">
-      {!away.length && <p className="queue-empty">{filtering ? "No matches." : empty}</p>}
+      {!away.length && !coming.length && <p className="queue-empty">{filtering ? "No matches." : empty}</p>}
+      {note && coming.length > 0 && (
+        <section className="group g-reminders" aria-labelledby="h-reminders">
+          <h2 id="h-reminders" className="group-head">
+            <span className="group-toggle">
+              <span>Reminders</span>
+              <span className="count">{coming.length}</span>
+            </span>
+          </h2>
+          <div className="lines">
+            {coming.map((n) => (
+              <NoteRow key={n.id} n={n} ctx={note} />
+            ))}
+          </div>
+        </section>
+      )}
       {away.map((g) => (
         <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
           <h2 id={`h-${g.key}`} className="group-head">

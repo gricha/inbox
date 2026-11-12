@@ -706,6 +706,7 @@ export interface Paused {
 // Every item once, at its best placement across boards: the app's main surface.
 export interface QueueView {
   inquiries: Inquiry[]; // agents' questions waiting on your answer, oldest first: the main page's first rows
+  notes: NotesView;
   sessions: SessionCard[]; // every session that needs you, with your triage on it; the active ones follow the questions
   // blocked: what your rules put in Blocked, and your PRs in Merging that another PR blocks; a chain's rows together, longest wait first
   sections: Record<Exclude<Bucket, "hide">, Card[]>;
@@ -1166,6 +1167,23 @@ export interface Inquiry {
   // read_at: when whoever asked first read your answer (desk_inquiry, or the wake that gives your agent its own); null
   // until then; absent on a dismissal, which owes nothing, and on an answer from before the desk kept it.
   answer: { text: string; at: string; dismissed: boolean; read_at?: string | null } | null;
+}
+
+// A note to yourself (New note, ⌘N): on your Inbox until you mark it done. With a reminder it waits until then, then
+// notifies once and leads Urgent.
+export interface Note {
+  id: string;
+  at: string; // written
+  text: string;
+  remind_at: string | null;
+  reminded_at: string | null; // when its reminder notified
+}
+
+// QueueView.notes, placed by the desk: due reminders lead Urgent, notes without one lead Standard, the rest wait in the Archive.
+export interface NotesView {
+  due: Note[]; // soonest reminder first
+  open: Note[]; // newest first
+  later: Note[]; // soonest first
 }
 
 // GET /api/inquiries/:id: with the card of the PR or issue it's about, when the desk holds it.
