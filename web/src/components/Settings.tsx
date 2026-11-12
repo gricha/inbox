@@ -750,7 +750,7 @@ function ClaudeStatus({
   );
 }
 
-// This device's first row, not from the schema: the theme is this device's, so it's kept here, not on the desk. Omarchy
+// Appearance's row, not from the schema: the theme is this device's, so it's kept here, not on the desk. Omarchy
 // is offered where the desk reads an Omarchy theme, or once picked.
 function ThemeRow() {
   const [theme, setTheme] = useState<ThemeId>(savedTheme);
@@ -955,7 +955,6 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
       />
     </>
   ),
-  app: () => <ThemeRow />,
 };
 
 // Rows after a setting's own, by its key: the sorting's failure under the switch that turns it on.
@@ -1153,6 +1152,13 @@ export function Settings({
             </span>
           </div>
         )}
+        {view && (
+          <section id="s-appearance" className="s-part" aria-label="Appearance" hidden={section !== "appearance"}>
+            <div className="lines s-sheet">
+              <ThemeRow />
+            </div>
+          </section>
+        )}
         {view?.sections.map((x) => {
           const p: PartProps = { view, active, now, loads, configErrors, flash };
           const defs = view.defs.filter((d) => d.section === x.id && (SHOWN[d.key]?.(view.values, desktop) ?? true));
@@ -1162,6 +1168,9 @@ export function Settings({
           const lead = LEAD[x.id];
           return (
             <section key={x.id} id={`s-${x.id}`} className="s-part" aria-label={x.title} hidden={section !== x.id}>
+              {x.id === "app" && lead === undefined && !defs.length && (
+                <p className="quiet-note">This device's settings are the desktop app's: open Inbox's app to change them.</p>
+              )}
               {(lead !== undefined || defs.length > 0) && (
                 <div className="lines s-sheet">
                   {lead?.(p)}

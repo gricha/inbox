@@ -587,7 +587,7 @@ const headSays = (page: Page) =>
   );
 // In Settings: the page head's words, then the sidebar's items, "|" for its hairline and the one it marks current in brackets:
 // "Agent: Inbox Inbox and notifications [Agent] Your automations This device | GitHub"; null outside Settings.
-const SETTINGS_SIDE = ["Inbox and notifications", "Agent", "Your automations", "Urgency", "This device"];
+const SETTINGS_SIDE = ["Inbox and notifications", "Agent", "Your automations", "Urgency", "Appearance", "This device"];
 const settingsSays = (page: Page) =>
   page.evaluate<string | null>(`(() => {
     const nav = document.querySelector('.side-nav[aria-label="Settings"]');
@@ -4406,16 +4406,16 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // On Settings the sidebar marks Settings, none of the pages, and the page head names it; in a browser This device is the
-    // theme alone (the mac size has the app's bridge: settings-app-desktop).
+    // On Settings the sidebar marks Settings, none of the pages, and the page head names it; in a browser This device has no
+    // rows, only a line saying they're the app's (the mac size has the app's bridge: settings-app-desktop).
     name: "settings-app",
     go: async (page) => {
       await at("#/settings/app")(page);
       const rows = await page.evaluate<string[]>(
         `[...document.querySelectorAll("#s-app .setting")].map((r) => r.id || r.querySelector(".input")?.id)`,
       );
-      if (!(await page.evaluate<boolean>("!!window.desktop")) && rows.join() !== "s-theme")
-        failures.push(`settings-app: This device in a browser has ${JSON.stringify(rows)}, not the theme alone`);
+      if (!(await page.evaluate<boolean>("!!window.desktop")) && (rows.length || !(await page.locator("#s-app .quiet-note").count())))
+        failures.push(`settings-app: This device in a browser has ${JSON.stringify(rows)}, not the line saying they're the app's`);
       const on = await sideOn(page);
       if (on !== "This device") failures.push(`settings-app: the sidebar marks ${JSON.stringify(on)}`);
       const says = await settingsSays(page);
@@ -4520,7 +4520,6 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       for (const [old, part] of [
         ["notify", "queue"],
-        ["appearance", "app"],
         ["review", "github"],
         ["handoff", "github"],
       ]) {
@@ -4775,9 +4774,9 @@ const SHOTS: Shot[] = [
     name: "theme-omarchy-settings",
     go: async (page) => {
       await omarchyAs(HACKERMAN)(page);
-      await at("#/settings/app")(page);
+      await at("#/settings/appearance")(page);
       const row = await page.evaluate<[string, string]>(
-        `[document.getElementById("s-theme").value, document.querySelector("#s-app .setting .s-help").textContent]`,
+        `[document.getElementById("s-theme").value, document.querySelector("#s-appearance .setting .s-help").textContent]`,
       );
       if (row[0] !== "omarchy" || !row[1].includes("(now Hackerman)"))
         failures.push(`theme-omarchy-settings: the row reads ${JSON.stringify(row)}`);

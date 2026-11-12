@@ -154,7 +154,7 @@ test("Settings' old section ids land on the part their settings live in now", ()
   const part = (id: string) => parseRoute(`#/settings/${id}`);
   assert.deepEqual(part("notify"), { name: "settings", section: "queue" });
   assert.deepEqual(part("review"), { name: "settings", section: "github" });
-  assert.deepEqual(part("appearance"), { name: "settings", section: "app" });
+  assert.deepEqual(part("appearance"), { name: "settings", section: "appearance" });
   assert.deepEqual(part("handoff"), { name: "settings", section: "github" });
   // Rules are still a place of its own, Your policy's old link lands on Agent, and every part's id goes round the hash unchanged.
   assert.deepEqual(part("rules"), { name: "settings", section: "rules" });
@@ -206,7 +206,7 @@ test("an automation opens as a view inside Settings, from its own link, and goes
 test("Settings' parts are the sidebar's items, each a route: the core's, then the plugins'; old links land on their part", () => {
   assert.deepEqual(
     SETTINGS_PARTS.map((p) => `${p.plugin ? "plugin " : ""}${p.id}`),
-    ["queue", "agent", "automations", "criteria", "app", "plugin github", "plugin sessions"],
+    ["queue", "agent", "automations", "criteria", "appearance", "app", "plugin github", "plugin sessions"],
   );
   const part = (hash: string) => {
     const r = parseRoute(hash);
@@ -217,7 +217,7 @@ test("Settings' parts are the sidebar's items, each a route: the core's, then th
   for (const p of SETTINGS_PARTS) assert.equal(part(`#/settings/${p.id}`), p.id);
   assert.equal(part("#/settings/notify"), "queue");
   assert.equal(part("#/settings/review"), "github");
-  assert.equal(part("#/settings/appearance"), "app");
+  assert.equal(part("#/settings/appearance"), "appearance");
   assert.equal(part("#/settings/rules"), "github");
   assert.equal(part("#/rules"), "github");
   assert.equal(part("#/settings/policy"), "agent");

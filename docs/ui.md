@@ -451,7 +451,7 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 - Tuning folds behind one quiet row at the sheet's end, **More <part> settings**, closed on open.
 - A row that would do nothing here isn't drawn (`SHOWN`); one that waits on another is greyed (`DISABLED`). `desk settings` and settings.json still set every one.
 - When settings.json has a problem, a notice above the part names each setting by label and key, and opens More if needed.
-- Old links still land: `#/settings/automations`, `notify` → Inbox and notifications, `review` and `handoff` → GitHub, `appearance` → This device, `#/rules` → Searches and rules, `policy` (Your policy, gone) → Agent.
+- Old links still land: `#/settings/automations`, `notify` → Inbox and notifications, `review` and `handoff` → GitHub, `#/rules` → Searches and rules, `policy` (Your policy, gone) → Agent.
 - **Views**: Searches and rules (`#/settings/rules`) and each automation (`#/settings/automations/<id>`; a plugin's `github.<id>`) open as views. Their head is the way back to their part ("‹ GitHub", "‹ Your automations"), and so is Esc once you've left the editor. Coming back puts focus on what opened it.
 - Esc on a part goes to the Inbox.
 - Parts and views stay mounted once opened, so an unsaved rules or automation draft survives leaving and coming back.
@@ -522,9 +522,12 @@ Each row:
 - **From GitHub**: the criteria GitHub comes with ("Asked by name", "Waiting on your reply", "Ready to merge", "Your PR others wait on", "Handed back"). You only switch them.
 - Under the sheets, quietly, who last scored your Inbox. A question waiting on its model says why on the first row.
 
+### Appearance
+
+- **Theme**: System, Omarchy (when available), then the light themes and the dark ones. Kept per device, not a desk setting ([Themes](#themes)).
+
 ### This device
 
-- **Theme**, first: System, Omarchy (when available), then the light themes and the dark ones. Kept per device, not a desk setting ([Themes](#themes)).
 - Only in the desktop app:
   - **Shortcut to show or hide the window**: its field, **Record** (tooltip names the keys it takes), **Turn off** while set. Help: "Works from any app.", "Off.", or in red why it couldn't take it ("Couldn't use Control+Alt+D: another app has this shortcut."). On a Mac it uses Option and Command. Default Control+Alt+D.
   - **Open at login**.

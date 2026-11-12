@@ -74,7 +74,6 @@ export const PAGE_GROUPS: Record<"queue" | "archive" | "blocked", GroupKey[]> = 
 const SETTINGS_ALIAS: Record<string, string> = {
   notify: "queue",
   review: "github",
-  appearance: "app",
   handoff: "github",
   policy: "agent", // Your policy, gone: rules and their weights sort now
 };
@@ -92,6 +91,7 @@ export const SETTINGS_PARTS: readonly { id: string; name: string; plugin?: true;
   { id: "agent", name: "Agent" },
   { id: "automations", name: "Your automations" },
   { id: "criteria", name: "Urgency" },
+  { id: "appearance", name: "Appearance" },
   { id: "app", name: "This device" },
   { id: "github", name: "GitHub", plugin: true },
   { id: "sessions", name: "Sessions", plugin: true, automations: false },
