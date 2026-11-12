@@ -53,7 +53,8 @@
     "prepare": "simple-git-hooks",
     "shots": "node --disable-warning=ExperimentalWarning scripts/shots.ts",
     "release": "node --disable-warning=ExperimentalWarning scripts/release.ts",
-    "prepack": "rm -rf lib && tsc -p tsconfig.build.json && npm run build"
+    "prepack": "rm -rf lib && tsc -p tsconfig.build.json && npm run build",
+    "release:publish": "bash scripts/release-publish.sh"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
@@ -137,6 +138,7 @@
       "hardenedRuntime": false
     },
     "linux": {
+      "executableName": "inbox",
       "category": "Development",
       "syncDesktopName": true,
       "target": [

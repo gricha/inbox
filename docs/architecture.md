@@ -335,6 +335,6 @@ With `app.source` (or `DESK_SOURCE`) set, the app runs the desk from that checko
 
 ### Updates and releases
 
-- `npm run release <x.y.z>` (`scripts/release.ts`) tags; `.github/workflows/release.yml` builds and publishes a GitHub Release on the tag.
+- `npm run release <x.y.z>` (`scripts/release.ts`) tags; `npm run release:publish v<x.y.z>` (`scripts/release-publish.sh`) builds every platform on a Mac and publishes the GitHub Release. `.github/workflows/release.yml` does it on a tag push, once Actions isn't blocked by billing.
 - `Updates` in `src/updates.ts` compares the packaged app's version with the latest release every 6 hours, read with your GitHub token (the repo is private). It reaches the UI as `Overview.update`; the sidebar's footer shows the line.
 - `POST /api/update` installs it where electron-updater can (`installUpdate()` in `electron/main.ts`): an AppImage on Linux, an installed build on Windows (`selfUpdates()` in `electron/lib.ts`). Elsewhere, including macOS, the line links to the release's download.

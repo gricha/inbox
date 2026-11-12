@@ -1,5 +1,5 @@
 // npm run release 0.2.0: package.json and package-lock.json at 0.2.0, committed on main and tagged v0.2.0, all local.
-// Pushing the tag starts .github/workflows/release.yml, which builds every platform and publishes the GitHub Release.
+// npm run release:publish v0.2.0 then builds every platform on this Mac and publishes the GitHub Release.
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { Cause, Data, Effect, Exit } from "effect";
@@ -58,7 +58,7 @@ const release = Effect.gen(function* () {
 
 // The boundary: what it refused ends the run with its words and exit 1.
 const exit = await Effect.runPromiseExit(release);
-if (Exit.isSuccess(exit)) console.log(`Committed and tagged ${exit.value}. To publish it: git push origin main ${exit.value}`);
+if (Exit.isSuccess(exit)) console.log(`Committed and tagged ${exit.value}. To publish it: npm run release:publish ${exit.value}`);
 else {
   const err = Cause.squash(exit.cause);
   console.error(`release: ${err instanceof Refused ? err.message : Cause.pretty(exit.cause)}`);

@@ -331,12 +331,20 @@ Set `DESK_HOME` and `DESK_PORT` to work on a scratch desk, and `DESK_SENTRY=0` t
 
 ## Release
 
+GitHub Actions is blocked by billing, so for now releases are built and published from a Mac:
+
 ```bash
-npm run release 0.2.0          # on a clean main: sets the version, commits and tags v0.2.0; pushes nothing
-git push origin main v0.2.0    # the tag starts the release workflow
+npm run release 0.2.4             # on a clean main: sets the version, commits and tags v0.2.4; pushes nothing
+npm run release:publish v0.2.4    # builds every platform from the tag, pushes main and the tag, publishes the Release
 ```
 
-[.github/workflows/release.yml](.github/workflows/release.yml) checks the tag matches `package.json`, runs `npm run check`, builds macOS (arm64 and Intel), Linux and Windows, and publishes one GitHub Release with notes from the commits since the last one. The release that isn't a draft or prerelease is the one channel.
+[scripts/release-publish.sh](scripts/release-publish.sh) checks out the tag in a worktree under `.claude/worktrees/`, runs `npm run check`, and builds macOS (arm64 and Intel), Windows (installer and zip) and Linux (AppImage and tar.gz) with electron-builder, which cross-builds from macOS with no Docker or Wine. Then it pushes main up to the tag, and `gh release create` publishes one GitHub Release with every build, the `latest*.yml` files the updater reads, and notes generated from the commits since the last release. It needs `gh` logged in with write access to `gricha/inbox`, and refuses a tag that's already released.
+
+- `npm run release:publish v0.2.4 -- --build-only` builds into `release/` and stops: nothing is pushed or published.
+- Nothing is signed: macOS is ad-hoc signed and not notarized, and Windows shows a SmartScreen warning on first run.
+- The Windows and Linux builds are made on the Mac and not run there: try one on a real machine when their packaging changes.
+
+[.github/workflows/release.yml](.github/workflows/release.yml) does the same on a tag push once Actions runs again; until then it fails at its first job. When it works, go back to `git push origin main v0.2.4` and stop using `release:publish`, or the two race to create the Release.
 
 **Updates.** The packaged app checks the latest release every 6 hours with your GitHub token (the repo is private). When there's a newer one, the sidebar's footer says so:
 
