@@ -3870,6 +3870,23 @@ export class Desk {
   }
 
   // GET /api/reviewers/:id?q=: who you can ask to review your PR, GitHub's suggestions first; what GitHub fails with is passed on.
+  // GET /api/file/:id?path=: a file of the PR as its head commit has it, for its review's "more lines"; null when GitHub
+  // won't give it (binary, too big, gone). Kept by commit, so a file is read once.
+  private blobs = new Map<string, string | null>();
+  fileAt(ref: string, file: string): Effect.Effect<{ text: string | null }, RefError | BadRequest | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      const it = (yield* this.pr(ref)).item;
+      if (!file) return yield* new BadRequest({ message: "need path" });
+      if (!it.head_oid) return { text: null };
+      const key = `${it.repo}@${it.head_oid}:${file}`;
+      if (this.blobs.has(key)) return { text: this.blobs.get(key)! };
+      const text = yield* this.gh.api.blob(it.repo, it.head_oid, file).pipe(Effect.mapError(upstream("")));
+      if (this.blobs.size >= 200) this.blobs.delete(this.blobs.keys().next().value!);
+      this.blobs.set(key, text);
+      return { text };
+    });
+  }
+
   reviewers(ref: string, q: string): Effect.Effect<Reviewer[], RefError | BadRequest | Conflict | Upstream> {
     return Effect.gen({ self: this }, function* () {
       const e = yield* this.pr(ref);

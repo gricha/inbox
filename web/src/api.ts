@@ -228,6 +228,8 @@ export const api = {
   // Your answer to an agent's question, or leaving it unanswered.
   answerInquiry: (id: string, b: { text: string } | { dismiss: true }) =>
     call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${encodeURIComponent(id)}/answer`, b),
+  file: (id: string, path: string) =>
+    call<{ text: string | null }>("GET", `/api/file/${encodeURIComponent(id)}?path=${encodeURIComponent(path)}`),
   reviewers: (id: string, q: string) => call<Reviewer[]>("GET", `/api/reviewers/${encodeURIComponent(id)}?q=${encodeURIComponent(q)}`),
   // The More menu's: close, draft, ready, merge, reopen, request changes (with a body, pinned to the head you read).
   github: (id: string, action: GitHubAction, more: { head_oid?: string; body?: string } = {}) =>

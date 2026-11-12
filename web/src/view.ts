@@ -736,3 +736,30 @@ export function checkGroups(list: Check[]): CheckGroup[] {
   });
   return groups.toSorted((a, b) => DOTS.indexOf(a.dot) - DOTS.indexOf(b.dot));
 }
+
+// The file before a PR from the file after it and the PR's patch for it: the patch run backwards. null when they don't agree
+// (a patch GitHub cut short, or one from another commit).
+export function oldFromNew(text: string, patch: string): string | null {
+  const now = text.split("\n");
+  const out: string[] = [];
+  let at = 0;
+  let inHunk = false;
+  for (const l of patch.split("\n")) {
+    const m = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(l);
+    if (m) {
+      const start = m[2] === "0" ? Number(m[1]) : Number(m[1]) - 1;
+      if (start < at || start > now.length) return null;
+      out.push(...now.slice(at, start));
+      at = start;
+      inHunk = true;
+    } else if (!inHunk || l.startsWith("\\")) continue;
+    else if (l.startsWith("-")) out.push(l.slice(1));
+    else if (l.startsWith("+") || l.startsWith(" ")) {
+      if (now[at] !== l.slice(1)) return null;
+      if (l.startsWith(" ")) out.push(l.slice(1));
+      at++;
+    }
+  }
+  out.push(...now.slice(at));
+  return out.join("\n");
+}

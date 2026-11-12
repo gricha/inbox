@@ -3945,6 +3945,22 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     bump();
     return { ok: true, url: `${urlOf(r.seed)}#issuecomment-mock` };
   }
+  // A file at the PR's head: its patch's lines where it has them, numbered filler around them.
+  const filing = /^\/api\/file\/(.+)$/.exec(url.pathname);
+  if (filing && req.method === "GET") {
+    const r = resolve(decodeURIComponent(filing[1]!));
+    const f = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size).files.find((x) => x.path === url.searchParams.get("path"));
+    if (!f?.patch) return { text: null };
+    const lines = new Map<number, string>();
+    let n = 0;
+    for (const l of f.patch.split("\n")) {
+      const m = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(l);
+      if (m) n = Number(m[1]);
+      else if (l.startsWith("+") || l.startsWith(" ")) lines.set(n++, l.slice(1));
+    }
+    const last = Math.max(0, ...lines.keys()) + 12;
+    return { text: Array.from({ length: last }, (_, i) => lines.get(i + 1) ?? `// line ${i + 1}`).join("\n") + "\n" };
+  }
   // Who you can ask to review your PR: GitHub's two suggestions, or everyone matching what you typed.
   const asking = /^\/api\/reviewers\/(.+)$/.exec(url.pathname);
   if (asking && req.method === "GET") {

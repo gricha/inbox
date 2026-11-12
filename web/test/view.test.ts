@@ -80,6 +80,7 @@ import {
   handsOff,
   checkDot,
   checkGroups,
+  oldFromNew,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
 import { isTestPath, onLines, sections, traditional, walk } from "../../src/sections.ts";
@@ -1309,4 +1310,13 @@ test("checks: shards of one check are one row with its worst dot, what's wrong f
     ],
   );
   assert.equal(checkDot(c("x", "cancelled")), "red");
+});
+
+test("oldFromNew runs a PR's patch backwards over the file after it, and gives up where they disagree", () => {
+  const before = ["a", "b", "c", "d", "e", "f", "g"].join("\n") + "\n";
+  const after = ["a", "B", "c", "d", "e", "g", "h"].join("\n") + "\n";
+  const patch = ["@@ -1,3 +1,3 @@", " a", "-b", "+B", " c", "@@ -5,3 +5,3 @@", " e", "-f", " g", "+h"].join("\n");
+  assert.equal(oldFromNew(after, patch), before);
+  assert.equal(oldFromNew(after.replace("B", "X"), patch), null, "another commit's file");
+  assert.equal(oldFromNew("x\n", "@@ -0,0 +1 @@\n+x"), "", "an added file was empty");
 });

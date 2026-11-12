@@ -209,6 +209,12 @@ export class FakeGitHub implements GitHub {
     });
   }
 
+  // A file's text at a commit, by "oid:path".
+  blobs = new Map<string, string>();
+  blob(_repo: string, oid: string, path: string): Effect.Effect<string | null, GitHubReadError> {
+    return Effect.succeed(this.blobs.get(`${oid}:${path}`) ?? null);
+  }
+
   rateLimit() {
     return null;
   }

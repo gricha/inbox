@@ -7,6 +7,7 @@ import type { Areas, Check, Context, Item, Reviewer, ReviewState } from "../type
 import { createClient, decode } from "./client.ts";
 import { isBot, login, normalize, toChecks, toHit, type Actor, type RawCheck, type RawHit, type RawNode } from "./normalize.ts";
 import {
+  BLOB,
   branchPrs as branchPrsQuery,
   DETAILS_REVIEW,
   detailsMine,
@@ -86,6 +87,8 @@ export interface GitHub {
   lookup(repo: string, number: number): Effect.Effect<SearchHit | null, GitHubReadError>;
   // GitHub's suggestions first, then users, then teams
   reviewers(repo: string, number: number, q: string): Effect.Effect<Reviewer[], GitHubReadError>;
+  // A file's text at a commit; null when it isn't there, is binary or is too big for GitHub to give.
+  blob(repo: string, oid: string, path: string): Effect.Effect<string | null, GitHubReadError>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
   // A repo's latest published release (not a draft or prerelease); null when it has none.
   latestRelease(repo: string): Effect.Effect<{ tag: string; url: string } | null, GitHubReadError>;
@@ -407,6 +410,15 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     });
   });
 
+  const blob = Effect.fn("GitHub.blob")(function* (repo: string, oid: string, path: string) {
+    const [owner, name] = repo.split("/");
+    const data = yield* client.query<{
+      repository: { object: { text: string | null; isBinary: boolean; isTruncated: boolean } | null } | null;
+    }>(BLOB, { owner, name, expr: `${oid}:${path}` });
+    const o = data.repository?.object;
+    return o && !o.isBinary && !o.isTruncated && typeof o.text === "string" ? o.text : null;
+  });
+
   const checks = Effect.fn("GitHub.checks")(function* (id: string) {
     const raw: RawCheck[] = [];
     let after: string | null = null;
@@ -477,6 +489,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     branchPrs,
     lookup,
     reviewers,
+    blob,
     rateLimit: () => client.rateLimit(),
     latestRelease,
   };

@@ -177,6 +177,12 @@ export const REVIEWERS = `query($owner: String!, $name: String!, $number: Int!, 
   organization(login: $owner) { teams(first: 10, query: $q) { nodes { id slug name } } }
 }`;
 
+// A file's text at a commit, for a review's "more lines" around a hunk.
+export const BLOB = `query($owner: String!, $name: String!, $expr: String!) {
+  ${RATE}
+  repository(owner: $owner, name: $name) { object(expression: $expr) { ... on Blob { text isBinary isTruncated } } }
+}`;
+
 export const TEAMS = `query($me: String!) {
   ${RATE}
   viewer { name organizations(first: 50) { nodes { login teams(first: 100, userLogins: [$me]) { nodes { slug } } } } }

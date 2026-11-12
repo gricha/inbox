@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { parsePatchFiles, type SelectedLineRange } from "@pierre/diffs";
 import { FileDiff, type DiffLineAnnotation, type FileDiffOptions } from "@pierre/diffs/react";
+import { hydratePartialDiff, type FileDiffLoadedFiles } from "@pierre/diffs";
 import {
   JOB_ATTEMPTS,
   type AiReview,
@@ -47,6 +48,7 @@ import {
   checkDot,
   checkGroups,
   currentFile,
+  oldFromNew,
   diffRows,
   drawUpTo,
   filePatch,
@@ -127,7 +129,8 @@ const DIFF: FileDiffOptions<Meta, undefined> = {
   diffStyle: "unified",
   diffIndicators: "bars",
   lineDiffType: "word-alt",
-  hunkSeparators: "line-info-basic",
+  hunkSeparators: "line-info",
+  expansionLineCount: 10,
   overflow: "wrap",
   disableFileHeader: true,
   lineHoverHighlight: "disabled",
@@ -210,6 +213,8 @@ export function Review({
   const [busy, setBusy] = useState<"ai" | null>(null);
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
+  // Each file's whole text before and after, read once per commit, so a hunk's band opens more lines on the first click.
+  const wholes = useRef(new Map<string, Promise<FileDiffLoadedFiles>>());
   const [more, setMore] = useState(false); // the More menu
   // The sidebar's checks and reviewers, listed: every PR opens with each in one line.
   const [checksOpen, setChecksOpen] = useState(false);
@@ -712,12 +717,41 @@ export function Review({
         c.comments.some((k) => (s.url && k.url === s.url) || (k.author.toLowerCase() === me.toLowerCase() && k.body.trim() === s.body)),
       ),
   );
+  // Pierre's "more lines" around a hunk: the file at the PR's head, and before it the same file run back through its patch.
+  const wholeFile = (f: ReviewFile): Promise<FileDiffLoadedFiles> => {
+    const key = `${view.diff_head ?? ""}:${f.path}`;
+    const kept = wholes.current.get(key);
+    if (kept) return kept;
+    const got = Effect.runPromise(
+      api.file(card.id, f.path).pipe(
+        Effect.flatMap(({ text }) => {
+          const old = text === null ? null : oldFromNew(text, f.patch ?? "");
+          return text === null || old === null
+            ? Effect.fail(new Error("GitHub doesn't give this file whole"))
+            : Effect.succeed({
+                oldFile: { name: f.previous_path ?? f.path, contents: old },
+                newFile: { name: f.path, contents: text },
+              });
+        }),
+      ),
+    );
+    wholes.current.set(key, got);
+    got.catch(() => wholes.current.delete(key));
+    return got;
+  };
+  const loadFile = (f: ReviewFile): Promise<FileDiffLoadedFiles> =>
+    wholeFile(f).catch((e: unknown) => {
+      flash(`Couldn't show more lines of ${f.path}: ${e instanceof Error ? e.message : String(e)}`, true);
+      throw e;
+    });
   const section = (x: Section, i: number) => (
     <SectionView
       key={x.key}
       section={x}
       index={i}
       file={files[x.file]!}
+      loadFile={loadFile}
+      wholeFile={wholeFile}
       notes={view.ai?.notes ?? []}
       looks={view.ai_stale ? [] : (view.ai?.look ?? [])}
       order={notes}
@@ -1961,10 +1995,14 @@ function SectionView({
   onOpen,
   sent,
   onDraft,
+  loadFile,
+  wholeFile,
 }: {
   section: Section;
   index: number;
   file: ReviewFile;
+  loadFile: (f: ReviewFile) => Promise<FileDiffLoadedFiles>; // on a band's click, saying why when it can't
+  wholeFile: (f: ReviewFile) => Promise<FileDiffLoadedFiles>; // ahead, quietly
   notes: ReviewNote[]; // the AI review's
   looks: ReviewLook[]; // the AI review's: where correctness hinges
   order: number[]; // ReviewView.order.notes: a note's place in it is its place in reading order
@@ -1984,12 +2022,39 @@ function SectionView({
 }) {
   // Pierre keeps a drawn diff by this key: the commit and the hunks, so a push or a regroup draws what a + will post on.
   const cacheKey = `${head}:${x.hunks.map((h) => h.id).join(",")}`;
-  const fileDiff = useMemo(
+  const partial = useMemo(
     () =>
       x.hunks.length
         ? (parsePatchFiles(filePatch({ ...file, patch: x.hunks.map((h) => h.patch).join("\n") }), cacheKey)[0]?.files[0] ?? null)
         : null,
     [x, file, cacheKey],
+  );
+  // Drawn, its file is read whole ahead, so a band's first click opens lines; until then (or if GitHub won't), the patch's.
+  const [whole, setWhole] = useState<FileDiffLoadedFiles | null>(null);
+  useEffect(() => {
+    const stop = new AbortController();
+    if (!shut && partial?.isPartial)
+      runUi(
+        Effect.tryPromise(() => wholeFile(file)).pipe(
+          Effect.tap((w) =>
+            Effect.sync(() => {
+              setWhole(w);
+            }),
+          ),
+          Effect.ignore,
+        ),
+        { signal: stop.signal },
+      );
+    return () => {
+      stop.abort();
+    };
+  }, [shut, partial, file, wholeFile]);
+  const fileDiff = useMemo(
+    () =>
+      partial?.isPartial && whole
+        ? Effect.runSync(Effect.try(() => hydratePartialDiff("clone", partial, whole)).pipe(Effect.orElseSucceed(() => partial)))
+        : partial,
+    [partial, whole],
   );
   const mine = useMemo(
     () =>
@@ -2044,7 +2109,12 @@ function SectionView({
     if (at) onDraft(at, null);
   };
   useSyncExternalStore(onOmarchy, omarchyTheme); // a live switch of Omarchy's theme draws the diff in its colours
-  const base = diffOptions();
+  const load = useRef(loadFile);
+  load.current = loadFile;
+  const fileRef = useRef(file);
+  fileRef.current = file;
+  const theme = diffOptions();
+  const base = useMemo((): FileDiffOptions<Meta, undefined> => ({ ...theme, loadDiffFiles: () => load.current(fileRef.current) }), [theme]);
   const options = useMemo(
     (): FileDiffOptions<Meta, undefined> =>
       canComment

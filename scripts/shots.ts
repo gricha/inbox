@@ -2330,6 +2330,27 @@ const SHOTS: Shot[] = [
     },
     after: sideDefault,
   },
+  // Guided or not, a hunk's band opens a few more lines of the file around it, read from GitHub at the PR's head.
+  {
+    name: "review-more-lines",
+    go: async (page) => {
+      await review("acme/api#4154")(page);
+      const rows = () =>
+        page.evaluate<number>(
+          `[...document.querySelectorAll(".rv-diff")].slice(0, 1).reduce((n, el) => n + (el.shadowRoot?.querySelectorAll("[data-line]").length ?? 0), 0)`,
+        );
+      const before = await rows();
+      const button = page.locator(".rv-diff").first().locator("[data-expand-button]").first();
+      if (!(await button.count())) {
+        failures.push("review-more-lines: the hunk's band has no button for more lines");
+        return;
+      }
+      await button.click();
+      await page.waitForTimeout(800);
+      const after = await rows();
+      if (after <= before) failures.push(`review-more-lines: a click showed no more lines (${before} → ${after})`);
+    },
+  },
   // Past the last change: the folded rest's line where the review has one (the mock's doesn't), and a click opens it in place.
   ...(["review-fold", "review-rest"] as const).map((name): Shot => ({
     name,

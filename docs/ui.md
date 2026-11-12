@@ -309,7 +309,7 @@ Neighbouring hunks of a file at one level read as one. Without a ranking (none y
 - **Traditional** is the plain diff: every file in the PR's order, all its hunks in diff order, Claude's notes inline on their lines (`traditional()` in `src/sections.ts`), then the desk's "Not worth reviewing" fold.
 - In the review's sidebar the steps take the files' place.
 
-**Drawing.** `@pierre/diffs`: unified, word-level changes, wrapped lines, Shiki highlighting in the theme's syntax colours (`diff` in `src/themes.ts`, `web/src/diffThemes.ts`). Unchanged lines fold into a band ("14 unmodified lines"). Each file's name sticks under the head while you read it.
+**Drawing.** `@pierre/diffs`: unified, word-level changes, wrapped lines, Shiki highlighting in the theme's syntax colours (`diff` in `src/themes.ts`, `web/src/diffThemes.ts`). Unchanged lines fold into a band ("14 unmodified lines"); its arrows open ten more at a time, in either review. A drawn file is read whole ahead (`GET /api/file/:id?path=`: the file at the PR's head; before it is the same run back through its patch, `oldFromNew()` in `web/src/view.ts`), so the first click opens lines. A file GitHub won't give whole (binary, too big) says so in a bubble. Each file's name sticks under the head while you read it.
 
 **Folding files.** A file's header folds its diff and everything on it. Consecutive folded files read as one list. A different PR starts with every file open.
 

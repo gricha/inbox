@@ -389,6 +389,14 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       { log, read: true },
     ),
   );
+  // A file of the PR at its head, for its review's more lines around a hunk.
+  app.get("/api/file/:id{.+}", (c) =>
+    respond(
+      c,
+      Effect.andThen(up, () => desk.fileAt(c.req.param("id"), c.req.query("path") ?? "")),
+      { log, read: true },
+    ),
+  );
   // A PR's id in one path segment (owner%2Frepo%23123), or as owner/repo%23123. An open starts its AI review and Claude's
   // read once its diff and conversation are in, so it runs to the end whoever still waits; only a prefetch is a read.
   app.get("/api/review/:id{.+}", (c) => {
