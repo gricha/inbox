@@ -763,3 +763,32 @@ export function oldFromNew(text: string, patch: string): string | null {
   out.push(...now.slice(at));
   return out.join("\n");
 }
+
+// The whole file before and after, as a review's section can show more lines of it: cut at the first hunk of the file past the
+// section's last, so the lines after the section are the same on both sides (Pierre's diff takes the ones it's given as all
+// there are). null when the section's hunks aren't the file's, or the cut doesn't line up.
+export function wholeFor(w: { old: string; new: string }, patch: string, sectionHunks: string[]): { old: string; new: string } | null {
+  const heads = (p: string) =>
+    [...p.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)].map((m) => ({
+      key: m[0],
+      oldStart: Number(m[1]),
+      oldCount: m[2] === undefined ? 1 : Number(m[2]),
+      newStart: Number(m[3]),
+      newCount: m[4] === undefined ? 1 : Number(m[4]),
+    }));
+  const all = heads(patch);
+  const mine = sectionHunks.flatMap((h) => heads(h));
+  const last = mine.at(-1);
+  if (!last) return null;
+  const at = all.findIndex((h) => h.key === last.key);
+  if (at < 0) return null;
+  const end = (start: number, n: number) => (n === 0 ? start : start + n - 1); // the hunk's last line on that side
+  const oldLines = w.old.split("\n");
+  const newLines = w.new.split("\n");
+  const next = all[at + 1];
+  const before = next ? oldLines.slice(0, next.oldStart - 1) : oldLines;
+  const after = next ? newLines.slice(0, next.newStart - 1) : newLines;
+  const trailing = (lines: string[], start: number, n: number) => lines.length - end(start, n);
+  if (trailing(before, last.oldStart, last.oldCount) !== trailing(after, last.newStart, last.newCount)) return null;
+  return { old: before.join("\n"), new: after.join("\n") };
+}

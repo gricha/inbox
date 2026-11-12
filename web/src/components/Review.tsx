@@ -49,6 +49,7 @@ import {
   checkGroups,
   currentFile,
   oldFromNew,
+  wholeFor,
   diffRows,
   drawUpTo,
   filePatch,
@@ -2044,6 +2045,17 @@ function drawnAt(d: Draft, list: Section[], conversation: Convo[], head: string)
 
 const rangeLabel = (at: InlineAt | undefined) => (at?.start ? `Comment on lines ${at.start.line}–${at.line}` : "Comment");
 
+// A section's own cut of its file before and after: what follows it the same on both sides, as Pierre needs; null when it can't be.
+function sectionCut(w: FileDiffLoadedFiles, file: ReviewFile, x: Section): FileDiffLoadedFiles | null {
+  if (!w.oldFile) return null;
+  const c = wholeFor(
+    { old: w.oldFile.contents, new: w.newFile.contents },
+    file.patch ?? "",
+    x.hunks.map((h) => h.patch),
+  );
+  return c && { oldFile: { ...w.oldFile, contents: c.old }, newFile: { ...w.newFile, contents: c.new } };
+}
+
 function SectionView({
   section: x,
   index,
@@ -2118,13 +2130,12 @@ function SectionView({
       stop.abort();
     };
   }, [shut, partial, file, wholeFile]);
-  const fileDiff = useMemo(
-    () =>
-      partial?.isPartial && whole
-        ? Effect.runSync(Effect.try(() => hydratePartialDiff("clone", partial, whole)).pipe(Effect.orElseSucceed(() => partial)))
-        : partial,
-    [partial, whole],
-  );
+  const fileDiff = useMemo(() => {
+    const files = partial?.isPartial && whole ? sectionCut(whole, file, x) : null;
+    return partial && files
+      ? Effect.runSync(Effect.try(() => hydratePartialDiff("clone", partial, files)).pipe(Effect.orElseSucceed(() => partial)))
+      : partial;
+  }, [partial, whole, file, x]);
   const mine = useMemo(
     () =>
       x.notes.flatMap((n) => {
@@ -2182,8 +2193,19 @@ function SectionView({
   load.current = loadFile;
   const fileRef = useRef(file);
   fileRef.current = file;
+  const sectionRef = useRef(x);
+  sectionRef.current = x;
   const theme = diffOptions();
-  const base = useMemo((): FileDiffOptions<Meta, undefined> => ({ ...theme, loadDiffFiles: () => load.current(fileRef.current) }), [theme]);
+  const base = useMemo(
+    (): FileDiffOptions<Meta, undefined> => ({
+      ...theme,
+      loadDiffFiles: () =>
+        load
+          .current(fileRef.current)
+          .then((w) => sectionCut(w, fileRef.current, sectionRef.current) ?? Promise.reject(new Error("no more lines to show here"))),
+    }),
+    [theme],
+  );
   const options = useMemo(
     (): FileDiffOptions<Meta, undefined> =>
       canComment

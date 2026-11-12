@@ -81,6 +81,7 @@ import {
   checkDot,
   checkGroups,
   oldFromNew,
+  wholeFor,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
 import { isTestPath, onLines, sections, traditional, walk } from "../../src/sections.ts";
@@ -1319,4 +1320,24 @@ test("oldFromNew runs a PR's patch backwards over the file after it, and gives u
   assert.equal(oldFromNew(after, patch), before);
   assert.equal(oldFromNew(after.replace("B", "X"), patch), null, "another commit's file");
   assert.equal(oldFromNew("x\n", "@@ -0,0 +1 @@\n+x"), "", "an added file was empty");
+});
+
+test("wholeFor cuts a section's files at the file's next hunk, so what's after it matches; the last section keeps them whole", () => {
+  const after = Array.from({ length: 30 }, (_, i) => `n${i + 1}`);
+  // Two hunks: +2 lines at 5, and 1 line replaced at 20 (new numbering).
+  const h1 = "@@ -4,2 +4,4 @@\n n4\n+n5\n+n6\n n7";
+  const h2 = "@@ -18,3 +20,3 @@\n n20\n-was21\n+n21\n n22";
+  const patch = `${h1}\n${h2}`;
+  const before = oldFromNew(after.join("\n"), patch);
+  assert.ok(before !== null);
+  const w = { old: before, new: after.join("\n") };
+  const first = wholeFor(w, patch, [h1]);
+  assert.deepEqual(
+    first && [first.new.split("\n").length, first.old.split("\n").length],
+    [19, 17],
+    "cut before the second hunk: 19 new lines, 17 old",
+  );
+  const second = wholeFor(w, patch, [h2]);
+  assert.deepEqual(second, w, "the last hunk: both files whole");
+  assert.equal(wholeFor(w, patch, ["@@ -1,1 +1,1 @@\n-x\n+y"]), null, "not this file's hunk");
 });
