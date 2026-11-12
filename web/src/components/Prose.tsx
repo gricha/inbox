@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { Fragment, useMemo, useState, type ReactNode } from "react";
 import { runUi } from "../api.ts";
 import { copyText } from "../format.ts";
-import { blocks, fencedCopy, textLines, unlinked, type Block, type Span } from "../../../src/prose.ts";
+import { blocks, fencedCopy, saidBlocks, textLines, unlinked, type Block, type Said, type Span } from "../../../src/prose.ts";
 
 // An agent's words drawn from src/prose.ts: React elements only, never HTML, never an image.
 export function Prose({ text }: { text: string }) {
@@ -20,6 +20,29 @@ export function ProseBlocks({ bs, links = true }: { bs: Block[]; links?: boolean
       ))}
     </div>
   );
+}
+
+// What a reviewer wrote on GitHub: its markdown as blocks, <details> a fold, <sub> small print; its URLs text, never HTML.
+export function SaidText({ text }: { text: string }) {
+  const bs = useMemo(() => saidBlocks(text), [text]);
+  return <div className="prose said">{bs.map(saidBlock)}</div>;
+}
+
+function saidBlock(b: Said, i: number): ReactNode {
+  if (b.t === "details")
+    return (
+      <details key={i} className="said-more">
+        <summary>{spans(unlinked(b.summary))}</summary>
+        <div className="prose">{b.blocks.map(saidBlock)}</div>
+      </details>
+    );
+  if (b.t === "small")
+    return (
+      <p key={i} className="said-small">
+        {spans(unlinked(b.spans))}
+      </p>
+    );
+  return <Fragment key={i}>{block(b, false)}</Fragment>;
 }
 
 // What a reviewer wrote, or Claude's read of it: code as code, a URL as text, never HTML; the box's pre-wrap keeps lines and indents.

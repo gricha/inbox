@@ -2278,6 +2278,15 @@ const SHOTS: Shot[] = [
       if ((await convo.locator(".cv-take code, .cv-body code, .cv-line code").count()) < 3)
         failures.push("review-conversation: a code name in the conversation isn't code");
       if ((await convo.allInnerTexts()).join("").includes("`")) failures.push("review-conversation: a backtick shows");
+      // A bot's finding: its <details> a fold, its <sub> small print, its HTML comments gone, no tag showing.
+      const bot = await page.evaluate<{ text: string; folds: number; small: number }>(`(() => {
+        const all = [...document.querySelectorAll(".rv-convo .cv-body, .rv-tc-body")].filter((el) => el.textContent.includes("null dereference"));
+        const el = all[0];
+        return el ? { text: el.textContent, folds: el.querySelectorAll("details.said-more").length, small: el.querySelectorAll(".said-small").length } : { text: "", folds: 0, small: 0 };
+      })()`);
+      if (!bot.text) failures.push("review-conversation: the bot's finding isn't shown");
+      else if (bot.folds !== 1 || bot.small !== 1 || /<|-->|cursor:finding/.test(bot.text))
+        failures.push(`review-conversation: the bot's finding reads ${JSON.stringify(bot)}`);
     },
   },
   {

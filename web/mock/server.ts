@@ -1445,7 +1445,12 @@ const TALK = new Map<string, Conversation[]>([
         path: "src/sync/merge.ts",
         outdated: true,
         comments: [
-          said("c4", "cursor[bot]", 6, "Possible null dereference: `local` may be undefined when the note was deleted on this device."),
+          said(
+            "c4",
+            "cursor[bot]",
+            6,
+            "### Possible null dereference\n\n`local` may be undefined when the note was deleted on this device.\n\n<details><summary>Evidence</summary>\n\n- `merge()` reads `local.clock` before checking it\n- `deleteNote()` drops the local copy first\n\n</details>\n\n<sub>Found by Cursor · bugbot</sub>\n<!-- cursor:finding:v1:abc123 -->",
+          ),
         ],
       }),
       convo({

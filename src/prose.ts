@@ -228,3 +228,74 @@ export function textLines(text: string): Span[][] {
     return fence || fenced ? [{ t: "text", text: line, bold: false }] : inline(line);
   });
 }
+
+// What a reviewer wrote on GitHub, as blocks to draw, never as HTML: its <!-- --> comments gone, a <details> a fold with its
+// <summary>, a line in <sub> quiet small print, <br> a line break, <b>/<strong> bold, <code> code; any other tag stays text.
+export type Said = Block | { t: "details"; summary: Span[]; blocks: Said[] } | { t: "small"; spans: Span[] };
+
+const COMMENT = /<!--[\s\S]*?(?:-->|$)/g;
+const DETAILS = /<details[^>]*>\s*(?:<summary[^>]*>([\s\S]*?)<\/summary>)?([\s\S]*?)<\/details>/i;
+const SUB = /^\s*<sub>([\s\S]*?)<\/sub>\s*$/i;
+
+// Outside ``` blocks only: a tag in code is code.
+function tags(s: string): string {
+  let fenced = false;
+  return s
+    .split("\n")
+    .map((l) => {
+      if (/^ {0,3}```/.test(l)) fenced = !fenced;
+      if (fenced || /^ {0,3}```/.test(l)) return l;
+      return l
+        .replaceAll(/<br\s*\/?>/gi, "\n")
+        .replaceAll(/<\/?(?:b|strong)>/gi, "**")
+        .replaceAll(/<\/?code>/gi, "`")
+        .replaceAll(/<\/?(?:p|div|span|em|i|sup)>/gi, "");
+    })
+    .join("\n");
+}
+
+export function saidBlocks(text: string): Said[] {
+  const plain = text.replaceAll("\r", "").replaceAll(COMMENT, "");
+  const m = DETAILS.exec(plain);
+  if (m) {
+    const before = plain.slice(0, m.index);
+    const after = plain.slice(m.index + m[0].length);
+    return [
+      ...saidBlocks(before),
+      { t: "details", summary: inline(tags(m[1] ?? "Details").trim()), blocks: saidBlocks(m[2] ?? "") },
+      ...saidBlocks(after),
+    ];
+  }
+  // A paragraph all in <sub> is small print, unless a ``` block it sits in makes it code; the rest is markdown.
+  const out: Said[] = [];
+  let md: string[] = [];
+  const fenced = () =>
+    md
+      .join("\n")
+      .split("\n")
+      .filter((l) => /^ {0,3}```/.test(l)).length %
+      2 ===
+    1;
+  for (const para of plain.split(/\n\s*\n/)) {
+    const sub = SUB.exec(para);
+    if (sub && !fenced()) {
+      out.push(...blocks(tags(md.join("\n\n"))));
+      md = [];
+      const spans = inline(tags(sub[1]!).trim());
+      if (spans.length) out.push({ t: "small", spans });
+    } else md.push(para);
+  }
+  out.push(...blocks(tags(md.join("\n\n"))));
+  return out;
+}
+
+// A reviewer's first line, to say what they said in one: its first block's words, comments and tags gone.
+export function saidLine(text: string): string {
+  const b = saidBlocks(text)[0];
+  const plain = (ss: Span[]) => ss.map((s) => (s.t === "link" ? s.url : s.text)).join("");
+  if (!b) return "";
+  if (b.t === "p" || b.t === "small") return plain(b.spans);
+  if (b.t === "details") return plain(b.summary);
+  if (b.t === "pre") return b.text.split("\n")[0] ?? "";
+  return plain(b.items[0] ?? []);
+}

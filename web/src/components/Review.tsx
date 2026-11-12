@@ -74,7 +74,7 @@ import type { Spot } from "./Chat.tsx";
 import { Conversation, threadOf } from "./Conversation.tsx";
 import { Diagram } from "./Diagram.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
-import { ProseBlocks, spans, Words } from "./Prose.tsx";
+import { ProseBlocks, SaidText, spans, Words } from "./Prose.tsx";
 import { focusReviewers, Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
@@ -2406,7 +2406,7 @@ function ThreadNote({
           </span>
           <span className="rv-tc-at">{age(c.at, now)}</span>
           <div className="rv-tc-body">
-            <Words text={c.body} />
+            <SaidText text={c.body} />
           </div>
         </div>
       ))}

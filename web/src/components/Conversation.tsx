@@ -5,7 +5,8 @@ import { api, runUi } from "../api.ts";
 import { age, cls, MOD, aiName } from "../format.ts";
 import type { Spot, Thread } from "./Chat.tsx";
 import { Avatar } from "./Avatar.tsx";
-import { Words } from "./Prose.tsx";
+import { SaidText, Words } from "./Prose.tsx";
+import { saidLine } from "../../../src/prose.ts";
 
 const where = (c: Convo) => (c.path ? `${c.path}${c.line ? `:${c.line}` : ""}${c.outdated ? ", outdated" : ""}` : "on the PR");
 // What an ask to your agent is about: "dana's thread on src/auth.ts:42".
@@ -17,7 +18,7 @@ export const threadOf = (item: string, c: Convo): Thread => ({
   label: `${c.comments[0]?.author ?? "their"}'s ${c.kind}${c.path ? ` on ${where(c)}` : ""}`,
 });
 const firstLine = (s: string) => {
-  const line = s.trim().split("\n")[0] ?? "";
+  const line = saidLine(s);
   return line.length > 160 ? `${line.slice(0, 159)}…` : line;
 };
 
@@ -245,9 +246,9 @@ function Said({ c, label, now }: { c: Convo; label?: string; now: number }) {
             </span>
             <span>{age(x.at, now)}</span>
           </p>
-          <p className="cv-body">
-            <Words text={x.body.trim()} />
-          </p>
+          <div className="cv-body">
+            <SaidText text={x.body} />
+          </div>
         </li>
       ))}
     </ol>

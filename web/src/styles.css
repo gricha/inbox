@@ -5516,7 +5516,6 @@ a.rv-part-row:hover {
 
 .cv-body {
   margin-top: 2px;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -5895,8 +5894,32 @@ p.rv-next {
 
 .rv-tc-body {
   color: var(--ink-2);
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* A reviewer's words: the size of the thread around them, a fold for its <details>, quiet small print for its <sub>. */
+.prose.said {
+  color: inherit;
+  font-size: inherit;
+}
+
+.said-more summary {
+  color: var(--ink-2);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.said-more > .prose {
+  margin-top: 6px;
+  padding-left: 14px;
+  border-left: 2px solid var(--rule);
+  color: inherit;
+  font-size: inherit;
+}
+
+.said-small {
+  color: var(--pencil);
+  font-size: 12.5px;
 }
 
 .rv-tc-acts {

@@ -288,7 +288,7 @@ Under the AI review, only when there's any.
 - Claude's one-line gist, then its take with the call in semibold ("**Valid concern:** …", "**Only you can answer:** …"), then the original words behind "What azulus wrote".
 - An empty reply box: the desk never writes your answer. **Reply** (or ⌘↵) posts it on GitHub as you.
 - Until Claude has read it, the gist is the comment's first line and "Claude is reading it." A failure says why in ink.
-- Text is drawn with `code` as code, never HTML; URLs stay text; the original keeps its lines and ``` blocks.
+- What a reviewer wrote is drawn from its markdown, never as HTML (`saidBlocks()` in `src/prose.ts`, `SaidText` in `Prose.tsx`): headings, paragraphs, lists, `code` and ``` blocks; a `<details>` is a fold under its `<summary>`; a paragraph in `<sub>` is small print; `<br>`, `<b>` and `<code>` read as meant; HTML comments (a bot's `<!-- finding -->` markers) are gone; any other tag is text. URLs stay text. The same in the diff's threads.
 - Everything not waiting on you is one line, "3 more conversations not waiting on you", opening to a line each and then their comments.
 
 ### The diff
