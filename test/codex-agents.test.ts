@@ -1,4 +1,4 @@
-// With Codex chosen (Settings → Agent): an automation's agent run and your agent run on the owner's codex, as Claude Code's do.
+// With Codex chosen (Settings → Local Agent Integration): an automation's agent run and your agent run on the owner's codex, as Claude Code's do.
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

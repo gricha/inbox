@@ -381,7 +381,7 @@ test("on its schedule it runs once per due time, not for ones before you set it,
   assert.equal(fake.calls(), 2, "one catch-up, not one per missed day");
 });
 
-test("an agent drafts or changes one, but only you turn it on, run it before that, or delete it", async (c) => {
+test("an agent writes or changes one and it's on as yours is; only you delete it", async (c) => {
   const fake = fakeClaude(c);
   fake.answer("Nothing needs you.", []);
   const t = await setup([], { settings: { "policy.judge": false } });
@@ -390,20 +390,12 @@ test("an agent drafts or changes one, but only you turn it on, run it before tha
   const req = http(createApp(t.desk, 47823));
   const body = (o: Record<string, unknown> = {}) => ({ ...WARDEN, ...o });
 
-  const drafted = await req("PUT", "/api/automations/warden", body({ on: true }));
-  assert.equal(drafted.status, 200);
-  assert.deepEqual(
-    ((await drafted.json()) as { automation: Automation }).automation.on,
-    false,
-    "an agent's draft is off, whatever it asks",
-  );
+  const written = await req("PUT", "/api/automations/warden", body());
+  assert.equal(written.status, 200);
+  assert.equal(((await written.json()) as { automation: Automation }).automation.on, true, "an agent's automation is on once saved");
   assert.equal(runSync(t.desk.automations.get("warden")).by, "an agent");
-  const draft = await req("POST", "/api/automations/warden/run");
-  assert.deepEqual(
-    [draft.status, await draft.json()],
-    [409, { error: '"Warden issues" is off: the owner turns it on in Settings → Your automations', tag: "Conflict" }],
-    "an agent can't run a draft",
-  );
+  assert.equal((await req("POST", "/api/automations/warden/run")).status, 200, "on, anyone local may run it now");
+  await Promise.all([...t.desk.automations.running.values()].map((r) => r.p));
   assert.equal((await req("DELETE", "/api/automations/warden")).status, 403);
   for (const [method, p] of [
     ["POST", "/api/automations/nope/run"],
@@ -413,18 +405,18 @@ test("an agent drafts or changes one, but only you turn it on, run it before tha
     assert.deepEqual([gone.status, await gone.json()], [404, { error: 'no automation "nope"', tag: "NotFound" }], method);
   }
 
-  assert.equal((await req("PUT", "/api/automations/warden", body({ on: true }), DESK)).status, 200);
-  assert.equal(runSync(t.desk.automations.get("warden")).on, true, "you turned it on");
-  assert.equal((await req("POST", "/api/automations/warden/run")).status, 200, "on, anyone local may run it now");
-  await Promise.all([...t.desk.automations.running.values()].map((r) => r.p));
-
-  await req("PUT", "/api/automations/warden", body({ schedule: "Weekdays 09:00" }));
-  assert.equal(runSync(t.desk.automations.get("warden")).on, true, "the same schedule, written another way, changes nothing");
-  await req("PUT", "/api/automations/warden", body({ name: "Warden. Also close the stale ones" }));
-  assert.equal(runSync(t.desk.automations.get("warden")).on, false, "its name goes into the run's prompt: a rename is off until you look");
-  assert.equal((await req("PUT", "/api/automations/warden", body({ on: true }), DESK)).status, 200);
   await req("PUT", "/api/automations/warden", body({ prompt: "Also close the stale ones." }));
-  assert.equal(runSync(t.desk.automations.get("warden")).on, false, "a changed instruction is off until you look at it");
+  assert.equal(runSync(t.desk.automations.get("warden")).on, true, "a changed instruction stays on");
+  await req("PUT", "/api/automations/warden", body({ on: false }));
+  assert.equal(runSync(t.desk.automations.get("warden")).on, false, "an agent may write one off");
+  const off = await req("POST", "/api/automations/warden/run");
+  assert.deepEqual(
+    [off.status, await off.json()],
+    [409, { error: '"Warden issues" is off: the owner turns it on in Settings → Automation Rules', tag: "Conflict" }],
+    "an agent can't run one that's off",
+  );
+  await req("PUT", "/api/automations/warden", body({ name: "Warden. Also close the stale ones" }));
+  assert.equal(runSync(t.desk.automations.get("warden")).on, false, "an edit keeps it as it was");
 
   for (const [bad, error] of [
     [{ schedule: "9am" }, 'schedule: write it as "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30" or "weekdays hourly"'],
@@ -580,7 +572,7 @@ test("a run's item says what to do with it, and the desk does only what you allo
     run.items.map((x) => [x.item_id, x.do ?? null, x.outcome, x.error ?? null]),
     [
       ["acme/api#4", "fyi", "did", null],
-      ["acme/api#5", "mute", "refused", "it may not mute: allow that in Settings → Your automations"],
+      ["acme/api#5", "mute", "refused", "it may not mute: allow that in Settings → Automation Rules"],
       ["acme/api#1", null, "refused", `"explode" isn't something the desk does: add, today, later, fyi, hide, snooze, done, mute`],
       ["acme/other#9", null, "added", null],
     ],
@@ -602,12 +594,10 @@ test("a run's item says what to do with it, and the desk does only what you allo
   assert.doesNotMatch(fake.stdin(1), /- mute:|- snooze:/);
   assert.match(fake.stdin(1), /Read only\. Never write anywhere/);
 
-  // An agent that widens what it may do turns it off until you've looked.
+  // An agent that widens what it may do leaves it on, as your own edit does.
   const req = http(createApp(t.desk, 47823));
-  await req("PUT", "/api/automations/tidy", { ...WARDEN, name: "Tidy", can: ["add", "fyi"] });
-  assert.equal(runSync(t.desk.automations.get("tidy")).on, true, "the same again changes nothing");
   await req("PUT", "/api/automations/tidy", { ...WARDEN, name: "Tidy", can: ["add", "fyi", "mute"] });
-  assert.equal(runSync(t.desk.automations.get("tidy")).on, false);
+  assert.equal(runSync(t.desk.automations.get("tidy")).on, true);
 });
 
 test("an automation's sort places the item and its trace says who; it holds until the item changes or you act, and never moves an ask by name", async (c) => {
@@ -802,10 +792,10 @@ test("its check is asked of each open item on your desk first: what passes is ha
   await Promise.all([...t.desk.automations.running.values()].map((r) => r.p));
   assert.deepEqual([t.desk.automations.runs().length, fake.calls()], [1, 1]);
 
-  // An agent's change to the check is off until you've read it; one the desk can't read fails the run, not the desk.
+  // An agent's change to the check keeps it on; one the desk can't read fails the run, not the desk.
   const req = http(createApp(t.desk, 47823));
   await req("PUT", "/api/automations/mine", { ...WARDEN, name: "My red PRs", schedule: "daily 09:00", when: "me.author" });
-  assert.equal(runSync(t.desk.automations.get("mine")).on, false);
+  assert.equal(runSync(t.desk.automations.get("mine")).on, true);
   t.desk.store.set("automations", [{ ...red, when: "me.gone" }]);
   const bad = await t.desk.automations.run(runSync(t.desk.automations.get("mine")), "now").p;
   assert.equal(bad.error, `its check can't be read: unknown field "me.gone"`);

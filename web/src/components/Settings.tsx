@@ -1,4 +1,5 @@
 // Rendered from the schema in GET /api/settings: a new entry in SETTINGS (src/settings.ts) needs no change here.
+import { SETTINGS_PARTS } from "../settings-parts.ts";
 import { Effect } from "effect";
 import {
   Fragment,
@@ -42,7 +43,6 @@ import {
   onePause,
   quietTimes,
   routeHash,
-  SETTINGS_PARTS,
   SETTINGS_VIEWS,
   settingsBack,
   SHOWN,
@@ -1116,7 +1116,7 @@ export function Settings({
 
   return (
     <div className="settings" hidden={!active}>
-      <div className="s-page" hidden={inView || section === "automations" || section === "criteria"}>
+      <div className="s-page" hidden={inView || section === "automations"}>
         {!view && (
           <section className="s-part s-skel" aria-busy="true" aria-label="Loading">
             <div className="lines s-sheet">
@@ -1170,8 +1170,8 @@ export function Settings({
           const lead = LEAD[x.id];
           return (
             <section key={x.id} id={`s-${x.id}`} className="s-part" aria-label={x.title} hidden={section !== x.id}>
-              {x.id === "app" && lead === undefined && !defs.length && (
-                <p className="quiet-note">This device's settings are the desktop app's: open Inbox's app to change them.</p>
+              {(x.id === "app" || x.id === "tailscale") && lead === undefined && !defs.length && (
+                <p className="quiet-note">{x.title}'s settings are the desktop app's: open Inbox's app to change them.</p>
               )}
               {(lead !== undefined || defs.length > 0) && (
                 <div className="lines s-sheet">
@@ -1212,15 +1212,15 @@ export function Settings({
       {/* The parts and the views stay mounted, so an unsaved draft in any survives leaving it and coming back. */}
       <div className="s-page" hidden={section !== "automations"}>
         <section id="s-automations" className="s-part" aria-label="Your automations">
+          <h2 className="group-head">Your automations</h2>
           <div className="lines s-sheet">
             <AutomationRows au={au} now={now} />
           </div>
           <NewAutomation au={au} model={decisionModel} />
         </section>
-      </div>
-      <div className="s-page" hidden={section !== "criteria"}>
         <section id="s-criteria" className="s-part" aria-label="Urgency">
-          <Criteria active={active && section === "criteria"} refresh={loads} now={now} flash={flash} onAsked={onAsked} />
+          <h2 className="group-head">Urgency</h2>
+          <Criteria active={active && section === "automations"} refresh={loads} now={now} flash={flash} onAsked={onAsked} />
         </section>
       </div>
       <section className="s-view" hidden={section !== "rules"} aria-labelledby="s-view-rules">

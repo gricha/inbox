@@ -25,7 +25,7 @@ On macOS and Linux, that one command:
 
 Run it again to update. On Windows, run the installer from [Releases](https://github.com/gricha/inbox/releases).
 
-**The first open** is one page: GitHub, signed in as you or what to run, and your agent. Claude Code, Codex and OpenCode each say whether they're installed and logged in, or the command that gets them there. Press **Use Claude Code** (or yours): that installs Inbox's MCP tools and skill in it, and you're on your Inbox while the first sync runs, about 30 seconds. Settings → Agent changes it later; `desk setup` does the same from a terminal.
+**The first open** is one page: GitHub, signed in as you or what to run, and your agent. Claude Code, Codex and OpenCode each say whether they're installed and logged in, or the command that gets them there. Press **Use Claude Code** (or yours): that installs Inbox's MCP tools and skill in it, and you're on your Inbox while the first sync runs, about 30 seconds. Settings → Local Agent Integration changes it later; `desk setup` does the same from a terminal.
 
 Every agent run is your own CLI, on your own login.
 
@@ -63,7 +63,7 @@ The sidebar has four pages, plus **Ask your agent** and **Settings** in its foot
 - **Blocked**: your PRs that can't move yet, such as one that needs another PR merged first, or one waiting on reviewers. Each says what it waits on, down the chain. It comes back to your Inbox when that changes.
 - **Merging**: your PRs the coordinator is getting merged, each with what it waits on and the coordinator's latest note. Merged ones stay for 3 days. **Back to desk** takes one back.
 - **Archive**: what's done (by you, or resolved by GitHub: merged, closed, approved), then what you snoozed or muted and what your rules hid.
-- **Settings** (⌘, in the app): Inbox and notifications, Agent, Your automations, Urgency, This device (theme, shortcut, menu bar count), then GitHub (account, searches and rules, the AI review, its automations). Changes save as you go.
+- **Settings** (⌘, in the app): Inbox and notifications, Local Agent Integration, Automation Rules (your automations and urgency), Appearance, This device (shortcut, menu bar count), Tailscale (use it from your other devices), then GitHub (account, searches and rules, the AI review, its automations). Changes save as you go.
 
 Everything is a click. A row opens its review (an issue opens in place). Right-click a row for Done, Snooze, Close on GitHub and Copy link. Platform keys still work: Esc goes back, ⌘↵ sends what you wrote, ⌘S saves an editor, Tab moves between controls.
 
@@ -131,9 +131,9 @@ Searches and rules lists the built-in rules with a switch each. Details: [docs/a
 
 ## Connect your agent
 
-Settings → Agent picks the agent that sorts your desk, writes AI reviews and runs the coordinator: **Claude Code**, **Codex** (run `codex login` once) or **OpenCode** (`opencode auth login`, or a provider key in your environment).
+Settings → Local Agent Integration picks the agent that sorts your desk, writes AI reviews and runs the coordinator: **Claude Code**, **Codex** (run `codex login` once) or **OpenCode** (`opencode auth login`, or a provider key in your environment).
 
-The agent needs two things from the desk. Settings → Agent says if either is missing, and **Connect** there adds it.
+The agent needs two things from the desk. Settings → Local Agent Integration says if either is missing, and **Connect** there adds it.
 
 - **MCP tools**, served by the desk at `http://localhost:47823/mcp` while the app or `desk serve` runs. The list: [docs/api.md → MCP tools](docs/api.md#mcp-tools).
 - **The Inbox skill** ([skills/inbox/SKILL.md](skills/inbox/SKILL.md)): what the desk is, which tool to use when, and its rules. The desk keeps installed copies up to date.
@@ -180,7 +180,7 @@ desk render review.json       # a review document as one HTML page (docs/review-
 
 ## Use it from another machine
 
-Over [Tailscale](https://tailscale.com), for you alone. On the desk's computer, turn on Settings → This device → **Use it from your other devices** (or run `desk serve --tailscale`).
+Over [Tailscale](https://tailscale.com), for you alone. On the desk's computer, turn on Settings → Tailscale → **Use it from your other devices** (or run `desk serve --tailscale`).
 
 - The desk runs `tailscale serve`, so it answers at `https://<this machine's tailnet name>/` on your tailnet only, never on the internet (no `tailscale funnel`). It stops serving when you turn the setting off or the desk stops.
 - It needs Tailscale signed in, with MagicDNS and HTTPS certificates on. The setting says what's missing.
@@ -212,7 +212,7 @@ For each PR (or stack) it starts a subagent that works in a git worktree of your
 
 **Conflicts.** A merge conflict alone never lands on your desk. Your PR that's otherwise ready to merge (approved, CI not failing, not a draft) but conflicts goes to the coordinator to rebase. It shows in Merging as "rebasing", is pushed with `--force-with-lease`, and comes back to your desk ready to merge. With the coordinator off, it stays on your desk.
 
-**How it runs.** The desk starts it on your first hand-off or ask (or **Start it now** in Merging), then only wakes it: at once for your asks, and once a minute with news on PRs in Merging (CI finished, a review or comment, a conflict). Wakes carry PR ids, URLs and what changed, never PR text. The desk checks every 5 minutes that it's still running and resumes it if not. Settings → Agent → **Run your agent** turns it off and on.
+**How it runs.** The desk starts it on your first hand-off or ask (or **Start it now** in Merging), then only wakes it: at once for your asks, and once a minute with news on PRs in Merging (CI finished, a review or comment, a conflict). Wakes carry PR ids, URLs and what changed, never PR text. The desk checks every 5 minutes that it's still running and resumes it if not. Settings → Local Agent Integration → **Run your agent** turns it off and on.
 
 - **Claude Code**: one background session (`claude --bg`) named "Inbox coordinator", in `~/.inbox/coordinator`, with Remote Control on. It's your own `claude`, with your login, model and settings. Claude Code runs it, so quitting the desk leaves it running. If Claude Code hasn't trusted that folder, Merging says so: run `claude` there once and accept.
 - **Codex**: one Codex thread; each wake is a `codex exec resume` turn the desk runs and waits on. A desk restart stops a turn in progress. Codex reads the deny list only in a trusted folder, so add `[projects."<that folder>"]` with `trust_level = "trusted"` to `~/.codex/config.toml` (Merging says so). With Let your agent run without asking off, it runs in Codex's workspace-write sandbox and hands back what needs a push.
@@ -220,7 +220,7 @@ For each PR (or stack) it starts a subagent that works in a git worktree of your
 
 Switching agents keeps each one's session. Details for each: [docs/api.md → The coordinator](docs/api.md#the-coordinator).
 
-**Permissions.** Settings → Agent → **Let your agent run without asking** (on by default) runs it without permission prompts. The deny list still applies, but it's then the only fence. Leave it on if your own sessions skip permission prompts: Claude Code passes messages between two sessions only when both skip them or neither does. Claude Code needs bypass mode accepted once: run `claude --dangerously-skip-permissions` and accept. Until then, or if your org disables it, Merging shows the refusal in red.
+**Permissions.** Settings → Local Agent Integration → **Let your agent run without asking** (on by default) runs it without permission prompts. The deny list still applies, but it's then the only fence. Leave it on if your own sessions skip permission prompts: Claude Code passes messages between two sessions only when both skip them or neither does. Claude Code needs bypass mode accepted once: run `claude --dangerously-skip-permissions` and accept. Until then, or if your org disables it, Merging shows the refusal in red.
 
 With it off, the coordinator uses your own Claude Code permissions, so allow `git`, `gh pr merge` and your test commands as you like. Its worktrees go under each clone's `.claude/worktrees/`, so add the folder holding your clones to `permissions.additionalDirectories` in `~/.inbox/coordinator/.claude/settings.json`, or approve its edits as they come.
 
@@ -241,8 +241,8 @@ Every item on your Inbox gets a score out of 10. The score and your **criteria**
 
 - A **criterion** is a yes-or-no about an item: a rule (`when`, free and exact) or a question your model answers (`ask`, such as "Is it about service accounts?"). A yes raises the score. An **urgent** criterion's yes puts the item in Urgent whatever its score, even one your rules hid.
 - Tell your agent what you care about ("I care about PRs about service accounts") and it saves a criterion. Criteria only order your Inbox; they never act on an item.
-- Settings → Urgency lists yours and GitHub's (Asked by name, which counts 3 points, Waiting on your reply, and the urgent ones: Ready to merge, Your PR others wait on, Handed back), each with a switch.
-- Your agent scores 20 items a call, with the one-line why your row shows. With a decision model key (Settings → Agent → More), that model scores instead. Before a model answers, or with Score the Inbox off, the desk scores from the rules and criteria.
+- Settings → Automation Rules → Urgency lists yours and GitHub's (Asked by name, which counts 3 points, Waiting on your reply, and the urgent ones: Ready to merge, Your PR others wait on, Handed back), each with a switch.
+- Your agent scores 20 items a call, with the one-line why your row shows. With a decision model key (Settings → Local Agent Integration → More), that model scores instead. Before a model answers, or with Score the Inbox off, the desk scores from the rules and criteria.
 - Urgent is 8 or more, FYI 3 or less (Settings → Inbox and notifications). A review asked of you by name, or your pin, never goes below Standard.
 - Every answer is kept in `~/.inbox/labels.jsonl`, to train a cheaper model later.
 
@@ -257,7 +257,7 @@ An automation is an instruction the desk runs for you, on a schedule or on event
 - On by default (no model): **Pick a reviewer** (your ready PR, a workday with nobody asked by name), **Follow up on silent reviewers** (two workdays of silence), **Team reviews someone else took** (to FYI), **Wide team pings** (asked of four or more teams: hidden).
 - Off by default: **Snooze while CI is red** and **Questions in mentions** (a model spots a question for you).
 
-**Yours.** Settings → Your automations lists them, with when each runs, its last run, **Run now** and a switch. Open one to edit it. Ask any agent with the desk's tools to write one (`desk_automations`). One an agent writes or changes stays off until you turn it on, and only you can delete one.
+**Yours.** Settings → Automation Rules lists them, with when each runs, its last run, **Run now** and a switch. Open one to edit it. Ask any agent with the desk's tools to write one (`desk_automations`). One an agent writes or changes is on as soon as it's saved, as yours is; only you can delete one.
 
 **When it runs.**
 
@@ -273,7 +273,7 @@ An automation is an instruction the desk runs for you, on a schedule or on event
 
 **What it may do.** By default it only adds items to your desk, pinned, with its own why. You can allow more (`can`): sort to Today, Later or FYI, hide, snooze, mark done, mute. It never sorts into Now or Blocked. Your hard rules, `final` rules and pins bind it. What it adds, it adds once, until something about the item changes. Every action carries its name and undo takes it back. It never touches a review asked of you by name, your pin or a PR your agent handed back.
 
-**Decision model.** By default your agent answers questions. With an OpenRouter key (Settings → Agent → More; `typesafe/jev-1.14` by default), each item is one request to OpenRouter's Decisions API, and the desk acts only when it's at least 80% sure. The item's facts then leave your computer for OpenRouter (never the AI review or its files). The key lives in `~/.inbox/secrets.json`.
+**Decision model.** By default your agent answers questions. With an OpenRouter key (Settings → Local Agent Integration → More; `typesafe/jev-1.14` by default), each item is one request to OpenRouter's Decisions API, and the desk acts only when it's at least 80% sure. The item's facts then leave your computer for OpenRouter (never the AI review or its files). The key lives in `~/.inbox/secrets.json`.
 
 A run that added something, couldn't, or failed notifies you. When a question's model can't answer (logged out, out of credits), the run waits and tries again in half an hour. Details: [docs/api.md → Automations](docs/api.md#automations).
 

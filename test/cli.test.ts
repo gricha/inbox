@@ -426,7 +426,7 @@ test("settings lists effective values by section and stars overrides", async () 
     /^GitHub\n {2}github\.resolve_on_others_approval +always\n {2}review\.auto_ai +true\n {2}review\.at_once +8\n {2}github\.my_repos +\(none\)\n/,
   );
   assert.match(r.out, /\n\* github\.poll_seconds +120\n {2}handoff\.prompt +Review \{item\.url\} by \{item\.author\}\. … \(\+3 lines\)\n/);
-  assert.match(r.out, /\n\nAgent\n {2}agent\.harness +claude-code\n {2}policy\.judge +true\n/);
+  assert.match(r.out, /\n\nLocal Agent Integration\n {2}agent\.harness +claude-code\n {2}policy\.judge +true\n/);
   assert.match(
     r.out,
     /\n\nInbox and notifications\n {2}queue\.quiet_days +14\n {2}queue\.urgent_at +8\n {2}queue\.fyi_at +3\n {2}notify\.enabled +true\n {2}notify\.quiet +19:00-09:00\n/,
@@ -434,7 +434,7 @@ test("settings lists effective values by section and stars overrides", async () 
   assert.match(r.out, /\n\nThis device\n {2}app\.hotkey +/);
   assert.deepEqual(
     r.out.split("\n").filter((l) => /^\S/.test(l) && !l.startsWith("*")),
-    ["GitHub", "Sessions", "Agent", "Inbox and notifications", "This device"],
+    ["GitHub", "Sessions", "Local Agent Integration", "Inbox and notifications", "This device", "Tailscale"],
   );
   assert.match(r.out, /\n\n\* set in \/home\/you\/\.inbox\/settings\.json\n$/);
   assert.equal(lastCall().path, "/api/settings");

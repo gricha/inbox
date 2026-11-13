@@ -38,7 +38,7 @@ A `ref` is `owner/repo#123`, `repo#123` when unique, a GitHub URL, or an item's 
 | `desk_events`      | The event log (asked, reviewed, pushed, CI, commented, merged, …). Pass `last_seq` back as `after`; `wait` up to 60 s; `item` to filter.                                      |
 | `desk_config`      | `get` config.toml (with its hash and the built-in rules), `preview` a full new text, `save` it with `base` = the hash.                                                        |
 | `desk_criteria`    | Urgency criteria: `list`, `set`, `delete`.                                                                                                                                    |
-| `desk_automations` | The user's automations: `list`, `set` (a draft, off until they turn it on), `run` (one that's on, now).                                                                       |
+| `desk_automations` | The user's automations: `list`, `set` (writes or changes one, on once saved), `run` (one that's on, now).                                                                     |
 | `desk_inquire`     | Ask the user a question in their desk. See "Asking in the desk".                                                                                                              |
 | `desk_inquiry`     | The answer to your `desk_inquire` (`id`, `wait` up to 60 s). No `id`: answers nobody has picked up yet.                                                                       |
 | `desk_merging`     | Coordinator: the PRs in Merging with CI, reviews, threads, mergeability, base, blockers, merge method, last note.                                                             |
@@ -111,7 +111,7 @@ Expressions: `&& || ! == != < <= > >= in matches`, `len() lower() contains() sta
 
 ### Urgency: "I care about X"
 
-When the user says what matters ("PRs about service accounts", "anything from dana first", "big PRs can wait"), save a criterion with `desk_criteria set`. It's on as soon as it's saved; tell them they can switch it off in Settings → Urgency.
+When the user says what matters ("PRs about service accounts", "anything from dana first", "big PRs can wait"), save a criterion with `desk_criteria set`. It's on as soon as it's saved; tell them they can switch it off in Settings → Automation Rules → Urgency.
 
 - `when`: a rule expression, free and exact. Use it alone when facts settle it (`item.author == 'dana'`).
 - `ask`: a yes-or-no question a model answers from the item's title, labels, people, state and description start. Use it for a topic or judgement ("Is it about service accounts?"), with `when` to narrow it (`!me.author` for other people's PRs).
@@ -180,7 +180,7 @@ For a PR already on the desk, `desk_doc` with `ref` turns its own AI review into
 
 ## Automations
 
-When the user wants something checked on a schedule or on events ("every morning, put new warden issues that need me on my desk"), draft it with `desk_automations set`. It stays off until they turn it on in Settings → Your automations; say so. Change or run one only when they ask. `set` sends the whole automation each time.
+When the user wants something checked on a schedule or on events ("every morning, put new warden issues that need me on my desk"), write it with `desk_automations set`. It's on once saved. Change or run one only when they ask. `set` sends the whole automation each time.
 
 - `prompt`: their instruction in their words: what to read, what counts as needing them, and that finding nothing is fine. A run reads only and lists PRs and issues with a why each.
 - `schedule` (local time): `daily 09:00`, `weekdays 09:00,13:00`, `mon 09:00`, `mon,thu 17:30`, `weekdays hourly`.

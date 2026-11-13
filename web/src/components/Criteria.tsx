@@ -1,4 +1,4 @@
-// Settings → Urgency: your criteria and the plugins', each a yes or no about an item that orders the Inbox and never acts on
+// Settings → Automation Rules → Urgency: your criteria and the plugins', each a yes or no about an item that orders the Inbox and never acts on
 // it. Yours first, with New criterion; then what GitHub comes with, which you only switch.
 import { Effect } from "effect";
 import { Fragment, useCallback, useEffect, useState, type KeyboardEvent } from "react";

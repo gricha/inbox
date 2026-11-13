@@ -24,8 +24,8 @@ export interface DecideOpts {
 }
 
 const DOWN: Record<number, string> = {
-  401: "OpenRouter refused the decision model's key (401). Check it in Settings → Agent.",
-  402: "OpenRouter says the decision model's key is out of credits (402). Add credits, or clear the key in Settings → Agent and Claude answers instead.",
+  401: "OpenRouter refused the decision model's key (401). Check it in Settings → Local Agent Integration.",
+  402: "OpenRouter says the decision model's key is out of credits (402). Add credits, or clear the key in Settings → Local Agent Integration and Claude answers instead.",
   429: "OpenRouter is rate limiting the decision model (429).",
 };
 

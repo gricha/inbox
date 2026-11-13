@@ -23,7 +23,7 @@ export interface Connector {
   readonly id: string; // "github"; the `source` of its events and of its boards
   readonly name: string; // "GitHub"
   readonly automations: readonly BuiltInAutomation[]; // what it comes with, run by the desk as yours are: Settings → its part
-  readonly criteria: readonly BuiltInCriterion[]; // what it comes with for the Inbox's order, asked as yours are: Settings → Urgency
+  readonly criteria: readonly BuiltInCriterion[]; // what it comes with for the Inbox's order, asked as yours are: Settings → Automation Rules → Urgency
   // What it comes with for its boards, by the name a board's `builtin` gives: read on every load, so a release's reach every desk.
   readonly rules: Readonly<Record<string, BuiltInRules>>;
   // Before the desk starts: what it must have (GitHub: your context); first: its part of the first config.toml, else null.

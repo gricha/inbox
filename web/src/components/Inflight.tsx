@@ -188,7 +188,7 @@ function Coordinator({ c, act }: { c: CoordinatorView; act: (k: "copy" | "wake")
   const wake = () => {
     act("wake");
   };
-  if (!c.on) return <p className="lane-coord">{"Your agent is off in Settings → Agent."}</p>;
+  if (!c.on) return <p className="lane-coord">{"Your agent is off in Settings → Local Agent Integration."}</p>;
   if (c.error)
     return (
       <p className="lane-coord lane-coord-error">

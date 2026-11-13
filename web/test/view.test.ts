@@ -1,3 +1,4 @@
+import { SETTINGS_PARTS } from "../src/settings-parts.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { checkSetting, DEFAULTS, settingDef } from "../../src/settings.ts";
@@ -67,7 +68,6 @@ import {
   settingsBack,
   settingsPart,
   partName,
-  SETTINGS_PARTS,
   changeAsk,
   SETTINGS_VIEWS,
   SHOWN,
@@ -222,7 +222,7 @@ test("an automation opens as a view inside Settings, from its own link, and goes
 test("Settings' parts are the sidebar's items, each a route: the core's, then the plugins'; old links land on their part", () => {
   assert.deepEqual(
     SETTINGS_PARTS.map((p) => `${p.plugin ? "plugin " : ""}${p.id}`),
-    ["queue", "agent", "automations", "criteria", "appearance", "app", "plugin github", "plugin sessions"],
+    ["queue", "agent", "automations", "appearance", "app", "tailscale", "plugin github", "plugin sessions"],
   );
   const part = (hash: string) => {
     const r = parseRoute(hash);
@@ -237,6 +237,7 @@ test("Settings' parts are the sidebar's items, each a route: the core's, then th
   assert.equal(part("#/settings/rules"), "github");
   assert.equal(part("#/rules"), "github");
   assert.equal(part("#/settings/policy"), "agent");
+  assert.equal(part("#/settings/criteria"), "automations");
   assert.equal(part("#/settings/automations/warden-issues"), "automations");
   // A plugin's own automation opens from its plugin's part and goes back to it.
   const builtIn = parseRoute("#/settings/automations/github.pick-reviewer");
@@ -246,12 +247,12 @@ test("Settings' parts are the sidebar's items, each a route: the core's, then th
   assert.equal(settingsBack("automations/github.pick-reviewer"), "github");
   assert.equal(settingsBack("automations"), null); // a part, not a view: Esc goes to the Inbox
   // The page head names the part.
-  assert.deepEqual(["queue", "agent", "automations", "criteria", "app", "github"].map(partName), [
+  assert.deepEqual(["queue", "agent", "automations", "app", "tailscale", "github"].map(partName), [
     "Inbox and notifications",
-    "Agent",
-    "Your automations",
-    "Urgency",
+    "Local Agent Integration",
+    "Automation Rules",
     "This device",
+    "Tailscale",
     "GitHub",
   ]);
 });

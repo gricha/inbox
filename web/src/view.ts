@@ -19,6 +19,7 @@ import type {
 } from "../../src/types.ts";
 import { onLines, type Section } from "../../src/sections.ts";
 import { ago, BUCKET_LABEL, shortRef, aiName } from "./format.ts";
+import { SETTINGS_PARTS } from "./settings-parts.ts";
 
 // The Inbox (`queue`: Urgent, Standard and FYI), a PR's review in its place, Blocked, your PRs in Merging, the Archive
 // (what's done, snoozed, muted or hidden), and Settings (with the rules).
@@ -77,26 +78,13 @@ const SETTINGS_ALIAS: Record<string, string> = {
   review: "github",
   handoff: "github",
   policy: "agent", // Your policy, gone: rules and their weights sort now
+  criteria: "automations", // Urgency, with your automations in Automation Rules now
 };
 
 // The editors that open as views of their own inside Settings, by id, and the part each one's Edit row is in.
 export const SETTINGS_VIEWS: Record<string, { name: string; part: string } | undefined> = {
   rules: { name: "Searches and rules", part: "github" },
 };
-
-// Settings' parts, each a route (#/settings/<id>) and an item of the sidebar while you're in Settings: the core's, then under
-// a hairline one per plugin, holding its account, its settings and the automations it comes with.
-// automations: false for a plugin that comes with none.
-export const SETTINGS_PARTS: readonly { id: string; name: string; plugin?: true; automations?: false }[] = [
-  { id: "queue", name: "Inbox and notifications" },
-  { id: "agent", name: "Agent" },
-  { id: "automations", name: "Your automations" },
-  { id: "criteria", name: "Urgency" },
-  { id: "appearance", name: "Appearance" },
-  { id: "app", name: "This device" },
-  { id: "github", name: "GitHub", plugin: true },
-  { id: "sessions", name: "Sessions", plugin: true, automations: false },
-];
 
 // An automation's own view in Settings ("automations/warden-issues", a plugin's "automations/github.pick-reviewer"): its id.
 export const automationOf = (section: string): string | null => /^automations\/([\w-]+(?:\.[\w-]+)?)$/.exec(section)?.[1] ?? null;

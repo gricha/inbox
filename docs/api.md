@@ -33,13 +33,13 @@ A desk that was never set up (no `config.toml` and nothing learned from GitHub y
 - **The installer:** `install.sh` run by Claude Code, Codex or OpenCode (it reads `CLAUDECODE`, `CODEX_THREAD_ID`/`CODEX_SANDBOX`, `OPENCODE`; `INBOX_AGENT` names one or `none`) installs that agent's MCP tools and skill right away (`desk connect <agent> --apply`), then picks it once the desk answers (`desk setup <agent>`).
 - **From a terminal:** `desk setup` asks both again and prints the same; `desk setup claude` (or `codex`, `opencode`) picks one.
 
-Settings → Agent is where you change it afterwards.
+Settings → Local Agent Integration is where you change it afterwards.
 
-### Your agent (Settings → Agent)
+### Your agent (Settings → Local Agent Integration)
 
 `agent.harness` picks your agent: `claude-code` (the default), `codex` or `opencode`. Every agent run the desk makes follows it ([Your own agent](#your-own-agent)), and so does Connect (`driverOf()` in `src/agents.ts`).
 
-Settings → Agent shows a row when your agent lacks the desk's MCP tools or the Inbox skill ([skills/inbox/SKILL.md](../skills/inbox/SKILL.md)). **Connect &lt;agent&gt;** installs what's missing (`POST /api/agents/connect`); **Update the skill** shows when only the skill is out of date. When both are in place the row is gone. From a terminal:
+Settings → Local Agent Integration shows a row when your agent lacks the desk's MCP tools or the Inbox skill ([skills/inbox/SKILL.md](../skills/inbox/SKILL.md)). **Connect &lt;agent&gt;** installs what's missing (`POST /api/agents/connect`); **Update the skill** shows when only the skill is out of date. When both are in place the row is gone. From a terminal:
 
 ```bash
 desk connect                   # what Claude Code is missing, and the commands that fix it
@@ -120,7 +120,7 @@ A page's link (`inbox://blocked`), a question's link (`inbox://question/<id>`) o
 | `desk_inquire`     | `question`, `context` (200–6,000), `options?` (≤6 `{ answer, next }`), `links?` (≤12 `{ label, url }`), `item?`, `from`                                                         | `asked as inquiry <id>`: a question for the owner, a row on their main page with its own page, and a notification. Beside the chat, not instead of it. Its description says when to ask and what the page needs. Poll `desk_inquiry` for the answer                                                                                                |
 | `desk_inquiry`     | `id?` (or the question's `inbox://question/<id>` link), `wait?` (0–60 s)                                                                                                        | The answer, "no answer yet", or that it was dismissed. Giving the answer by `id` marks it picked up (`POST /api/inquiries/:id/read`). By link it also shows the question itself (fenced) and doesn't count as a pickup. With no `id`: the answers nobody has picked up yet, picking none up                                                        |
 | `desk_criteria`    | `action` (`list` `set` `delete`), `id?`, `name?`, `when?`, `ask?`, `urgent?`                                                                                                    | list: each criterion, on or off, and how many Inbox items it says yes to; a plugin's marked built in. set: saves one, whole, on at once. delete: removes one of the owner's ([Urgency](#urgency))                                                                                                                                                  |
-| `desk_automations` | `action` (`list` `set` `run`), `id?`, `name?`, `schedule?`, `events?`, `prompt?`, `when?`, `decide?`, `rule?`, `can?`                                                           | list: each automation (a plugin's marked built in), what starts it, its check, how it decides, what it may do, on or off, next run, last 3 runs (summaries fenced). set: drafts or changes one, whole; it stays off until the owner turns it on. run: runs one that's on, now ([Automations](#automations))                                        |
+| `desk_automations` | `action` (`list` `set` `run`), `id?`, `name?`, `schedule?`, `events?`, `prompt?`, `when?`, `decide?`, `rule?`, `can?`                                                           | list: each automation (a plugin's marked built in), what starts it, its check, how it decides, what it may do, on or off, next run, last 3 runs (summaries fenced). set: writes or changes one, whole; it's on once saved unless `on: false`. run: runs one that's on, now ([Automations](#automations))                                           |
 
 `until` (snooze): `1h`, `3h`, `2d` (any positive hours or days), `tomorrow` (09:00 local; before 05:00 it means this morning), `monday` (next Monday 09:00), `activity` (until someone else acts), `YYYY-MM-DD` (09:00 that day), a future ISO time, or one of the card's `wake_on` (`ci`, `push`, `approved`, `ready`, `conflict`).
 
@@ -263,7 +263,7 @@ After you answer, the question leaves the main page and is owed to whoever asked
 | GET         | `/api/events`        | Server-sent events ([Events](#events))                                                                                                                                                                                                                           |
 | POST        | `/mcp`               | MCP JSON-RPC (Streamable HTTP): responses as an SSE stream; 202 for notifications                                                                                                                                                                                |
 | GET, DELETE | `/mcp`               | 405, `Allow: POST`                                                                                                                                                                                                                                               |
-| GET         | `/api/remote`        | `RemoteView`: `{ on, text, url, login, devices }`, Settings → This device's Tailscale rows                                                                                                                                                                       |
+| GET         | `/api/remote`        | `RemoteView`: `{ on, text, url, login, devices }`, Settings → Tailscale's rows                                                                                                                                                                                   |
 | POST        | `/api/pair/code`     | `{ code, expires_at, url, pair_url }` (`desk pair`). This machine only; 409 while not served over Tailscale. A new code replaces the last                                                                                                                        |
 | POST        | `/api/pair/token`    | `{ name? }` → `{ url, token, device }` (`desk pair --print`). This machine only; 409 while not served                                                                                                                                                            |
 | POST        | `/api/pair`          | `{ code, kind?: "browser" \| "device", name? }`. Another device only: the code for `{ ok, token, device }`, or for a browser the session cookie and `{ ok, device }`. 403 for a wrong, used or expired code; 429 past five tries a minute                        |
@@ -793,7 +793,7 @@ interface AutomationView extends Automation {
 
 ### Your own agent
 
-Settings → Agent (`agent.harness`) picks who sorts and reviews: Claude Code (the default), Codex or OpenCode. It is always your own CLI from PATH, on your own login, model and config. The desk passes no model and sets no API key. (`DESK_CLAUDE`, `DESK_CODEX` and `DESK_OPENCODE` only point tests at fakes.)
+Settings → Local Agent Integration (`agent.harness`) picks who sorts and reviews: Claude Code (the default), Codex or OpenCode. It is always your own CLI from PATH, on your own login, model and config. The desk passes no model and sets no API key. (`DESK_CLAUDE`, `DESK_CODEX` and `DESK_OPENCODE` only point tests at fakes.)
 
 There are two kinds of runs:
 
@@ -843,7 +843,7 @@ The only model the desk calls that isn't your agent is [the decision model](#the
 
 ### The decision model (OpenRouter)
 
-With `agent.decision_key` set (Settings → Agent → More; an OpenRouter key), an automation's question (`decide: "ask"`) and [Urgency](#urgency)'s criteria and scores go to OpenRouter's Decisions API instead of your agent. With no key, nothing in the desk calls OpenRouter.
+With `agent.decision_key` set (Settings → Local Agent Integration → More; an OpenRouter key), an automation's question (`decide: "ask"`) and [Urgency](#urgency)'s criteria and scores go to OpenRouter's Decisions API instead of your agent. With no key, nothing in the desk calls OpenRouter.
 
 **The request** (`src/decisions.ts`): one per item, `POST https://openrouter.ai/api/alpha/decisions` with `Authorization: Bearer <key>` and a body of `{ model, state, questions }`, nothing else. Plain `fetch`, 30 s timeout, four at once. `model` is `agent.decision_model`, default `typesafe/jev-1.14`, pinned because each release's probabilities differ.
 
@@ -865,7 +865,7 @@ It leaves out the AI review's first sentence and the directories the PR touches.
 **Failures:**
 
 - `DecisionModelError`, the run's error: a missing or mistyped answer, or any other 4xx.
-- `DecisionModelDown`: 401, 402, 429, a 5xx, or no answer (unreachable, or nothing in 30 s); e.g. "OpenRouter refused the decision model's key (401). Check it in Settings → Agent.". It holds the run like a logged-out agent: not spent, nothing in it acted on (one item's failure holds the whole run), its events kept. It asks again in 30 minutes, or at once when you save another key or model.
+- `DecisionModelDown`: 401, 402, 429, a 5xx, or no answer (unreachable, or nothing in 30 s); e.g. "OpenRouter refused the decision model's key (401). Check it in Settings → Local Agent Integration.". It holds the run like a logged-out agent: not spent, nothing in it acted on (one item's failure holds the whole run), its events kept. It asks again in 30 minutes, or at once when you save another key or model.
 
 **The key** is a `secret` setting:
 
@@ -1122,7 +1122,7 @@ Each item gets back a bucket and a few words of why, which replace the hint's (a
 - A changed item keeps its old answer until the new one lands, and so does each item a rule change touches; never-answered items go first. An item the reply leaves out stays where the rules put it until it changes, and its card says "Claude gave no answer".
 - `policy.judge` (default on) turns the judge off; then the rules' placements stand.
 
-**Failures.** Until an item has an answer, or if the call fails, it sits where the rules put it. A failure (an expired login, a timeout) shows in Settings → Agent under Sort my desk with Claude and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on, or changing the agent settings, tries again now. desk.log keeps the agent's own words.
+**Failures.** Until an item has an answer, or if the call fails, it sits where the rules put it. A failure (an expired login, a timeout) shows in Settings → Local Agent Integration under Sort my desk with Claude and pauses the judge for 5, then 10, 20 and 60 minutes; syncs don't retry sooner. Turning `policy.judge` off and on, or changing the agent settings, tries again now. desk.log keeps the agent's own words.
 
 **What you see.** The rule trace (`desk_item`, `desk show`, the item's detail) ends with the judge's step: `Claude: today, <why>` (plus "an earlier answer; sorting it again" while a fresh one is due), `automation <name>: fyi, <why> (Claude is weighing it)`, or `Claude: not sorted yet, so where the rules put it`. `desk_item` and `desk show` then list the signals the judge weighs and, when its answer weighed others, those (`ItemDetail.judge`). A hard rule's step names its floor (`hard rule: never below today`). The card's facts say who placed it: "sorted by Claude", "placed by a hard rule", "kept up by its pin", "not sorted by Claude yet" or "Claude gave no answer".
 
@@ -1161,7 +1161,7 @@ as "in their areas: 2 of 5 files; touches src/sentry/auth/ (2, theirs), static/a
 
 The Inbox's sections, Urgent, Standard and FYI, and their order come from `src/urgency.ts`. It works on what the rules, the judge and automations' sorts placed in now, today, later or fyi. Those buckets stay the rules' view (`QueueView.sections`, the rule trace, `desk_list`); `QueueView.inbox` is what the window draws.
 
-**Criteria** (Settings → Urgency, `desk_criteria`, `/api/criteria`) are yes-or-no questions about an item.
+**Criteria** (Settings → Automation Rules → Urgency, `desk_criteria`, `/api/criteria`) are yes-or-no questions about an item.
 
 - Yours are in kv `criteria` (`Criterion` in `src/types.ts`). A plugin's are in its file (`Connector.criteria`; GitHub's in `src/connectors/github-criteria.ts`), switched in kv `criteria_builtin`.
 - Each has an id, a name, and at least one of: `when` (the rules' language, free and exact, compiled on save) and `ask` (a question for a model, asked only of items whose `when` passes). `urgent`: a yes puts the item in Urgent whatever its score. A plugin's may carry a `weight`: the points a yes adds to the desk's own score (1 unless set), and the scorer reads it as "counts 3 times".
@@ -1184,7 +1184,7 @@ GitHub's are rule-only, so a fresh desk sections from its first sync:
 - on the decision model when `agent.decision_key` is set (one request an item, a `noul` per question, yes at 0.8 or above);
 - else one tool-less call of 20 items on your agent (`askAgent()`), the questions in your words, the items fenced.
 
-A model that can't answer holds every question and score for 30 minutes (`Urgency.held`, shown in Settings → Urgency), and the Inbox uses what it has. Another key, model or agent, the agent working again, or saving a criterion asks at once.
+A model that can't answer holds every question and score for 30 minutes (`Urgency.held`, shown in Settings → Automation Rules → Urgency), and the Inbox uses what it has. Another key, model or agent, the agent working again, or saving a criterion asks at once.
 
 **Score**, 0 to 10, for each Inbox item. The scorer gets the item as the judge's `describe()` words it, where the rules placed it and why, and each criterion's outcome by name; it answers a score and a one-line why.
 
@@ -1215,7 +1215,7 @@ Each card carries `section`, `score` and `reason`, the row's quiet why. `reason`
 
 ### The coordinator
 
-One background agent session the desk starts and wakes (`src/coordinator.ts`, README → Coordinator); the window calls it your agent. What it does on a wake is the skill's "Coordinator" section. It's your own agent, with your MCP servers, tools and permissions, plus the desk's tools through the user-scope `inbox` server (Settings → Agent → Connect).
+One background agent session the desk starts and wakes (`src/coordinator.ts`, README → Coordinator); the window calls it your agent. What it does on a wake is the skill's "Coordinator" section. It's your own agent, with your MCP servers, tools and permissions, plus the desk's tools through the user-scope `inbox` server (Settings → Local Agent Integration → Connect).
 
 **What it does on a wake:**
 

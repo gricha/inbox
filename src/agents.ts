@@ -1,4 +1,4 @@
-// The agent you work in (Settings → Agent): whether it has the desk's MCP tools and the Inbox skill, and connecting it.
+// The agent you work in (Settings → Local Agent Integration): whether it has the desk's MCP tools and the Inbox skill, and connecting it.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

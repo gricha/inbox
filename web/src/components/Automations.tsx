@@ -1,4 +1,4 @@
-// Settings → Your automations: your instructions, on a schedule or when something happens; a plugin's part lists the ones it
+// Settings → Automation Rules: your instructions, on a schedule or when something happens; a plugin's part lists the ones it
 // comes with, which you only switch or copy. The part lists them (turn one on, run it now, write a new one); each opens a view of its own that says in plain words what starts it, its check, how it decides
 // and what it may do, with its editor and its runs. A run's summary and whys are an agent's words: shown as text, never markup.
 import { Effect } from "effect";
@@ -64,7 +64,7 @@ const WAY: Record<Way, { name: string; help: string }> = {
   ask: { name: "Ask a model", help: "One call reads the items and answers for each, or leaves it as it is." },
   agent: { name: "An agent with tools", help: "Your own agent, read only, with tools: it can look further than the items." },
 };
-// Who answers a question: your decision model once its key is set (Settings → Agent), else Claude.
+// Who answers a question: your decision model once its key is set (Settings → Local Agent Integration), else Claude.
 const answers = (model: string | null) => (model ? `${model} answers, through OpenRouter` : `${aiName()} answers, without tools`);
 // Codex's and OpenCode's run have only the desk's read tools: neither can hold a shell to gh's reads, so they have none.
 const agentRun = () =>
@@ -91,7 +91,6 @@ const slug = (s: string) =>
     .slice(0, 40);
 
 const viewOf = (id: string) => routeHash({ name: "settings", section: `automations/${id}` });
-const drafted = (a: Auto) => !a.on && a.by === "an agent"; // what an agent wrote is on screen before you turn it on
 
 // The last run, the end of its row's help: what it put on your desk, then (red, the only part that is) why it failed or what
 // it couldn't add.
@@ -247,8 +246,7 @@ const editing = (a: Auto): Draft => ({
 });
 
 // A part's automation rows on its sheet: each its name (its view), when it runs (a plugin's: what it does) and its last run,
-// Run now while it's on and its switch; an agent's draft has Review instead, so it can't run before its instruction has been
-// on screen. `plugin`: that plugin's, which you don't write; else yours, ending in New automation.
+// Run now while it's on and its switch. `plugin`: that plugin's, which you don't write; else yours, ending in New automation.
 export function AutomationRows({ au, now, plugin }: { au: Automations; now: number; plugin?: string }) {
   if (au.error && !au.list)
     return (
@@ -310,60 +308,44 @@ export function AutomationRows({ au, now, plugin }: { au: Automations; now: numb
 
 function AutomationRow({ a, au, now }: { a: Auto; au: Automations; now: number }) {
   const href = viewOf(a.id);
-  const draft = drafted(a);
   const last = lastLine(a.runs[0], now);
   const timing = [a.trigger, a.on ? a.next_at && `next ${when(a.next_at)}` : "off"].filter(Boolean).join(" · ");
   return (
     <div className="setting au-row">
       <div className="s-label-col">
-        {/* A draft's Review is its one stop for Tab; the name is there for the mouse. */}
-        <a className="s-label s-name" href={href} tabIndex={draft ? -1 : undefined}>
+        <a className="s-label s-name" href={href}>
           {a.name}
         </a>
         <p className="s-help">
-          {draft ? (
-            `An agent wrote it; read it before it runs · ${a.trigger}`
-          ) : (
-            <>
-              {a.help ?? timing} · {a.waiting ? "" : last.text}
-              {a.waiting ? <span className="t-bad">waiting: {a.waiting.why}</span> : last.bad && <span className="t-bad">{last.bad}</span>}
-            </>
-          )}
+          {a.help ?? timing} · {a.waiting ? "" : last.text}
+          {a.waiting ? <span className="t-bad">waiting: {a.waiting.why}</span> : last.bad && <span className="t-bad">{last.bad}</span>}
         </p>
       </div>
       <div className="s-control">
-        {draft ? (
-          <a className="act s-cta" href={href} aria-label={`Review ${a.name}`}>
-            Review
-          </a>
-        ) : (
-          <>
-            {a.on && (
-              <button
-                type="button"
-                className="s-edit"
-                disabled={a.running}
-                aria-label={`Run now: ${a.name}`}
-                onClick={() => {
-                  runUi(au.runNow(a));
-                }}
-              >
-                {a.running ? "Running…" : "Run now"}
-              </button>
-            )}
-            <input
-              className="switch"
-              type="checkbox"
-              // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked
-              role="switch"
-              checked={a.on}
-              aria-label={`Run ${a.name} ${a.events ? "when its events land" : "on its schedule"}`}
-              onChange={() => {
-                runUi(au.turn(a, !a.on));
-              }}
-            />
-          </>
+        {a.on && (
+          <button
+            type="button"
+            className="s-edit"
+            disabled={a.running}
+            aria-label={`Run now: ${a.name}`}
+            onClick={() => {
+              runUi(au.runNow(a));
+            }}
+          >
+            {a.running ? "Running…" : "Run now"}
+          </button>
         )}
+        <input
+          className="switch"
+          type="checkbox"
+          // oxlint-disable-next-line jsx-a11y/role-has-required-aria-props -- a checkbox input's state is its native checked
+          role="switch"
+          checked={a.on}
+          aria-label={`Run ${a.name} ${a.events ? "when its events land" : "on its schedule"}`}
+          onChange={() => {
+            runUi(au.turn(a, !a.on));
+          }}
+        />
       </div>
     </div>
   );
@@ -445,8 +427,7 @@ export function AutomationView({
       </p>
     );
 
-  const agents = drafted(a);
-  const line = `${a.trigger} · ${agents ? "an agent wrote it: read it before you turn it on." : a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
+  const line = `${a.trigger} · ${a.on ? (a.next_at ? `next ${when(a.next_at)}` : "on") : "off"}`;
   const turn = (on: boolean) => () => {
     runUi(au.turn(a, on));
   };
@@ -531,11 +512,7 @@ export function AutomationView({
               </p>
             )}
             <div className="actions">
-              {agents ? (
-                <button type="button" className="act primary" disabled={au.busy} onClick={turn(true)}>
-                  Turn on
-                </button>
-              ) : !a.schedule && !a.when && a.decide ? null : (
+              {!a.schedule && !a.when && a.decide ? null : (
                 <button
                   type="button"
                   className="act"
@@ -569,11 +546,9 @@ export function AutomationView({
                   Edit
                 </button>
               )}
-              {!agents && (
-                <button type="button" className="act" disabled={au.busy} onClick={turn(!a.on)}>
-                  {a.on ? "Turn off" : "Turn on"}
-                </button>
-              )}
+              <button type="button" className="act" disabled={au.busy} onClick={turn(!a.on)}>
+                {a.on ? "Turn off" : "Turn on"}
+              </button>
               {!changing && (
                 <button
                   type="button"

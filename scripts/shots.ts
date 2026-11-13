@@ -9,6 +9,7 @@ import { chromium, type Browser, type Page, type Request as Sent, type Route } f
 import { colorsOf, tokensFrom } from "../src/omarchy.ts";
 import { isTestPath } from "../src/sections.ts";
 import { THEMES } from "../src/themes.ts";
+import { SETTINGS_PARTS } from "../web/src/settings-parts.ts";
 import type {
   AgentStatus,
   Ask,
@@ -350,7 +351,8 @@ const settingsView = async (page: Page, name: string, title: string, part: strin
       col: getComputedStyle(document.querySelector(".main")).maxWidth,
     };
   })()`);
-  const to = ({ github: "GitHub", agent: "Agent", automations: "Your automations" } as Record<string, string>)[part] ?? part;
+  const to =
+    ({ github: "GitHub", agent: "Local Agent Integration", automations: "Automation Rules" } as Record<string, string>)[part] ?? part;
   if (seen.back !== to) failures.push(`${name}: the page head's way back reads ${JSON.stringify(seen.back)}, not ${to}`);
   if (seen.href !== `#/settings/${part}`) failures.push(`${name}: the way back goes to ${seen.href}, not #/settings/${part}`);
   if (seen.h1 !== title) failures.push(`${name}: the view's name reads ${JSON.stringify(seen.h1)}`);
@@ -584,7 +586,7 @@ const headSays = (page: Page) =>
   );
 // In Settings: the page head's words, then the sidebar's items, "|" for its hairline and the one it marks current in brackets:
 // "Agent: Inbox Inbox and notifications [Agent] Your automations This device | GitHub"; null outside Settings.
-const SETTINGS_SIDE = ["Inbox and notifications", "Agent", "Your automations", "Urgency", "Appearance", "This device"];
+const SETTINGS_SIDE = SETTINGS_PARTS.filter((p) => !p.plugin).map((p) => p.name);
 const settingsSays = (page: Page) =>
   page.evaluate<string | null>(`(() => {
     const nav = document.querySelector('.side-nav[aria-label="Settings"]');
@@ -1343,7 +1345,7 @@ const SHOTS: Shot[] = [
   },
   {
     // Claude logged out: one bubble at the window's edge instead of a line on the page or a note on every card, its words and
-    // the way to Settings → Agent; on that page, none, as the page says it.
+    // the way to Settings → Local Agent Integration; on that page, none, as the page says it.
     name: "queue-ai-paused",
     writes: true,
     go: async (page) => {
@@ -1356,7 +1358,7 @@ const SHOTS: Shot[] = [
         b[0]!.title !== "Claude is paused" ||
         !b[0]!.text?.includes("Run claude auth login") ||
         b[0]!.tone !== "red" ||
-        b[0]!.fix !== "Open Settings → Agent" ||
+        b[0]!.fix !== "Open Settings → Local Agent Integration" ||
         !b[0]!.placed
       )
         failures.push(`queue-ai-paused: the bubbles read ${JSON.stringify(b)}`);
@@ -1365,11 +1367,12 @@ const SHOTS: Shot[] = [
         failures.push(`queue-ai-paused: the queue starts with ${JSON.stringify(first)}, not its first section`);
     },
     after: async (page) => {
-      await page.locator(".bubble-fix", { hasText: "Open Settings → Agent" }).click();
+      await page.locator(".bubble-fix", { hasText: "Open Settings → Local Agent Integration" }).click();
       await page.waitForTimeout(400);
       const hash = await page.evaluate<string>("location.hash");
-      if (hash !== "#/settings/agent") failures.push(`queue-ai-paused: Open Settings → Agent went to ${hash}`);
-      if (await page.locator(".bubble").count()) failures.push("queue-ai-paused: Settings → Agent says it and still has the bubble");
+      if (hash !== "#/settings/agent") failures.push(`queue-ai-paused: Open Settings → Local Agent Integration went to ${hash}`);
+      if (await page.locator(".bubble").count())
+        failures.push("queue-ai-paused: Settings → Local Agent Integration says it and still has the bubble");
       await at("#/")(page);
       await pauseAi(false)(page);
     },
@@ -3806,7 +3809,8 @@ const SHOTS: Shot[] = [
       if (!filled) failures.push("settings-agent: no filled Connect Claude Code");
       // The part is the agent's: its name is the first row's choice, Codex listed beside it; its status follows.
       const head = await settingsSays(page);
-      if (head !== onPart("Agent")) failures.push(`settings-agent: the head and the sidebar read ${JSON.stringify(head)}`);
+      if (head !== onPart("Local Agent Integration"))
+        failures.push(`settings-agent: the head and the sidebar read ${JSON.stringify(head)}`);
       const first = await page.evaluate<{ label: string; options: [string, boolean][]; status: boolean } | null>(`(() => {
         const row = document.querySelector("#s-agent .setting");
         const sel = row?.querySelector("select");
@@ -3866,13 +3870,13 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // More Agent settings, opened: the decision model's key is a password field whose help says what leaves this computer;
+    // More Local Agent Integration settings, opened: the decision model's key is a password field whose help says what leaves this computer;
     // saved, it shows dots and the desk never sends the key back, and Reset to default clears it. Shot with one saved.
     name: "settings-agent-more",
     go: async (page) => {
       const KEY = "sk-or-v1-shots-0000000000000000000000000000000000000000000000000000";
       await at("#/settings/agent")(page);
-      await page.getByRole("button", { name: "More Agent settings" }).click();
+      await page.getByRole("button", { name: "More Local Agent Integration settings" }).click();
       const key = page.locator('[id="setting-agent.decision_key"]');
       const row = page.locator('[id="row-agent.decision_key"]');
       const seen = await page.evaluate<{ type: string; value: string; hint: string | null; help: string }>(`(() => {
@@ -3890,7 +3894,7 @@ const SHOTS: Shot[] = [
       if (model !== "typesafe/jev-1.14") failures.push(`settings-agent-more: the model reads ${JSON.stringify(model)}`);
       // The judge's hourly cap is tuning: folded here, now that Your policy is gone.
       if (!(await page.locator('[id="row-policy.max_per_hour"]').isVisible()))
-        failures.push("settings-agent-more: no Let Claude sort up to in More Agent settings");
+        failures.push("settings-agent-more: no Let Claude sort up to in More Local Agent Integration settings");
       if (await page.locator(".s-view-row").filter({ hasText: "Your policy" }).count())
         failures.push("settings-agent-more: a Your policy row is still drawn");
       await key.fill(KEY);
@@ -3914,7 +3918,7 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
       const cleared = await deskHas(page, "agent.decision_key");
       if (cleared !== "") failures.push(`settings-agent-more: Reset to default leaves ${JSON.stringify(cleared)}`);
-      await page.getByRole("button", { name: "More Agent settings" }).click();
+      await page.getByRole("button", { name: "More Local Agent Integration settings" }).click();
     },
   },
   {
@@ -3983,13 +3987,13 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Settings → Urgency: your criteria (the agent's, on), then GitHub's under their heading, each with its switch; who last
+    // Settings → Automation Rules → Urgency: your criteria (the agent's, on), then GitHub's under their heading, each with its switch; who last
     // scored the Inbox, quietly under the sheets.
     name: "settings-criteria",
     go: async (page) => {
       await at("#/settings/criteria")(page);
       const says = await settingsSays(page);
-      if (says !== onPart("Urgency")) failures.push(`settings-criteria: the head and the sidebar read ${JSON.stringify(says)}`);
+      if (says !== onPart("Automation Rules")) failures.push(`settings-criteria: the head and the sidebar read ${JSON.stringify(says)}`);
       const rows = await page.locator("#s-criteria .cr-row").count();
       if (rows !== 7) failures.push(`settings-criteria: ${rows} rows, not the mock's one and GitHub's six`);
       if ((await page.locator("#s-criteria .switch:checked").count()) !== rows) failures.push("settings-criteria: a criterion is off");
@@ -4009,7 +4013,7 @@ const SHOTS: Shot[] = [
   },
   {
     // Settings' Automations tab, on its own: a row each, its name, when it runs and its last run, Run now and its switch on the
-    // sheet's right edge in line with the settings tab's; the agent's draft has a tinted Review instead and no switch; one
+    // sheet's right edge in line with the settings tab's; one an agent wrote and left off is a row like yours; one
     // that runs on events says what it reacts to, and each says what its last run did by verb; New automation last.
     name: "settings-automations",
     go: async (page) => {
@@ -4018,7 +4022,7 @@ const SHOTS: Shot[] = [
       const setting = await page.evaluate<number>(`document.querySelector('[id="setting-notify.enabled"]').getBoundingClientRect().right`);
       await at("#/settings/automations")(page);
       const says = await settingsSays(page);
-      if (says !== onPart("Your automations")) failures.push(`settings-automations: the head and the sidebar read ${JSON.stringify(says)}`);
+      if (says !== onPart("Automation Rules")) failures.push(`settings-automations: the head and the sidebar read ${JSON.stringify(says)}`);
       if (await page.locator("#s-github").isVisible()) failures.push("settings-automations: another part shows on Your automations");
       const [mine, draft, rule, ask, ...more] = await automationRows(page);
       if (
@@ -4031,14 +4035,8 @@ const SHOTS: Shot[] = [
         mine.review
       )
         failures.push(`settings-automations: the first row reads ${JSON.stringify(mine)}`);
-      if (
-        !draft ||
-        draft.help !== "An agent wrote it; read it before it runs · Mon and Thu at 17:30" ||
-        draft.run ||
-        draft.on !== null ||
-        draft.review !== "#/settings/automations/sdk-releases"
-      )
-        failures.push(`settings-automations: the agent's draft reads ${JSON.stringify(draft)}`);
+      if (!draft || !draft.help.startsWith("Mon and Thu at 17:30 · off") || draft.run || draft.on !== false || draft.review)
+        failures.push(`settings-automations: the agent's off one reads ${JSON.stringify(draft)}`);
       if (!rule || !/^When CI changes · ran \d+h ago, snoozed 1$/.test(rule.help) || !rule.run || rule.on !== true)
         failures.push(`settings-automations: the rule's row reads ${JSON.stringify(rule)}`);
       if (
@@ -4050,15 +4048,6 @@ const SHOTS: Shot[] = [
       )
         failures.push(`settings-automations: the question's row reads ${JSON.stringify(ask)}`);
       if (more.length) failures.push(`settings-automations: ${more.length} more rows than the mock's four`);
-      const [tinted, wash] = await page.evaluate<string[]>(`(() => {
-        const d = document.createElement("div");
-        d.style.background = "var(--accent-wash)";
-        document.body.append(d);
-        const fills = [document.querySelector("#s-automations .s-cta"), d].map((e) => getComputedStyle(e).backgroundColor);
-        d.remove();
-        return fills;
-      })()`);
-      if (tinted !== wash) failures.push(`settings-automations: Review's fill is ${tinted}, not the accent's wash ${wash}`);
       const edge = await page.evaluate<number>(`document.querySelector("#s-automations .switch").getBoundingClientRect().right`);
       if (Math.abs(edge - setting) > 0.5)
         failures.push(`settings-automations: an automation's switch ends at ${edge}px, a setting's at ${setting}px`);
@@ -4122,35 +4111,6 @@ const SHOTS: Shot[] = [
       if (await cancel.count()) await cancel.click();
       await unsettle(page);
     },
-  },
-  {
-    // The agent's draft, opened by its Review: its instruction quoted, then a filled Turn on and Edit, with no Run now.
-    name: "settings-automations-draft",
-    go: async (page) => {
-      const name = "SDK release blockers";
-      await at("#/settings/automations")(page);
-      await page.locator("#s-automations .s-cta").click();
-      await page.waitForTimeout(300);
-      const hash = await page.evaluate<string>("location.hash");
-      if (hash !== "#/settings/automations/sdk-releases") failures.push(`settings-automations-draft: Review opens ${hash}`);
-      await settingsView(page, "settings-automations-draft", name, "automations", "760px");
-      const seen = await page.evaluate<{ line: string; prompt: string; filled: string[]; buttons: string[] }>(`(() => {
-        const v = [...document.querySelectorAll(".s-view")].find((s) => !s.hidden);
-        return {
-          line: v.querySelector(".s-view-line").textContent,
-          prompt: v.querySelector(".au-prompt")?.textContent ?? "",
-          filled: [...v.querySelectorAll(".act.primary")].map((b) => b.textContent),
-          buttons: [...v.querySelectorAll(".au-view .actions button")].map((b) => b.textContent),
-        };
-      })()`);
-      if (seen.line !== "Mon and Thu at 17:30 · an agent wrote it: read it before you turn it on.")
-        failures.push(`settings-automations-draft: the view's line reads ${JSON.stringify(seen.line)}`);
-      if (!seen.prompt.startsWith("Check the open release-blocker issues"))
-        failures.push(`settings-automations-draft: the instruction reads ${JSON.stringify(seen.prompt)}`);
-      if (seen.filled.join() !== "Turn on" || seen.buttons.join() !== "Turn on,Edit,Change with your agent")
-        failures.push(`settings-automations-draft: its buttons are ${JSON.stringify(seen)}`);
-    },
-    after: at("#/"),
   },
   {
     // An automation's view, from its name: its instruction, what each run found and what came of each item, each run's
@@ -4449,22 +4409,13 @@ const SHOTS: Shot[] = [
       const links = await page.evaluate<string[]>(
         `[...document.querySelectorAll('.side-nav[aria-label="Settings"] a')].map((a) => a.getAttribute("href"))`,
       );
-      const want = [
-        "#/",
-        "#/settings/queue",
-        "#/settings/agent",
-        "#/settings/automations",
-        "#/settings/criteria",
-        "#/settings/app",
-        "#/settings/github",
-        "#/settings/sessions",
-      ];
+      const want = ["#/", ...SETTINGS_PARTS.map((p) => `#/settings/${p.id}`)];
       if (links.join() !== want.join()) failures.push(`settings-nav: the sidebar links to ${JSON.stringify(links)}`);
       if (await page.locator(".page-head .head-tabs").count()) failures.push("settings-nav: the page head still has tabs");
       for (const [name, id] of [
-        ["Agent", "agent"],
+        ["Local Agent Integration", "agent"],
         ["GitHub", "github"],
-        ["Your automations", "automations"],
+        ["Automation Rules", "automations"],
       ] as const) {
         await side(name).click();
         await page.waitForTimeout(300);
@@ -4474,10 +4425,10 @@ const SHOTS: Shot[] = [
       // A new one half written, then another part and back.
       await page.locator("#s-automations").getByRole("button", { name: "New automation" }).click();
       await page.locator("#s-automations .au-editor input").first().fill("Half written");
-      await side("Agent").click();
+      await side("Local Agent Integration").click();
       await page.waitForTimeout(300);
       if (await page.locator("#s-automations").isVisible()) failures.push("settings-nav: Your automations shows on Agent");
-      await side("Your automations").click();
+      await side("Automation Rules").click();
       await page.waitForTimeout(300);
       const kept = await page
         .locator("#s-automations .au-editor input")
@@ -4491,13 +4442,13 @@ const SHOTS: Shot[] = [
       const name = "Warden and dotagents issues";
       await page.locator("#s-automations .s-name", { hasText: name }).click();
       await page.waitForTimeout(300);
-      if ((await sideOn(page)) !== "Your automations") failures.push(`settings-nav: in a view, the sidebar marks ${await sideOn(page)}`);
+      if ((await sideOn(page)) !== "Automation Rules") failures.push(`settings-nav: in a view, the sidebar marks ${await sideOn(page)}`);
       await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).click();
       await page.locator(".s-view .au-editor input").first().fill("Warden, edited");
       await page.locator(".side-foot .side-item", { hasText: "Settings" }).click();
       await page.waitForTimeout(400);
       if ((await hash()) !== "#/settings") failures.push(`settings-nav: the footer's Settings goes to ${await hash()}`);
-      await side("Your automations").click();
+      await side("Automation Rules").click();
       await page.locator("#s-automations .s-name", { hasText: name }).click();
       await page.waitForTimeout(300);
       const edited = await page
@@ -4626,14 +4577,14 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Use it from your other devices, on: where it serves and for whom under it, then each paired device with Revoke, which
+    // Settings → Tailscale, Use it from your other devices on: where it serves and for whom under it, then each paired device with Revoke, which
     // takes it off at once; off, the address goes and the devices stay listed.
     name: "settings-app-remote",
     sizes: ["mac"],
     writes: true,
     go: async (page) => {
       await page.evaluate(`fetch("/api/mock/devices", { method: "POST" })`); // used 40 minutes ago as of now
-      await at("#/settings/app")(page);
+      await at("#/settings/tailscale")(page);
       const row = page.locator('[id="row-app.tailscale"]');
       if (!(await row.isVisible())) failures.push("settings-app-remote: no Use it from your other devices row");
       await row.locator("input.switch").check();

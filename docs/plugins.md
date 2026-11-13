@@ -39,7 +39,7 @@ The owner's direction: a small core, with every source (GitHub first) as a plugi
 
 - Urgency (`src/urgency.ts`): the Inbox's Urgent, Standard and FYI sections, criteria and scores. "Now" and "Today" below are the internal buckets those sections are drawn from.
 - Claude's work ledger (`src/jobs.ts`).
-- The chosen agent: the judge, automations, AI reviews and the coordinator run Claude Code, Codex or OpenCode (`askAgent()`, Settings → Agent).
+- The chosen agent: the judge, automations, AI reviews and the coordinator run Claude Code, Codex or OpenCode (`askAgent()`, Settings → Local Agent Integration).
 
 ## 1. The core, and what it isn't
 
@@ -276,7 +276,7 @@ builtin = "review"  # the source's rule set
 queries = ["is:open is:pr review-requested:{me}"]
 ```
 
-**Settings.** `SETTINGS` stays one static array, so `desk.settings["github.bots"]` still typechecks. GitHub's entries (`github.*`, `review.*`, `handoff.*`, keys unchanged) move to GitHub's own file and are spread in. In Settings, the sidebar lists the core's parts (Inbox and notifications, Agent, Your automations, Urgency, This device), then one part per plugin (`SETTINGS_PARTS`). GitHub's part holds its account, its entries, Searches and rules, and its automations; `more` folds its tuning behind More GitHub settings. Its section shows `status()` beside its entries.
+**Settings.** `SETTINGS` stays one static array, so `desk.settings["github.bots"]` still typechecks. GitHub's entries (`github.*`, `review.*`, `handoff.*`, keys unchanged) move to GitHub's own file and are spread in. In Settings, the sidebar lists the core's parts (Inbox and notifications, Local Agent Integration, Automation Rules, Appearance, This device, Tailscale), then one part per plugin (`SETTINGS_PARTS`). GitHub's part holds its account, its entries, Searches and rules, and its automations; `more` folds its tuning behind More GitHub settings. Its section shows `status()` beside its entries.
 
 **Built-in automations** (built). A plugin ships automations so a fresh install works with no config (GitHub's: `src/connectors/github-automations.ts`).
 
@@ -359,7 +359,7 @@ docs/api.md → Automations is the reference. A run on Claude Code is `claude -p
 - **Allow:** the core's (Read, Grep, Glob, WebSearch, WebFetch, the desk's read tools) + every plugin's `agent.allow` (GitHub: its `gh` read commands) + the automation's `tools` (F1).
 - **Deny:** your agent's list (`src/coordinator.ts`) + the core's (Write, Edit, NotebookEdit, the desk's mutating tools) + every plugin's `agent.deny` (GitHub: `git push`, `git commit`, the `gh` writes). Deny always wins.
 
-Your agent's own run keeps its list alone, because it pushes with `--force-with-lease` and merges; that list stays in coordinator.ts beside `ROLE` and `REBASE`. Each find goes to `push(ref, why, a)` through `hold`, so any plugin's `ref` can claim it. An agent's draft or edit stays off until you turn it on; only the window deletes one. With F1, `tools` is how a run reaches a system with no plugin: the data source is an MCP server, the rules are the prompt, the output is items on the desk.
+Your agent's own run keeps its list alone, because it pushes with `--force-with-lease` and merges; that list stays in coordinator.ts beside `ROLE` and `REBASE`. Each find goes to `push(ref, why, a)` through `hold`, so any plugin's `ref` can claim it. An agent's automation is on once saved, as yours is; only the window deletes one. With F1, `tools` is how a run reaches a system with no plugin: the data source is an MCP server, the rules are the prompt, the output is items on the desk.
 
 ### Your agent (the coordinator) and Merging (core)
 
@@ -497,7 +497,7 @@ Each has a recommended answer and today's behaviour as the conservative one, wit
 
 **Offered, not assumed.**
 
-- **F1. Tools on automations.** Recommended: yes, last. An automation gets `tools?: string[]`: tools allowed beyond the desk's and plugins'. An agent's edit already leaves it off until you turn it on, and deny still wins. _Conservative:_ not built.
+- **F1. Tools on automations.** Recommended: yes, last. An automation gets `tools?: string[]`: tools allowed beyond the desk's and plugins'. Deny still wins. _Conservative:_ not built.
 - **F2. An automation as a source's prefilter.** Recommended: yes, last, as one rule key: `{ when = "…", bucket = "judge", judge = "<automation>" }`. The run gets the items, fenced, with its prompt and tools, and answers `{ bucket, why }` per item. Answers are kept like the judge's, keyed by `Lens.judge` and the automation's `updated_at`. Floors and `final` bind them; they never answer Blocked. _Conservative:_ not built; the judge weighing the rules does it.
 
 **Settled.** Ids carry their source in the prefix. Blocking fields stay `pr.blocked*`, so config.toml is never rewritten. AI takes things off your desk only by sorting them into FYI. Plugins are code in this repo, listed in `startServer`. One judge. The desk's own moves stay code over `needs`. Merging takes only what a plugin calls `yours`: your own PRs today.

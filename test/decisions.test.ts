@@ -66,10 +66,10 @@ test("401, 402, 429, a 5xx and no answer are the model being down, in the owner'
   c.after(api.close);
   const ask = () => failure(decide("x", { bot: YES_NO }, { key: KEY, model: "typesafe/jev-1.14", url: api.url }));
   for (const [status, words] of [
-    [401, "OpenRouter refused the decision model's key (401). Check it in Settings → Agent."],
+    [401, "OpenRouter refused the decision model's key (401). Check it in Settings → Local Agent Integration."],
     [
       402,
-      "OpenRouter says the decision model's key is out of credits (402). Add credits, or clear the key in Settings → Agent and Claude answers instead.",
+      "OpenRouter says the decision model's key is out of credits (402). Add credits, or clear the key in Settings → Local Agent Integration and Claude answers instead.",
     ],
     [429, "OpenRouter is rate limiting the decision model (429)."],
   ] as const) {

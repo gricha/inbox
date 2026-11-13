@@ -203,7 +203,7 @@ Each job has a state (queued, running, done, failed), tries, timestamps, and the
 
 ## Agents
 
-Every model call is the owner's own agent CLI: `claude`, `codex` or `opencode`, picked in Settings → Agent (`agent.harness`). No `--model`, no API key. The one exception is the optional decision model (OpenRouter), used only when you set its key ([api.md → The decision model](api.md#the-decision-model-openrouter)).
+Every model call is the owner's own agent CLI: `claude`, `codex` or `opencode`, picked in Settings → Local Agent Integration (`agent.harness`). No `--model`, no API key. The one exception is the optional decision model (OpenRouter), used only when you set its key ([api.md → The decision model](api.md#the-decision-model-openrouter)).
 
 ### Tool-less calls
 
@@ -217,7 +217,7 @@ Prompts, the AI review's checks and the reviewer read: [api.md → Your own agen
 
 ### Connecting an agent
 
-`src/agents.ts` checks whether your agent has the desk's MCP server and the Inbox skill (`skills/inbox/`), and connects them (`desk connect`, Settings → Agent). One driver per agent registers the MCP server at user scope and copies the skill. See [api.md → Connect an agent](api.md#connect-an-agent).
+`src/agents.ts` checks whether your agent has the desk's MCP server and the Inbox skill (`skills/inbox/`), and connects them (`desk connect`, Settings → Local Agent Integration). One driver per agent registers the MCP server at user scope and copies the skill. See [api.md → Connect an agent](api.md#connect-an-agent).
 
 ### The coordinator (`src/coordinator.ts`)
 

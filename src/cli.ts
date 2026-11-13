@@ -56,9 +56,9 @@ const USAGE = `usage: desk <command>
   mcp [--url <address>]               MCP server on stdio (the desk also serves MCP over HTTP at /mcp); --url or DESK_URL,
                                       with DESK_TOKEN, for a desk on another machine
   setup [claude|codex|opencode]       the first-run page: GitHub and each agent, what to run; naming one sets it as your
-                                      agent and connects it (Settings → Agent)
+                                      agent and connects it (Settings → Local Agent Integration)
   connect [claude|codex|opencode] [--apply]
-                                      connect your agent (Settings → Agent) to the desk: MCP tools and skill; --apply does it
+                                      connect your agent (Settings → Local Agent Integration) to the desk: MCP tools and skill; --apply does it
   connect <address> --code <code> [claude|codex|opencode]
                                       on another machine: pair with the desk at its tailnet address, connect your agent to it
   pair [--print] [--name <name>]      pair another device over Tailscale: a one-time code and what to run there;

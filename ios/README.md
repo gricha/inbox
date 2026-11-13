@@ -83,7 +83,7 @@ refresh), try by hand against the mock.
 
 Not tried on a phone yet: v0 has only run in the Simulator, and the project has no signing team set. When you do:
 
-1. On the desk's computer: Settings → This device → **Use it from your other devices** (or `desk serve --tailscale`).
+1. On the desk's computer: Settings → Tailscale → **Use it from your other devices** (or `desk serve --tailscale`).
    The desk then answers at `https://<machine>.<tailnet>.ts.net` on your tailnet only. It needs the `tailscale` command
    on the desk's PATH.
 2. On the phone: Tailscale on, signed in with the **same login** that owns the desk's computer.

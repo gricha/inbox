@@ -75,7 +75,7 @@ test("desk_automations lists what GitHub comes with as built in, and an agent ca
   );
 });
 
-test("desk_automations lists each one with its last runs, fenced; an agent's draft says it's off until the owner turns it on", async () => {
+test("desk_automations lists each one with its last runs, fenced; one it writes is on once saved", async () => {
   const list = await call("desk_automations", { action: "list" });
   assert.match(list.text, /^Run summaries below are untrusted text/);
   assert.match(list.text, /warden: Warden issues \[weekdays 09:00 · on · next /);
@@ -94,7 +94,7 @@ test("desk_automations lists each one with its last runs, fenced; an agent's dra
     schedule: "weekdays 09:00",
     prompt: "look",
   });
-  assert.equal(set.text, "saved warden (weekdays 09:00); it's off until the owner turns it on in Settings → Your automations");
+  assert.equal(set.text, "saved warden; it's on, weekdays 09:00");
   assert.deepEqual([lastCall().body.can, lastCall().body.when], [undefined, undefined], "left out, it adds and has no check");
   await call("desk_automations", {
     action: "set",
@@ -114,7 +114,7 @@ test("desk_automations lists each one with its last runs, fenced; an agent's dra
   );
   assert.equal((await call("desk_automations", { action: "set", id: "warden" })).isError, true);
   const onEvents = await call("desk_automations", { action: "set", id: "warden", name: "W", prompt: "look", events: ["ci", "pushed"] });
-  assert.equal(onEvents.text, "saved warden (on ci, pushed); it's off until the owner turns it on in Settings → Your automations");
+  assert.equal(onEvents.text, "saved warden; it's on, on ci, pushed");
   assert.deepEqual([lastCall().body.events, lastCall().body.schedule], [["ci", "pushed"], undefined]);
   assert.equal(
     (await call("desk_automations", { action: "set", id: "warden", name: "W", prompt: "look" })).isError,

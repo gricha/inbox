@@ -1,4 +1,4 @@
-// With OpenCode chosen (Settings → Agent): the tool-less calls, an automation's agent run and your agent run on the
+// With OpenCode chosen (Settings → Local Agent Integration): the tool-less calls, an automation's agent run and your agent run on the
 // owner's opencode, fenced by the config the desk passes it, as Codex's are by flags.
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";

@@ -1,7 +1,8 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { Overview } from "../../../src/types.ts";
 import { cls, MOD } from "../format.ts";
-import { pageOf, routeHash, SETTINGS_PARTS, settingsPart, type ListPage, type Route } from "../view.ts";
+import { SETTINGS_PARTS } from "../settings-parts.ts";
+import { pageOf, routeHash, settingsPart, type ListPage, type Route } from "../view.ts";
 import { Mark } from "./Mark.tsx";
 
 // The window's only global chrome. The pages, in the owner's order: Inbox, Blocked, then Merging and the Archive under

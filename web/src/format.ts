@@ -54,7 +54,7 @@ export function when(at: string): string {
   return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 
-// Who sorts and reviews (Settings → Agent), as Overview.ai_agent names it: set on every load, read while drawing.
+// Who sorts and reviews (Settings → Local Agent Integration), as Overview.ai_agent names it: set on every load, read while drawing.
 let sorter: AgentName = "Claude";
 export const aiName = () => sorter;
 export function setAiName(name: AgentName): void {

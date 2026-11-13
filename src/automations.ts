@@ -1,7 +1,7 @@
 // Automations: your instructions, run on their schedule or when something happens on an item. The desk asks each one's check
 // first; then a rule acts with no model, a question is one model call without tools (Claude's, or with a key in Settings a
 // decision model's through OpenRouter), and an agent is your own Claude Code, read only. What comes of it, the desk acts on, by the verbs you allow it (add, when you allow nothing else: on your desk
-// with its why). Agents may draft one; only you turn it on, in the desk.
+// with its why). An agent may write or change one, and it's on unless it says off, as yours is.
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { Effect, Result, type Fiber } from "effect";
@@ -387,7 +387,7 @@ export class Automations {
     });
   }
 
-  // Yours from the desk's window; an agent's draft or edit is off until you turn it on there.
+  // Yours from the desk's window, or an agent's: on unless it says off, as it was before an edit.
   set(
     id: string,
     b: {
@@ -454,7 +454,7 @@ export class Automations {
       };
       // Its name goes into the run's prompt as yours too, so an agent's rename is a change; so is what it may do.
       const changed = !was || does(was) !== does(next);
-      const on = byYou ? (b.on ?? was?.on ?? true) : was?.on === true && !changed;
+      const on = b.on ?? was?.on ?? true;
       const a: Automation = {
         id,
         ...next,
@@ -1024,7 +1024,7 @@ export class Automations {
     if (!a) return Effect.succeed(refused("it was deleted during its run"));
     if (started.on && !a.on) return Effect.succeed(refused("it was turned off during its run"));
     if (!verb) return Effect.succeed(refused(`"${String(x.do)}" isn't something the desk does: ${VERBS.join(", ")}`));
-    if (!canOf(a).includes(verb)) return Effect.succeed(refused(`it may not ${VERB[verb]}: allow that in Settings → Your automations`));
+    if (!canOf(a).includes(verb)) return Effect.succeed(refused(`it may not ${VERB[verb]}: allow that in Settings → Automation Rules`));
     const desk = this.desk;
     const failed = (e: { message: string }) => Effect.succeed({ ...failedItem(x, e.message), ...(verb !== "add" && { do: verb }) });
     if (verb === "add") return desk.push(x.ref, x.why, a).pipe(Effect.catch(failed));
@@ -1062,7 +1062,7 @@ export class Automations {
   }
 }
 
-// What an automation does, as an agent's edit is compared: a change to any of it is off until you've read it.
+// What an automation does, as an edit is compared: a change to any of it is a new instruction, by whoever changed it.
 const does = (a: Pick<Automation, "name" | "schedule" | "events" | "prompt" | "when" | "decide" | "rule" | "can">) =>
   JSON.stringify([a.name, a.schedule, a.events ?? [], a.prompt, a.when ?? "", a.decide ?? "agent", a.rule ?? null, canOf(a)]);
 

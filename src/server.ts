@@ -743,8 +743,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, open, { log });
   });
-  // Automations (src/automations.ts): any local client may list, draft and run them; one an agent drafts or changes stays off
-  // until you turn it on in the desk's window, and it runs before that only on your Run now there; only you delete one. A
+  // Automations (src/automations.ts): any local client may list, write and run them, on as soon as saved; only you delete one. A
   // plugin's is listed too, and only switched, only from the window.
   app.get("/api/automations", (c) => total(c, () => desk.automations.view()));
   app.put("/api/automations/:id", (c) => {
@@ -787,7 +786,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   });
   app.delete("/api/automations/:id", (c) => {
     const remove = Effect.gen(function* () {
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "delete it in the desk's window: Settings → Your automations" });
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "delete it in the desk's window: Settings → Automation Rules" });
       yield* desk.automations.remove(c.req.param("id"));
       return { ok: true };
     });
@@ -799,7 +798,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       const a = yield* desk.automations.get(c.req.param("id"));
       if (!a.on && !fromDesk(c))
         return yield* new Conflict({
-          message: `"${a.name}" is off: the owner turns it on in Settings → ${a.plugin ? (desk.connectors.find((x) => x.id === a.plugin)?.name ?? a.plugin) : "Your automations"}`,
+          message: `"${a.name}" is off: the owner turns it on in Settings → ${a.plugin ? (desk.connectors.find((x) => x.id === a.plugin)?.name ?? a.plugin) : "Automation Rules"}`,
         });
       desk.automations.run(a, "now");
       return { ok: true, running: a.id };
@@ -834,7 +833,8 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.put("/api/criteria/:id/on", (c) => {
     const turn = Effect.gen(function* () {
       yield* up;
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "only the owner switches it, in the desk's window: Settings → Urgency" });
+      if (!fromDesk(c))
+        return yield* new Forbidden({ message: "only the owner switches it, in the desk's window: Settings → Automation Rules → Urgency" });
       const { on } = yield* bodyOf(c);
       if (typeof on !== "boolean") return yield* new BadRequest({ message: "need { on: true or false }" });
       return { ok: true, criterion: yield* desk.urgency.switch(c.req.param("id"), on) };
@@ -901,7 +901,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       // A key (a secret setting) is set or cleared in the desk's window only, as approve is: no agent, CLI or curl reaches it.
       const keys = [...(b.set && typeof b.set === "object" ? Object.keys(b.set) : []), ...(Array.isArray(b.reset) ? b.reset : [])];
       if (keys.some((k) => typeof k === "string" && isSecret(k)) && !fromDesk(c))
-        return yield* new Forbidden({ message: "set or clear a key in the desk's window: Settings → Agent" });
+        return yield* new Forbidden({ message: "set or clear a key in the desk's window: Settings → Local Agent Integration" });
       return yield* desk.putSettings({ set: b.set, reset: b.reset });
     });
     return respond(c, put, { log });
@@ -980,7 +980,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   const served = Effect.suspend(() =>
     remote.url
       ? Effect.succeed(remote.url)
-      : Effect.fail(new Conflict({ message: "turn on Settings → This device → Use it from your other devices first" })),
+      : Effect.fail(new Conflict({ message: "turn on Settings → Tailscale → Use it from your other devices first" })),
   );
   app.get("/api/remote", (c) =>
     total(

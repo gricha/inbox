@@ -8,7 +8,7 @@ import { Prose } from "./Prose.tsx";
 
 const kept = new Map<string, string>(); // what you'd typed to it, per item, in this window
 let seen: AsksView | null = null; // the last asks fetched, so a reopen draws at once
-const OFF = "Your agent is off in Settings → Agent, so nothing is sent.";
+const OFF = "Your agent is off in Settings → Local Agent Integration, so nothing is sent.";
 
 export interface Thread {
   kind: "thread";

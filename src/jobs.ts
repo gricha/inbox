@@ -170,7 +170,7 @@ export class Jobs {
       if (j.state !== "done") this.done(j.kind, j.key);
     } else if (j.state === "running" || j.state === "queued") {
       if (desk.coordinator.on) this.again(j, a, now);
-      else this.fail(j.kind, j.key, "your agent is off: Settings → Agent");
+      else this.fail(j.kind, j.key, "your agent is off: Settings → Local Agent Integration");
     }
   }
 

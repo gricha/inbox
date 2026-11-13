@@ -42,7 +42,7 @@ test("the agent paused: its own words and the way to Settings → Agent, except 
   assert.equal(n?.title, "Claude is paused");
   assert.equal(n?.text, LOGGED_OUT);
   assert.equal(n?.tone, "red");
-  assert.deepEqual(n?.fix, { label: "Open Settings → Agent", href: "#/settings/agent" });
+  assert.deepEqual(n?.fix, { label: "Open Settings → Local Agent Integration", href: "#/settings/agent" });
   assert.equal(noticesOf({ ...fine, paused: { who: "ai", why: "out of usage" } })[0]?.title, "AI reviews are paused");
   assert.deepEqual(ids({ paused: { who: "claude", why: LOGGED_OUT }, page: "#/settings/agent" }), []);
 });

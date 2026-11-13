@@ -30,9 +30,10 @@ const ACCELERATOR =
 export const SECTIONS: SettingsSection[] = [
   { id: "github", title: "GitHub" },
   { id: "sessions", title: "Sessions" },
-  { id: "agent", title: "Agent" },
+  { id: "agent", title: "Local Agent Integration" },
   { id: "queue", title: "Inbox and notifications" },
   { id: "app", title: "This device" },
+  { id: "tailscale", title: "Tailscale" },
 ];
 
 export const SETTINGS = [
@@ -336,7 +337,7 @@ export const SETTINGS = [
   },
   {
     key: "app.tailscale",
-    section: "app",
+    section: "tailscale",
     label: "Use it from your other devices",
     type: "boolean",
     default: false,
@@ -344,11 +345,10 @@ export const SETTINGS = [
   },
   {
     key: "app.tailscale_login",
-    section: "app",
+    section: "tailscale",
     label: "Tailscale login allowed in",
     type: "string",
     default: "",
-    more: true,
     help: "Empty: the login that owns this machine in Tailscale.",
   },
 ] as const satisfies readonly SettingDef[];

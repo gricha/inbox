@@ -588,7 +588,7 @@ export const askClaude = Effect.fn("askClaude")(function* (
   return yield* claudeEnvelope(out);
 });
 
-// The tool-less call on the agent you chose (Settings → Agent): the judge, the AI review and its check, the conversation
+// The tool-less call on the agent you chose (Settings → Local Agent Integration): the judge, the AI review and its check, the conversation
 // read and automations' questions all go through here, so they follow the setting from their next call.
 export const askAgent = (prompt: string, opts: { command?: string } & AskOpts): Effect.Effect<ClaudeAnswer, CommandError | ClaudeError> =>
   opts.agent === "codex" ? askCodex(prompt, opts) : opts.agent === "opencode" ? askOpencode(prompt, opts) : askClaude(prompt, opts);
@@ -642,7 +642,7 @@ export const tomlKey = (name: string) => (/^[A-Za-z0-9_-]+$/.test(name) ? name :
 
 const SERVERS_TTL = 5 * 60_000;
 let servers: { command: string; at: number; listed: Listed[] } | null = null;
-// Another agent chosen (Settings → Agent): the next Codex call lists its servers afresh.
+// Another agent chosen (Settings → Local Agent Integration): the next Codex call lists its servers afresh.
 export function forgetCodexServers(): void {
   servers = null;
 }

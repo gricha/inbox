@@ -101,7 +101,7 @@ export function noticesOf(c: Conditions): Notice[] {
       tone: "red",
       title: c.paused.who === "claude" ? `${c.agent} is paused` : "AI reviews are paused",
       text: c.paused.why,
-      fix: { label: "Open Settings → Agent", href: AGENT },
+      fix: { label: "Open Settings → Local Agent Integration", href: AGENT },
     });
 
   // The last sync failed or hit GitHub's rate limit. Rate limited has no fix: the desk skips every sync until the limit

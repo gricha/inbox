@@ -6,7 +6,7 @@ import { cls } from "../format.ts";
 import { Mark } from "./Mark.tsx";
 
 // The first-run page, in the window's place until GitHub is connected and you've picked your agent. The desk decides what
-// it says (GET /api/setup); Retry asks it again, and Use connects that agent as Settings → Agent's Connect does.
+// it says (GET /api/setup); Retry asks it again, and Use connects that agent as Settings → Local Agent Integration's Connect does.
 export function Setup({ view, onChange }: { view: SetupView; onChange: (v: SetupView) => void }) {
   const [busy, setBusy] = useState<string | null>(null); // "check", or the agent being connected
   const [error, setError] = useState<{ at: string; text: string } | null>(null);
