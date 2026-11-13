@@ -231,7 +231,10 @@ final class Store {
   // Pull to refresh: asks the desk to sync now, then reads what it has. The sync's own result arrives as an update.
   func refresh() async {
     guard let client else { return }
-    try? await client.sync()
+    // A sync nothing answered already says the desk is away: no second wait for the read to say it again.
+    do { try await client.sync() } catch let e as APIError {
+      if e == .unreachable || e == .notDesk { return took(e) }
+    } catch {}
     await load()
   }
 

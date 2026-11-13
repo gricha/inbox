@@ -366,6 +366,27 @@ final class StoreTests: XCTestCase {
     XCTAssertEqual(store.inboxCount, 29)
   }
 
+  // Pull to refresh on a desk that's away: the sync's silence is the answer, and nothing more is asked.
+  func testRefreshStopsAtASyncNothingAnswers() async throws {
+    StubProtocol.reset(["/api/pair": pair])
+    let store = Store(defaults: defaults, session: StubProtocol.session())
+    _ = await store.connect(typed: address, code: "ABCD-2345")
+    store.stopLive()
+    let ok = { (name: String) in StubProtocol.Answer(body: String(decoding: try Fixture.data(name), as: UTF8.self)) }
+    StubProtocol.reset(["/api/sync": .init(error: .timedOut), "/api/overview": try ok("overview"), "/api/queue": try ok("queue")])
+    await store.refresh()
+    XCTAssertTrue(store.offline)
+    XCTAssertEqual(StubProtocol.requests().map { $0.url?.path }, ["/api/sync"])
+
+    // A sync the desk refuses doesn't stop the read.
+    StubProtocol.reset([
+      "/api/sync": .init(status: 500, body: #"{"error":"boom","tag":"Internal"}"#), "/api/overview": try ok("overview"), "/api/queue": try ok("queue"),
+    ])
+    await store.refresh()
+    XCTAssertFalse(store.offline)
+    XCTAssertEqual(store.inboxCount, 29)
+  }
+
   func testDisconnectForgetsTheTokenAndTheAddress() async {
     StubProtocol.reset(["/api/pair": pair])
     let store = Store(defaults: defaults, session: StubProtocol.session())
