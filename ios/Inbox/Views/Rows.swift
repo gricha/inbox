@@ -121,6 +121,8 @@ struct RowLines: View {
         }
         Text(age).sans(13, tabular: true).foregroundStyle(Theme.pencil).fixedSize().padding(.leading, cta == nil ? 10 : 8)
       }
+      // One line with parts that never shrink: past the largest standard size they'd push the facts off the row. The title keeps growing.
+      .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
       if let under, !under.isEmpty {
         Text(under).sans(13).foregroundStyle(Theme.pencil).lineLimit(2).lineSpacing(1.5)
           .frame(maxWidth: .infinity, alignment: .leading)
