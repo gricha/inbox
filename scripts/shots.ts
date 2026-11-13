@@ -244,10 +244,6 @@ const toBottom = (name: string) => async (page: Page) => {
   if (room !== null && room > BOTTOM_ROOM)
     failures.push(`${name}: ${room}px of empty page below the last content when scrolled to the bottom`);
 };
-// The review's sidebar back to its default for the window's width: what Hide or Files chose is kept per device.
-const sideDefault = async (page: Page) => {
-  await page.evaluate(`localStorage.removeItem("desk.review.side")`);
-};
 // Your chat closed: with words in its box, the first Esc only leaves the box.
 const closeChat = async (page: Page) => {
   for (let i = 0; i < 2 && (await page.locator(".chat").count()); i++) await page.keyboard.press("Escape");
@@ -1623,7 +1619,7 @@ const SHOTS: Shot[] = [
         return;
       }
       await besideOpen(page, "beside-review", "acme/api#4127");
-      if (b?.sideInline) failures.push("beside-review: the review's sidebar squeezes in beside the diff next to the list");
+      if (!b?.sideInline) failures.push("beside-review: the review's sidebar isn't open beside the diff next to the list");
       // The Inbox beside it keeps the page's sections, Urgent first, a question's row leading it.
       const heads = await page.locator(".beside .group-head").count();
       const first = await page.locator(".beside .line .c-meta").first().textContent();
@@ -2308,7 +2304,6 @@ const SHOTS: Shot[] = [
       if (!rows.includes("dana")) failures.push(`review-add-reviewers: a pick isn't asked: the reviewers read ${rows.join(" | ")}`);
     },
     after: async (page) => {
-      await sideDefault(page);
       await fresh(page);
     },
   },
@@ -2358,7 +2353,7 @@ const SHOTS: Shot[] = [
       if (await files.isVisible()) await files.click();
       await page.waitForTimeout(200);
     },
-    after: sideDefault,
+    after: fresh,
   },
   // In a stack: its place after the ref, and the chain in the sidebar, this PR marked.
   { name: "review-stack", go: review("acme/api#4154") },
@@ -2409,7 +2404,7 @@ const SHOTS: Shot[] = [
       if (nested.rows.slice(1, 3).join(" | ") !== "red (chromium) ↗ | yellow (firefox) ↗")
         failures.push(`review-checks: e2e opened reads ${JSON.stringify(nested.rows)}`);
     },
-    after: sideDefault,
+    after: fresh,
   },
   // Guided or not, a hunk's band opens a few more lines of the file around it, read from GitHub at the PR's head.
   {
@@ -2426,6 +2421,9 @@ const SHOTS: Shot[] = [
         failures.push("review-more-lines: the hunk's band has no button for more lines");
         return;
       }
+      // The pointer on its way there draws the file whole, as a hand reaching for the band would.
+      await button.hover();
+      await page.waitForTimeout(400);
       await button.click();
       await page.waitForTimeout(800);
       const after = await rows();
@@ -2548,7 +2546,6 @@ const SHOTS: Shot[] = [
     },
     after: async (page) => {
       await page.evaluate(`localStorage.setItem("desk.review.view", "traditional")`);
-      await sideDefault(page);
     },
     // xl has room for the sidebar beside the list, where the steps replace the files.
     sizes: ["wide", "mid", "min", "mac", "xl"],
@@ -2578,7 +2575,7 @@ const SHOTS: Shot[] = [
     // Hide or Files: folded where it was open (wide), open over the diff where it starts folded (narrow).
     name: "review-side-toggled",
     go: review("acme/api#4154", [".rv-side-toggle"]),
-    after: sideDefault,
+    after: fresh,
   },
   {
     // A click from the queue on a PR with no AI review yet: it's being written.
@@ -2696,10 +2693,13 @@ const SHOTS: Shot[] = [
         await page.waitForTimeout(300);
       }
       // A PR in a stack with a conflict: every part, in order, a line each.
+      // Open as it opens, beside the diff; folded only where it would lie over it.
       await review("acme/api#4154")(page);
-      if ((await says()).label !== "Show the stack, checks and files")
-        failures.push(`review-panel: in a stack, the toggle reads ${JSON.stringify((await says()).label)}`);
-      await toggle.click();
+      const wide = await page.evaluate<boolean>(`document.querySelector(".col").getBoundingClientRect().width >= 700`);
+      const opened = await says();
+      if (opened.label !== `${wide ? "Hide" : "Show"} the stack, checks and files`)
+        failures.push(`review-panel: in a stack, ${wide ? "with room" : "without room"} the toggle reads ${JSON.stringify(opened.label)}`);
+      if (!wide) await toggle.click();
       await side.waitFor();
       const parts = await page.evaluate<{
         names: string[];
@@ -2737,7 +2737,6 @@ const SHOTS: Shot[] = [
     },
     after: async (page) => {
       await unroute(page);
-      await sideDefault(page);
       await fresh(page);
     },
   },
@@ -3321,7 +3320,7 @@ const SHOTS: Shot[] = [
       await page.locator(".chat").waitFor({ state: "detached" });
       await page.locator(".rv-side").waitFor();
     },
-    after: sideDefault,
+    after: fresh,
   },
   {
     // Your agent off: no Ask your agent anywhere.
@@ -4987,13 +4986,17 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
-    // Picked, a pill: only dana's rows, and × takes it off.
+    // Picked with the keyboard, a pill: Enter takes Author, then the first person it offers; only dana's rows.
     name: "filter-pill",
     go: async (page) => {
       await at("#/")(page);
       await page.locator(".page-head .search input").click();
+      await page.keyboard.press("Enter");
+      const typed = await page.locator(".page-head .search input").inputValue();
+      if (typed !== "author:") failures.push(`filter-pill: Enter on Author leaves ${JSON.stringify(typed)}`);
       await page.keyboard.type("da");
-      await page.locator(".search-pop .pop-item", { hasText: "Author" }).first().click();
+      await page.locator(".search-pop .pop-item").first().waitFor();
+      await page.keyboard.press("Enter");
       const pill = await page.locator(".page-head .search-pill").textContent();
       if (pill !== "Authordana×") failures.push(`filter-pill: the pill reads ${JSON.stringify(pill)}`);
       const by = await page.locator(".queue .line:not(.inq) .line-by").allTextContents();

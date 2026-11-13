@@ -117,9 +117,8 @@ const SIDE_ROWS = 6; // a sidebar part longer than this folds its quiet rows
 const LINE = 96; // px below the window's top where "the section you're in" is read off
 const REST = "Not worth reviewing"; // the fold's line
 const STACK_SHOWN = 4; // the PR below this one, this one and two above; the rest of a long stack is a click away
-const ROOM = 1000; // px of the page's column (styles.css's @container pane): narrower, the sidebar opens over the diff, folded
+const ROOM = 700; // px of the page's column (styles.css's @container pane): narrower, the sidebar opens over the diff, folded
 const ROW = 19; // px: .rv-diff's --diffs-line-height
-const SIDE = "desk.review.side"; // this device's choice: the review's sidebar open or folded, where it has room
 const VIEW = "desk.review.view"; // this device's choice: the guided review or traditional, when a review has steps
 const pane = () => document.querySelector(".col");
 // The fractional width, as the container query reads it, so the two agree at the edge.
@@ -209,9 +208,9 @@ export function Review({
   const [restOpen, setRestOpen] = useState(false);
   const [walking, setWalking] = useState(() => !["traditional", "importance"].includes(getStored(VIEW) ?? ""));
   const [testsOpen, setTestsOpen] = useState<ReadonlySet<string>>(new Set()); // test files you opened in the guided review
-  const [side, setSide] = useState(() => getStored(SIDE) !== "folded");
+  const [side, setSide] = useState(true); // every review opens with it; a fold lasts for this review
   const [room, setRoom] = useState(roomy); // the page's column has room for the sidebar beside the diff
-  const [over, setOver] = useState(false); // without room, Files opened it over the diff (not kept)
+  const [over, setOver] = useState(false); // without room, Files opened it over the diff
   const showSide = (room ? side : over) && !chat;
   const [busy, setBusy] = useState<"ai" | null>(null);
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
@@ -579,7 +578,6 @@ export function Review({
       return;
     }
     setSide(show);
-    setStored(SIDE, show ? "open" : "folded");
   }
 
   function askAi() {
@@ -994,6 +992,7 @@ export function Review({
                 aria-pressed={w === walking}
                 onClick={() => {
                   setWalking(w);
+                  setDrawn(0); // the other view's sections draw a screenful first too, not all at once
                   setStored(VIEW, w ? "guided" : "traditional");
                 }}
               >
@@ -1311,13 +1310,10 @@ function Head({
             {card.stack.pos}/{card.stack.size}
           </span>
         )}
-        <span className="rv-by rv-author">
-          by
-          {isMine ? me && <Avatar login={me} /> : !card.author_bot && <Avatar login={card.author} />}
-          <span>
-            {isMine ? "you" : card.author}
-            {card.author_bot ? (isMine ? `, through ${card.author}` : " (bot)") : ""}
-          </span>
+        <span className="rv-by">
+          by {isMine ? me && <Avatar login={me} /> : !card.author_bot && <Avatar login={card.author} />}
+          {isMine ? "you" : card.author}
+          {card.author_bot ? (isMine ? `, through ${card.author}` : " (bot)") : ""}
         </span>
       </p>
       <h1 className="rv-title">{card.title}</h1>
@@ -2113,8 +2109,10 @@ function SectionView({
         : null,
     [x, file, cacheKey],
   );
-  // Drawn, its file is read whole ahead, so a band's first click opens lines; until then (or if GitHub won't), the patch's.
+  // Drawn, its file is read whole ahead; it's drawn whole (highlighting the whole file) only once the pointer comes near, so a
+  // band's first click opens lines without a big PR paying for every file it shows. Until then, or if GitHub won't, the patch's.
   const [whole, setWhole] = useState<FileDiffLoadedFiles | null>(null);
+  const [near, setNear] = useState(false);
   useEffect(() => {
     const stop = new AbortController();
     if (!shut && partial?.isPartial)
@@ -2134,11 +2132,11 @@ function SectionView({
     };
   }, [shut, partial, file, wholeFile]);
   const fileDiff = useMemo(() => {
-    const files = partial?.isPartial && whole ? sectionCut(whole, file, x) : null;
+    const files = partial?.isPartial && whole && near ? sectionCut(whole, file, x) : null;
     return partial && files
       ? Effect.runSync(Effect.try(() => hydratePartialDiff("clone", partial, files)).pipe(Effect.orElseSucceed(() => partial)))
       : partial;
-  }, [partial, whole, file, x]);
+  }, [partial, whole, near, file, x]);
   const mine = useMemo(
     () =>
       x.notes.flatMap((n) => {
@@ -2229,7 +2227,14 @@ function SectionView({
   const adds = x.hunks.reduce((n, h) => n + h.additions, 0);
   const dels = x.hunks.reduce((n, h) => n + h.deletions, 0);
   return (
-    <section className={cls("rv-file-sec", shut && "shut")} id={`rv-s-${index}`} aria-label={x.path}>
+    <section
+      className={cls("rv-file-sec", shut && "shut")}
+      id={`rv-s-${index}`}
+      aria-label={x.path}
+      onPointerEnter={() => {
+        setNear(true);
+      }}
+    >
       <h3 className="rv-fhead">
         <button
           type="button"

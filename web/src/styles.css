@@ -1654,18 +1654,22 @@ p {
   color: var(--ink-2);
 }
 
-/* A person's picture before their name, sized to its words (16px at a row's 13px), so a row stays one line. */
+/* A person's picture before their name, sized to its words (16px at a row's 13px), so a row stays one line. Whatever its size,
+   its middle sits 0.3em over the baseline, between the name's x-height and cap height; the space before it and its margin
+   after are one gap each side. */
 .avatar {
-  width: 1.25em;
-  height: 1.25em;
-  margin-right: 0.3em;
+  --face: 1.25em;
+
+  width: var(--face);
+  height: var(--face);
+  margin: 0 0.3em 0 0.1em; /* with a word's space before it, as much room each side */
   border-radius: 50%;
-  vertical-align: -0.3em;
+  vertical-align: calc(0.3em - var(--face) / 2);
 }
 
-.rv-by .avatar {
-  width: 1.4em;
-  height: 1.4em;
+.rv-by .avatar,
+.rv-revs .avatar {
+  --face: 1.4em;
 }
 
 /* A question has no stage: who asks takes that column's room too; with no weight, so a tight table still narrows it. */
@@ -4760,6 +4764,18 @@ fieldset.au-field > legend {
 
 /* Beside the diff where the page's column has room for it (Review.tsx's ROOM), whatever narrows it: the window, the list
    beside the review, the chat. */
+@container pane (width >= 700px) {
+  .review.side-open {
+    grid-template-columns: minmax(0, 1fr) 240px;
+  }
+}
+
+@container pane (width >= 880px) {
+  .review.side-open {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+}
+
 @container pane (width >= 1000px) {
   .review.side-open {
     grid-template-columns: minmax(0, 1fr) 280px;
@@ -4814,7 +4830,7 @@ fieldset.au-field > legend {
 }
 
 /* Narrower, it opens over the diff's right edge rather than squeezing it. */
-@container pane (width < 1000px) {
+@container pane (width < 700px) {
   .rv-side {
     position: fixed;
     top: 52px;
@@ -5317,17 +5333,6 @@ a.rv-part-row:hover {
   color: var(--pencil);
 }
 
-/* "by", the face, the name: one even gap each, the face centred on the words. */
-.rv-author {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35em;
-}
-
-.rv-author .avatar {
-  margin: 0;
-}
-
 /* Under the title: its size, + green and − red, then who reviews it. */
 .rv-size-line {
   display: flex;
@@ -5358,11 +5363,6 @@ a.rv-part-row:hover {
   flex-wrap: wrap;
   gap: 2px 12px;
   min-width: 0;
-}
-
-.rv-revs .avatar {
-  width: 1.4em;
-  height: 1.4em;
 }
 
 .rv-rev {
