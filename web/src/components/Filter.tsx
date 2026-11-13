@@ -79,7 +79,7 @@ export function Filter({
     } else if (shown && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       e.preventDefault();
       setHi((h) => (h + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length);
-    } else if (e.key === "Enter" && shown && word) {
+    } else if (e.key === "Enter" && shown) {
       e.preventDefault();
       pick(list[Math.min(hi, list.length - 1)] as Pick);
     } else if (e.key === "Enter" || e.key === "ArrowDown") e.currentTarget.blur();
