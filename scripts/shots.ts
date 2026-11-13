@@ -5070,6 +5070,38 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
+    // FYI shows its first five rows and Show N more; a click shows the rest. The mock's FYI has six, one short of a fold,
+    // so three more ride in on the queue.
+    name: "fyi-more",
+    go: async (page) => {
+      await at("#/")(page);
+      await queueAs((q) => {
+        for (const c of q.inbox.fyi.slice(0, 3))
+          q.inbox.fyi.push(Object.assign(structuredClone(c), { id: `${c.id}0`, number: c.number * 10 }));
+      })(page);
+      const total = Number(await page.locator(".g-fyi .group-head .count").textContent());
+      const rows = () => page.locator(".g-fyi .line[data-id]").count();
+      const more = page.locator(".g-fyi .group-more button");
+      if ((await rows()) !== 5 || (await more.textContent({ timeout: 5000 }).catch(() => null)) !== `Show ${total - 5} more`)
+        failures.push(
+          `fyi-more: FYI shows ${await rows()} rows of ${total}, its button reads ${await more.textContent({ timeout: 1 }).catch(() => null)}`,
+        );
+      else {
+        await page.waitForTimeout(200);
+        await more.click();
+        if ((await rows()) !== total || (await more.count())) failures.push(`fyi-more: after Show more, ${await rows()} rows of ${total}`);
+        // The picture: folded again in a fresh page, scrolled to the button.
+        await page.reload();
+        await page.locator(READY).first().waitFor({ timeout: 15_000 });
+        await more.scrollIntoViewIfNeeded();
+      }
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  {
     // Move to Urgent from a Standard row's menu: it's in Urgent at once; an Urgent row's menu offers only Move to Standard.
     name: "row-menu-move",
     go: async (page) => {

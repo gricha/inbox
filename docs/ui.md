@@ -108,7 +108,7 @@ The main page: what the desk put on your desk, in three sections. `src/urgency.t
 
 Each section is a heading with its count; a click opens or closes it. Within a section: higher score first, then the desk's order (`group` on each card): hand-backs, other people's PRs waiting on your review, issues and the rest, then your own PRs.
 
-Every row shows: all of Urgent, then all of Standard, then all of FYI, nothing behind a "more". Scrolling, the section you're in keeps its heading pinned under the page's head until the next one's pushes it off.
+Every row of Urgent and Standard shows, then FYI's first 5: the rest wait behind **Show N more** (one click shows all, until you leave the page). A filter, or a selected row further down, shows all of FYI. Scrolling, the section you're in keeps its heading pinned under the page's head until the next one's pushes it off.
 
 **Notes to yourself.** **New note** on a list page's head, or ⌘N anywhere, opens a box at the window's bottom: your words and **Remind me** (No reminder, In 1 hour, In 3 hours, Tomorrow 9:00, Monday 9:00, or Pick a time…, a date and time). ⌘↵ saves, Esc closes. A note without a reminder leads Standard; one with a reminder waits under **Reminders** at the top of the Archive, then at its time notifies once (even in quiet hours; not when notifications are off) and leads Urgent. Its row: Note, its words, **Done**, and its time ("at Tue 9:00") where a PR's author goes. A click on it opens the box to change it. The filter matches a note's words.
 

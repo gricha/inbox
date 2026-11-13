@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type { Card, Inquiry, Note, Overview, QueueView, SessionCard } from "../../../src/types.ts";
 import { cls, aiName } from "../format.ts";
 import { PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
@@ -6,6 +7,8 @@ import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { NoteRow, type NoteCtx } from "./Note.tsx";
 import { SessionRow, type SessionCtx } from "./Session.tsx";
 import { SkRows } from "./Skeleton.tsx";
+
+const FYI_SHOWN = 5; // FYI's first rows; the rest wait behind Show more until you leave the page
 
 // The main page: what's on your Inbox, in its sections, each in the desk's order: Urgent (agents' questions and the sessions
 // that need you first, since one waits on each), Standard and FYI. Each row says why it's there, quietly.
@@ -34,6 +37,7 @@ export function Queue({
   filter: string;
   toggle: (k: GroupKey) => void;
 }) {
+  const [allFyi, setAllFyi] = useState(false);
   if (!view) {
     const first = !!overview && !overview.synced_at;
     return (
@@ -75,36 +79,59 @@ export function Queue({
     <div className="queue">
       {first && <p className={cls("queue-first", any && "above")}>{first}</p>}
       {any ? (
-        parts.map(({ g, lead }) => (
-          <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
-            <h2 id={`h-${g.key}`} className="group-head">
-              <button
-                type="button"
-                className="group-toggle"
-                aria-expanded={g.open}
-                disabled={g.forced}
-                title={g.forced ? "Opened by the filter" : g.open ? "Close" : "Open"}
-                onClick={() => {
-                  toggle(g.key);
-                }}
-              >
-                <span>{g.label}</span>
-                <span className="count">{g.total + lead}</span>
-              </button>
-            </h2>
-            {g.open && (
-              <div className="lines">
-                {g.key === "urgent" && inquiries.map((q) => <InquiryRow key={q.id} q={q} ctx={inq} />)}
-                {g.key === "urgent" && ses && shown.map((s) => <SessionRow key={s.id} s={s} ctx={ses} />)}
-                {g.key === "urgent" && due.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
-                {g.key === "standard" && open.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
-                {g.cards.map((c) => (
-                  <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
-                ))}
-              </div>
-            )}
-          </section>
-        ))
+        parts.map(({ g, lead }) => {
+          // FYI shows its first rows, unless you're filtering, asked for all, or the selected row is further down.
+          const cut =
+            g.key === "fyi" &&
+            !allFyi &&
+            !filter.trim() &&
+            g.cards.length > FYI_SHOWN + 1 &&
+            !g.cards.slice(FYI_SHOWN).some((c) => c.id === ctx.selected);
+          const cards = cut ? g.cards.slice(0, FYI_SHOWN) : g.cards;
+          return (
+            <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
+              <h2 id={`h-${g.key}`} className="group-head">
+                <button
+                  type="button"
+                  className="group-toggle"
+                  aria-expanded={g.open}
+                  disabled={g.forced}
+                  title={g.forced ? "Opened by the filter" : g.open ? "Close" : "Open"}
+                  onClick={() => {
+                    toggle(g.key);
+                  }}
+                >
+                  <span>{g.label}</span>
+                  <span className="count">{g.total + lead}</span>
+                </button>
+              </h2>
+              {g.open && (
+                <div className="lines">
+                  {g.key === "urgent" && inquiries.map((q) => <InquiryRow key={q.id} q={q} ctx={inq} />)}
+                  {g.key === "urgent" && ses && shown.map((s) => <SessionRow key={s.id} s={s} ctx={ses} />)}
+                  {g.key === "urgent" && due.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
+                  {g.key === "standard" && open.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
+                  {cards.map((c) => (
+                    <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
+                  ))}
+                </div>
+              )}
+              {g.open && cut && (
+                <p className="group-more">
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => {
+                      setAllFyi(true);
+                    }}
+                  >
+                    Show {g.cards.length - FYI_SHOWN} more
+                  </button>
+                </p>
+              )}
+            </section>
+          );
+        })
       ) : first ? null : (
         <p className="queue-empty">{filter.trim() ? "No matches." : "Nothing needs you right now."}</p>
       )}

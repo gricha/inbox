@@ -1818,6 +1818,11 @@ p {
 }
 
 /* PRs held back until Claude has reviewed them: said once, under the queue, quietly. */
+.group-more {
+  margin: 0;
+  padding: 10px var(--pad) 0;
+}
+
 .queue-reviewing {
   margin: 0;
   padding: 14px var(--pad) 0;
