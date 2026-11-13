@@ -52,15 +52,17 @@ export function Filter({
   const pills = parseFilter(filter).terms.filter((t) => t.done);
   const rest = filterRest(filter);
   const word = /\S*$/.exec(rest)?.[0] ?? "";
-  // A typed word that's a name opens the list; an empty box only once there's nothing else to filter by.
-  const list = open && (word || !rest.trim()) ? suggest(word, people) : [];
+  // A typed word that's a name opens the list; an empty box only once there's nothing else to filter by. A person picked
+  // closes it until you ask again: typing, ↓, or a click in the box.
+  const offered = word || !rest.trim() ? suggest(word, people) : [];
+  const list = open ? offered : [];
   const shown = list.length > 0;
 
   function pick(p: Pick) {
     const before = rest.slice(0, rest.length - word.length);
     setFilter(p.login ? filterOf([...pills, { key: p.key, who: p.login }], before) : filterOf(pills, `${before}${p.key}:`));
     setHi(0);
-    setOpen(true);
+    setOpen(!p.login);
     input.current?.focus();
   }
   function drop(i: number) {
@@ -79,6 +81,10 @@ export function Filter({
     } else if (shown && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
       e.preventDefault();
       setHi((h) => (h + (e.key === "ArrowDown" ? 1 : list.length - 1)) % list.length);
+    } else if (e.key === "ArrowDown" && !open && offered.length) {
+      e.preventDefault();
+      setHi(0);
+      setOpen(true);
     } else if (e.key === "Enter" && shown) {
       e.preventDefault();
       pick(list[Math.min(hi, list.length - 1)] as Pick);
@@ -130,6 +136,9 @@ export function Filter({
             setOpen(true);
           }}
           onFocus={() => {
+            if (!filter.trim()) setOpen(true);
+          }}
+          onClick={() => {
             setOpen(true);
           }}
           onBlur={() => {

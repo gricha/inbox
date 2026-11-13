@@ -4997,6 +4997,7 @@ const SHOTS: Shot[] = [
       await page.keyboard.type("da");
       await page.locator(".search-pop .pop-item").first().waitFor();
       await page.keyboard.press("Enter");
+      if (await page.locator(".search-pop").count()) failures.push("filter-pill: the list stays open after a person is picked");
       const pill = await page.locator(".page-head .search-pill").textContent();
       if (pill !== "Authordana×") failures.push(`filter-pill: the pill reads ${JSON.stringify(pill)}`);
       const by = await page.locator(".queue .line:not(.inq) .line-by").allTextContents();
