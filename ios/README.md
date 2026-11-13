@@ -81,7 +81,7 @@ refresh), try by hand against the mock.
 
 ## On a real phone
 
-Not tried yet: v0 has only run in the Simulator, and the project has no signing team set. When you do:
+Not tried on a phone yet: v0 has only run in the Simulator, and the project has no signing team set. When you do:
 
 1. On the desk's computer: Settings → This device → **Use it from your other devices** (or `desk serve --tailscale`).
    The desk then answers at `https://<machine>.<tailnet>.ts.net` on your tailnet only. It needs the `tailscale` command
@@ -96,9 +96,10 @@ UserDefaults. Settings → Disconnect forgets the token on the phone. The device
 it there (Settings → This device): if you do, the phone's next request is refused and it goes back to the connect
 screen.
 
-Unverified until that first run: that `tailscale serve` passes the event stream through unbuffered (if not, the app
-falls back to reading again when the stream goes quiet for a minute), and the whole pairing path, which the mock
-doesn't have.
+Checked in the Simulator on the desk's own Mac, through a desk served at its tailnet address: pairing with the link,
+the token on every read, a refused write (403), a desk still starting (503, in its words) and the event stream, which
+`tailscale serve` passes through as it comes. The first request after serving is turned on can time out once, while
+Tailscale gets the address its certificate: Connect again with the same code, which an unanswered try doesn't burn.
 
 ## What the phone can't do, and why
 

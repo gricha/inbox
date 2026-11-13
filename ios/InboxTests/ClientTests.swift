@@ -84,7 +84,7 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(e, .unreachable)
     let why = PairFailure(e!, host: tailnet.host)
     XCTAssertEqual(why, .unreachable(host: "desk.tail1234.ts.net"))
-    XCTAssertEqual(why.words, "Can't reach desk.tail1234.ts.net. Check Tailscale is on on this phone, and that the desk's computer is awake.")
+    XCTAssertEqual(why.words, "Can't reach desk.tail1234.ts.net. Check this phone has Tailscale on, and that the desk's computer is awake.")
     for code in [URLError.Code.timedOut, .notConnectedToInternet, .cannotConnectToHost, .secureConnectionFailed] {
       StubProtocol.reset(["/api/pair": Answer(error: code)])
       let e = await failure { try await self.client(token: nil).pair(code: "ABCD2345", name: "x") }

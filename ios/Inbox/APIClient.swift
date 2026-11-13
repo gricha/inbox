@@ -45,7 +45,7 @@ enum PairFailure: Error, Equatable {
     case .wrongLogin(let m): Words.capitalized(m) + ". Sign this phone in to Tailscale as the desk's owner."
     case .notServed(let m):
       Words.capitalized(m) + ". Turn on Settings → This device → Use it from your other devices on the desk's computer."
-    case .unreachable(let host): "Can't reach \(host). Check Tailscale is on on this phone, and that the desk's computer is awake."
+    case .unreachable(let host): "Can't reach \(host). Check this phone has Tailscale on, and that the desk's computer is awake."
     }
   }
 }

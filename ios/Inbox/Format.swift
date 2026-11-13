@@ -232,7 +232,7 @@ enum Notices {
             text: "Start it with `desk serve` or open the desktop app.", fix: .retry, fixLabel: "Retry")
           : Notice(
             id: "desk", sig: "offline", tone: .red, title: "The desk can't be reached",
-            text: "Check Tailscale is on on this phone, and that the desk's computer is awake.", fix: .retry, fixLabel: "Retry")
+            text: "Check this phone has Tailscale on, and that the desk's computer is awake.", fix: .retry, fixLabel: "Retry")
       ]
     }
     if let starting = c.starting {
