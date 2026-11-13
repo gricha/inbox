@@ -21,6 +21,9 @@ enum Theme {
   static let onAccent = Color(light: 0xffffff, dark: 0x162b2d)
   static let accentInk = Color(light: 0x365d60, dark: 0xa3c5c7)
   static let accentWash = Color(light: 0xd5e8e7, dark: 0x243a3d)
+  // A swipe action's label is white whatever the appearance, so its fill stays dark in both: the tile's petrol, and a grey.
+  static let swipeAccent = Color(light: 0x365d60, dark: 0x365d60)
+  static let swipeQuiet = Color(light: 0x5c6573, dark: 0x424a57)
 
   static let pad: CGFloat = 16  // a row's side padding, as the two-line row's
 }

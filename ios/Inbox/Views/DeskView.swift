@@ -145,15 +145,15 @@ struct CardLine: View {
     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
       if card.inflight != true {
         if card.active {
-          Button("Done") { store.act(card.id, name: card.shortRef, "done") }.tint(Theme.accent)
+          Button("Done") { store.act(card.id, name: card.shortRef, "done") }.tint(Theme.swipeAccent)
         } else {
-          Button("Back on the desk") { store.act(card.id, name: card.shortRef, "restore") }.tint(Theme.accent)
+          Button("Back on the desk") { store.act(card.id, name: card.shortRef, "restore") }.tint(Theme.swipeAccent)
         }
       }
     }
     .swipeActions(edge: .leading, allowsFullSwipe: false) {
       if card.inflight != true {
-        Button("Snooze") { store.snoozing = card }.tint(Theme.pencil)
+        Button("Snooze") { store.snoozing = card }.tint(Theme.swipeQuiet)
       }
     }
     .contextMenu { CardMenu(card: card) }
@@ -328,7 +328,7 @@ struct SessionLine: View {
     .buttonStyle(RowPress())
     .deskRow()
     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-      Button("Done") { store.act(s.id, name: s.name ?? "", "done") }.tint(Theme.accent)
+      Button("Done") { store.act(s.id, name: s.name ?? "", "done") }.tint(Theme.swipeAccent)
     }
     .contextMenu {
       Button("Done") { store.act(s.id, name: s.name ?? "", "done") }
