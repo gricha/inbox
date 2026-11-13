@@ -148,6 +148,13 @@ final class FormatTests: XCTestCase {
     // While the desk is unreachable, what it said last is stale: only that it's down is said.
     XCTAssertEqual(Notices.of(Conditions(offline: true, paused: paused)).count, 1)
     XCTAssertEqual(Notices.of(Conditions(starting: "desk is starting; the first sync can take a minute")).map(\.title), ["The desk is starting"])
+
+    // A read the desk refused: its words, and alone, since what it said before is stale.
+    let refused = Notices.of(Conditions(refused: "forbidden host", paused: paused))
+    XCTAssertEqual(refused.map(\.title), ["Can't read the desk"])
+    XCTAssertEqual(refused[0].text, "Forbidden host.")
+    XCTAssertEqual(refused[0].tone, .red)
+    XCTAssertEqual(Notices.of(Conditions(offline: true, refused: "forbidden host")).map(\.title), ["The desk can't be reached"])
   }
 
   func testProseSplitsAtLinks() {

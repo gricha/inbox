@@ -296,13 +296,13 @@ extension View {
 }
 
 // Before the first answer: bars while it's on its way, the first-sync line on a desk that never synced, and nothing
-// at all once the desk turned out to be away (its bubble says so).
+// at all once the desk turned out to be away or refused the read (its bubble says so).
 struct Waiting: View {
   @Environment(Store.self) private var store
 
   var body: some View {
     ScrollView {
-      if store.offline || store.starting != nil || store.broken != nil {
+      if store.offline || store.starting != nil || store.broken != nil || store.refused != nil {
         Color.clear.frame(height: 1)
       } else if let o = store.overview, o.syncedAt == nil {
         QuietLine(text: "Getting your PRs from GitHub…")

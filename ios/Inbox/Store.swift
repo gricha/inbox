@@ -50,6 +50,7 @@ final class Store {
   private(set) var offline = false
   private(set) var starting: String?
   private(set) var broken: String?
+  private(set) var refused: String?  // the desk's words for a read it wouldn't give (another Tailscale login, a desk this app can't read)
   private(set) var leaving: Set<String> = []
   private(set) var toast: Toast?
   private(set) var failures: [Notice] = []
@@ -149,6 +150,7 @@ final class Store {
     offline = false
     starting = nil
     broken = nil
+    refused = nil
     leaving = []
     toast = nil
     failures = []
@@ -188,6 +190,7 @@ final class Store {
       offline = false
       starting = nil
       broken = nil
+      refused = nil
       loads += 1
     } catch let e as APIError {
       took(e)
@@ -200,18 +203,23 @@ final class Store {
     case .unreachable, .notDesk:
       offline = true
       starting = nil
+      refused = nil
     case .unpaired:
       disconnect(note: "This phone isn't paired with the desk any more: it was revoked on the desk's computer. Pair it again.")
     case .starting(let m):
       offline = false
       starting = m
+      refused = nil
     case .rules(let m):
       offline = false
       starting = nil
+      refused = nil
       broken = m
     case .refused(_, let m):
       offline = false
-      if action { fail(m) }
+      starting = nil
+      // An action's refusal fades; a read's stays until the desk answers one.
+      if action { fail(m) } else { refused = m }
     }
   }
 
@@ -344,7 +352,7 @@ final class Store {
     guard address != nil else { return [] }
     let all = Notices.of(
       Conditions(
-        offline: offline, local: address?.isLocal ?? false, starting: starting, broken: broken, overview: overview,
+        offline: offline, local: address?.isLocal ?? false, starting: starting, refused: refused, broken: broken, overview: overview,
         paused: queue?.paused, agent: agent), now: now)
     return all.filter { dismissed[$0.id] != $0.sig } + failures
   }

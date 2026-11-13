@@ -70,6 +70,11 @@ enum Words {
     s.prefix(1).uppercased() + s.dropFirst()
   }
 
+  // A sentence of the desk's own words: a capital first, and a full stop unless it ends itself.
+  static func sentence(_ s: String) -> String {
+    capitalized(s) + (s.last.map { ".?!".contains($0) } == true ? "" : ".")
+  }
+
   static func plural(_ n: Int, _ word: String) -> String {
     "\(n) \(word)\(n == 1 ? "" : "s")"
   }
@@ -194,6 +199,7 @@ struct Conditions {
   var offline = false
   var local = false  // the desk is on this machine (the Simulator on the desk's Mac): the window's own words hold
   var starting: String?
+  var refused: String?  // the desk answered a read with a refusal, or with what this app can't read
   var broken: String?
   var overview: Overview?
   var paused: QueueView.Paused?
@@ -216,6 +222,15 @@ enum Notices {
     }
     if let starting = c.starting {
       return [Notice(id: "desk", sig: "starting", title: "The desk is starting", text: starting, fix: .retry, fixLabel: "Retry")]
+    }
+    // As stale as when it's away: what it said last isn't what it would say now.
+    if let refused = c.refused {
+      let owner = refused.contains("desk's owner") ? " Sign this phone in to Tailscale as the desk's owner." : ""
+      return [
+        Notice(
+          id: "desk", sig: "refused:\(refused)", tone: .red, title: "Can't read the desk", text: Words.sentence(refused) + owner, fix: .retry,
+          fixLabel: "Retry")
+      ]
     }
     var out: [Notice] = []
     let errors = c.overview?.configErrors.count ?? 0

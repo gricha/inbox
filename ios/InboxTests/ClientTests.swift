@@ -321,6 +321,37 @@ final class StoreTests: XCTestCase {
     XCTAssertTrue(store.notices.isEmpty)
   }
 
+  // A read the desk refuses (this phone's Tailscale is signed in as someone else) says so, in its words, until one is answered.
+  func testARefusedReadSaysWhy() async throws {
+    StubProtocol.reset(["/api/pair": pair])
+    let store = Store(defaults: defaults, session: StubProtocol.session())
+    _ = await store.connect(typed: address, code: "ABCD-2345")
+    store.stopLive()
+    let no = StubProtocol.Answer(status: 403, body: #"{"error":"only the desk's owner may use it from another device","tag":"Forbidden"}"#)
+    StubProtocol.reset(["/api/overview": no, "/api/queue": no])
+    await store.load()
+    XCTAssertNil(store.queue)
+    XCTAssertNotNil(store.address, "a 403 isn't a revoke: the token stays")
+    XCTAssertEqual(store.refused, "only the desk's owner may use it from another device")
+    XCTAssertEqual(store.notices.map(\.title), ["Can't read the desk"])
+    XCTAssertEqual(store.notices[0].text, "Only the desk's owner may use it from another device. Sign this phone in to Tailscale as the desk's owner.")
+    XCTAssertEqual(store.notices[0].fixLabel, "Retry")
+    await store.load()
+    XCTAssertEqual(store.notices.count, 1, "the same refusal again is the same bubble")
+
+    // A desk newer than the app: its answer can't be read, and that's said too.
+    StubProtocol.reset(["/api/overview": .init(body: #"{"me":7}"#), "/api/queue": .init(body: "[]")])
+    await store.load()
+    XCTAssertEqual(store.notices.map(\.text), ["This app can't read the desk's answer: is the desk newer than the app?"])
+
+    let ok = { (name: String) in StubProtocol.Answer(body: String(decoding: try Fixture.data(name), as: UTF8.self)) }
+    StubProtocol.reset(["/api/overview": try ok("overview"), "/api/queue": try ok("queue")])
+    await store.load()
+    XCTAssertNil(store.refused)
+    XCTAssertTrue(store.notices.isEmpty)
+    XCTAssertEqual(store.inboxCount, 29)
+  }
+
   func testDisconnectForgetsTheTokenAndTheAddress() async {
     StubProtocol.reset(["/api/pair": pair])
     let store = Store(defaults: defaults, session: StubProtocol.session())
