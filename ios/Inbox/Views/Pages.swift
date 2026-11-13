@@ -79,7 +79,6 @@ struct InquiryPage: View {
       .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.rule, lineWidth: 1))
     }
     .buttonStyle(.plain)
-    .accessibilityLabel("What it's about")
   }
 
   private func context(_ q: Inquiry) -> some View {

@@ -156,7 +156,6 @@ struct ItemPage: View {
                 .overlay(alignment: .leading) { Theme.ruleStrong.frame(width: 2) }
             }
           }
-          .accessibilityLabel("Concerns")
         } else {
           Text("No concerns.").sans(13).foregroundStyle(Theme.pencil)
         }
