@@ -1,0 +1,88 @@
+{
+    "id": "q1c0ffee",
+    "at": "2026-11-13T06:58:37.843Z",
+    "from": "Inbox coordinator",
+    "question": "Compact tombstones in #12, or ship #12 and compact them in a follow-up?",
+    "context": "azulus asked on #12 why tombstones never go away: every sync ships the whole list, and on a long-lived notebook it only grows. They're right. Nothing in #12 or on main prunes it; `syncTombstones()` in src/sync/merge.ts:88 sends it whole on every pull.\n\nCompacting is safe once every device has synced past a tombstone. The server already keeps each device's last full sync (`devices.last_full_sync`), so merge() can drop the ones older than the oldest of those. It's about 40 lines and a test.\n\npriya wants #12 before Thursday's mobile freeze. #12 is green, and kai approved it before azulus's comment. I'd do it in #12: it's small, and shipping the growth to every phone first means a second migration later.",
+    "options": [
+        {
+            "answer": "Compact them in #12",
+            "next": "I add the pruning and a test that a week-old delete doesn't come back, push, and ask azulus and kai to look again. A day, likely before Thursday."
+        },
+        {
+            "answer": "Ship #12, compact in a follow-up",
+            "next": "I reply to azulus that a follow-up does it, and open that PR today. #12 can merge now; phones carry the growing list until the follow-up ships."
+        },
+        {
+            "answer": "Neither: it's fine for now",
+            "next": "I leave it, and tell azulus why. The list keeps growing with every delete."
+        }
+    ],
+    "links": [
+        {
+            "label": "azulus's comment on #12",
+            "url": "https://github.com/me/notes-app/pull/12#discussion_r1874401"
+        },
+        {
+            "label": "syncTombstones() in merge.ts",
+            "url": "https://github.com/me/notes-app/blob/sync-merge/src/sync/merge.ts#L88"
+        },
+        {
+            "label": "priya's question about the freeze",
+            "url": "https://github.com/me/notes-app/pull/12#issuecomment-2210"
+        }
+    ],
+    "item_id": "me/notes-app#12",
+    "answer": null,
+    "card": {
+        "id": "me/notes-app#12",
+        "kind": "pr",
+        "repo": "me/notes-app",
+        "number": 12,
+        "title": "Last-writer-wins sync with tombstones",
+        "url": "https://github.com/me/notes-app/pull/12",
+        "author": "me",
+        "author_bot": false,
+        "by": "you",
+        "people": [
+            "me",
+            "kai"
+        ],
+        "stage": "waiting for review",
+        "bucket": "now",
+        "why": "3 unresolved threads",
+        "board": "personal-mine",
+        "boards": [
+            "personal-mine"
+        ],
+        "chips": [
+            "3 unresolved",
+            "+420 \u221266"
+        ],
+        "ci": "green",
+        "review": "required",
+        "draft": false,
+        "created_at": "2026-11-09T13:22:37.843Z",
+        "updated_at": "2026-11-13T01:22:37.843Z",
+        "activity_at": "2026-11-13T01:22:37.843Z",
+        "waiting_since": "2026-11-09T13:22:37.843Z",
+        "new": true,
+        "pinned": false,
+        "status": "active",
+        "snooze_until": null,
+        "snooze_when": null,
+        "wake_on": [
+            "approved"
+        ],
+        "verdict": null,
+        "resolved": null,
+        "resolved_at": null,
+        "inflight": false,
+        "talk": true,
+        "actions": [
+            "close",
+            "draft"
+        ],
+        "placed_by": "claude"
+    }
+}

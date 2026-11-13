@@ -1,0 +1,786 @@
+{
+    "rows": [
+        {
+            "card": {
+                "id": "acme/api#4122",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4122,
+                "title": "Paginate the audit log export",
+                "url": "https://github.com/acme/api/pull/4122",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "dana"
+                ],
+                "stage": "changes requested",
+                "bucket": "fyi",
+                "why": "merging",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "changes requested",
+                    "3 unresolved",
+                    "+260 \u221240"
+                ],
+                "ci": "green",
+                "review": "changes_requested",
+                "draft": false,
+                "created_at": "2026-11-10T09:22:37.843Z",
+                "updated_at": "2026-11-13T02:22:37.843Z",
+                "activity_at": "2026-11-13T02:22:37.843Z",
+                "waiting_since": "2026-11-10T09:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": true
+            },
+            "state": "open",
+            "base": "main",
+            "stacked": false,
+            "review_optional": false,
+            "merge_method": "SQUASH",
+            "ci": "green",
+            "failing": [],
+            "approved_by": [],
+            "changes_by": [
+                "dana"
+            ],
+            "waiting_on": [],
+            "threads_unresolved": 3,
+            "mergeable": "clean",
+            "draft": false,
+            "rebase": false,
+            "theirs": false,
+            "blocked_by": null,
+            "requires_closed": [],
+            "waits_on": "waits on a second look from dana",
+            "note": {
+                "text": "Pushed 4be71c2 for dana's 3 comments: the cursor stays the row id, with a test pinning its format",
+                "at": "2026-11-13T06:58:37.843Z"
+            }
+        },
+        {
+            "card": {
+                "id": "acme/api#4152",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4152,
+                "title": "Planner: run the table scan as a stage",
+                "url": "https://github.com/acme/api/pull/4152",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "dana",
+                    "sam"
+                ],
+                "stage": "approved",
+                "bucket": "fyi",
+                "why": "merging",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+126 \u221222"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-09T07:22:37.843Z",
+                "updated_at": "2026-11-13T00:22:37.843Z",
+                "activity_at": "2026-11-13T00:22:37.843Z",
+                "waiting_since": "2026-11-09T07:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": true,
+                "stack": {
+                    "id": "acme/api#4150",
+                    "pos": 1,
+                    "size": 6
+                }
+            },
+            "state": "open",
+            "base": "main",
+            "stacked": false,
+            "review_optional": false,
+            "merge_method": "SQUASH",
+            "ci": "green",
+            "failing": [],
+            "approved_by": [
+                "dana",
+                "sam"
+            ],
+            "changes_by": [],
+            "waiting_on": [],
+            "threads_unresolved": 0,
+            "mergeable": "clean",
+            "draft": false,
+            "rebase": false,
+            "theirs": false,
+            "blocked_by": null,
+            "requires_closed": [],
+            "waits_on": "ready to merge",
+            "note": {
+                "text": "Approved and green: merging it once #4151's merge settles",
+                "at": "2026-11-13T07:10:37.843Z"
+            }
+        },
+        {
+            "card": {
+                "id": "acme/api#4153",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4153,
+                "title": "Planner: push filters down into the scan stage",
+                "url": "https://github.com/acme/api/pull/4153",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "fyi",
+                "why": "merging",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+149 \u221227"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-09T19:22:37.843Z",
+                "updated_at": "2026-11-13T00:52:37.843Z",
+                "activity_at": "2026-11-13T00:52:37.843Z",
+                "waiting_since": "2026-11-09T19:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": true,
+                "stack": {
+                    "id": "acme/api#4150",
+                    "pos": 2,
+                    "size": 6
+                }
+            },
+            "state": "open",
+            "base": "me/planner-3",
+            "stacked": true,
+            "review_optional": false,
+            "merge_method": "SQUASH",
+            "ci": "red",
+            "failing": [
+                "test (3.12)"
+            ],
+            "approved_by": [],
+            "changes_by": [],
+            "waiting_on": [],
+            "threads_unresolved": 0,
+            "mergeable": "unknown",
+            "draft": false,
+            "rebase": false,
+            "theirs": false,
+            "blocked_by": null,
+            "requires_closed": [],
+            "waits_on": "waits on a CI fix",
+            "note": {
+                "text": "Fixing test (3.12): running pytest tests/planner/test_filters.py",
+                "at": "2026-11-13T07:04:37.843Z"
+            }
+        },
+        {
+            "card": {
+                "id": "acme/web#2295",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2295,
+                "title": "Fix the flaky timezone test",
+                "url": "https://github.com/acme/web/pull/2295",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "fyi",
+                "why": "merging",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+8 \u22123"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T11:22:37.843Z",
+                "updated_at": "2026-11-12T11:22:37.843Z",
+                "activity_at": "2026-11-12T11:22:37.843Z",
+                "waiting_since": "2026-11-12T11:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": true
+            },
+            "state": "open",
+            "base": "main",
+            "stacked": false,
+            "review_optional": false,
+            "merge_method": "SQUASH",
+            "ci": "red",
+            "failing": [
+                "test (20.x)"
+            ],
+            "approved_by": [],
+            "changes_by": [],
+            "waiting_on": [
+                "marco"
+            ],
+            "threads_unresolved": 0,
+            "mergeable": "clean",
+            "draft": false,
+            "rebase": false,
+            "theirs": false,
+            "blocked_by": null,
+            "requires_closed": [],
+            "waits_on": "waits on a CI fix",
+            "note": {
+                "text": "Fixing test (20.x): it assumed UTC; running npm test -- timezone",
+                "at": "2026-11-13T07:18:37.843Z"
+            }
+        },
+        {
+            "card": {
+                "id": "acme/api#4110",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4110,
+                "title": "Rewrite the retention cleanup job",
+                "url": "https://github.com/acme/api/pull/4110",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "fyi",
+                "why": "merging",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "conflict",
+                    "+380 \u2212290"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-07T21:22:37.843Z",
+                "updated_at": "2026-11-12T01:22:37.843Z",
+                "activity_at": "2026-11-12T01:22:37.843Z",
+                "waiting_since": "2026-11-07T21:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": true
+            },
+            "state": "open",
+            "base": "main",
+            "stacked": false,
+            "review_optional": false,
+            "merge_method": "SQUASH",
+            "ci": "green",
+            "failing": [],
+            "approved_by": [],
+            "changes_by": [],
+            "waiting_on": [
+                "@backend"
+            ],
+            "threads_unresolved": 0,
+            "mergeable": "conflict",
+            "draft": false,
+            "rebase": false,
+            "theirs": false,
+            "blocked_by": null,
+            "requires_closed": [],
+            "waits_on": "waits on a merge conflict fix",
+            "note": {
+                "text": "Merging main in: its cleanup schedule conflicts with this one",
+                "at": "2026-11-13T06:10:37.843Z"
+            }
+        },
+        {
+            "card": {
+                "id": "acme/api#4105",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4105,
+                "title": "Speed up fixture loading in tests",
+                "url": "https://github.com/acme/api/pull/4105",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "fyi",
+                "why": "merging",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "+45 \u2212120"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T15:22:37.843Z",
+                "updated_at": "2026-11-12T01:22:37.843Z",
+                "activity_at": "2026-11-12T01:22:37.843Z",
+                "waiting_since": "2026-11-11T15:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": true
+            },
+            "state": "open",
+            "base": "main",
+            "stacked": false,
+            "review_optional": false,
+            "merge_method": "SQUASH",
+            "ci": "green",
+            "failing": [],
+            "approved_by": [],
+            "changes_by": [],
+            "waiting_on": [
+                "sam",
+                "@backend",
+                "@issue-detection-backend",
+                "@issues-feed",
+                "@security",
+                "@owners-auth"
+            ],
+            "threads_unresolved": 0,
+            "mergeable": "clean",
+            "draft": false,
+            "rebase": false,
+            "theirs": false,
+            "blocked_by": null,
+            "requires_closed": [],
+            "waits_on": "waits on a review from sam, @backend and 4 more",
+            "note": null
+        },
+        {
+            "card": {
+                "id": "acme/billing#2301",
+                "kind": "pr",
+                "repo": "acme/billing",
+                "number": 2301,
+                "title": "Alert when a service account's usage spikes",
+                "url": "https://github.com/acme/billing/pull/2301",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "shan"
+                ],
+                "stage": "blocked",
+                "bucket": "fyi",
+                "why": "merging",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+105 \u22127"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-11T21:22:37.843Z",
+                "updated_at": "2026-11-11T23:22:37.843Z",
+                "activity_at": "2026-11-11T23:22:37.843Z",
+                "waiting_since": "2026-11-11T21:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": true,
+                "blocker": {
+                    "id": "acme/api#1294",
+                    "ref": "api#1294",
+                    "waits": "waits on your reply to dana, then a review from sam, kai and 6 more"
+                },
+                "needs": [
+                    "api#1294"
+                ]
+            },
+            "state": "open",
+            "base": "main",
+            "stacked": false,
+            "review_optional": false,
+            "merge_method": "SQUASH",
+            "ci": "green",
+            "failing": [],
+            "approved_by": [
+                "shan"
+            ],
+            "changes_by": [],
+            "waiting_on": [],
+            "threads_unresolved": 0,
+            "mergeable": "clean",
+            "draft": false,
+            "rebase": false,
+            "theirs": false,
+            "blocked_by": {
+                "ref": "api#1294",
+                "waits": "waits on your reply to dana, then a review from sam, kai and 6 more"
+            },
+            "requires_closed": [],
+            "waits_on": "waits on api#1294 to merge first",
+            "note": {
+                "text": "Nothing to fix here: its CI needs service accounts on control silo, which api#1294 adds",
+                "at": "2026-11-13T05:22:37.843Z"
+            }
+        },
+        {
+            "card": {
+                "id": "acme/worker#871",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 871,
+                "title": "Log why a job was dead-lettered",
+                "url": "https://github.com/acme/worker/pull/871",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "kofi"
+                ],
+                "stage": "merged",
+                "bucket": "fyi",
+                "why": "merged",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+34 \u22126"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-10T19:22:37.843Z",
+                "updated_at": "2026-11-12T11:22:37.843Z",
+                "activity_at": "2026-11-12T11:22:37.843Z",
+                "waiting_since": "2026-11-10T19:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": "merged",
+                "resolved_at": "2026-11-12T11:22:37.843Z",
+                "inflight": false,
+                "placed_by": "claude"
+            },
+            "state": "merged",
+            "base": "main",
+            "stacked": false,
+            "review_optional": false,
+            "merge_method": "SQUASH",
+            "ci": "green",
+            "failing": [],
+            "approved_by": [
+                "kofi"
+            ],
+            "changes_by": [],
+            "waiting_on": [],
+            "threads_unresolved": 0,
+            "mergeable": "clean",
+            "draft": false,
+            "rebase": false,
+            "theirs": false,
+            "blocked_by": null,
+            "requires_closed": [],
+            "waits_on": null,
+            "note": {
+                "text": "Fixed CI in 1f3c9a0, then merged it",
+                "at": "2026-11-12T11:22:37.843Z"
+            }
+        }
+    ],
+    "stacks": {
+        "acme/api#4150": {
+            "id": "acme/api#4150",
+            "repo": "acme/api",
+            "base": "main",
+            "line": [
+                {
+                    "id": "acme/api#4150",
+                    "number": 4150,
+                    "title": "Planner: pull the cost model out of the executor",
+                    "url": "https://github.com/acme/api/pull/4150",
+                    "author": "me",
+                    "state": "merged",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": null,
+                    "current": false,
+                    "bucket": null,
+                    "why": "merged"
+                },
+                {
+                    "id": "acme/api#4151",
+                    "number": 4151,
+                    "title": "Planner: a Stage interface and the stage runner",
+                    "url": "https://github.com/acme/api/pull/4151",
+                    "author": "me",
+                    "state": "merged",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "acme/api#4150",
+                    "current": false,
+                    "bucket": null,
+                    "why": "merged"
+                },
+                {
+                    "id": "acme/api#4152",
+                    "number": 4152,
+                    "title": "Planner: run the table scan as a stage",
+                    "url": "https://github.com/acme/api/pull/4152",
+                    "author": "me",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "approved",
+                    "parent": "acme/api#4151",
+                    "current": true,
+                    "bucket": null,
+                    "why": ""
+                },
+                {
+                    "id": "acme/api#4153",
+                    "number": 4153,
+                    "title": "Planner: push filters down into the scan stage",
+                    "url": "https://github.com/acme/api/pull/4153",
+                    "author": "me",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "red",
+                    "review": "required",
+                    "parent": "acme/api#4152",
+                    "current": false,
+                    "bucket": null,
+                    "why": ""
+                },
+                {
+                    "id": "acme/api#4154",
+                    "number": 4154,
+                    "title": "Planner: hash join stage",
+                    "url": "https://github.com/acme/api/pull/4154",
+                    "author": "me",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "changes_requested",
+                    "parent": "acme/api#4153",
+                    "current": false,
+                    "bucket": "now",
+                    "why": "changes requested"
+                },
+                {
+                    "id": "acme/api#4155",
+                    "number": 4155,
+                    "title": "Planner: aggregate stage",
+                    "url": "https://github.com/acme/api/pull/4155",
+                    "author": "me",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "acme/api#4154",
+                    "current": false,
+                    "bucket": "fyi",
+                    "why": "waiting on reviewers"
+                },
+                {
+                    "id": "acme/api#4156",
+                    "number": 4156,
+                    "title": "Planner: stream partial results between stages",
+                    "url": "https://github.com/acme/api/pull/4156",
+                    "author": "me",
+                    "state": "open",
+                    "draft": true,
+                    "ci": "red",
+                    "review": "required",
+                    "parent": "acme/api#4155",
+                    "current": false,
+                    "bucket": "later",
+                    "why": "a draft: its CI can wait"
+                },
+                {
+                    "id": "acme/api#4157",
+                    "number": 4157,
+                    "title": "Planner: delete the old planner",
+                    "url": "https://github.com/acme/api/pull/4157",
+                    "author": "me",
+                    "state": "open",
+                    "draft": true,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "acme/api#4156",
+                    "current": false,
+                    "bucket": "fyi",
+                    "why": "waiting on reviewers"
+                }
+            ],
+            "forks": [],
+            "current": "acme/api#4152",
+            "up": "acme/api#4153",
+            "down": null
+        }
+    },
+    "coordinator": {
+        "on": true,
+        "id": "4be71c2a",
+        "url": "https://claude.ai/code/session_01MockCoordinator",
+        "error": null,
+        "status": "busy",
+        "queued": []
+    },
+    "work": [
+        {
+            "title": "Virtualize the issue stream list so long projects stay responsive",
+            "kind": "ai_review",
+            "key": "acme/web#2301",
+            "item": "acme/web#2301",
+            "head": "0000000000000000000000000000058e18a0cbed",
+            "state": "running",
+            "attempts": 2,
+            "queued_at": "2026-11-13T07:22:37.882Z",
+            "started_at": "2026-11-13T07:18:37.843Z",
+            "finished_at": null,
+            "retry_at": null,
+            "error": "no answer in 5 minutes, so it was stopped"
+        },
+        {
+            "title": "Drop the legacy v1 auth middleware",
+            "kind": "ai_review",
+            "key": "acme/api#4099",
+            "item": "acme/api#4099",
+            "head": "000000000000000000000000000009e552417d13",
+            "state": "running",
+            "attempts": 1,
+            "queued_at": "2026-11-13T07:22:37.882Z",
+            "started_at": "2026-11-13T07:21:57.843Z",
+            "finished_at": null,
+            "retry_at": null,
+            "error": null
+        },
+        {
+            "title": "i think we addressed azulus's tombstone point in the follow-up PR, can you confirm so I can reply and if not, what's left?",
+            "kind": "ask",
+            "key": "b7d3e410",
+            "item": "me/notes-app#12",
+            "head": null,
+            "state": "running",
+            "attempts": 1,
+            "queued_at": "2026-11-13T07:10:37.843Z",
+            "started_at": "2026-11-13T07:10:37.843Z",
+            "finished_at": null,
+            "retry_at": null,
+            "error": null
+        },
+        {
+            "title": "Queue: a leases table for in-flight jobs",
+            "kind": "ai_review",
+            "key": "acme/worker#890",
+            "item": "acme/worker#890",
+            "head": "000000000000000000000000000002260cdd115a",
+            "state": "failed",
+            "attempts": 3,
+            "queued_at": "2026-11-13T05:46:37.843Z",
+            "started_at": "2026-11-13T06:16:37.843Z",
+            "finished_at": "2026-11-13T06:22:37.843Z",
+            "retry_at": null,
+            "error": "no answer in 5 minutes, so it was stopped"
+        },
+        {
+            "title": "Rerun the baseline arm, or compare against last week's numbers?",
+            "from": "seer: code mode research",
+            "kind": "answer",
+            "key": "q3ab5e17",
+            "item": null,
+            "head": null,
+            "state": "failed",
+            "attempts": 0,
+            "queued_at": "2026-11-13T06:42:37.843Z",
+            "started_at": null,
+            "finished_at": "2026-11-13T07:12:37.843Z",
+            "retry_at": null,
+            "error": "that session has probably ended"
+        }
+    ]
+}

@@ -1,0 +1,121 @@
+{
+    "me": "me",
+    "synced_at": "2026-11-13T07:21:57.843Z",
+    "syncing": false,
+    "sync_error": null,
+    "config_errors": [],
+    "connectors": [
+        {
+            "id": "github",
+            "name": "GitHub",
+            "status": "ok",
+            "synced_at": "2026-11-13T07:21:57.843Z",
+            "error": null
+        }
+    ],
+    "spaces": [
+        {
+            "id": "work",
+            "name": "Work",
+            "boards": [
+                {
+                    "id": "work-review",
+                    "name": "PRs to review",
+                    "space": "work",
+                    "counts": {
+                        "now": 3,
+                        "today": 5,
+                        "blocked": 1,
+                        "later": 3,
+                        "fyi": 1,
+                        "hide": 0,
+                        "cleared": 9
+                    },
+                    "new": 3
+                },
+                {
+                    "id": "work-mine",
+                    "name": "My PRs",
+                    "space": "work",
+                    "counts": {
+                        "now": 2,
+                        "today": 6,
+                        "blocked": 9,
+                        "later": 3,
+                        "fyi": 2,
+                        "hide": 0,
+                        "cleared": 0
+                    },
+                    "new": 1
+                },
+                {
+                    "id": "work-mentions",
+                    "name": "Mentions",
+                    "space": "work",
+                    "counts": {
+                        "now": 1,
+                        "today": 2,
+                        "blocked": 0,
+                        "later": 0,
+                        "fyi": 0,
+                        "hide": 0,
+                        "cleared": 1
+                    },
+                    "new": 2
+                }
+            ]
+        },
+        {
+            "id": "personal",
+            "name": "Personal",
+            "boards": [
+                {
+                    "id": "personal-review",
+                    "name": "Review requests",
+                    "space": "personal",
+                    "counts": {
+                        "now": 2,
+                        "today": 4,
+                        "blocked": 0,
+                        "later": 1,
+                        "fyi": 0,
+                        "hide": 1,
+                        "cleared": 0
+                    },
+                    "new": 0
+                },
+                {
+                    "id": "personal-mine",
+                    "name": "My PRs",
+                    "space": "personal",
+                    "counts": {
+                        "now": 1,
+                        "today": 1,
+                        "blocked": 0,
+                        "later": 0,
+                        "fyi": 1,
+                        "hide": 0,
+                        "cleared": 0
+                    },
+                    "new": 1
+                }
+            ]
+        }
+    ],
+    "focus": {
+        "now": 10,
+        "today": 14,
+        "new": 6,
+        "asks": 2,
+        "sessions": 2
+    },
+    "inflight": {
+        "total": 7
+    },
+    "agent": true,
+    "ai_agent": "Claude",
+    "rate_limit": {
+        "remaining": 4870,
+        "reset_at": "2026-11-13T08:22:37.843Z"
+    }
+}

@@ -1,0 +1,5320 @@
+{
+    "inquiries": [
+        {
+            "id": "q1c0ffee",
+            "at": "2026-11-13T06:58:37.843Z",
+            "from": "Inbox coordinator",
+            "question": "Compact tombstones in #12, or ship #12 and compact them in a follow-up?",
+            "context": "azulus asked on #12 why tombstones never go away: every sync ships the whole list, and on a long-lived notebook it only grows. They're right. Nothing in #12 or on main prunes it; `syncTombstones()` in src/sync/merge.ts:88 sends it whole on every pull.\n\nCompacting is safe once every device has synced past a tombstone. The server already keeps each device's last full sync (`devices.last_full_sync`), so merge() can drop the ones older than the oldest of those. It's about 40 lines and a test.\n\npriya wants #12 before Thursday's mobile freeze. #12 is green, and kai approved it before azulus's comment. I'd do it in #12: it's small, and shipping the growth to every phone first means a second migration later.",
+            "options": [
+                {
+                    "answer": "Compact them in #12",
+                    "next": "I add the pruning and a test that a week-old delete doesn't come back, push, and ask azulus and kai to look again. A day, likely before Thursday."
+                },
+                {
+                    "answer": "Ship #12, compact in a follow-up",
+                    "next": "I reply to azulus that a follow-up does it, and open that PR today. #12 can merge now; phones carry the growing list until the follow-up ships."
+                },
+                {
+                    "answer": "Neither: it's fine for now",
+                    "next": "I leave it, and tell azulus why. The list keeps growing with every delete."
+                }
+            ],
+            "links": [
+                {
+                    "label": "azulus's comment on #12",
+                    "url": "https://github.com/me/notes-app/pull/12#discussion_r1874401"
+                },
+                {
+                    "label": "syncTombstones() in merge.ts",
+                    "url": "https://github.com/me/notes-app/blob/sync-merge/src/sync/merge.ts#L88"
+                },
+                {
+                    "label": "priya's question about the freeze",
+                    "url": "https://github.com/me/notes-app/pull/12#issuecomment-2210"
+                }
+            ],
+            "item_id": "me/notes-app#12",
+            "answer": null
+        },
+        {
+            "id": "q2bead00",
+            "at": "2026-11-13T05:52:37.843Z",
+            "from": "sentry: ViewerContext rollout",
+            "question": "Which PR in the stack should land first after the deploy freeze lifts?",
+            "context": "The freeze lifts Monday. #129146 is the core change: it adds the actor to ViewerContext, and the eight per-team PRs read it. Each per-team PR could ship behind its own flag, so they don't strictly wait on the core one, but without it their flags do nothing.\n\nLanding the core first is the safe order; landing a team's first would let that team test its flag earlier. Tell me the order you want.",
+            "options": [],
+            "links": [
+                {
+                    "label": "The core PR, #129146",
+                    "url": "https://github.com/getsentry/sentry/pull/129146"
+                },
+                {
+                    "label": "The stack's tracking issue",
+                    "url": "https://github.com/getsentry/sentry/issues/128982"
+                }
+            ],
+            "item_id": null,
+            "answer": null
+        }
+    ],
+    "notes": {
+        "due": [
+            {
+                "id": "n1",
+                "at": "2026-11-12T05:22:37.843Z",
+                "text": "Ask Priya whether the planner change needs a migration note",
+                "remind_at": "2026-11-13T07:10:37.843Z",
+                "reminded_at": "2026-11-13T07:10:37.843Z"
+            }
+        ],
+        "open": [
+            {
+                "id": "n2",
+                "at": "2026-11-13T04:22:37.843Z",
+                "text": "Write up the tombstone compaction idea for the sync design doc",
+                "remind_at": null,
+                "reminded_at": null
+            }
+        ],
+        "later": [
+            {
+                "id": "n3",
+                "at": "2026-11-13T06:22:37.843Z",
+                "text": "Check the p95 dashboard after the search deploy",
+                "remind_at": "2026-11-14T01:22:37.850Z",
+                "reminded_at": null
+            }
+        ]
+    },
+    "sessions": [
+        {
+            "id": "session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
+            "session_id": "5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
+            "kind": "desktop",
+            "name": "Fix the flaky upload test",
+            "cwd": "/Users/you/code/api",
+            "branch": "fix/upload-flake",
+            "state": "blocked",
+            "reason": "needs permission: Bash",
+            "since": "2026-11-13T07:04:37.843Z",
+            "excerpt": "Bash: Run the upload tests 20 times with retries off",
+            "resets_at": null,
+            "alive": true,
+            "actions": [
+                "open"
+            ],
+            "open_url": "claude://claude.ai/epitaxy/local_5f1c2a90",
+            "attach": null,
+            "status": "active",
+            "snooze_until": null
+        },
+        {
+            "id": "session:a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
+            "session_id": "a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
+            "kind": "background",
+            "name": "Migrate the job store to SQLite",
+            "cwd": "/Users/you/code/worker",
+            "branch": "store-sqlite",
+            "state": "stalled",
+            "reason": "rate limited until 00:22",
+            "since": "2026-11-13T05:46:37.843Z",
+            "excerpt": "API Error: Rate limit reached for your five-hour window",
+            "resets_at": "2026-11-13T08:22:37.843Z",
+            "alive": false,
+            "actions": [
+                "kick"
+            ],
+            "open_url": null,
+            "attach": null,
+            "status": "active",
+            "snooze_until": null
+        }
+    ],
+    "sections": {
+        "now": [
+            {
+                "id": "oss/tinyhttp#205",
+                "kind": "pr",
+                "repo": "oss/tinyhttp",
+                "number": 205,
+                "title": "Add a keep-alive timeout option",
+                "url": "https://github.com/oss/tinyhttp/pull/205",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "handed back",
+                "bucket": "now",
+                "why": "handed back: the keep-alive test times out on Node 22 only; it needs a decision on the default",
+                "board": "personal-mine",
+                "boards": [
+                    "personal-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+70 \u22128"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T05:22:37.843Z",
+                "updated_at": "2026-11-12T11:22:37.843Z",
+                "activity_at": "2026-11-12T11:22:37.843Z",
+                "waiting_since": "2026-11-12T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "handed_back": true,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "back"
+            },
+            {
+                "id": "oss/tinyhttp#212",
+                "kind": "pr",
+                "repo": "oss/tinyhttp",
+                "number": 212,
+                "title": "Support HTTP/2 prior knowledge",
+                "url": "https://github.com/oss/tinyhttp/pull/212",
+                "author": "ana-k",
+                "author_bot": false,
+                "by": "ana-k",
+                "people": [
+                    "ana-k",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "asked you directly",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+310 \u221245"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-12T01:22:37.843Z",
+                "activity_at": "2026-11-12T01:22:37.843Z",
+                "waiting_since": "2026-11-12T02:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Accepts cleartext HTTP/2 when a client opens with the h2 preface, behind a new http2: 'prior-knowledge' option. HTTP/1.1 on the same port keeps working.",
+                    "concerns": [
+                        "The preface sniff waits for 24 bytes, so an HTTP/1 client that sends less sits out the 5 s sniff timeout."
+                    ],
+                    "notes": 1
+                },
+                "group": "review"
+            },
+            {
+                "id": "acme/worker#882",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 882,
+                "title": "Retry dead-lettered jobs with jittered backoff",
+                "url": "https://github.com/acme/worker/pull/882",
+                "author": "marco",
+                "author_bot": false,
+                "by": "marco",
+                "people": [
+                    "marco",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "asked you directly",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+96 \u221212"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-12T01:22:37.843Z",
+                "activity_at": "2026-11-12T01:22:37.843Z",
+                "waiting_since": "2026-11-12T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Retries dead-lettered jobs up to 5 times with full-jitter backoff capped at 10 minutes, and keeps the attempt count in a column so it survives a worker restart.",
+                    "concerns": [
+                        "Webhook jobs aren't idempotent: one that timed out after the request went out will deliver twice."
+                    ],
+                    "notes": 1
+                },
+                "group": "review"
+            },
+            {
+                "id": "acme/api#4127",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4127,
+                "title": "Stream partial results from the query planner",
+                "url": "https://github.com/acme/api/pull/4127",
+                "author": "priya",
+                "author_bot": false,
+                "by": "priya",
+                "people": [
+                    "priya",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "asked you directly",
+                "board": "work-review",
+                "boards": [
+                    "work-review",
+                    "work-mentions"
+                ],
+                "chips": [
+                    "+62 \u22127"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-13T01:22:37.843Z",
+                "updated_at": "2026-11-13T01:22:37.843Z",
+                "activity_at": "2026-11-13T01:22:37.843Z",
+                "waiting_since": "2026-11-13T04:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "talk": true,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Adds a streaming scan (`streamRows`) and uses it in `runPlan`, so a query that runs past its time budget returns the rows found so far, marked partial. The `/v2/query` route passes an optional `?budget=` through and sets `X-Partial-Results`.",
+                    "concerns": [
+                        "src/routes/query.ts passes ?budget= through Number() unchecked: a non-numeric value becomes NaN and silently turns the budget off, and 0 or a negative value returns an empty partial result.",
+                        "Every query now has a 2 s budget by default, so slow queries that used to complete will come back partial; clients that ignore the new partial flag will treat them as complete."
+                    ],
+                    "notes": 5
+                },
+                "group": "review"
+            },
+            {
+                "team_ask": "asked @backend",
+                "id": "acme/api#4099",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4099,
+                "title": "Drop the legacy v1 auth middleware",
+                "url": "https://github.com/acme/api/pull/4099",
+                "author": "dana",
+                "author_bot": false,
+                "by": "dana",
+                "people": [
+                    "dana",
+                    "me",
+                    "sam"
+                ],
+                "stage": "changes requested",
+                "bucket": "now",
+                "why": "pushed since your review",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "changes requested",
+                    "2 unresolved",
+                    "+341 \u2212802"
+                ],
+                "ci": "green",
+                "review": "changes_requested",
+                "draft": false,
+                "created_at": "2026-11-08T07:22:37.843Z",
+                "updated_at": "2026-11-12T23:22:37.843Z",
+                "activity_at": "2026-11-12T23:22:37.843Z",
+                "waiting_since": "2026-11-08T17:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "stale",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Removes the v1 session-cookie middleware and moves the four routes that still used it onto token auth. Most of the diff deletes compatibility shims and their tests.",
+                    "since": "Moves `/v1/export` onto token auth too and adds a `Deprecation` header, but cookie callers still break with no window to switch.",
+                    "concerns": [
+                        "`/v1/export` still sees session-cookie traffic; dropping it here breaks those callers with no deprecation window."
+                    ],
+                    "notes": 1
+                },
+                "group": "review"
+            },
+            {
+                "id": "acme/worker#875",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 875,
+                "title": "Add idempotency keys to webhook delivery",
+                "url": "https://github.com/acme/worker/pull/875",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "marco"
+                ],
+                "stage": "approved",
+                "bucket": "now",
+                "why": "approved and green: merge it",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+180 \u221222"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-11T05:22:37.843Z",
+                "updated_at": "2026-11-13T04:22:37.843Z",
+                "activity_at": "2026-11-13T04:22:37.843Z",
+                "waiting_since": "2026-11-11T05:22:37.843Z",
+                "new": false,
+                "pinned": true,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "rerequest",
+                    "merge"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine"
+            },
+            {
+                "id": "me/notes-app#12",
+                "kind": "pr",
+                "repo": "me/notes-app",
+                "number": 12,
+                "title": "Last-writer-wins sync with tombstones",
+                "url": "https://github.com/me/notes-app/pull/12",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "kai"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "3 unresolved threads",
+                "board": "personal-mine",
+                "boards": [
+                    "personal-mine"
+                ],
+                "chips": [
+                    "3 unresolved",
+                    "+420 \u221266"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-09T13:22:37.843Z",
+                "updated_at": "2026-11-13T01:22:37.843Z",
+                "activity_at": "2026-11-13T01:22:37.843Z",
+                "waiting_since": "2026-11-09T13:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "talk": true,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "cta": "reply"
+            },
+            {
+                "id": "acme/api#4154",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4154,
+                "title": "Planner: hash join stage",
+                "url": "https://github.com/acme/api/pull/4154",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "sam"
+                ],
+                "stage": "changes requested",
+                "bucket": "now",
+                "why": "changes requested",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "changes requested",
+                    "2 unresolved",
+                    "+172 \u221232"
+                ],
+                "ci": "green",
+                "review": "changes_requested",
+                "draft": false,
+                "created_at": "2026-11-10T07:22:37.843Z",
+                "updated_at": "2026-11-13T01:22:37.843Z",
+                "activity_at": "2026-11-13T01:22:37.843Z",
+                "waiting_since": "2026-11-10T07:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "rerequest"
+                ],
+                "placed_by": "claude",
+                "stack": {
+                    "id": "acme/api#4150",
+                    "pos": 3,
+                    "size": 6,
+                    "folded": [
+                        "acme/api#4155",
+                        "acme/api#4156",
+                        "acme/api#4157"
+                    ]
+                },
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine"
+            },
+            {
+                "id": "acme/worker#860",
+                "kind": "issue",
+                "repo": "acme/worker",
+                "number": 860,
+                "title": "Worker OOM on large batches",
+                "url": "https://github.com/acme/worker/issues/860",
+                "author": "nina",
+                "author_bot": false,
+                "by": "nina",
+                "people": [
+                    "nina",
+                    "me"
+                ],
+                "bucket": "now",
+                "why": "assigned to you",
+                "board": "work-mentions",
+                "boards": [
+                    "work-mentions"
+                ],
+                "chips": [
+                    "issue"
+                ],
+                "ci": "none",
+                "review": "none",
+                "draft": false,
+                "created_at": "2026-11-11T07:22:37.843Z",
+                "updated_at": "2026-11-12T21:22:37.843Z",
+                "activity_at": "2026-11-12T21:22:37.843Z",
+                "waiting_since": "2026-11-11T07:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "other"
+            },
+            {
+                "id": "nadia/sentry-javascript-integrations#14402",
+                "kind": "pr",
+                "repo": "nadia/sentry-javascript-integrations",
+                "number": 14402,
+                "title": "Capture unhandled rejections in edge runtimes",
+                "url": "https://github.com/nadia/sentry-javascript-integrations/pull/14402",
+                "author": "dana",
+                "author_bot": false,
+                "by": "dana",
+                "people": [
+                    "dana",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "asked you directly",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+58 \u22129"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T11:22:37.843Z",
+                "updated_at": "2026-11-12T11:22:37.843Z",
+                "activity_at": "2026-11-12T11:22:37.843Z",
+                "waiting_since": "2026-11-12T13:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "skim",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "skim",
+                    "risk": "low",
+                    "summary": "Listens for `unhandledrejection` in edge runtimes and reports `event.reason` as an unhandled error, so a promise that rejects with no catch shows up in Sentry. The handler lives in `edgeRejectionIntegration()` and is added only when `globalThis.EdgeRuntime` is set; Node keeps its own `onUnhandledRejection` integration. A reason that isn't an `Error` (a string, say) is wrapped in a synthetic one, so it still gets a stack. The new `captureUnhandledRejections` option defaults to on. Tests cover an `Error` reason, a string reason and the Node path, as https://github.com/nadia/sentry-javascript-integrations/issues/14390 asked.",
+                    "concerns": [],
+                    "notes": 1
+                },
+                "group": "review"
+            }
+        ],
+        "today": [
+            {
+                "team_ask": "asked @maintainers",
+                "id": "oss/parsekit#77",
+                "kind": "pr",
+                "repo": "oss/parsekit",
+                "number": 77,
+                "title": "Rewrite the tokenizer with a state table",
+                "url": "https://github.com/oss/parsekit/pull/77",
+                "author": "wren",
+                "author_bot": false,
+                "by": "wren",
+                "people": [
+                    "wren"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "the tokenizer you maintain",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+1880 \u22121210"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-10-31T19:22:37.843Z",
+                "updated_at": "2026-10-31T19:22:37.843Z",
+                "activity_at": "2026-10-31T19:22:37.843Z",
+                "waiting_since": "2026-11-01T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "high",
+                    "summary": "Replaces the hand-written tokenizer with a generated state table and a short driver loop. Token positions now count UTF-16 code units instead of bytes.",
+                    "concerns": [
+                        "Offsets after any non-ASCII character shift; tools that slice the source by byte offset will break without an error.",
+                        "The 1,400-line table is checked in, but CI never regenerates it, so a grammar edit without rerunning the script ships a stale table."
+                    ],
+                    "notes": 1
+                },
+                "group": "review"
+            },
+            {
+                "team_ask": "CODEOWNERS ping to @ml-team",
+                "id": "acme/worker#879",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 879,
+                "title": "Split the scheduler into lease and dispatch",
+                "url": "https://github.com/acme/worker/pull/879",
+                "author": "kofi",
+                "author_bot": false,
+                "by": "kofi",
+                "people": [
+                    "kofi",
+                    "priya"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "your team's scheduler, and kofi waits on you",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "4 unresolved",
+                    "+1102 \u2212138"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-10T04:22:37.843Z",
+                "updated_at": "2026-11-13T05:22:37.843Z",
+                "activity_at": "2026-11-13T05:22:37.843Z",
+                "waiting_since": "2026-11-10T09:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Splits the scheduler in two. Lease owns the jobs table: it hands out time-limited leases with a fencing token, renews them on heartbeat and reclaims expired ones every 15 s. Dispatch asks Lease for work, runs it and reports back with the token, so a worker that lost its lease can't overwrite a newer result. The old scheduler stays behind SCHEDULER_V2=false for a release and reads the same table, so a rollback needs no migration. Most of the 1,240 lines move existing code; about 300 are new, mainly the renewal loop and its tests.",
+                    "concerns": [
+                        "Both services run migrations on start, so two replicas starting together can race on the new lease_token column."
+                    ],
+                    "notes": 1
+                },
+                "group": "review"
+            },
+            {
+                "id": "acme/web#2301",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2301,
+                "title": "Virtualize the issue stream list so long projects stay responsive",
+                "url": "https://github.com/acme/web/pull/2301",
+                "author": "li-wei",
+                "author_bot": false,
+                "by": "li-wei",
+                "people": [
+                    "li-wei",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "asked you directly",
+                "demoted": "3 from PRs to review are urgent already",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+420 \u2212180"
+                ],
+                "ci": "pending",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T03:22:37.843Z",
+                "updated_at": "2026-11-11T03:22:37.843Z",
+                "activity_at": "2026-11-11T03:22:37.843Z",
+                "waiting_since": "2026-11-11T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "running"
+                },
+                "group": "review"
+            },
+            {
+                "id": "acme/worker#890",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 890,
+                "title": "Queue: a leases table for in-flight jobs",
+                "url": "https://github.com/acme/worker/pull/890",
+                "author": "marco",
+                "author_bot": false,
+                "by": "marco",
+                "people": [
+                    "marco",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "asked you directly",
+                "demoted": "3 from PRs to review are urgent already",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+120 \u22128"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-12T01:22:37.843Z",
+                "activity_at": "2026-11-12T01:22:37.843Z",
+                "waiting_since": "2026-11-13T02:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "stack": {
+                    "id": "acme/worker#890",
+                    "pos": 1,
+                    "size": 3,
+                    "folded": [
+                        "acme/worker#891"
+                    ]
+                },
+                "preflight": {
+                    "state": "failed"
+                },
+                "group": "review"
+            },
+            {
+                "id": "acme/api#4071",
+                "kind": "issue",
+                "repo": "acme/api",
+                "number": 4071,
+                "title": "Search returns stale results after a reindex",
+                "url": "https://github.com/acme/api/issues/4071",
+                "author": "tomas",
+                "author_bot": false,
+                "by": "tomas",
+                "people": [
+                    "tomas"
+                ],
+                "bucket": "today",
+                "why": "new activity since you looked",
+                "board": "work-mentions",
+                "boards": [
+                    "work-mentions"
+                ],
+                "chips": [
+                    "issue"
+                ],
+                "ci": "none",
+                "review": "none",
+                "draft": false,
+                "created_at": "2026-11-09T03:22:37.843Z",
+                "updated_at": "2026-11-13T03:22:37.843Z",
+                "activity_at": "2026-11-13T03:22:37.843Z",
+                "waiting_since": "2026-11-09T03:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "other"
+            },
+            {
+                "id": "acme/api#1294",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 1294,
+                "title": "Service accounts reach control-silo endpoints",
+                "url": "https://github.com/acme/api/pull/1294",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "dana"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "blocks billing#2298, billing#2299 and 4 more; it waits on your reply to dana, then a review from sam, kai and 6 more",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "1 unresolved",
+                    "+214 \u221238"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-10T09:22:37.843Z",
+                "updated_at": "2026-11-13T02:22:37.843Z",
+                "activity_at": "2026-11-13T02:22:37.843Z",
+                "waiting_since": "2026-11-10T09:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "talk": true,
+                "actions": [
+                    "close",
+                    "draft",
+                    "rerequest"
+                ],
+                "placed_by": "claude",
+                "blocks": [
+                    "billing#2298",
+                    "billing#2299",
+                    "billing#2300",
+                    "billing#2301",
+                    "billing#2302",
+                    "billing#2303"
+                ],
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "cta": "reply"
+            },
+            {
+                "id": "oss/calendar-ui#310",
+                "kind": "pr",
+                "repo": "oss/calendar-ui",
+                "number": 310,
+                "title": "Extract the date picker into its own package",
+                "url": "https://github.com/oss/calendar-ui/pull/310",
+                "author": "rosa",
+                "author_bot": false,
+                "by": "rosa",
+                "people": [
+                    "rosa"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "close collaborator: 7 PRs in 90 days",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+180 \u2212140"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T11:22:37.843Z",
+                "updated_at": "2026-11-11T11:22:37.843Z",
+                "activity_at": "2026-11-11T11:22:37.843Z",
+                "waiting_since": "2026-11-11T11:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "skim",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "stack": {
+                    "id": "oss/calendar-ui#310",
+                    "pos": 1,
+                    "size": 3,
+                    "folded": [
+                        "oss/calendar-ui#311",
+                        "oss/calendar-ui#312"
+                    ]
+                },
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "skim",
+                    "risk": "low",
+                    "summary": "Moves the date picker and its tests into packages/date-picker with no behaviour change; the app imports it from there.",
+                    "concerns": [],
+                    "notes": 0
+                },
+                "group": "other"
+            },
+            {
+                "id": "acme/web#2303",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2303,
+                "title": "Show the export's progress in the toolbar",
+                "url": "https://github.com/acme/web/pull/2303",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "draft",
+                "bucket": "today",
+                "why": "your draft, touched today: yours to finish",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "draft",
+                    "+96 \u221212"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": true,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-13T04:22:37.843Z",
+                "activity_at": "2026-11-13T04:22:37.843Z",
+                "waiting_since": "2026-11-12T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "cta": "ready",
+                "actions": [
+                    "close",
+                    "ready"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine"
+            },
+            {
+                "id": "acme/api#3051",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 3051,
+                "title": "ref(billing): Read request.user through acting_user_id()",
+                "url": "https://github.com/acme/api/pull/3051",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "CI failing",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+25 \u221212"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-13T01:22:37.843Z",
+                "activity_at": "2026-11-13T01:22:37.843Z",
+                "waiting_since": "2026-11-12T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine"
+            },
+            {
+                "id": "acme/api#3052",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 3052,
+                "title": "ref(issues): Read request.user through acting_user_id()",
+                "url": "https://github.com/acme/api/pull/3052",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "CI failing",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+26 \u221212"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-13T00:22:37.843Z",
+                "activity_at": "2026-11-13T00:22:37.843Z",
+                "waiting_since": "2026-11-12T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine"
+            },
+            {
+                "id": "acme/api#3053",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 3053,
+                "title": "ref(alerts): Read request.user through acting_user_id()",
+                "url": "https://github.com/acme/api/pull/3053",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "CI failing",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+27 \u221212"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-12T23:22:37.843Z",
+                "activity_at": "2026-11-12T23:22:37.843Z",
+                "waiting_since": "2026-11-12T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine"
+            },
+            {
+                "team_ask": "asked @backend",
+                "id": "acme/api#4130",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4130,
+                "title": "Add a p95 latency budget to the search endpoint",
+                "url": "https://github.com/acme/api/pull/4130",
+                "author": "priya",
+                "author_bot": false,
+                "by": "priya",
+                "people": [
+                    "priya"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "the search endpoint you own",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+132 \u221220"
+                ],
+                "ci": "pending",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T22:22:37.843Z",
+                "updated_at": "2026-11-12T22:22:37.843Z",
+                "activity_at": "2026-11-12T22:22:37.843Z",
+                "waiting_since": "2026-11-12T22:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "push"
+                ],
+                "verdict": "skim",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "skim",
+                    "risk": "medium",
+                    "summary": "Tracks search latency and answers 503 with Retry-After while the rolling p95 stays over 800 ms for a minute, so a slow index sheds load instead of queueing it.",
+                    "concerns": [
+                        "The budget is per process: with 12 replicas one hot shard trips it on some and not others, so clients see flapping 503s."
+                    ],
+                    "notes": 1
+                },
+                "group": "review"
+            },
+            {
+                "team_ask": "CODEOWNERS ping to @ml-team",
+                "id": "acme/ml-pipeline#307",
+                "kind": "pr",
+                "repo": "acme/ml-pipeline",
+                "number": 307,
+                "title": "Evaluate the reranker on the holdout set",
+                "url": "https://github.com/acme/ml-pipeline/pull/307",
+                "author": "sam",
+                "author_bot": false,
+                "by": "sam",
+                "people": [
+                    "sam"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "close collaborator: 12 PRs in 90 days",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+240 \u221212"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-13T00:22:37.843Z",
+                "updated_at": "2026-11-13T00:22:37.843Z",
+                "activity_at": "2026-11-13T00:22:37.843Z",
+                "waiting_since": "2026-11-13T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "queued"
+                },
+                "group": "review"
+            },
+            {
+                "id": "acme/api#4131",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4131,
+                "title": "Retry the billing webhook on a 502",
+                "url": "https://github.com/acme/api/pull/4131",
+                "author": "acme-junior[bot]",
+                "author_bot": true,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "draft",
+                "bucket": "today",
+                "why": "your draft, opened through acme-junior: yours to finish",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "draft",
+                    "+48 \u22126"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": true,
+                "created_at": "2026-11-13T02:22:37.843Z",
+                "updated_at": "2026-11-13T05:22:37.843Z",
+                "activity_at": "2026-11-13T05:22:37.843Z",
+                "waiting_since": "2026-11-13T02:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "cta": "ready",
+                "actions": [
+                    "close",
+                    "ready"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine"
+            }
+        ],
+        "blocked": [
+            {
+                "id": "acme/billing#2298",
+                "kind": "pr",
+                "repo": "acme/billing",
+                "number": 2298,
+                "title": "Let service accounts read billing usage",
+                "url": "https://github.com/acme/billing/pull/2298",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "shan"
+                ],
+                "stage": "blocked",
+                "bucket": "blocked",
+                "why": "needs api#1294, which waits on your reply to dana, then a review from sam, kai and 6 more",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+66 \u22129"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-10T19:22:37.843Z",
+                "updated_at": "2026-11-12T23:52:37.843Z",
+                "activity_at": "2026-11-12T23:52:37.843Z",
+                "waiting_since": "2026-11-10T19:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "rerequest",
+                    "merge"
+                ],
+                "blocker": {
+                    "id": "acme/api#1294",
+                    "ref": "api#1294",
+                    "waits": "waits on your reply to dana, then a review from sam, kai and 6 more"
+                },
+                "needs": [
+                    "api#1294"
+                ],
+                "depth": 0
+            },
+            {
+                "id": "acme/billing#2299",
+                "kind": "pr",
+                "repo": "acme/billing",
+                "number": 2299,
+                "title": "Bill service accounts' API calls to the team that owns them",
+                "url": "https://github.com/acme/billing/pull/2299",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "shan"
+                ],
+                "stage": "blocked",
+                "bucket": "blocked",
+                "why": "needs api#1294",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+79 \u221210"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-10T23:22:37.843Z",
+                "updated_at": "2026-11-13T00:22:37.843Z",
+                "activity_at": "2026-11-13T00:22:37.843Z",
+                "waiting_since": "2026-11-10T23:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "rerequest",
+                    "merge"
+                ],
+                "blocker": {
+                    "id": "acme/api#1294",
+                    "ref": "api#1294",
+                    "waits": "waits on your reply to dana, then a review from sam, kai and 6 more"
+                },
+                "needs": [
+                    "api#1294"
+                ],
+                "depth": 0
+            },
+            {
+                "id": "acme/billing#2300",
+                "kind": "pr",
+                "repo": "acme/billing",
+                "number": 2300,
+                "title": "Show service-account usage on the billing page",
+                "url": "https://github.com/acme/billing/pull/2300",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "blocked",
+                "bucket": "blocked",
+                "why": "needs api#1294",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "+92 \u22126"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T11:22:37.843Z",
+                "updated_at": "2026-11-13T01:52:37.843Z",
+                "activity_at": "2026-11-13T01:52:37.843Z",
+                "waiting_since": "2026-11-11T11:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "blocker": {
+                    "id": "acme/api#1294",
+                    "ref": "api#1294",
+                    "waits": "waits on your reply to dana, then a review from sam, kai and 6 more"
+                },
+                "needs": [
+                    "api#1294"
+                ],
+                "blocks": [
+                    "billing#2302",
+                    "billing#2303"
+                ],
+                "depth": 0
+            },
+            {
+                "id": "acme/billing#2302",
+                "kind": "pr",
+                "repo": "acme/billing",
+                "number": 2302,
+                "title": "Email teams a monthly service-account usage summary",
+                "url": "https://github.com/acme/billing/pull/2302",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "blocked",
+                "bucket": "blocked",
+                "why": "needs billing#2300",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+118 \u22128"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-12T11:22:37.843Z",
+                "updated_at": "2026-11-13T04:52:37.843Z",
+                "activity_at": "2026-11-13T04:52:37.843Z",
+                "waiting_since": "2026-11-12T11:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "merge"
+                ],
+                "blocker": {
+                    "id": "acme/api#1294",
+                    "ref": "api#1294 (through billing#2300)",
+                    "waits": "waits on your reply to dana, then a review from sam, kai and 6 more"
+                },
+                "needs": [
+                    "billing#2300"
+                ],
+                "blocks": [
+                    "billing#2303"
+                ],
+                "depth": 1
+            },
+            {
+                "id": "acme/billing#2303",
+                "kind": "pr",
+                "repo": "acme/billing",
+                "number": 2303,
+                "title": "Link each summary email to its team's usage page",
+                "url": "https://github.com/acme/billing/pull/2303",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "blocked",
+                "bucket": "blocked",
+                "why": "needs billing#2302",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+40 \u22129"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-12T15:22:37.843Z",
+                "updated_at": "2026-11-13T05:22:37.843Z",
+                "activity_at": "2026-11-13T05:22:37.843Z",
+                "waiting_since": "2026-11-12T15:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "merge"
+                ],
+                "blocker": {
+                    "id": "acme/api#1294",
+                    "ref": "api#1294 (through billing#2302)",
+                    "waits": "waits on your reply to dana, then a review from sam, kai and 6 more"
+                },
+                "needs": [
+                    "billing#2302"
+                ],
+                "depth": 2
+            },
+            {
+                "id": "acme/billing#2301",
+                "kind": "pr",
+                "repo": "acme/billing",
+                "number": 2301,
+                "title": "Alert when a service account's usage spikes",
+                "url": "https://github.com/acme/billing/pull/2301",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "shan"
+                ],
+                "stage": "blocked",
+                "bucket": "fyi",
+                "why": "in Merging \u00b7 needs api#1294",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+105 \u22127"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-11T21:22:37.843Z",
+                "updated_at": "2026-11-11T23:22:37.843Z",
+                "activity_at": "2026-11-11T23:22:37.843Z",
+                "waiting_since": "2026-11-11T21:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": true,
+                "blocker": {
+                    "id": "acme/api#1294",
+                    "ref": "api#1294",
+                    "waits": "waits on your reply to dana, then a review from sam, kai and 6 more"
+                },
+                "needs": [
+                    "api#1294"
+                ],
+                "depth": 0
+            },
+            {
+                "id": "acme/api#1301",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 1301,
+                "title": "Per-region usage export",
+                "url": "https://github.com/acme/api/pull/1301",
+                "author": "dana",
+                "author_bot": false,
+                "by": "dana",
+                "people": [
+                    "dana",
+                    "me"
+                ],
+                "stage": "blocked",
+                "bucket": "blocked",
+                "why": "needs api#1299, which waits on a review from kai",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+140 \u221222"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T05:22:37.843Z",
+                "updated_at": "2026-11-12T05:22:37.843Z",
+                "activity_at": "2026-11-12T05:22:37.843Z",
+                "waiting_since": "2026-11-12T11:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "blocker": {
+                    "id": "acme/api#1299",
+                    "ref": "api#1299",
+                    "waits": "waits on a review from kai"
+                },
+                "needs": [
+                    "api#1299"
+                ],
+                "depth": 0
+            },
+            {
+                "id": "acme/web#2306",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2306,
+                "title": "Remember the export format each person picked last",
+                "url": "https://github.com/acme/web/pull/2306",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "blocked",
+                "why": "waits on a review from sam, @backend and 1 more",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "+48 \u221210"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T15:22:37.843Z",
+                "updated_at": "2026-11-12T21:22:37.843Z",
+                "activity_at": "2026-11-12T21:22:37.843Z",
+                "waiting_since": "2026-11-12T21:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "blocks": [
+                    "web#2307",
+                    "web#2308",
+                    "web#2309"
+                ],
+                "depth": 0
+            },
+            {
+                "id": "acme/web#2307",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2307,
+                "title": "Default the export dialog to the remembered format",
+                "url": "https://github.com/acme/web/pull/2307",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "blocked",
+                "bucket": "blocked",
+                "why": "needs web#2306",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+52 \u22124"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-12T22:22:37.843Z",
+                "updated_at": "2026-11-13T02:52:37.843Z",
+                "activity_at": "2026-11-13T02:52:37.843Z",
+                "waiting_since": "2026-11-12T22:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "merge"
+                ],
+                "blocker": {
+                    "id": "acme/web#2306",
+                    "ref": "web#2306",
+                    "waits": "waits on a review from sam, @backend and 1 more"
+                },
+                "needs": [
+                    "web#2306"
+                ],
+                "blocks": [
+                    "web#2309"
+                ],
+                "depth": 1
+            },
+            {
+                "id": "acme/web#2308",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2308,
+                "title": "Remember the format per project as well as per person",
+                "url": "https://github.com/acme/web/pull/2308",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "blocked",
+                "bucket": "blocked",
+                "why": "needs web#2306",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+63 \u22125"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-12T23:22:37.843Z",
+                "updated_at": "2026-11-13T03:22:37.843Z",
+                "activity_at": "2026-11-13T03:22:37.843Z",
+                "waiting_since": "2026-11-12T23:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "merge"
+                ],
+                "blocker": {
+                    "id": "acme/web#2306",
+                    "ref": "web#2306",
+                    "waits": "waits on a review from sam, @backend and 1 more"
+                },
+                "needs": [
+                    "web#2306"
+                ],
+                "blocks": [
+                    "web#2309"
+                ],
+                "depth": 1
+            },
+            {
+                "id": "acme/web#2309",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2309,
+                "title": "Say in the export dialog which format was remembered",
+                "url": "https://github.com/acme/web/pull/2309",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "blocked",
+                "bucket": "blocked",
+                "why": "needs web#2307 and web#2308",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+74 \u22126"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-13T01:22:37.843Z",
+                "updated_at": "2026-11-13T04:22:37.843Z",
+                "activity_at": "2026-11-13T04:22:37.843Z",
+                "waiting_since": "2026-11-13T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "merge"
+                ],
+                "blocker": {
+                    "id": "acme/web#2306",
+                    "ref": "web#2306 (through web#2307)",
+                    "waits": "waits on a review from sam, @backend and 1 more"
+                },
+                "needs": [
+                    "web#2307",
+                    "web#2308"
+                ],
+                "depth": 2
+            }
+        ],
+        "later": [
+            {
+                "id": "acme/api#4040",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4040,
+                "title": "Move rate limits into the gateway",
+                "url": "https://github.com/acme/api/pull/4040",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "later",
+                "why": "conflicts with main",
+                "demoted": "quiet for 3 weeks",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "conflict",
+                    "+210 \u221295"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-10-10T07:22:37.843Z",
+                "updated_at": "2026-10-24T07:22:37.843Z",
+                "activity_at": "2026-10-24T07:22:37.843Z",
+                "waiting_since": "2026-10-10T07:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved",
+                    "conflict"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude"
+            },
+            {
+                "id": "acme/ml-pipeline#299",
+                "kind": "pr",
+                "repo": "acme/ml-pipeline",
+                "number": 299,
+                "title": "Experiment: smaller embedding batch",
+                "url": "https://github.com/acme/ml-pipeline/pull/299",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "draft",
+                "bucket": "later",
+                "why": "draft, idle over a week",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "draft",
+                    "+64 \u221210"
+                ],
+                "ci": "none",
+                "review": "required",
+                "draft": true,
+                "created_at": "2026-11-04T03:22:37.843Z",
+                "updated_at": "2026-11-04T23:22:37.843Z",
+                "activity_at": "2026-11-04T23:22:37.843Z",
+                "waiting_since": "2026-11-04T03:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "cta": "ready",
+                "actions": [
+                    "close",
+                    "ready"
+                ],
+                "placed_by": "claude"
+            },
+            {
+                "team_ask": "asked @maintainers",
+                "id": "friends/garden-sensors#18",
+                "kind": "pr",
+                "repo": "friends/garden-sensors",
+                "number": 18,
+                "title": "Add soil moisture calibration",
+                "url": "https://github.com/friends/garden-sensors/pull/18",
+                "author": "jules",
+                "author_bot": false,
+                "by": "jules",
+                "people": [
+                    "jules"
+                ],
+                "stage": "waiting for review",
+                "bucket": "later",
+                "why": "asked of the maintainers team; nobody waits on you",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+90 \u221215"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T00:22:37.843Z",
+                "updated_at": "2026-11-11T00:22:37.843Z",
+                "activity_at": "2026-11-11T00:22:37.843Z",
+                "waiting_since": "2026-11-11T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "skim",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude"
+            },
+            {
+                "team_ask": "asked @frontend",
+                "id": "acme/web#2290",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2290,
+                "title": "Migrate settings forms to the new validation library",
+                "url": "https://github.com/acme/web/pull/2290",
+                "author": "jordan",
+                "author_bot": false,
+                "by": "jordan",
+                "people": [
+                    "jordan"
+                ],
+                "stage": "waiting for review",
+                "bucket": "later",
+                "why": "red CI, so it waits on its author",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "CI red",
+                    "+512 \u2212498"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T15:22:37.843Z",
+                "updated_at": "2026-11-11T15:22:37.843Z",
+                "activity_at": "2026-11-11T15:22:37.843Z",
+                "waiting_since": "2026-11-11T17:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude"
+            },
+            {
+                "team_ask": "asked @ml-team",
+                "id": "acme/api#4118",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4118,
+                "title": "Remove the deprecated /v0/events route",
+                "url": "https://github.com/acme/api/pull/4118",
+                "author": "jordan",
+                "author_bot": false,
+                "by": "jordan",
+                "people": [
+                    "jordan"
+                ],
+                "stage": "waiting for review",
+                "bucket": "later",
+                "why": "added by a bot",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+12 \u2212240"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T17:22:37.843Z",
+                "updated_at": "2026-11-12T17:22:37.843Z",
+                "activity_at": "2026-11-12T17:22:37.843Z",
+                "waiting_since": "2026-11-12T17:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude"
+            }
+        ],
+        "fyi": [
+            {
+                "team_ask": "asked @ml-team",
+                "id": "acme/worker#870",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 870,
+                "title": "Document queue sizing for large tenants",
+                "url": "https://github.com/acme/worker/pull/870",
+                "author": "hana",
+                "author_bot": false,
+                "by": "hana",
+                "people": [
+                    "hana"
+                ],
+                "stage": "draft",
+                "bucket": "fyi",
+                "why": "docs-only draft from your team",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "draft",
+                    "+88 \u22120"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": true,
+                "created_at": "2026-11-06T15:22:37.843Z",
+                "updated_at": "2026-11-06T15:22:37.843Z",
+                "activity_at": "2026-11-06T15:22:37.843Z",
+                "waiting_since": "2026-11-07T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push",
+                    "ready"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude"
+            },
+            {
+                "id": "me/dotfiles#41",
+                "kind": "pr",
+                "repo": "me/dotfiles",
+                "number": 41,
+                "title": "Switch the prompt to starship",
+                "url": "https://github.com/me/dotfiles/pull/41",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "fyi",
+                "why": "no action needed",
+                "board": "personal-mine",
+                "boards": [
+                    "personal-mine"
+                ],
+                "chips": [
+                    "+30 \u221252"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-07T11:22:37.843Z",
+                "updated_at": "2026-11-09T03:22:37.843Z",
+                "activity_at": "2026-11-09T03:22:37.843Z",
+                "waiting_since": "2026-11-07T11:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude"
+            }
+        ]
+    },
+    "reviewing": 0,
+    "hidden": [
+        {
+            "team_ask": "asked @maintainers",
+            "id": "oss/tinyhttp#209",
+            "kind": "pr",
+            "repo": "oss/tinyhttp",
+            "number": 209,
+            "title": "Bump undici from 6.19.8 to 6.21.0",
+            "url": "https://github.com/oss/tinyhttp/pull/209",
+            "author": "dependabot[bot]",
+            "author_bot": true,
+            "by": "dependabot[bot]",
+            "people": [],
+            "stage": "waiting for review",
+            "bucket": "hide",
+            "why": "dependency bump by a bot",
+            "board": "personal-review",
+            "boards": [
+                "personal-review"
+            ],
+            "chips": [
+                "+14 \u221214"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-10T07:22:37.843Z",
+            "updated_at": "2026-11-10T07:22:37.843Z",
+            "activity_at": "2026-11-10T07:22:37.843Z",
+            "waiting_since": "2026-11-10T07:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "active",
+            "snooze_until": null,
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude"
+        }
+    ],
+    "cleared": [
+        {
+            "team_ask": "asked @backend",
+            "id": "acme/api#4088",
+            "kind": "pr",
+            "repo": "acme/api",
+            "number": 4088,
+            "title": "Remove unused feature flags (batch 7)",
+            "url": "https://github.com/acme/api/pull/4088",
+            "author": "tomas",
+            "author_bot": false,
+            "by": "tomas",
+            "people": [
+                "tomas"
+            ],
+            "stage": "waiting for review",
+            "bucket": "later",
+            "why": "team request",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+3 \u2212410"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-04T23:22:37.843Z",
+            "updated_at": "2026-11-04T23:22:37.843Z",
+            "activity_at": "2026-11-04T23:22:37.843Z",
+            "waiting_since": "2026-11-05T09:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "snoozed",
+            "snooze_until": "2026-11-14T03:22:37.843Z",
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude"
+        },
+        {
+            "team_ask": "CODEOWNERS ping to @ml-team",
+            "id": "acme/infra#533",
+            "kind": "pr",
+            "repo": "acme/infra",
+            "number": 533,
+            "title": "Bump the alpine base image to 3.20",
+            "url": "https://github.com/acme/infra/pull/533",
+            "author": "alex-ops",
+            "author_bot": false,
+            "by": "alex-ops",
+            "people": [
+                "alex-ops"
+            ],
+            "stage": "waiting for review",
+            "bucket": "fyi",
+            "why": "CODEOWNERS ping to @ml-team",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+2 \u22122"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-10T09:22:37.843Z",
+            "updated_at": "2026-11-10T09:22:37.843Z",
+            "activity_at": "2026-11-10T09:22:37.843Z",
+            "waiting_since": "2026-11-10T09:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "muted",
+            "snooze_until": null,
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude"
+        },
+        {
+            "team_ask": "CODEOWNERS ping to @ml-team",
+            "id": "acme/api#4101",
+            "kind": "pr",
+            "repo": "acme/api",
+            "number": 4101,
+            "title": "Normalize tag keys at ingest",
+            "url": "https://github.com/acme/api/pull/4101",
+            "author": "nina",
+            "author_bot": false,
+            "by": "nina",
+            "people": [
+                "nina"
+            ],
+            "stage": "waiting for review",
+            "bucket": "fyi",
+            "why": "CODEOWNERS ping to @ml-team",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+77 \u221231"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-10T19:22:37.843Z",
+            "updated_at": "2026-11-10T19:22:37.843Z",
+            "activity_at": "2026-11-10T19:22:37.843Z",
+            "waiting_since": "2026-11-10T19:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "snoozed",
+            "snooze_until": "2026-11-13T17:00:00.000Z",
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude"
+        },
+        {
+            "team_ask": "asked @backend",
+            "id": "acme/api#4091",
+            "kind": "pr",
+            "repo": "acme/api",
+            "number": 4091,
+            "title": "Flags: a registry of who owns each feature flag",
+            "url": "https://github.com/acme/api/pull/4091",
+            "author": "tomas",
+            "author_bot": false,
+            "by": "tomas",
+            "people": [
+                "tomas"
+            ],
+            "stage": "waiting for review",
+            "bucket": "later",
+            "why": "team request",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+140 \u221212"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-11T05:22:37.843Z",
+            "updated_at": "2026-11-11T05:22:37.843Z",
+            "activity_at": "2026-11-11T05:22:37.843Z",
+            "waiting_since": "2026-11-11T07:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "snoozed",
+            "snooze_until": "2026-11-14T03:22:37.843Z",
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude",
+            "stack": {
+                "id": "acme/api#4091",
+                "pos": 1,
+                "size": 2
+            }
+        },
+        {
+            "team_ask": "asked @backend",
+            "id": "acme/api#4092",
+            "kind": "pr",
+            "repo": "acme/api",
+            "number": 4092,
+            "title": "Flags: ping a flag's owner after 30 days at 100%",
+            "url": "https://github.com/acme/api/pull/4092",
+            "author": "tomas",
+            "author_bot": false,
+            "by": "tomas",
+            "people": [
+                "tomas"
+            ],
+            "stage": "waiting for review",
+            "bucket": "later",
+            "why": "team request",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+96 \u22128"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-11T05:22:37.843Z",
+            "updated_at": "2026-11-11T05:22:37.843Z",
+            "activity_at": "2026-11-11T05:22:37.843Z",
+            "waiting_since": "2026-11-11T07:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "snoozed",
+            "snooze_until": "2026-11-14T03:22:37.843Z",
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude",
+            "stack": {
+                "id": "acme/api#4091",
+                "pos": 2,
+                "size": 2
+            }
+        },
+        {
+            "team_ask": "CODEOWNERS ping to @ml-team",
+            "id": "acme/infra#540",
+            "kind": "pr",
+            "repo": "acme/infra",
+            "number": 540,
+            "title": "Rotate staging KMS keys",
+            "url": "https://github.com/acme/infra/pull/540",
+            "author": "alex-ops",
+            "author_bot": false,
+            "by": "alex-ops",
+            "people": [
+                "alex-ops"
+            ],
+            "stage": "waiting for review",
+            "bucket": "fyi",
+            "why": "CODEOWNERS ping to @ml-team",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+18 \u221218"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-12T03:22:37.843Z",
+            "updated_at": "2026-11-12T03:22:37.843Z",
+            "activity_at": "2026-11-12T03:22:37.843Z",
+            "waiting_since": "2026-11-12T03:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "snoozed",
+            "snooze_until": "2026-11-13T17:00:00.000Z",
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude"
+        },
+        {
+            "team_ask": "asked @frontend",
+            "id": "acme/web#2231",
+            "kind": "pr",
+            "repo": "acme/web",
+            "number": 2231,
+            "title": "Swap the date picker for the native input",
+            "url": "https://github.com/acme/web/pull/2231",
+            "author": "jordan",
+            "author_bot": false,
+            "by": "jordan",
+            "people": [
+                "jordan"
+            ],
+            "stage": "waiting for review",
+            "bucket": "later",
+            "why": "team request",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "CI red",
+                "+140 \u2212210"
+            ],
+            "ci": "red",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-12T01:22:37.843Z",
+            "updated_at": "2026-11-12T01:22:37.843Z",
+            "activity_at": "2026-11-12T01:22:37.843Z",
+            "waiting_since": "2026-11-12T05:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "snoozed",
+            "snooze_until": null,
+            "snooze_when": "ci",
+            "wake_on": [
+                "ci",
+                "push"
+            ],
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude"
+        },
+        {
+            "team_ask": "CODEOWNERS ping to @ml-team",
+            "id": "acme/ml-pipeline#311",
+            "kind": "pr",
+            "repo": "acme/ml-pipeline",
+            "number": 311,
+            "title": "Cache the tokenizer per worker process",
+            "url": "https://github.com/acme/ml-pipeline/pull/311",
+            "author": "sam",
+            "author_bot": false,
+            "by": "sam",
+            "people": [
+                "sam"
+            ],
+            "stage": "waiting for review",
+            "bucket": "today",
+            "why": "close collaborator: 12 PRs in 90 days",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+34 \u22124"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-12T11:22:37.843Z",
+            "updated_at": "2026-11-12T11:22:37.843Z",
+            "activity_at": "2026-11-12T11:22:37.843Z",
+            "waiting_since": "2026-11-12T12:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "snoozed",
+            "snooze_until": "2026-11-13T17:00:00.000Z",
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": "skim",
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude"
+        },
+        {
+            "id": "acme/api#4132",
+            "kind": "pr",
+            "repo": "acme/api",
+            "number": 4132,
+            "title": "Guard against an empty cursor in pagination",
+            "url": "https://github.com/acme/api/pull/4132",
+            "author": "marco",
+            "author_bot": false,
+            "by": "marco",
+            "people": [
+                "marco",
+                "me"
+            ],
+            "stage": "waiting for review",
+            "bucket": "now",
+            "why": "asked you directly",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+22 \u22124"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-13T05:22:37.843Z",
+            "updated_at": "2026-11-13T05:22:37.843Z",
+            "activity_at": "2026-11-13T05:22:37.843Z",
+            "waiting_since": "2026-11-13T05:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "done",
+            "snooze_until": null,
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "done_at": "2026-11-13T06:22:37.843Z",
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes",
+                "unrequest"
+            ],
+            "placed_by": "claude"
+        },
+        {
+            "id": "acme/web#2288",
+            "kind": "pr",
+            "repo": "acme/web",
+            "number": 2288,
+            "title": "Dashboard empty states",
+            "url": "https://github.com/acme/web/pull/2288",
+            "author": "li-wei",
+            "author_bot": false,
+            "by": "li-wei",
+            "people": [
+                "li-wei"
+            ],
+            "stage": "waiting for review",
+            "bucket": "fyi",
+            "why": "mentioned in a thread",
+            "board": "work-mentions",
+            "boards": [
+                "work-mentions"
+            ],
+            "chips": [
+                "+150 \u221230"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-09T23:22:37.843Z",
+            "updated_at": "2026-11-12T01:22:37.843Z",
+            "activity_at": "2026-11-12T01:22:37.843Z",
+            "waiting_since": "2026-11-09T23:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "snoozed",
+            "snooze_until": "2026-11-13T17:00:00.000Z",
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": null,
+            "resolved_at": null,
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude"
+        }
+    ],
+    "resolved": [
+        {
+            "id": "acme/web#2284",
+            "kind": "pr",
+            "repo": "acme/web",
+            "number": 2284,
+            "title": "Tighten the CSP on the embed iframe",
+            "url": "https://github.com/acme/web/pull/2284",
+            "author": "li-wei",
+            "author_bot": false,
+            "by": "li-wei",
+            "people": [
+                "li-wei",
+                "me",
+                "marco"
+            ],
+            "stage": "merged",
+            "bucket": "now",
+            "why": "merged",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "CI red",
+                "approved",
+                "+24 \u22126"
+            ],
+            "ci": "red",
+            "review": "approved",
+            "draft": false,
+            "created_at": "2026-11-12T01:22:37.843Z",
+            "updated_at": "2026-11-13T06:22:37.843Z",
+            "activity_at": "2026-11-13T06:22:37.843Z",
+            "waiting_since": "2026-11-12T03:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "active",
+            "snooze_until": null,
+            "snooze_when": null,
+            "wake_on": [
+                "ci",
+                "push"
+            ],
+            "verdict": null,
+            "resolved": "merged",
+            "resolved_at": "2026-11-13T06:22:37.843Z",
+            "inflight": false,
+            "placed_by": "claude"
+        },
+        {
+            "id": "acme/web#2292",
+            "kind": "pr",
+            "repo": "acme/web",
+            "number": 2292,
+            "title": "Lazy-load the settings panes",
+            "url": "https://github.com/acme/web/pull/2292",
+            "author": "marco",
+            "author_bot": false,
+            "by": "marco",
+            "people": [
+                "marco",
+                "me"
+            ],
+            "stage": "waiting for review",
+            "bucket": "now",
+            "why": "you approved",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+48 \u221220"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-12T05:22:37.843Z",
+            "updated_at": "2026-11-13T05:22:37.843Z",
+            "activity_at": "2026-11-13T05:22:37.843Z",
+            "waiting_since": "2026-11-12T07:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "active",
+            "snooze_until": null,
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": "you approved",
+            "resolved_at": "2026-11-13T05:22:37.843Z",
+            "inflight": false,
+            "actions": [
+                "request_changes",
+                "unrequest"
+            ],
+            "placed_by": "claude"
+        },
+        {
+            "id": "acme/worker#868",
+            "kind": "pr",
+            "repo": "acme/worker",
+            "number": 868,
+            "title": "Drop the legacy cron runner",
+            "url": "https://github.com/acme/worker/pull/868",
+            "author": "kofi",
+            "author_bot": false,
+            "by": "kofi",
+            "people": [
+                "kofi"
+            ],
+            "stage": "waiting for review",
+            "bucket": "later",
+            "why": "no longer requested",
+            "board": "work-review",
+            "boards": [
+                "work-review"
+            ],
+            "chips": [
+                "+12 \u2212340"
+            ],
+            "ci": "green",
+            "review": "required",
+            "draft": false,
+            "created_at": "2026-11-11T05:22:37.843Z",
+            "updated_at": "2026-11-13T01:22:37.843Z",
+            "activity_at": "2026-11-13T01:22:37.843Z",
+            "waiting_since": "2026-11-11T07:22:37.843Z",
+            "new": false,
+            "pinned": false,
+            "status": "active",
+            "snooze_until": null,
+            "snooze_when": null,
+            "wake_on": [
+                "push"
+            ],
+            "verdict": null,
+            "resolved": "no longer requested",
+            "resolved_at": "2026-11-13T01:22:37.843Z",
+            "inflight": false,
+            "actions": [
+                "request_changes"
+            ],
+            "placed_by": "claude"
+        }
+    ],
+    "paused": null,
+    "stacks": {
+        "acme/api#4150": {
+            "id": "acme/api#4150",
+            "repo": "acme/api",
+            "base": "main",
+            "line": [
+                {
+                    "id": "acme/api#4150",
+                    "number": 4150,
+                    "title": "Planner: pull the cost model out of the executor",
+                    "url": "https://github.com/acme/api/pull/4150",
+                    "author": "me",
+                    "state": "merged",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": null,
+                    "current": false,
+                    "bucket": null,
+                    "why": "merged"
+                },
+                {
+                    "id": "acme/api#4151",
+                    "number": 4151,
+                    "title": "Planner: a Stage interface and the stage runner",
+                    "url": "https://github.com/acme/api/pull/4151",
+                    "author": "me",
+                    "state": "merged",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "acme/api#4150",
+                    "current": false,
+                    "bucket": null,
+                    "why": "merged"
+                },
+                {
+                    "id": "acme/api#4152",
+                    "number": 4152,
+                    "title": "Planner: run the table scan as a stage",
+                    "url": "https://github.com/acme/api/pull/4152",
+                    "author": "me",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "approved",
+                    "parent": "acme/api#4151",
+                    "current": false,
+                    "bucket": null,
+                    "why": ""
+                },
+                {
+                    "id": "acme/api#4153",
+                    "number": 4153,
+                    "title": "Planner: push filters down into the scan stage",
+                    "url": "https://github.com/acme/api/pull/4153",
+                    "author": "me",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "red",
+                    "review": "required",
+                    "parent": "acme/api#4152",
+                    "current": false,
+                    "bucket": null,
+                    "why": ""
+                },
+                {
+                    "id": "acme/api#4154",
+                    "number": 4154,
+                    "title": "Planner: hash join stage",
+                    "url": "https://github.com/acme/api/pull/4154",
+                    "author": "me",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "changes_requested",
+                    "parent": "acme/api#4153",
+                    "current": true,
+                    "bucket": "now",
+                    "why": "changes requested"
+                },
+                {
+                    "id": "acme/api#4155",
+                    "number": 4155,
+                    "title": "Planner: aggregate stage",
+                    "url": "https://github.com/acme/api/pull/4155",
+                    "author": "me",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "acme/api#4154",
+                    "current": false,
+                    "bucket": "fyi",
+                    "why": "waiting on reviewers"
+                },
+                {
+                    "id": "acme/api#4156",
+                    "number": 4156,
+                    "title": "Planner: stream partial results between stages",
+                    "url": "https://github.com/acme/api/pull/4156",
+                    "author": "me",
+                    "state": "open",
+                    "draft": true,
+                    "ci": "red",
+                    "review": "required",
+                    "parent": "acme/api#4155",
+                    "current": false,
+                    "bucket": "later",
+                    "why": "a draft: its CI can wait"
+                },
+                {
+                    "id": "acme/api#4157",
+                    "number": 4157,
+                    "title": "Planner: delete the old planner",
+                    "url": "https://github.com/acme/api/pull/4157",
+                    "author": "me",
+                    "state": "open",
+                    "draft": true,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "acme/api#4156",
+                    "current": false,
+                    "bucket": "fyi",
+                    "why": "waiting on reviewers"
+                }
+            ],
+            "forks": [],
+            "current": "acme/api#4154",
+            "up": "acme/api#4155",
+            "down": "acme/api#4153"
+        },
+        "acme/worker#890": {
+            "id": "acme/worker#890",
+            "repo": "acme/worker",
+            "base": "main",
+            "line": [
+                {
+                    "id": "acme/worker#890",
+                    "number": 890,
+                    "title": "Queue: a leases table for in-flight jobs",
+                    "url": "https://github.com/acme/worker/pull/890",
+                    "author": "marco",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": null,
+                    "current": true,
+                    "bucket": "today",
+                    "why": "asked you directly"
+                },
+                {
+                    "id": "acme/worker#891",
+                    "number": 891,
+                    "title": "Queue: renew leases from the worker heartbeat",
+                    "url": "https://github.com/acme/worker/pull/891",
+                    "author": "marco",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "acme/worker#890",
+                    "current": false,
+                    "bucket": "later",
+                    "why": "team request"
+                },
+                {
+                    "id": "acme/worker#892",
+                    "number": 892,
+                    "title": "Queue: expire stale leases and requeue their jobs",
+                    "url": "https://github.com/acme/worker/pull/892",
+                    "author": "marco",
+                    "state": "open",
+                    "draft": true,
+                    "ci": "pending",
+                    "review": "required",
+                    "parent": "acme/worker#891",
+                    "current": false,
+                    "bucket": null,
+                    "why": ""
+                }
+            ],
+            "forks": [
+                {
+                    "id": "acme/worker#893",
+                    "number": 893,
+                    "title": "Queue: an admin page to inspect and break leases",
+                    "url": "https://github.com/acme/worker/pull/893",
+                    "author": "marco",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "acme/worker#890",
+                    "current": false,
+                    "bucket": null,
+                    "why": ""
+                }
+            ],
+            "current": "acme/worker#890",
+            "up": "acme/worker#891",
+            "down": null
+        },
+        "oss/calendar-ui#310": {
+            "id": "oss/calendar-ui#310",
+            "repo": "oss/calendar-ui",
+            "base": "main",
+            "line": [
+                {
+                    "id": "oss/calendar-ui#310",
+                    "number": 310,
+                    "title": "Extract the date picker into its own package",
+                    "url": "https://github.com/oss/calendar-ui/pull/310",
+                    "author": "rosa",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": null,
+                    "current": true,
+                    "bucket": "today",
+                    "why": "close collaborator: 7 PRs in 90 days"
+                },
+                {
+                    "id": "oss/calendar-ui#311",
+                    "number": 311,
+                    "title": "Move the date picker's styles onto design tokens",
+                    "url": "https://github.com/oss/calendar-ui/pull/311",
+                    "author": "rosa",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "oss/calendar-ui#310",
+                    "current": false,
+                    "bucket": "today",
+                    "why": "close collaborator: 7 PRs in 90 days"
+                },
+                {
+                    "id": "oss/calendar-ui#312",
+                    "number": 312,
+                    "title": "Use the shared date picker in the report filters",
+                    "url": "https://github.com/oss/calendar-ui/pull/312",
+                    "author": "rosa",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "oss/calendar-ui#311",
+                    "current": false,
+                    "bucket": "today",
+                    "why": "close collaborator: 7 PRs in 90 days"
+                }
+            ],
+            "forks": [],
+            "current": "oss/calendar-ui#310",
+            "up": "oss/calendar-ui#311",
+            "down": null
+        },
+        "acme/api#4091": {
+            "id": "acme/api#4091",
+            "repo": "acme/api",
+            "base": "main",
+            "line": [
+                {
+                    "id": "acme/api#4091",
+                    "number": 4091,
+                    "title": "Flags: a registry of who owns each feature flag",
+                    "url": "https://github.com/acme/api/pull/4091",
+                    "author": "tomas",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": null,
+                    "current": true,
+                    "bucket": null,
+                    "why": ""
+                },
+                {
+                    "id": "acme/api#4092",
+                    "number": 4092,
+                    "title": "Flags: ping a flag's owner after 30 days at 100%",
+                    "url": "https://github.com/acme/api/pull/4092",
+                    "author": "tomas",
+                    "state": "open",
+                    "draft": false,
+                    "ci": "green",
+                    "review": "required",
+                    "parent": "acme/api#4091",
+                    "current": false,
+                    "bucket": null,
+                    "why": ""
+                }
+            ],
+            "forks": [],
+            "current": "acme/api#4091",
+            "up": "acme/api#4092",
+            "down": null
+        }
+    },
+    "inbox": {
+        "urgent": [
+            {
+                "id": "acme/api#4127",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4127,
+                "title": "Stream partial results from the query planner",
+                "url": "https://github.com/acme/api/pull/4127",
+                "author": "priya",
+                "author_bot": false,
+                "by": "priya",
+                "people": [
+                    "priya",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "asked you directly",
+                "board": "work-review",
+                "boards": [
+                    "work-review",
+                    "work-mentions"
+                ],
+                "chips": [
+                    "+62 \u22127"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-13T01:22:37.843Z",
+                "updated_at": "2026-11-13T01:22:37.843Z",
+                "activity_at": "2026-11-13T01:22:37.843Z",
+                "waiting_since": "2026-11-13T04:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "talk": true,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Adds a streaming scan (`streamRows`) and uses it in `runPlan`, so a query that runs past its time budget returns the rows found so far, marked partial. The `/v2/query` route passes an optional `?budget=` through and sets `X-Partial-Results`.",
+                    "concerns": [
+                        "src/routes/query.ts passes ?budget= through Number() unchecked: a non-numeric value becomes NaN and silently turns the budget off, and 0 or a negative value returns an empty partial result.",
+                        "Every query now has a 2 s budget by default, so slow queries that used to complete will come back partial; clients that ignore the new partial flag will treat them as complete."
+                    ],
+                    "notes": 5
+                },
+                "group": "review",
+                "section": "urgent",
+                "score": 9,
+                "reason": "priya waits on your review; the planner's partial results"
+            },
+            {
+                "id": "oss/tinyhttp#212",
+                "kind": "pr",
+                "repo": "oss/tinyhttp",
+                "number": 212,
+                "title": "Support HTTP/2 prior knowledge",
+                "url": "https://github.com/oss/tinyhttp/pull/212",
+                "author": "ana-k",
+                "author_bot": false,
+                "by": "ana-k",
+                "people": [
+                    "ana-k",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "asked you directly",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+310 \u221245"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-12T01:22:37.843Z",
+                "activity_at": "2026-11-12T01:22:37.843Z",
+                "waiting_since": "2026-11-12T02:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Accepts cleartext HTTP/2 when a client opens with the h2 preface, behind a new http2: 'prior-knowledge' option. HTTP/1.1 on the same port keeps working.",
+                    "concerns": [
+                        "The preface sniff waits for 24 bytes, so an HTTP/1 client that sends less sits out the 5 s sniff timeout."
+                    ],
+                    "notes": 1
+                },
+                "group": "review",
+                "section": "urgent",
+                "score": 8,
+                "reason": "Asked by name",
+                "quick": "Quick to review: low risk, 38 lines"
+            },
+            {
+                "id": "acme/worker#882",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 882,
+                "title": "Retry dead-lettered jobs with jittered backoff",
+                "url": "https://github.com/acme/worker/pull/882",
+                "author": "marco",
+                "author_bot": false,
+                "by": "marco",
+                "people": [
+                    "marco",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "asked you directly",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+96 \u221212"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-12T01:22:37.843Z",
+                "activity_at": "2026-11-12T01:22:37.843Z",
+                "waiting_since": "2026-11-12T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Retries dead-lettered jobs up to 5 times with full-jitter backoff capped at 10 minutes, and keeps the attempt count in a column so it survives a worker restart.",
+                    "concerns": [
+                        "Webhook jobs aren't idempotent: one that timed out after the request went out will deliver twice."
+                    ],
+                    "notes": 1
+                },
+                "group": "review",
+                "section": "urgent",
+                "score": 8,
+                "reason": "Asked by name"
+            },
+            {
+                "id": "nadia/sentry-javascript-integrations#14402",
+                "kind": "pr",
+                "repo": "nadia/sentry-javascript-integrations",
+                "number": 14402,
+                "title": "Capture unhandled rejections in edge runtimes",
+                "url": "https://github.com/nadia/sentry-javascript-integrations/pull/14402",
+                "author": "dana",
+                "author_bot": false,
+                "by": "dana",
+                "people": [
+                    "dana",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "asked you directly",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+58 \u22129"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T11:22:37.843Z",
+                "updated_at": "2026-11-12T11:22:37.843Z",
+                "activity_at": "2026-11-12T11:22:37.843Z",
+                "waiting_since": "2026-11-12T13:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "skim",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "skim",
+                    "risk": "low",
+                    "summary": "Listens for `unhandledrejection` in edge runtimes and reports `event.reason` as an unhandled error, so a promise that rejects with no catch shows up in Sentry. The handler lives in `edgeRejectionIntegration()` and is added only when `globalThis.EdgeRuntime` is set; Node keeps its own `onUnhandledRejection` integration. A reason that isn't an `Error` (a string, say) is wrapped in a synthetic one, so it still gets a stack. The new `captureUnhandledRejections` option defaults to on. Tests cover an `Error` reason, a string reason and the Node path, as https://github.com/nadia/sentry-javascript-integrations/issues/14390 asked.",
+                    "concerns": [],
+                    "notes": 1
+                },
+                "group": "review",
+                "section": "urgent",
+                "score": 8,
+                "reason": "Asked by name"
+            },
+            {
+                "id": "acme/worker#875",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 875,
+                "title": "Add idempotency keys to webhook delivery",
+                "url": "https://github.com/acme/worker/pull/875",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "marco"
+                ],
+                "stage": "approved",
+                "bucket": "now",
+                "why": "approved and green: merge it",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "approved",
+                    "+180 \u221222"
+                ],
+                "ci": "green",
+                "review": "approved",
+                "draft": false,
+                "created_at": "2026-11-11T05:22:37.843Z",
+                "updated_at": "2026-11-13T04:22:37.843Z",
+                "activity_at": "2026-11-13T04:22:37.843Z",
+                "waiting_since": "2026-11-11T05:22:37.843Z",
+                "new": false,
+                "pinned": true,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "rerequest",
+                    "merge"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "section": "urgent",
+                "score": 8,
+                "reason": "Ready to merge"
+            },
+            {
+                "id": "me/notes-app#12",
+                "kind": "pr",
+                "repo": "me/notes-app",
+                "number": 12,
+                "title": "Last-writer-wins sync with tombstones",
+                "url": "https://github.com/me/notes-app/pull/12",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "kai"
+                ],
+                "stage": "waiting for review",
+                "bucket": "now",
+                "why": "3 unresolved threads",
+                "board": "personal-mine",
+                "boards": [
+                    "personal-mine"
+                ],
+                "chips": [
+                    "3 unresolved",
+                    "+420 \u221266"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-09T13:22:37.843Z",
+                "updated_at": "2026-11-13T01:22:37.843Z",
+                "activity_at": "2026-11-13T01:22:37.843Z",
+                "waiting_since": "2026-11-09T13:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "talk": true,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "cta": "reply",
+                "section": "urgent",
+                "score": 8,
+                "reason": "Waiting on your reply"
+            },
+            {
+                "id": "acme/api#1294",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 1294,
+                "title": "Service accounts reach control-silo endpoints",
+                "url": "https://github.com/acme/api/pull/1294",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "dana"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "blocks billing#2298, billing#2299 and 4 more; it waits on your reply to dana, then a review from sam, kai and 6 more",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "1 unresolved",
+                    "+214 \u221238"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-10T09:22:37.843Z",
+                "updated_at": "2026-11-13T02:22:37.843Z",
+                "activity_at": "2026-11-13T02:22:37.843Z",
+                "waiting_since": "2026-11-10T09:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "talk": true,
+                "actions": [
+                    "close",
+                    "draft",
+                    "rerequest"
+                ],
+                "placed_by": "claude",
+                "blocks": [
+                    "billing#2298",
+                    "billing#2299",
+                    "billing#2300",
+                    "billing#2301",
+                    "billing#2302",
+                    "billing#2303"
+                ],
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "cta": "reply",
+                "section": "urgent",
+                "score": 8,
+                "reason": "Your PR others wait on"
+            },
+            {
+                "id": "oss/tinyhttp#205",
+                "kind": "pr",
+                "repo": "oss/tinyhttp",
+                "number": 205,
+                "title": "Add a keep-alive timeout option",
+                "url": "https://github.com/oss/tinyhttp/pull/205",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "handed back",
+                "bucket": "now",
+                "why": "handed back: the keep-alive test times out on Node 22 only; it needs a decision on the default",
+                "board": "personal-mine",
+                "boards": [
+                    "personal-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+70 \u22128"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T05:22:37.843Z",
+                "updated_at": "2026-11-12T11:22:37.843Z",
+                "activity_at": "2026-11-12T11:22:37.843Z",
+                "waiting_since": "2026-11-12T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "handed_back": true,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "back",
+                "section": "urgent",
+                "score": 7,
+                "reason": "handed back: the keep-alive test times out on Node 22 only; it needs a decision on the default"
+            },
+            {
+                "id": "acme/web#2303",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2303,
+                "title": "Show the export's progress in the toolbar",
+                "url": "https://github.com/acme/web/pull/2303",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "draft",
+                "bucket": "today",
+                "why": "your draft, touched today: yours to finish",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "draft",
+                    "+96 \u221212"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": true,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-13T04:22:37.843Z",
+                "activity_at": "2026-11-13T04:22:37.843Z",
+                "waiting_since": "2026-11-12T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "cta": "ready",
+                "actions": [
+                    "close",
+                    "ready"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "section": "urgent",
+                "score": 7,
+                "reason": "Your draft"
+            },
+            {
+                "id": "acme/api#4131",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4131,
+                "title": "Retry the billing webhook on a 502",
+                "url": "https://github.com/acme/api/pull/4131",
+                "author": "acme-junior[bot]",
+                "author_bot": true,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "draft",
+                "bucket": "today",
+                "why": "your draft, opened through acme-junior: yours to finish",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "draft",
+                    "+48 \u22126"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": true,
+                "created_at": "2026-11-13T02:22:37.843Z",
+                "updated_at": "2026-11-13T05:22:37.843Z",
+                "activity_at": "2026-11-13T05:22:37.843Z",
+                "waiting_since": "2026-11-13T02:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "cta": "ready",
+                "actions": [
+                    "close",
+                    "ready"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "section": "urgent",
+                "score": 7,
+                "reason": "Your draft"
+            },
+            {
+                "team_ask": "asked @backend",
+                "id": "acme/api#4099",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4099,
+                "title": "Drop the legacy v1 auth middleware",
+                "url": "https://github.com/acme/api/pull/4099",
+                "author": "dana",
+                "author_bot": false,
+                "by": "dana",
+                "people": [
+                    "dana",
+                    "me",
+                    "sam"
+                ],
+                "stage": "changes requested",
+                "bucket": "now",
+                "why": "pushed since your review",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "changes requested",
+                    "2 unresolved",
+                    "+341 \u2212802"
+                ],
+                "ci": "green",
+                "review": "changes_requested",
+                "draft": false,
+                "created_at": "2026-11-08T07:22:37.843Z",
+                "updated_at": "2026-11-12T23:22:37.843Z",
+                "activity_at": "2026-11-12T23:22:37.843Z",
+                "waiting_since": "2026-11-08T17:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "stale",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Removes the v1 session-cookie middleware and moves the four routes that still used it onto token auth. Most of the diff deletes compatibility shims and their tests.",
+                    "since": "Moves `/v1/export` onto token auth too and adds a `Deprecation` header, but cookie callers still break with no window to switch.",
+                    "concerns": [
+                        "`/v1/export` still sees session-cookie traffic; dropping it here breaks those callers with no deprecation window."
+                    ],
+                    "notes": 1
+                },
+                "group": "review",
+                "section": "urgent",
+                "score": 6,
+                "reason": "Auth and keys"
+            },
+            {
+                "id": "acme/ml-pipeline#299",
+                "kind": "pr",
+                "repo": "acme/ml-pipeline",
+                "number": 299,
+                "title": "Experiment: smaller embedding batch",
+                "url": "https://github.com/acme/ml-pipeline/pull/299",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "draft",
+                "bucket": "later",
+                "why": "draft, idle over a week",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "draft",
+                    "+64 \u221210"
+                ],
+                "ci": "none",
+                "review": "required",
+                "draft": true,
+                "created_at": "2026-11-04T03:22:37.843Z",
+                "updated_at": "2026-11-04T23:22:37.843Z",
+                "activity_at": "2026-11-04T23:22:37.843Z",
+                "waiting_since": "2026-11-04T03:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "cta": "ready",
+                "actions": [
+                    "close",
+                    "ready"
+                ],
+                "placed_by": "claude",
+                "section": "urgent",
+                "score": 4,
+                "reason": "Your draft"
+            }
+        ],
+        "standard": [
+            {
+                "id": "acme/web#2301",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2301,
+                "title": "Virtualize the issue stream list so long projects stay responsive",
+                "url": "https://github.com/acme/web/pull/2301",
+                "author": "li-wei",
+                "author_bot": false,
+                "by": "li-wei",
+                "people": [
+                    "li-wei",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "asked you directly",
+                "demoted": "3 from PRs to review are urgent already",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+420 \u2212180"
+                ],
+                "ci": "pending",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T03:22:37.843Z",
+                "updated_at": "2026-11-11T03:22:37.843Z",
+                "activity_at": "2026-11-11T03:22:37.843Z",
+                "waiting_since": "2026-11-11T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "running"
+                },
+                "group": "review",
+                "section": "standard",
+                "score": 7,
+                "reason": "Asked by name"
+            },
+            {
+                "id": "acme/worker#890",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 890,
+                "title": "Queue: a leases table for in-flight jobs",
+                "url": "https://github.com/acme/worker/pull/890",
+                "author": "marco",
+                "author_bot": false,
+                "by": "marco",
+                "people": [
+                    "marco",
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "asked you directly",
+                "demoted": "3 from PRs to review are urgent already",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+120 \u22128"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-12T01:22:37.843Z",
+                "activity_at": "2026-11-12T01:22:37.843Z",
+                "waiting_since": "2026-11-13T02:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes",
+                    "unrequest"
+                ],
+                "placed_by": "claude",
+                "stack": {
+                    "id": "acme/worker#890",
+                    "pos": 1,
+                    "size": 3,
+                    "folded": [
+                        "acme/worker#891"
+                    ]
+                },
+                "preflight": {
+                    "state": "failed"
+                },
+                "group": "review",
+                "section": "standard",
+                "score": 7,
+                "reason": "Asked by name"
+            },
+            {
+                "id": "acme/worker#860",
+                "kind": "issue",
+                "repo": "acme/worker",
+                "number": 860,
+                "title": "Worker OOM on large batches",
+                "url": "https://github.com/acme/worker/issues/860",
+                "author": "nina",
+                "author_bot": false,
+                "by": "nina",
+                "people": [
+                    "nina",
+                    "me"
+                ],
+                "bucket": "now",
+                "why": "assigned to you",
+                "board": "work-mentions",
+                "boards": [
+                    "work-mentions"
+                ],
+                "chips": [
+                    "issue"
+                ],
+                "ci": "none",
+                "review": "none",
+                "draft": false,
+                "created_at": "2026-11-11T07:22:37.843Z",
+                "updated_at": "2026-11-12T21:22:37.843Z",
+                "activity_at": "2026-11-12T21:22:37.843Z",
+                "waiting_since": "2026-11-11T07:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "other",
+                "section": "standard",
+                "score": 7,
+                "reason": "assigned to you"
+            },
+            {
+                "id": "acme/api#4154",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4154,
+                "title": "Planner: hash join stage",
+                "url": "https://github.com/acme/api/pull/4154",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me",
+                    "sam"
+                ],
+                "stage": "changes requested",
+                "bucket": "now",
+                "why": "changes requested",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "changes requested",
+                    "2 unresolved",
+                    "+172 \u221232"
+                ],
+                "ci": "green",
+                "review": "changes_requested",
+                "draft": false,
+                "created_at": "2026-11-10T07:22:37.843Z",
+                "updated_at": "2026-11-13T01:22:37.843Z",
+                "activity_at": "2026-11-13T01:22:37.843Z",
+                "waiting_since": "2026-11-10T07:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft",
+                    "rerequest"
+                ],
+                "placed_by": "claude",
+                "stack": {
+                    "id": "acme/api#4150",
+                    "pos": 3,
+                    "size": 6,
+                    "folded": [
+                        "acme/api#4155",
+                        "acme/api#4156",
+                        "acme/api#4157"
+                    ]
+                },
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "section": "standard",
+                "score": 7,
+                "reason": "changes requested"
+            },
+            {
+                "team_ask": "asked @maintainers",
+                "id": "oss/parsekit#77",
+                "kind": "pr",
+                "repo": "oss/parsekit",
+                "number": 77,
+                "title": "Rewrite the tokenizer with a state table",
+                "url": "https://github.com/oss/parsekit/pull/77",
+                "author": "wren",
+                "author_bot": false,
+                "by": "wren",
+                "people": [
+                    "wren"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "the tokenizer you maintain",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+1880 \u22121210"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-10-31T19:22:37.843Z",
+                "updated_at": "2026-10-31T19:22:37.843Z",
+                "activity_at": "2026-10-31T19:22:37.843Z",
+                "waiting_since": "2026-11-01T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "high",
+                    "summary": "Replaces the hand-written tokenizer with a generated state table and a short driver loop. Token positions now count UTF-16 code units instead of bytes.",
+                    "concerns": [
+                        "Offsets after any non-ASCII character shift; tools that slice the source by byte offset will break without an error.",
+                        "The 1,400-line table is checked in, but CI never regenerates it, so a grammar edit without rerunning the script ships a stale table."
+                    ],
+                    "notes": 1
+                },
+                "group": "review",
+                "section": "standard",
+                "score": 6,
+                "reason": "the tokenizer you maintain"
+            },
+            {
+                "team_ask": "CODEOWNERS ping to @ml-team",
+                "id": "acme/worker#879",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 879,
+                "title": "Split the scheduler into lease and dispatch",
+                "url": "https://github.com/acme/worker/pull/879",
+                "author": "kofi",
+                "author_bot": false,
+                "by": "kofi",
+                "people": [
+                    "kofi",
+                    "priya"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "your team's scheduler, and kofi waits on you",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "4 unresolved",
+                    "+1102 \u2212138"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-10T04:22:37.843Z",
+                "updated_at": "2026-11-13T05:22:37.843Z",
+                "activity_at": "2026-11-13T05:22:37.843Z",
+                "waiting_since": "2026-11-10T09:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "look",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "look",
+                    "risk": "medium",
+                    "summary": "Splits the scheduler in two. Lease owns the jobs table: it hands out time-limited leases with a fencing token, renews them on heartbeat and reclaims expired ones every 15 s. Dispatch asks Lease for work, runs it and reports back with the token, so a worker that lost its lease can't overwrite a newer result. The old scheduler stays behind SCHEDULER_V2=false for a release and reads the same table, so a rollback needs no migration. Most of the 1,240 lines move existing code; about 300 are new, mainly the renewal loop and its tests.",
+                    "concerns": [
+                        "Both services run migrations on start, so two replicas starting together can race on the new lease_token column."
+                    ],
+                    "notes": 1
+                },
+                "group": "review",
+                "section": "standard",
+                "score": 6,
+                "reason": "your team's scheduler, and kofi waits on you"
+            },
+            {
+                "team_ask": "asked @backend",
+                "id": "acme/api#4130",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4130,
+                "title": "Add a p95 latency budget to the search endpoint",
+                "url": "https://github.com/acme/api/pull/4130",
+                "author": "priya",
+                "author_bot": false,
+                "by": "priya",
+                "people": [
+                    "priya"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "the search endpoint you own",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+132 \u221220"
+                ],
+                "ci": "pending",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T22:22:37.843Z",
+                "updated_at": "2026-11-12T22:22:37.843Z",
+                "activity_at": "2026-11-12T22:22:37.843Z",
+                "waiting_since": "2026-11-12T22:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "push"
+                ],
+                "verdict": "skim",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "skim",
+                    "risk": "medium",
+                    "summary": "Tracks search latency and answers 503 with Retry-After while the rolling p95 stays over 800 ms for a minute, so a slow index sheds load instead of queueing it.",
+                    "concerns": [
+                        "The budget is per process: with 12 replicas one hot shard trips it on some and not others, so clients see flapping 503s."
+                    ],
+                    "notes": 1
+                },
+                "group": "review",
+                "section": "standard",
+                "score": 6,
+                "reason": "the search endpoint you own"
+            },
+            {
+                "team_ask": "CODEOWNERS ping to @ml-team",
+                "id": "acme/ml-pipeline#307",
+                "kind": "pr",
+                "repo": "acme/ml-pipeline",
+                "number": 307,
+                "title": "Evaluate the reranker on the holdout set",
+                "url": "https://github.com/acme/ml-pipeline/pull/307",
+                "author": "sam",
+                "author_bot": false,
+                "by": "sam",
+                "people": [
+                    "sam"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "close collaborator: 12 PRs in 90 days",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+240 \u221212"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-13T00:22:37.843Z",
+                "updated_at": "2026-11-13T00:22:37.843Z",
+                "activity_at": "2026-11-13T00:22:37.843Z",
+                "waiting_since": "2026-11-13T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "queued"
+                },
+                "group": "review",
+                "section": "standard",
+                "score": 6,
+                "reason": "close collaborator: 12 PRs in 90 days"
+            },
+            {
+                "id": "acme/api#4071",
+                "kind": "issue",
+                "repo": "acme/api",
+                "number": 4071,
+                "title": "Search returns stale results after a reindex",
+                "url": "https://github.com/acme/api/issues/4071",
+                "author": "tomas",
+                "author_bot": false,
+                "by": "tomas",
+                "people": [
+                    "tomas"
+                ],
+                "bucket": "today",
+                "why": "new activity since you looked",
+                "board": "work-mentions",
+                "boards": [
+                    "work-mentions"
+                ],
+                "chips": [
+                    "issue"
+                ],
+                "ci": "none",
+                "review": "none",
+                "draft": false,
+                "created_at": "2026-11-09T03:22:37.843Z",
+                "updated_at": "2026-11-13T03:22:37.843Z",
+                "activity_at": "2026-11-13T03:22:37.843Z",
+                "waiting_since": "2026-11-09T03:22:37.843Z",
+                "new": true,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "other",
+                "section": "standard",
+                "score": 6,
+                "reason": "new activity since you looked"
+            },
+            {
+                "id": "oss/calendar-ui#310",
+                "kind": "pr",
+                "repo": "oss/calendar-ui",
+                "number": 310,
+                "title": "Extract the date picker into its own package",
+                "url": "https://github.com/oss/calendar-ui/pull/310",
+                "author": "rosa",
+                "author_bot": false,
+                "by": "rosa",
+                "people": [
+                    "rosa"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "close collaborator: 7 PRs in 90 days",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+180 \u2212140"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T11:22:37.843Z",
+                "updated_at": "2026-11-11T11:22:37.843Z",
+                "activity_at": "2026-11-11T11:22:37.843Z",
+                "waiting_since": "2026-11-11T11:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "skim",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "stack": {
+                    "id": "oss/calendar-ui#310",
+                    "pos": 1,
+                    "size": 3,
+                    "folded": [
+                        "oss/calendar-ui#311",
+                        "oss/calendar-ui#312"
+                    ]
+                },
+                "preflight": {
+                    "state": "ready",
+                    "verdict": "skim",
+                    "risk": "low",
+                    "summary": "Moves the date picker and its tests into packages/date-picker with no behaviour change; the app imports it from there.",
+                    "concerns": [],
+                    "notes": 0
+                },
+                "group": "other",
+                "section": "standard",
+                "score": 6,
+                "reason": "close collaborator: 7 PRs in 90 days"
+            },
+            {
+                "id": "acme/api#3051",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 3051,
+                "title": "ref(billing): Read request.user through acting_user_id()",
+                "url": "https://github.com/acme/api/pull/3051",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "CI failing",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+25 \u221212"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-13T01:22:37.843Z",
+                "activity_at": "2026-11-13T01:22:37.843Z",
+                "waiting_since": "2026-11-12T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "section": "standard",
+                "score": 6,
+                "reason": "CI failing"
+            },
+            {
+                "id": "acme/api#3052",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 3052,
+                "title": "ref(issues): Read request.user through acting_user_id()",
+                "url": "https://github.com/acme/api/pull/3052",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "CI failing",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+26 \u221212"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-13T00:22:37.843Z",
+                "activity_at": "2026-11-13T00:22:37.843Z",
+                "waiting_since": "2026-11-12T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "section": "standard",
+                "score": 6,
+                "reason": "CI failing"
+            },
+            {
+                "id": "acme/api#3053",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 3053,
+                "title": "ref(alerts): Read request.user through acting_user_id()",
+                "url": "https://github.com/acme/api/pull/3053",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "today",
+                "why": "CI failing",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "CI red",
+                    "+27 \u221212"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T01:22:37.843Z",
+                "updated_at": "2026-11-12T23:22:37.843Z",
+                "activity_at": "2026-11-12T23:22:37.843Z",
+                "waiting_since": "2026-11-12T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "preflight": {
+                    "state": "none"
+                },
+                "group": "mine",
+                "section": "standard",
+                "score": 6,
+                "reason": "CI failing"
+            }
+        ],
+        "fyi": [
+            {
+                "id": "acme/api#4040",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4040,
+                "title": "Move rate limits into the gateway",
+                "url": "https://github.com/acme/api/pull/4040",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "later",
+                "why": "conflicts with main",
+                "demoted": "quiet for 3 weeks",
+                "board": "work-mine",
+                "boards": [
+                    "work-mine"
+                ],
+                "chips": [
+                    "conflict",
+                    "+210 \u221295"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-10-10T07:22:37.843Z",
+                "updated_at": "2026-10-24T07:22:37.843Z",
+                "activity_at": "2026-10-24T07:22:37.843Z",
+                "waiting_since": "2026-10-10T07:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved",
+                    "conflict"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "section": "fyi",
+                "score": 3,
+                "reason": "conflicts with main"
+            },
+            {
+                "team_ask": "asked @maintainers",
+                "id": "friends/garden-sensors#18",
+                "kind": "pr",
+                "repo": "friends/garden-sensors",
+                "number": 18,
+                "title": "Add soil moisture calibration",
+                "url": "https://github.com/friends/garden-sensors/pull/18",
+                "author": "jules",
+                "author_bot": false,
+                "by": "jules",
+                "people": [
+                    "jules"
+                ],
+                "stage": "waiting for review",
+                "bucket": "later",
+                "why": "asked of the maintainers team; nobody waits on you",
+                "board": "personal-review",
+                "boards": [
+                    "personal-review"
+                ],
+                "chips": [
+                    "+90 \u221215"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T00:22:37.843Z",
+                "updated_at": "2026-11-11T00:22:37.843Z",
+                "activity_at": "2026-11-11T00:22:37.843Z",
+                "waiting_since": "2026-11-11T05:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": "skim",
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "section": "fyi",
+                "score": 3,
+                "reason": "asked of the maintainers team; nobody waits on you"
+            },
+            {
+                "team_ask": "asked @frontend",
+                "id": "acme/web#2290",
+                "kind": "pr",
+                "repo": "acme/web",
+                "number": 2290,
+                "title": "Migrate settings forms to the new validation library",
+                "url": "https://github.com/acme/web/pull/2290",
+                "author": "jordan",
+                "author_bot": false,
+                "by": "jordan",
+                "people": [
+                    "jordan"
+                ],
+                "stage": "waiting for review",
+                "bucket": "later",
+                "why": "red CI, so it waits on its author",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "CI red",
+                    "+512 \u2212498"
+                ],
+                "ci": "red",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-11T15:22:37.843Z",
+                "updated_at": "2026-11-11T15:22:37.843Z",
+                "activity_at": "2026-11-11T15:22:37.843Z",
+                "waiting_since": "2026-11-11T17:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "ci",
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "section": "fyi",
+                "score": 3,
+                "reason": "red CI, so it waits on its author"
+            },
+            {
+                "team_ask": "asked @ml-team",
+                "id": "acme/api#4118",
+                "kind": "pr",
+                "repo": "acme/api",
+                "number": 4118,
+                "title": "Remove the deprecated /v0/events route",
+                "url": "https://github.com/acme/api/pull/4118",
+                "author": "jordan",
+                "author_bot": false,
+                "by": "jordan",
+                "people": [
+                    "jordan"
+                ],
+                "stage": "waiting for review",
+                "bucket": "later",
+                "why": "added by a bot",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "+12 \u2212240"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-12T17:22:37.843Z",
+                "updated_at": "2026-11-12T17:22:37.843Z",
+                "activity_at": "2026-11-12T17:22:37.843Z",
+                "waiting_since": "2026-11-12T17:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "section": "fyi",
+                "score": 3,
+                "reason": "added by a bot"
+            },
+            {
+                "team_ask": "asked @ml-team",
+                "id": "acme/worker#870",
+                "kind": "pr",
+                "repo": "acme/worker",
+                "number": 870,
+                "title": "Document queue sizing for large tenants",
+                "url": "https://github.com/acme/worker/pull/870",
+                "author": "hana",
+                "author_bot": false,
+                "by": "hana",
+                "people": [
+                    "hana"
+                ],
+                "stage": "draft",
+                "bucket": "fyi",
+                "why": "docs-only draft from your team",
+                "board": "work-review",
+                "boards": [
+                    "work-review"
+                ],
+                "chips": [
+                    "draft",
+                    "+88 \u22120"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": true,
+                "created_at": "2026-11-06T15:22:37.843Z",
+                "updated_at": "2026-11-06T15:22:37.843Z",
+                "activity_at": "2026-11-06T15:22:37.843Z",
+                "waiting_since": "2026-11-07T01:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "push",
+                    "ready"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "request_changes"
+                ],
+                "placed_by": "claude",
+                "section": "fyi",
+                "score": 1,
+                "reason": "docs-only draft from your team"
+            },
+            {
+                "id": "me/dotfiles#41",
+                "kind": "pr",
+                "repo": "me/dotfiles",
+                "number": 41,
+                "title": "Switch the prompt to starship",
+                "url": "https://github.com/me/dotfiles/pull/41",
+                "author": "me",
+                "author_bot": false,
+                "by": "you",
+                "people": [
+                    "me"
+                ],
+                "stage": "waiting for review",
+                "bucket": "fyi",
+                "why": "no action needed",
+                "board": "personal-mine",
+                "boards": [
+                    "personal-mine"
+                ],
+                "chips": [
+                    "+30 \u221252"
+                ],
+                "ci": "green",
+                "review": "required",
+                "draft": false,
+                "created_at": "2026-11-07T11:22:37.843Z",
+                "updated_at": "2026-11-09T03:22:37.843Z",
+                "activity_at": "2026-11-09T03:22:37.843Z",
+                "waiting_since": "2026-11-07T11:22:37.843Z",
+                "new": false,
+                "pinned": false,
+                "status": "active",
+                "snooze_until": null,
+                "snooze_when": null,
+                "wake_on": [
+                    "approved"
+                ],
+                "verdict": null,
+                "resolved": null,
+                "resolved_at": null,
+                "inflight": false,
+                "actions": [
+                    "close",
+                    "draft"
+                ],
+                "placed_by": "claude",
+                "section": "fyi",
+                "score": 1,
+                "reason": "no action needed"
+            }
+        ]
+    },
+    "first_pass": null
+}
