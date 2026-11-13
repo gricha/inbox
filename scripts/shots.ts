@@ -5008,6 +5008,26 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
+    // ↓ and ↑ on the Inbox move between rows (focus selects), from the first; the page scrolls only to keep the row in view.
+    name: "rows-by-arrows",
+    go: async (page) => {
+      await at("#/")(page);
+      await page.mouse.click(5, 300); // nothing focused, as after opening the window
+      const ids: (string | null)[] = [];
+      for (const row of await page.locator(".queue .line[data-id]").all()) ids.push(await row.getAttribute("data-id"));
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("ArrowUp");
+      const sel = await page.locator(".queue .line.sel").getAttribute("data-id");
+      if (sel !== ids[1]) failures.push(`rows-by-arrows: ↓↓↓↑ selects ${sel}, not the second row ${ids[1]}`);
+      const scrolled = await page.evaluate("window.scrollY");
+      if (scrolled !== 0) failures.push(`rows-by-arrows: the page scrolled to ${String(scrolled)} for its second row`);
+      await page.waitForTimeout(200);
+    },
+    after: fresh,
+  },
+  {
     // Copy GitHub link in a row's menu: the PR's GitHub URL on the clipboard (stubbed), and a quiet toast.
     name: "row-menu-copy-github-link",
     go: async (page) => {

@@ -1325,12 +1325,31 @@ export function App() {
     }
   }
 
+  // ↓ and ↑ on a list page move to the row after or before the focused one (else the selected one; with neither, the first or
+  // last) and focus it, which selects it; Enter opens it. False where there's no list, so the page scrolls as usual.
+  function stepRow(by: 1 | -1): boolean {
+    if (!LIST_PAGES.has(route.name) && route.name !== "inflight") return false;
+    if (document.activeElement?.closest(".beside, .chat, .popover")) return false; // they scroll or read their own arrows
+    const rows = [...document.querySelectorAll<HTMLElement>(".line[data-id] .row-main")].filter((b) => !b.closest(".beside"));
+    if (!rows.length) return false;
+    const idOf = (b: Element) => b.closest<HTMLElement>(".line[data-id]")?.dataset.id;
+    const on = document.activeElement?.closest(".line[data-id]");
+    const at = rows.findIndex((b) => (on ? b.closest(".line[data-id]") === on : idOf(b) === selected));
+    const to = rows[at < 0 ? (by > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, at + by))];
+    to?.focus({ preventScroll: LIST_PAGES.has(route.name) }); // the selection's own scroll keeps a group's heading in view
+    return true;
+  }
+
   // Esc is the one key: on a list it closes the item opened in place, then clears the filter; a Settings view goes back to its
   // part; then it goes back to the Inbox.
   const onKey = (e: KeyboardEvent) => {
-    if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey && !menuAt) {
+      if (stepRow(e.key === "ArrowDown" ? 1 : -1)) e.preventDefault();
+      return;
+    }
+    if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
     if (route.name === "review" || route.name === "inquiry") return; // they read their own Esc
     const onList = LIST_PAGES.has(route.name); // where the filter is drawn
     const part = route.name === "settings" ? settingsBack(route.section) : null;

@@ -10,7 +10,7 @@ What each page does and says: [docs/ui.md](docs/ui.md). Behaviour and the API: [
 - **State lives in the desk; clients only render.** `src/desk.ts` decides what's on the queue, its order and what notifies. The window, tray, CLI, MCP and notifications all show the same state.
 - **Never hold back the action an item is there for.** Anything on the Inbox can be acted on from the desk.
 - **Automate before adding pages.** New behaviour becomes a rule or a setting, not a new page.
-- **Mouse first.** Every action is a click named in words: a button, a link or a row's right-click menu. Only platform keys work (Esc, ⌘↵, ⌘S, Tab, ⌘1 to ⌘4, ⌘[ and ⌘]), and the window names a key only in its button's tooltip.
+- **Mouse first.** Every action is a click named in words: a button, a link or a row's right-click menu. Only platform keys work (Esc, ⌘↵, ⌘S, Tab, ↓ and ↑ on a list, ⌘1 to ⌘4, ⌘[ and ⌘]), and the window names a key only in its button's tooltip.
 - **Colour only for information.** A calm palette. Colour marks CI failing, a conflict, changes requested, an AI review's risk, and calls to action (the accent). Lists are tables, sentence case, no boxed chips.
 - **Problems with the system are bubbles.** The desk offline, a failed sync, the agent logged out, broken rules or a refused action show as a bubble at the window's bottom right. What belongs to an item (its CI, its AI review failing) stays on the item.
 - **Look before calling a UI change done.** Run `npm run shots` and look at `.shots/` in light and dark, each theme and each size (`-- --only queue,later` shoots just those). [docs/visual.md → Checking a design change](docs/visual.md#checking-a-design-change) says what to look at; the `design-check` workflow runs it.
