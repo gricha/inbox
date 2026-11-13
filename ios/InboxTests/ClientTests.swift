@@ -180,11 +180,32 @@ final class ClientTests: XCTestCase {
     XCTAssertEqual(StubProtocol.requests().map { "\($0.httpMethod ?? "") \($0.url?.path ?? "")" }, ["GET /api/inquiries/q1c0ffee"])
   }
 
-  // The stream never asks for the desk's notifications: ?notify=1 would take them away from its computer.
-  func testTheEventStreamsRequest() {
-    let req = client().request("GET", "/api/events")
-    XCTAssertEqual(req.url?.absoluteString, "https://desk.tail1234.ts.net/api/events")
-    XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer inbox_test")
+  // The stream as events() itself asks for it: never ?notify=1, which would take the desk's notifications away from its
+  // computer, and with the device's token. One value per update; a ping or any other event is not a cue to read.
+  func testTheEventStreamYieldsOncePerUpdate() async throws {
+    let frames = "event: update\ndata: {\"rev\":1}\n\n: ping\n\nevent: notify\ndata: {}\n\nevent: omarchy\ndata: null\n\nevent: update\ndata: {\"rev\":2}\n\n"
+    StubProtocol.reset(["/api/events": Answer(type: "text/event-stream", body: frames)])
+    var updates = 0
+    for try await _ in client().events() { updates += 1 }
+    XCTAssertEqual(updates, 2)
+    let sent = StubProtocol.requests()
+    XCTAssertEqual(sent.count, 1)
+    XCTAssertEqual(sent[0].url?.absoluteString, "https://desk.tail1234.ts.net/api/events")
+    XCTAssertEqual(sent[0].value(forHTTPHeaderField: "Authorization"), "Bearer inbox_test")
+    XCTAssertEqual(sent[0].httpMethod, "GET")
+  }
+
+  // Whatever answers the stream that isn't the desk's (Tailscale's page, a refusal) ends it with an error, so the store reads and tries again.
+  func testAStreamThatIsNotTheDesksThrows() async {
+    for answer in [Answer(type: "text/html", body: "event: update\n\n"), Answer(status: 403, type: "text/event-stream", body: "event: update\n\n")] {
+      StubProtocol.reset(["/api/events": answer])
+      do {
+        for try await _ in client().events() { XCTFail("no update from what isn't the desk's stream") }
+        XCTFail("it should throw")
+      } catch {
+        XCTAssertEqual(error as? APIError, .notDesk)
+      }
+    }
   }
 }
 
