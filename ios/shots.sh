@@ -19,6 +19,12 @@ PATH="/opt/homebrew/bin:$PATH"
 UDID=${SHOTS_UDID:-$(xcrun simctl list devices booted | sed -n 's/.*(\([0-9A-F-]\{36\}\)) (Booted).*/\1/p' | head -1)}
 [ -n "$UDID" ] || { echo "No booted simulator: open Simulator (or xcrun simctl boot \"iPhone 17 Pro\") first." >&2; exit 1; }
 
+# A desk already on the port (a mock started by hand, with whatever was done to it since) would be shot in the mock's place.
+if curl -fs "$DESK/health" >/dev/null 2>&1; then
+  echo "Something already answers on port $PORT: stop it first (or set SHOTS_PORT), so the shots are of a fresh mock." >&2
+  exit 1
+fi
+
 echo "Building…"
 mkdir -p "$HERE/.build"
 xcodebuild -project "$HERE/Inbox.xcodeproj" -scheme Inbox -configuration Debug \
@@ -33,6 +39,7 @@ cleanup() {
   kill "$MOCK" 2>/dev/null || true
   xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
   xcrun simctl status_bar "$UDID" clear >/dev/null 2>&1 || true
+  xcrun simctl ui "$UDID" appearance light >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM
 i=0
@@ -83,5 +90,4 @@ wanted settings && shot settings -deskURL "$DESK" -settings
 # A desk that isn't there: nothing listens on port 9.
 wanted offline && shot offline -deskURL "http://localhost:9"
 
-xcrun simctl ui "$UDID" appearance light
 echo "Wrote $OUT"

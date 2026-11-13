@@ -71,10 +71,13 @@ ios/shots.sh inbox item-pr   # only these
 It builds, installs on the booted simulator, starts the mock on port 47841 (and stops it), and writes
 `ios/.shots/<state>-<light|dark>.png` for: `connect`, `connect-error`, `inbox`, `inbox-scrolled`, `inbox-empty`,
 `blocked`, `merging`, `archive`, `item-pr` (with an AI review), `item-issue`, `question`, `session`, `settings` and
-`offline` (a desk that isn't there). Look at them after any change here, as `npm run shots` is looked at for the window:
-clipped or cut text, weights (a title is 500, a heading 650, a row's facts 400), the facts line when it runs out of
-room, both appearances, and the top and bottom edges. What a shot can't show (the page menu, a row's swipe and long
-press, the toast's Undo, pull to refresh), try by hand against the mock.
+`offline` (a desk that isn't there). It won't shoot while something already answers on that port (a mock you started by
+hand has whatever you did to it since): stop that first, or set `SHOTS_PORT`.
+
+Look at them after any change here, as `npm run shots` is looked at for the window: clipped or cut text, weights (a
+title is 500, a heading 650, a row's facts 400), the facts line when it runs out of room, both appearances, and the top
+and bottom edges. What a shot can't show (the page menu, a row's swipe and long press, the toast's Undo, pull to
+refresh), try by hand against the mock.
 
 ## On a real phone
 
