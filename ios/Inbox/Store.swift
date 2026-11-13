@@ -251,6 +251,9 @@ final class Store {
     stopLive()
     guard let client else { return }
     live = Task { [weak self] in
+      if Task.isCancelled { return }
+      // Read first: a desk that doesn't answer (its computer asleep) holds the stream's request for a minute before it fails.
+      await self?.load()
       var wait = 1.0
       while !Task.isCancelled {
         do {

@@ -22,6 +22,7 @@ final class StubProtocol: URLProtocol {
     var type = "application/json"
     var body = "{}"
     var error: URLError.Code?
+    var hangs = false  // never answers, as a computer asleep on the tailnet
   }
 
   nonisolated(unsafe) static var answers: [String: Answer] = [:]  // by path
@@ -52,6 +53,7 @@ final class StubProtocol: URLProtocol {
       StubProtocol.seen.append(request)
       return StubProtocol.answers[request.url?.path ?? ""]
     }
+    if answer?.hangs == true { return }
     guard let answer, answer.error == nil, let url = request.url else {
       client?.urlProtocol(self, didFailWithError: URLError(answer?.error ?? .cannotConnectToHost))
       return

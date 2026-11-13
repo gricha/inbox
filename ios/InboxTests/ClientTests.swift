@@ -352,6 +352,20 @@ final class StoreTests: XCTestCase {
     XCTAssertEqual(store.inboxCount, 29)
   }
 
+  // Coming to the front reads at once: it doesn't wait for the event stream, which a sleeping desk holds for a minute.
+  func testGoingLiveReadsBeforeTheStreamAnswers() async throws {
+    StubProtocol.reset(["/api/pair": pair])
+    let store = Store(defaults: defaults, session: StubProtocol.session())
+    _ = await store.connect(typed: address, code: "ABCD-2345")
+    store.stopLive()
+    let ok = { (name: String) in StubProtocol.Answer(body: String(decoding: try Fixture.data(name), as: UTF8.self)) }
+    StubProtocol.reset(["/api/events": .init(hangs: true), "/api/overview": try ok("overview"), "/api/queue": try ok("queue")])
+    store.startLive()
+    for _ in 0..<150 where store.queue == nil { try await Task.sleep(for: .milliseconds(20)) }
+    store.stopLive()
+    XCTAssertEqual(store.inboxCount, 29)
+  }
+
   func testDisconnectForgetsTheTokenAndTheAddress() async {
     StubProtocol.reset(["/api/pair": pair])
     let store = Store(defaults: defaults, session: StubProtocol.session())
