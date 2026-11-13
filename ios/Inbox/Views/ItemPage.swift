@@ -261,10 +261,11 @@ struct ItemPage: View {
     .padding(.top, 4)
   }
 
-  // Done, Snooze and Mute take it off its list: back to the list, where the toast offers Undo.
+  // What takes it off its list goes back to the list, where the toast offers Undo; anything else stays on its page.
   private func act(_ c: Card, _ action: String, _ snooze: SnoozeOption? = nil) {
+    let leaves = store.leaves(c.id, action)
     store.act(c.id, name: c.shortRef, action, snooze: snooze)
-    if ["done", "snooze", "mute"].contains(action), !store.path.isEmpty { store.path.removeLast() }
+    if leaves, !store.path.isEmpty { store.path.removeLast() }
   }
 
   // The window's call to action for this item, which only the desk's own window may press: said once, plainly.

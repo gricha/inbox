@@ -291,10 +291,18 @@ final class Store {
 
   // MARK: Acting
 
+  // Whether an action takes the row off its list, as the window has it: Done, Snooze and Mute do, to an active item.
+  // A resolved one stays under the Archive whatever you do to it, and so does one already snoozed or muted.
+  func leaves(_ id: String, _ action: String) -> Bool {
+    guard ["done", "snooze", "mute"].contains(action) else { return false }
+    guard let c = card(id) else { return true }  // a session
+    return c.active && c.resolved == nil
+  }
+
   // done, snooze, mute, unmute, restore: what a paired device may do. The row leaves at once, and comes back if the desk refuses.
   func act(_ id: String, name: String, _ action: String, snooze: SnoozeOption? = nil) {
     guard let client else { return }
-    let leaves = ["done", "snooze", "mute"].contains(action)
+    let leaves = leaves(id, action)
     if leaves { withAnimation(.easeOut(duration: 0.2)) { _ = leaving.insert(id) } }
     Task {
       do {

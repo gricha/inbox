@@ -387,6 +387,35 @@ final class StoreTests: XCTestCase {
     XCTAssertEqual(store.inboxCount, 29)
   }
 
+  // As the window: Done, Snooze and Mute take an active item off its list; a resolved or already cleared one stays put.
+  func testWhatLeavesItsList() async throws {
+    StubProtocol.reset(["/api/pair": pair])
+    let store = Store(defaults: defaults, session: StubProtocol.session())
+    _ = await store.connect(typed: address, code: "ABCD-2345")
+    store.stopLive()
+    let ok = { (name: String) in StubProtocol.Answer(body: String(decoding: try Fixture.data(name), as: UTF8.self)) }
+    StubProtocol.reset(["/api/overview": try ok("overview"), "/api/queue": try ok("queue")])
+    await store.load()
+    for action in ["done", "snooze", "mute"] {
+      XCTAssertTrue(store.leaves("acme/api#4127", action), "an Inbox row")
+      XCTAssertFalse(store.leaves("acme/web#2284", action), "merged: it stays in the Archive")
+      XCTAssertFalse(store.leaves("acme/api#4088", action), "already snoozed")
+      XCTAssertTrue(store.leaves("session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21", action), "a session")
+    }
+    for action in ["restore", "unmute", "seen"] { XCTAssertFalse(store.leaves("acme/api#4127", action)) }
+
+    // The row of a resolved item is still there while the desk has the action.
+    StubProtocol.reset([
+      "/api/act": .init(body: #"{"ok":true,"state":{"id":"acme/web#2284"},"undo_seq":7}"#), "/api/overview": try ok("overview"), "/api/queue": try ok("queue"),
+    ])
+    store.act("acme/web#2284", name: "web#2284", "done")
+    XCTAssertFalse(store.leaving.contains("acme/web#2284"))
+    store.act("acme/api#4127", name: "api#4127", "done")
+    XCTAssertTrue(store.leaving.contains("acme/api#4127"))
+    for _ in 0..<150 where !store.leaving.isEmpty || store.toast == nil { try await Task.sleep(for: .milliseconds(20)) }
+    XCTAssertEqual(store.toast?.undo, 7)
+  }
+
   func testDisconnectForgetsTheTokenAndTheAddress() async {
     StubProtocol.reset(["/api/pair": pair])
     let store = Store(defaults: defaults, session: StubProtocol.session())
