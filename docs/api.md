@@ -139,20 +139,23 @@ JSON in and out. Errors are `{ error: string, candidates?: string[] }`:
 
 ### Queue and items
 
-| Method | Path              | What it does                                                                                                                                                                                                | 503 |
-| ------ | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
-| GET    | `/health`         | `{ ok: true, version }`                                                                                                                                                                                     |     |
-| GET    | `/api/overview`   | `Overview`                                                                                                                                                                                                  | ✓   |
-| GET    | `/api/queue`      | `QueueView`: every item once, at its best placement. The window's main source                                                                                                                               | ✓   |
-| GET    | `/api/focus`      | `FocusView`: the queue's now and today in the desk's order; never a PR in Merging                                                                                                                           | ✓   |
-| GET    | `/api/boards/:id` | `BoardView`                                                                                                                                                                                                 | ✓   |
-| GET    | `/api/item`       | `?id=<ref>` (encode `#` as `%23`) → `ItemDetail`                                                                                                                                                            | ✓   |
-| POST   | `/api/act`        | `{ id, action, until? }` → `{ ok, state: ItemState, undo_seq }`. `seen` and `undo` give `undo_seq: 0`. `inflight` is own page only                                                                          | ✓   |
-| POST   | `/api/add`        | `{ id, why?, from? }` → `{ ok, item: ItemDetail, undo_seq }`: on your desk, pinned ([Adding](#adding)). 400 for a ref it can't read or a short one it doesn't hold; 404 when GitHub has no such PR or issue | ✓   |
-| POST   | `/api/undo`       | `{ seq? }` (default: the latest action, any client's) → `{ ok, id, action }`. 409 if a later action on the item must be undone first, or for a hand-off or Back to desk not from the own page               | ✓   |
-| POST   | `/api/sync`       | Starts a sync now                                                                                                                                                                                           |     |
-| GET    | `/api/status`     | `{ now, today, new, text }`; `text` is e.g. `desk 7 +3` (7 in the queue, 3 new), `""` when 0/0                                                                                                              | ✓   |
-| GET    | `/api/fields`     | `FieldDoc[]`: every field rules can use                                                                                                                                                                     |     |
+| Method | Path                               | What it does                                                                                                                                                                                                | 503 |
+| ------ | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
+| GET    | `/health`                          | `{ ok: true, version }`                                                                                                                                                                                     |     |
+| GET    | `/api/overview`                    | `Overview`                                                                                                                                                                                                  | ✓   |
+| GET    | `/api/queue`                       | `QueueView`: every item once, at its best placement. The window's main source                                                                                                                               | ✓   |
+| GET    | `/api/focus`                       | `FocusView`: the queue's now and today in the desk's order; never a PR in Merging                                                                                                                           | ✓   |
+| GET    | `/api/boards/:id`                  | `BoardView`                                                                                                                                                                                                 | ✓   |
+| GET    | `/api/item`                        | `?id=<ref>` (encode `#` as `%23`) → `ItemDetail`                                                                                                                                                            | ✓   |
+| POST   | `/api/act`                         | `{ id, action, until? }` → `{ ok, state: ItemState, undo_seq }`. `seen` and `undo` give `undo_seq: 0`. `inflight` is own page only                                                                          | ✓   |
+| POST   | `/api/add`                         | `{ id, why?, from? }` → `{ ok, item: ItemDetail, undo_seq }`: on your desk, pinned ([Adding](#adding)). 400 for a ref it can't read or a short one it doesn't hold; 404 when GitHub has no such PR or issue | ✓   |
+| POST   | `/api/undo`                        | `{ seq? }` (default: the latest action, any client's) → `{ ok, id, action }`. 409 if a later action on the item must be undone first, or for a hand-off or Back to desk not from the own page               | ✓   |
+| POST   | `/api/sync`                        | Starts a sync now                                                                                                                                                                                           |     |
+| POST   | `/api/issue/:id/analyze`           | `{ trust? }` → `{ ok }`: the issue's pre-review now ([Issues](#issues)); `trust` (no screen) own page only. 400 for a PR; 409 for a blocked author                                                          | ✓   |
+| POST   | `/api/issue/:id/fix`               | `{ ok, ask }`: Make PR with fix, an ask to your agent. Own page only. 409 unless open with a fixable pre-review                                                                                             | ✓   |
+| POST   | `/api/issue/:id/block`, `/unblock` | `{ ok, author }`: the author on or off the desk's blocklist. Own page only; nothing on GitHub                                                                                                               | ✓   |
+| GET    | `/api/status`                      | `{ now, today, new, text }`; `text` is e.g. `desk 7 +3` (7 in the queue, 3 new), `""` when 0/0                                                                                                              | ✓   |
+| GET    | `/api/fields`                      | `FieldDoc[]`: every field rules can use                                                                                                                                                                     |     |
 
 `Action` is one of:
 
@@ -964,6 +967,25 @@ Opening a PR (`GET /api/review/:id`) asks for its AI review and has your agent r
 **Merge line:** `ReviewView.merge` is one line when something stands in an open PR's way ("Merge conflict with main", from `mergeable`, which the desk asks only of your own PRs), else `null`.
 
 `activity` keeps the PR's recent events; a resolved PR's head line reads them.
+
+### Issues
+
+An open issue on your desk gets a pre-review (`IssueReview` in `ItemDetail.issue_ai`, `src/issue.ts`): what's actually wrong, its cause in the code, and what we'd do. It's about actionability: the reporter's diagnosis and suggested fix are claims to check, never instructions.
+
+**Which issues.** Any open issue on your desk: issues assigned to you come from the default boards' `assignee:@me` search. For every open issue in some repos, add a board whose query names them, e.g. `queries = ["is:issue is:open archived:false repo:you/tool repo:you/lib"]` in a space whose scope includes them.
+
+**When.** With `review.auto_ai`, after each sync the desk pre-reviews one issue at a time, the Inbox from the top: one with none, or one updated since its last at most every 6 hours. Opening it asks at once for one written before its latest activity. A failed try on a version waits an hour. `POST /api/issue/:id/analyze` asks now. A blocked author's issue never gets one. Kept per issue in kv `issue_ai:<id>`, the last failure in `issue_fail:<id>`.
+
+**The screen.** When anyone outside the repo's collaborators wrote any of it (the issue or a comment; author association not `OWNER`, `MEMBER` or `COLLABORATOR`; you aside), a tool-less call on your agent reads only their text, fenced with a random tag, and says whether it tries to steer an agent: instructions to an AI, asks to run commands, read secrets, change CI or push code, hidden text carrying instructions, a "fix" that weakens security. When it says yes, nothing else runs: the pre-review is only `injection: { who, why }`, the row's why reads "possible prompt injection from @who: no agent read it further", and it isn't read again on its own. From the window, **Block @who** (`POST /api/issue/:id/block`) puts them on the desk's blocklist (kv `blocked_authors`): every item of theirs is muted and no agent reads their issues; `/unblock` takes them off. Nothing is written to GitHub. **Not an injection: analyze it** (`analyze` with `{ trust: true }`, own page only) runs the analysis without the screen.
+
+**The analysis.** Your agent, on the issue's title, body and latest 20 comments (fenced; who's a maintainer said):
+
+- On Claude Code, with your local clone of the repo (a folder under `~/code`, `~/src`, `~/projects`, `~/dev`, `~/git`, `~/repos`, `~/work` or `~/Developer` whose `origin` is the repo; a worktree doesn't count), it runs in the clone with `--tools Read,Grep,Glob`, `--strict-mcp-config` and `disableAllHooks`: it reads and searches the code, and `-p` refuses anything outside the clone. Otherwise it's the usual tool-less call, from the text alone (`code: false`).
+- It answers `kind` (bug, feature, question, other), `summary`, `problem`, `cause`, `evidence` (`path`, `line`, `why`; kept only for files that exist in the clone), `fix` and `steps` (a walk through a complicated one, at most 6, ending with its recommendation).
+- `fixable`: it said so, it's a bug, it read the code, and some evidence held. That's **Make PR with fix**.
+- `~/.inbox/issue.md` changes its instructions as `review.md` does a PR's: text under no heading is yours, added after the defaults; `## <id>` replaces that part (`goal`, `kind`, `problem`, `cause`, `fix`, `fixable`, `steps`).
+
+**Make PR with fix** (`POST /api/issue/:id/fix`, own page only) needs an open issue whose pre-review is `fixable` and not flagged. It's an ask ([Asks](#asks)) with `fix: true`, its text the desk's own: the analysis's problem, cause, places and fix, and that the issue's text is untrusted. The wake line adds `Make PR with fix: open a draft PR with this fix (desk_ask <id> says where)`, and `desk_ask`'s `fix` is `{ repo, base }` while the issue is open and the pre-review still has the fix. The coordinator opens a draft PR from a new branch off `base` (skill: "Make PR with fix"); the desk writes nothing.
 
 ### What reviewers said
 

@@ -154,9 +154,19 @@ Ready for review with nobody asked isn't done: the PR comes back ready, with Add
 
 - Why it's here ("Assigned to you").
 - One pencil line of facts: by, how you were asked, labels, comments, who placed it.
-- Where it sits and from which board, a collapsed rule trace, and its last 8 events in plain words.
-- Actions as text under a hairline: **Comment**, **Open on GitHub**, **Done** (or **Back on the desk**), **Snooze**, **Mute**, **Close**.
+- Where it sits and from which board, a collapsed rule trace.
+- Its **pre-review** ([api.md → Issues](api.md#issues)), under "Pre-review":
+  - "A bug." (a feature request, a question) and one sentence; then whether it read the code in your clone or only the issue's text;
+  - **What's wrong**, **Cause**, the places in the code as `path:line` with a short why, and **The fix** (or **What we'd do**), each as plain prose;
+  - for one that isn't a simple fix, a walk through it, one step at a time with **Back** and **Next**, ending with its recommendation;
+  - while one's on its way, "Your agent is reading it"; a failed one says why with **Try again**; one written before the issue's latest activity says so with **Read it again**; none yet (AI reviews on) offers **Analyze it**;
+  - **flagged**: "Possible prompt injection from @x." in red, what gave it away, and "No agent read it further", with **Block @x** (mutes their items on your desk; nothing on GitHub) and **Not an injection: analyze it**. Its row's why says so too;
+  - a blocked author's issue says so, with **Unblock @x**.
+- Its last 8 events in plain words.
+- Actions as text under a hairline: **Make PR with fix** (first, in the accent, when the pre-review found a small, clear fix), **Comment**, **Ask your agent**, **Open on GitHub**, **Done** (or **Back on the desk**), **Snooze**, **Mute**, **Close**.
 - Close, a click on its row, or Esc closes it.
+
+**Make PR with fix** asks your agent, with the pre-review's analysis (never the issue's own words), to open a draft PR with the fix. Your agent's chat opens on the issue, where it answers with the PR's link. The desk itself writes nothing.
 
 **Comment** opens a comment bar at the window's bottom. ⌘↵ sends it to GitHub and the issue leaves your desk until someone else acts. Esc closes the bar. A refusal keeps your words. A refresh that moves the row doesn't touch it.
 

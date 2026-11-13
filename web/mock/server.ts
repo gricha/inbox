@@ -65,6 +65,7 @@ import type {
   CoordinatorView,
   InflightView,
   Check,
+  IssueReview,
   Item,
   QueueView,
   ItemDetail,
@@ -2933,8 +2934,67 @@ function detail(r: Rec): ItemDetail {
       .toReversed()
       .slice(0, 8),
     stack: stackOf(r.id),
+    ...(item.kind === "issue" && {
+      issue_ai: ISSUE_PRE[r.id] ? { ...ISSUE_PRE[r.id]!, updated_at: item.updated_at } : null,
+      issue_ai_state: null,
+      issue_ai_error: null,
+      blocked_author: false,
+    }),
   };
 }
+
+// Canned issue pre-reviews: a small bug with its fix, and one to walk through.
+const preOf = (o: Partial<IssueReview>): IssueReview => ({
+  updated_at: "",
+  at: iso(1),
+  model: "claude-opus-5[1m]",
+  injection: null,
+  kind: "bug",
+  summary: "",
+  problem: "",
+  cause: "",
+  evidence: [],
+  fix: "",
+  fixable: false,
+  steps: [],
+  code: true,
+  base: "main",
+  ...o,
+});
+const ISSUE_PRE: Record<string, IssueReview> = {
+  "acme/worker#860": preOf({
+    summary: "Batches over 10,000 rows run the worker out of memory.",
+    problem: "The batch loader reads every row of a batch into one array before it writes any, so memory grows with the batch.",
+    cause: "`loadBatch()` in `src/batch.ts` collects the cursor with `toArray()`; `chunkSize` is read from config but never used.",
+    evidence: [
+      { path: "src/batch.ts", line: 42, why: "collects the whole cursor" },
+      { path: "src/config.ts", line: 18, why: "chunkSize, set to 500, unused" },
+    ],
+    fix: "Iterate the cursor in `chunkSize` chunks in `loadBatch()` and write each chunk before reading the next.",
+    fixable: true,
+  }),
+  "acme/api#4071": preOf({
+    summary: "Search keeps serving the old index for a few minutes after a reindex.",
+    problem: "After a reindex, queries hit the old index until the alias cache expires, so results are stale for up to five minutes.",
+    cause: "The search client caches the alias lookup for 300 seconds and nothing clears it when the reindex swaps the alias.",
+    evidence: [{ path: "search/client.py", line: 77, why: "alias cached with a 300s TTL" }],
+    fix: "Clear the alias cache when the reindex job swaps the alias, or look the alias up per request.",
+    steps: [
+      {
+        title: "Where the stale results come from",
+        body: "The client resolves the `products` alias once and keeps the answer for 5 minutes. A reindex swaps the alias to the new index, but the client keeps querying the old one until its cache expires.",
+      },
+      {
+        title: "Two ways to fix it",
+        body: "Clearing the cache from the reindex job is precise but couples the job to every client process. Resolving the alias per request costs one extra round trip on each search, about 2 ms.",
+      },
+      {
+        title: "Recommendation",
+        body: "Have the reindex job publish an alias-changed event the clients already listen for, and clear the cache on it. It keeps searches fast and needs no new infrastructure.",
+      },
+    ],
+  }),
+};
 
 // ---------------------------------------------------------------------------
 // The review view: canned diffs and a canned agent. MOCK_ANALYZE_FAIL=1 fails like a missing CLI; MOCK_AI_MS is how long it takes.
@@ -4153,6 +4213,13 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return { ...q, card };
   }
   if (route === "POST /api/ask") return { ok: true, ask: addAsk(await readBody(req)) };
+  const issueAct = /^POST \/api\/issue\/(.+)\/(analyze|fix|block|unblock)$/.exec(route);
+  if (issueAct) {
+    const r = resolve(decodeURIComponent(issueAct[1]!));
+    if (issueAct[2] === "fix") return { ok: true, ask: addAsk({ text: `Make a PR with a fix for ${r.id}.`, item_id: r.id }) };
+    if (issueAct[2] === "block" || issueAct[2] === "unblock") return { ok: true, author: itemOf(r).author };
+    return { ok: true };
+  }
   if (route === "POST /api/undo") {
     const body = await readBody(req);
     return { ok: true, id: undo(body.seq as number | undefined) };
