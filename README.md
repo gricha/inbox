@@ -200,6 +200,10 @@ desk pair            # on the desk's computer
 
 Settings → This device lists paired devices; **Revoke** shuts one out at once. The desk's own computer needs no token. How requests are checked: [docs/api.md → Security model](docs/api.md#security-model).
 
+## On your phone
+
+A small native iPhone app lives in [`ios/`](ios/README.md) (v0, Simulator only so far). It pairs as a device with `desk pair`, shows your Inbox, Blocked, Merging and the Archive, and triages (Done, Snooze, Mute, Undo). Approving, replying, merging and answering an agent stay in the desk's own window. [ios/README.md](ios/README.md) says how to build and run it.
+
 ## Coordinator
 
 The coordinator gets the PRs you hand off merged. The window calls it **your agent**.
