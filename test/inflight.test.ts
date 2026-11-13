@@ -503,21 +503,40 @@ test("Ready for review with nobody asked to review it isn't done: it stays out o
 test("reviewers to pick from are GitHub's for your own PR, without you; anyone else's PR has none", async (c) => {
   const t = await setup([reviewAsk(1), myPr(3, { draft: true })]);
   c.after(t.cleanup);
-  await run(t.desk.sync());
   t.gh.reviewerList = [
     { id: "U_dana", login: "dana", name: "Dana", team: false, suggested: true },
     { id: "U_me", login: "Me", name: "", team: false, suggested: false },
     { id: "T_backend", login: "backend", name: "Backend", team: true, suggested: false },
   ];
+  await run(t.desk.sync());
   const app = createApp(t.desk, 47823);
-  const res = await app.request(`http://127.0.0.1:47823/api/reviewers/${encodeURIComponent("acme/web#3")}?q=%20da`);
-  assert.equal(res.status, 200);
-  assert.deepEqual(
-    ((await res.json()) as { login: string }[]).map((r) => r.login),
-    ["dana", "backend"],
-  );
-  assert.deepEqual(t.gh.reviewerCalls, ["acme/web#3 da"]);
+  const ask = async (q: string) => {
+    const res = await app.request(`http://127.0.0.1:47823/api/reviewers/${encodeURIComponent("acme/web#3")}?q=${q}`);
+    assert.equal(res.status, 200);
+    return ((await res.json()) as { login: string }[]).map((r) => r.login);
+  };
+  assert.deepEqual(await ask(""), ["dana", "backend"]);
+  assert.deepEqual(await ask("%20da"), ["dana"], "narrowed from the whole list GitHub gave for no search");
+  assert.deepEqual(t.gh.reviewerCalls, ["acme/web#3 "], "asked once, as the sync found your draft");
   await assert.rejects(run(t.desk.reviewers("api#1", "")), (e: Error & { status: number }) => e.status === 409);
+});
+
+test("who you can ask is GitHub's answer kept a while: fetched ahead for a PR that needs reviewers, a page-full is asked again as you type", async (c) => {
+  const t = await setup([myPr(3, { ci: "green" })]);
+  c.after(t.cleanup);
+  t.gh.reviewerList = Array.from({ length: 20 }, (_, i) => ({ id: `U_${i}`, login: `dev${i}`, name: "", team: false, suggested: false }));
+  await run(t.desk.sync()); // nobody's asked to review it: its suggestions are fetched now
+  const ask = (q: string) => run(t.desk.reviewers("web#3", q));
+  const [a, b] = await Promise.all([ask(""), ask("")]);
+  assert.equal(a.length, 20);
+  assert.equal(b.length, 20);
+  assert.deepEqual(t.gh.reviewerCalls, ["acme/web#3 "], "fetched with the sync, and shared or kept since");
+  await ask("dev1");
+  await ask("dev1");
+  assert.deepEqual(t.gh.reviewerCalls, ["acme/web#3 ", "acme/web#3 dev1"], "a page-full may hold only some: dev1 is asked, once");
+  t.setNow(new Date(NOW.getTime() + 16 * 60_000));
+  await ask("dev1");
+  assert.equal(t.gh.reviewerCalls.length, 3, "a quarter of an hour on, GitHub is asked again");
 });
 
 test("a refused Ready for review says why, and nothing is logged", async (c) => {

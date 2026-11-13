@@ -347,6 +347,8 @@ type ActError = RefError | Forbidden | Conflict | BadRequest;
 // What a GitHub write the desk sends fails with, besides its own checks: the same write on its way, or GitHub refused it.
 type WriteError = ActError | Stale | Busy | Upstream;
 // What GitHub said, passed on after the desk's words. Its own error is the cause, which nothing reported: Sentry sees it.
+// How long GitHub's answer to who you can ask to review is kept.
+const REVIEWERS_KEEP_MS = 15 * 60_000;
 const upstream =
   (said: string) =>
   (err: GitHubError): Upstream =>
@@ -1102,6 +1104,7 @@ export class Desk {
     this.automations.pump();
     this.notifyNew();
     this.pumpAi();
+    this.warmReviewers();
     this.recheckLogin();
     const kept = new Set(this.store.itemMeta().keys());
     this.store.pruneKv("review:", kept);
@@ -3920,9 +3923,60 @@ export class Desk {
       const e = yield* this.pr(ref);
       if (!e.analysis.signals.me.author) return yield* new Conflict({ message: `${e.item.id} isn't your PR` });
       const me = this.me().toLowerCase();
-      const list = yield* this.gh.api.reviewers(e.item.repo, e.item.number, q.trim()).pipe(Effect.mapError(upstream("")));
+      const list = yield* this.reviewerList(e.item, q.trim());
       return list.filter((r) => r.team || r.login.toLowerCase() !== me);
     });
+  }
+
+  // GitHub's answers to who you can ask, kept a while per PR and search: each takes it a second, and the picker asks as you
+  // type. A search on its way is shared, and one a shorter search answered in full is narrowed here instead.
+  private reviewerAnswers = new Map<string, { at: number; list: Reviewer[] }>();
+  private reviewerRuns = new Map<string, Deferred.Deferred<Reviewer[], Upstream>>();
+
+  private reviewerList(it: Item, q: string): Effect.Effect<Reviewer[], Upstream> {
+    return Effect.suspend(() => {
+      const kept = (s: string) => {
+        const a = this.reviewerAnswers.get(`${it.id}\n${s}`);
+        return a && this.now().getTime() - a.at < REVIEWERS_KEEP_MS ? a.list : undefined;
+      };
+      const hit = kept(q);
+      if (hit) return Effect.succeed(hit);
+      const needle = q.toLowerCase();
+      for (let n = q.length - 1; n >= 0; n--) {
+        const shorter = kept(q.slice(0, n));
+        // Under GitHub's page sizes (20 people, 10 teams), it holds every match.
+        if (shorter && shorter.filter((r) => !r.team).length < 20 && shorter.filter((r) => r.team).length < 10)
+          return Effect.succeed(shorter.filter((r) => r.login.toLowerCase().includes(needle) || r.name.toLowerCase().includes(needle)));
+      }
+      return Deferred.await(this.fetchReviewers(it, q));
+    });
+  }
+
+  private fetchReviewers(it: Item, q: string): Deferred.Deferred<Reviewer[], Upstream> {
+    const key = `${it.id}\n${q}`;
+    const fetch = this.gh.api.reviewers(it.repo, it.number, q).pipe(
+      Effect.mapError(upstream("")),
+      Effect.tap((list) =>
+        Effect.sync(() => {
+          if (this.reviewerAnswers.size >= 500) this.reviewerAnswers.delete(this.reviewerAnswers.keys().next().value!);
+          this.reviewerAnswers.delete(key);
+          this.reviewerAnswers.set(key, { at: this.now().getTime(), list });
+        }),
+      ),
+    );
+    return this.shared(this.reviewerRuns, "reviewers", key, fetch);
+  }
+
+  // Your open PRs nobody's asked to review, drafts too: GitHub's suggestions fetched before you open the picker.
+  private warmReviewers(): void {
+    const snap = this.snapshot();
+    for (const e of snap.entries.values()) {
+      const it = e.item;
+      if (it.kind !== "pr" || it.state !== "open" || !e.analysis.signals.me.author) continue;
+      if (!it.draft && !e.analysis.signals.pr.unasked) continue;
+      const a = this.reviewerAnswers.get(`${it.id}\n`);
+      if (!a || this.now().getTime() - a.at >= REVIEWERS_KEEP_MS / 2) this.fetchReviewers(it, "");
+    }
   }
 
   // ---------------------------------------------------------------- config
