@@ -31,7 +31,7 @@ export interface About {
   spot: Spot | null;
 }
 
-// Your chat with the coordinator on the window's right: every ask about the item, oldest first, each with its answer.
+// Your chat with the coordinator on the window's right: one conversation, every ask oldest first, each with what it was about and its answer.
 export function Chat({
   about,
   review,
@@ -117,7 +117,7 @@ export function Chat({
     );
   }
 
-  const mine = (view?.asks ?? []).filter((a) => a.item_id === about.item);
+  const mine = view?.asks ?? [];
   const answered = mine.filter((a) => a.answer).length;
   // The newest turn's top: your words and the answer's lead, not the end of a long answer.
   useLayoutEffect(() => {
@@ -162,6 +162,14 @@ export function Chat({
               <p className="chat-you">{a.text}</p>
               <p className="chat-meta mine">
                 {sinceText(a.at, now)}
+                {a.item_id && (
+                  <>
+                    {" \u00b7 "}
+                    <a href={`#/review/${encodeURIComponent(a.item_id)}`} title={a.item_id}>
+                      {shortId(a.item_id)}
+                    </a>
+                  </>
+                )}
                 {a.lines && (
                   <>
                     {" \u00b7 "}

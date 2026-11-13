@@ -646,7 +646,7 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 - **Head**: "Your agent", the item it's about, **Close**. Outside a review, a × after the item switches to general asks, keeping what you typed.
 - **The spot**, above the box: "On dana's thread on src/auth.ts:42", "On plan.ts:20–23", "On plan.ts:17–18, removed". Full path and commit in its tooltip. A × drops it so the next ask is about the whole PR. Picking another spot replaces it; leaving the review drops it.
 - **Open questions** from your agent about the item: "Your agent asks: … · Answer".
-- **History**, oldest first: your words on the right with their time and spot; each answer as plain prose (paragraphs, lists, `code`, code blocks, bold; https links shown as URLs; never HTML or images). Each code block has a **Copy** that keeps its ``` fence, ready to paste as a GitHub suggestion.
+- **History**: one conversation, every ask you've sent oldest first, whatever it was about: your words on the right with their time, the PR it was about (a link to its review) and spot; each answer as plain prose (paragraphs, lists, `code`, code blocks, bold; https links shown as URLs; never HTML or images). Each code block has a **Copy** that keeps its ``` fence, ready to paste as a GitHub suggestion.
 - **Under your latest unanswered ask**: "On it", "Queued: …", "Waiting on a permission prompt" (answer it on claude.ai), or "It stopped without answering" with **Wake it**, plus a link to watch it on claude.ai.
 - With nothing asked yet: "Ask or tell it something about web#3: it answers here."
 - It opens at the newest turn's top and returns there on a send and when an answer lands. Shift+Tab from the box reaches the log.
@@ -661,7 +661,7 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 
 ### Behaviour
 
-- It follows you into another PR's review, about that PR, and closes when you leave for any other page.
+- It stays open wherever you go until you close it, and through a reload of the window. In a review it's about that PR; elsewhere it stays about what it was, without a spot.
 - When your agent pushes a change you asked for to your own open PR (not handed off): it stays on your desk; the push counts as your activity; an open `+` box stays pinned to the commit you read; the AI review goes stale; the answer names the commit and says to pull first.
 - If your agent won't start, the chat says so and your words stay.
 - With your agent off (Settings → Agent), no Ask your agent shows. An open chat says so and its box sends nothing.

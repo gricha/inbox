@@ -105,6 +105,7 @@ const go = (r: Route) => {
 type Down = DeskUnreachable | DeskStarting | DeskConfigBroken; // why the API isn't usable right now
 const isDown = (e: ApiError): e is Down => e._tag === "DeskUnreachable" || e._tag === "DeskStarting" || e._tag === "DeskConfigBroken";
 const LIST = "desk.list"; // this device's choice: the list beside a review open or folded
+const CHAT = "desk.chat"; // the chat open in this window, about this item ("" for nothing): kept through a reload
 const DISMISSED = "desk.notices"; // this device's: the notices you dismissed, each as it was then
 function dismissedAtStart(): Dismissed {
   const raw = getStored(DISMISSED);
@@ -184,7 +185,10 @@ export function App() {
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [reviewFrom, setReviewFrom] = useState<ListPage>("queue"); // where Esc goes back to from a review
   const [reviewQuestion, setReviewQuestion] = useState<string | null>(null); // or the agent's question it was opened from
-  const [asking, setAsking] = useState<About | null>(null); // your chat with the coordinator, open
+  const [asking, setAsking] = useState<About | null>(() => {
+    const kept = getStored(CHAT, true);
+    return kept === null ? null : { item: kept || null, spot: null };
+  }); // your chat with the coordinator, open
   const [spot, setSpot] = useState<Spot | null>(null); // where in the open review you last were
   const [pageQuestion, setPageQuestion] = useState<Inquiry | null>(null); // the question page's own copy, kept once it's answered
   const [askWaiting, setAskWaiting] = useState(false); // the open review's latest ask is unanswered (Review says, and unsays it as it goes)
@@ -193,6 +197,9 @@ export function App() {
   const roomy = useWide(1160);
   const crowded = !useWide(1600);
   const chatOpen = !!asking;
+  useEffect(() => {
+    setStored(CHAT, asking ? (asking.item ?? "") : null, true);
+  }, [asking]);
   useEffect(() => {
     setPeek(false);
   }, [chatOpen]);
@@ -330,8 +337,12 @@ export function App() {
       if (LIST_PAGES.has(routeRef.current.name)) left.current = { page: routeRef.current.name, y: window.scrollY };
       setRoute(next);
       setSpot(null); // a review you come back to asks about the PR until you pick a spot in it again
-      // Your chat follows you into another PR's review, and closes when you leave for any other page.
-      setAsking((a) => (a && next.name === "review" ? (a.item === next.id ? a : { item: next.id, spot: null }) : null));
+      // Your chat stays open wherever you go until you close it: in a review it's about that PR, elsewhere about what it was, no spot.
+      setAsking((a) => {
+        if (!a) return a;
+        if (next.name === "review") return a.item === next.id ? a : { item: next.id, spot: null };
+        return a.spot ? { ...a, spot: null } : a;
+      });
     };
     window.addEventListener("hashchange", on);
     return () => {

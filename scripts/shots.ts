@@ -196,7 +196,7 @@ const emptyInbox = async (page: Page, name: string) => {
 };
 // The queue in a fresh page: nothing a changed answer left behind stands in for the next shot's.
 const fresh = async (page: Page) => {
-  await page.evaluate(`location.hash = "#/"`);
+  await page.evaluate(`sessionStorage.removeItem("desk.chat"); location.hash = "#/"`);
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
@@ -3314,9 +3314,13 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await review("acme/api#4154")(page);
       await page.locator(".side-ask").click();
-      await page.locator(".chat-empty").waitFor(); // no asks about it yet: no log to focus
+      await page.locator(".chat-input").waitFor();
       if ((page.viewportSize()?.width ?? 0) <= 1100) await page.locator(".chat-head button", { hasText: "Close" }).click();
-      await page.locator(".rv-side-show").click();
+      await page
+        .locator(".chat")
+        .waitFor({ state: "detached", timeout: 1000 })
+        .catch(() => {});
+      if (await page.locator(".rv-side-show").count()) await page.locator(".rv-side-show").click();
       await page.locator(".chat").waitFor({ state: "detached" });
       await page.locator(".rv-side").waitFor();
     },
@@ -5024,6 +5028,29 @@ const SHOTS: Shot[] = [
       const scrolled = await page.evaluate("window.scrollY");
       if (scrolled !== 0) failures.push(`rows-by-arrows: the page scrolled to ${String(scrolled)} for its second row`);
       await page.waitForTimeout(200);
+    },
+    after: fresh,
+  },
+  {
+    // The chat stays open from a review onto the Inbox and through a reload, about the PR it was on, until you close it.
+    name: "chat-stays",
+    go: async (page) => {
+      await review("acme/api#4154")(page);
+      await page.locator(".side-ask").click();
+      await page.locator(".chat-input").waitFor();
+      await at("#/")(page);
+      if (!(await page.locator(".chat").count())) failures.push("chat-stays: the chat closed on leaving the review");
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      const about = await page
+        .locator(".chat-about")
+        .textContent({ timeout: 5000 })
+        .catch(() => null);
+      if (!about?.includes("4154")) failures.push(`chat-stays: after a reload the chat reads ${JSON.stringify(about)}`);
+      await closeChat(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      if (await page.locator(".chat").count()) failures.push("chat-stays: a closed chat came back on a reload");
     },
     after: fresh,
   },
