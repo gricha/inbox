@@ -194,7 +194,7 @@ struct ItemPage: View {
               if m.review == "approved" { Text("✓").font(.system(size: 12)).foregroundStyle(Theme.green) }
             }
           }
-          .frame(minHeight: 32)
+          .frame(minHeight: 44)
           .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -292,9 +292,10 @@ struct GroupHead: View {
       Text("\(count)").sans(13, 450, tabular: true).foregroundStyle(Theme.pencil)
       Spacer(minLength: 0)
     }
-    // On the sheet, as the heading of the window's two-line list; a plain list's own gap above a heading does the rest.
+    // On the sheet, as the heading of the window's two-line list. One that folds takes a finger, so it's 44pt tall with
+    // its words at the foot: a List gives a heading no touch outside its own frame.
     .padding(.init(top: 4, leading: Theme.pad, bottom: 8, trailing: Theme.pad))
-    .frame(maxWidth: .infinity, alignment: .leading)
+    .frame(maxWidth: .infinity, minHeight: 44, alignment: .bottomLeading)
     .background(Theme.sheet)
     .contentShape(Rectangle())
     .accessibilityElement(children: .combine)

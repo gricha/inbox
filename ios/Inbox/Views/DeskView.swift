@@ -112,6 +112,7 @@ extension View {
 
   func deskList() -> some View {
     listStyle(.plain)
+      .listSectionSpacing(8)  // with a heading's own 44pt, the window's 24 above its words
       .scrollContentBackground(.hidden)
       .background(Theme.sheet)
       .environment(\.defaultMinListRowHeight, 1)
@@ -505,7 +506,9 @@ struct MergingList: View {
             Button {
               openURL(url)
             } label: {
+              // One line of small text: its touch reaches into the room around it.
               Text("Watch on claude.ai").underline(color: Theme.ruleStrong).foregroundStyle(Theme.ink2)
+                .contentShape(Rectangle().inset(by: -13))
             }
             .buttonStyle(.plain)
           }
