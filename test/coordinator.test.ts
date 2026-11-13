@@ -611,6 +611,17 @@ test(
     assert.deepEqual(t.said().slice(1), [
       "In Merging: acme/web#3 (https://github.com/acme/web/pull/3): ready to merge but conflicts: rebase it onto its base, run what's runnable, push with --force-with-lease to its own branch, don't merge it; hand it back if it can't rebase cleanly.",
     ]);
+    // It stays on your Inbox while it's rebased, and its tools are the coordinator's; Hand off for merge makes it a hand-off.
+    const card = () =>
+      Object.values(runSync(t.desk.queue()).sections)
+        .flat()
+        .find((x) => x.id === it.id);
+    assert.deepEqual([card()?.stage, card()?.inflight], ["rebasing", false]);
+    assert.equal(runSync(t.desk.inflightEntry(it.id)).item.id, it.id);
+    runSync(t.desk.act(it.id, "inflight"));
+    const e = t.desk.snapshot().entries.get(it.id)!;
+    assert.deepEqual([e.inflight, e.rebasing, t.desk.merging(it.id).rebase], [true, false, undefined]);
+    assert.equal(card(), undefined, "handed off, it's in Merging");
   },
 );
 

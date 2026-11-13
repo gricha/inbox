@@ -1563,7 +1563,7 @@ They sit beside `pr.waits`, `pr.waiting_on` and `me.owes_reply`. Examples: a tea
 
 1. `pr.blocked && pr.review != 'changes_requested' && !me.owes_reply` goes first, so a change request or a reply you owe stays yours.
 2. A root that blocks others and owes a reply goes to Today ("blocks getsentry#22982 and getsentry#22983; it waits on your reply to markstory, then …"), as does one whose need closed without merging ("needs sentry#1, closed without merging").
-3. Your PRs waiting on reviewers go to Blocked ("waits on a review from sam, @backend and 1 more"), with a merge conflict too ("waits on a review from cvxluo, and a merge conflict fix"). A conflict is only a signal until it's approved, when your agent rebases it. Red CI keeps such a PR out (it has its own rule).
+3. Your PRs waiting on reviewers go to Blocked ("waits on a review from sam, @backend and 1 more"), with a merge conflict too ("waits on a review from cvxluo, and a merge conflict fix"). A conflict is only a signal until it's approved, when your agent rebases it; the PR stays on your Inbox meanwhile (stage "rebasing"), and Hand off for merge still works. Red CI keeps such a PR out (it has its own rule).
 
 A config with the earlier rule, which left out a conflicted PR, gets today's once (`migrateWaitsConflict`, backup in `config.toml.bak`).
 

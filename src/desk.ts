@@ -231,6 +231,7 @@ export interface Entry {
   isNew: boolean;
   resolved: Resolution | null;
   inflight: boolean; // your open PR, handed off for merge: Merging has it, not the queue's buckets
+  rebasing: boolean; // your open PR the desk gave the coordinator only to rebase: it stays on your Inbox meanwhile
   activityAt: string; // its activity, or a later merge of a PR it needs: what done and snoozes compare with
 }
 
@@ -1615,14 +1616,17 @@ export class Desk {
       }
       const isNew = analysis.others_at !== null && analysis.others_at > (state.seen_at ?? baseline);
       const resolved = resolution(item, analysis.signals, this.settings, ctx.teams);
-      const inflight = !!state.inflight_at && item.kind === "pr" && item.state === "open";
+      const theirs = !!state.inflight_at && item.kind === "pr" && item.state === "open";
+      // Rebasing is the coordinator's too, but it stays on your Inbox, where you can still hand it off for merge.
+      const rebasing = theirs && !!merging.get(item.id)?.rebase;
+      const inflight = theirs && !rebasing;
       const freed = deps.get(item.id)?.merged.at(-1)?.at ?? "";
       const activityAt = freed > analysis.activity_at ? freed : analysis.activity_at;
       const status = blocked.has(item.author.toLowerCase()) ? "muted" : statusOf(state, activityAt, now);
       const back = merging.get(item.id)?.handback;
       analysis.signals.me.handed_back =
         !!back && !inflight && status === "active" && item.state === "open" && (state.done_at ?? "") <= back.at;
-      entries.set(item.id, { item, analysis, state, status, isNew, resolved, inflight, activityAt });
+      entries.set(item.id, { item, analysis, state, status, isNew, resolved, inflight, rebasing, activityAt });
     }
     // An open PR waits on you: asked of you or your team, your reply, or your own outside Merging with its next step yours.
     const onYou = (e: Entry) => {
@@ -1874,7 +1878,13 @@ export class Desk {
     // Back on top of your desk; your agent's hand-back says so where its stage would be, as no heading over its row does.
     const back = !e.inflight && snap.needs.has(it.id);
     const handed = back && snap.needs.get(it.id) !== UNASKED;
-    const shown = handed ? "handed back" : sig.blocked && (st === "approved" || st === "waiting for review") ? "blocked" : st;
+    const shown = handed
+      ? "handed back"
+      : e.rebasing
+        ? "rebasing"
+        : sig.blocked && (st === "approved" || st === "waiting for review")
+          ? "blocked"
+          : st;
     const handoff = snap.handed.get(it.id);
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
@@ -3237,7 +3247,7 @@ export class Desk {
             return yield* new Conflict({ message: `only open PRs are handed off for merge; ${id} isn't one` });
           if (!entry.analysis.signals.me.author && entry.item.review_decision !== "approved")
             return yield* new Conflict({ message: `${id} isn't yours, so it's handed off for merge once it's approved` });
-          if (s.inflight_at) return yield* new Conflict({ message: `${id} is in Merging already` });
+          if (s.inflight_at && !entry.rebasing) return yield* new Conflict({ message: `${id} is in Merging already` });
           // Ready for review is yours, so a draft in Merging would wait on you there.
           if (entry.item.draft) return yield* new Conflict({ message: `${id} is a draft: mark it ready for review first` });
           // Nobody would review it, so the coordinator would wait on nothing; a repo that needs no review merges on green CI.
@@ -3673,7 +3683,8 @@ export class Desk {
     return this.store.read(`sitter:${id}`, MergingSchema) ?? {};
   }
 
-  // Your own PR on your desk, ready to merge but for a conflict, goes to your coordinator to rebase until GitHub sees it mergeable.
+  // Your own PR on your desk, ready to merge but for a conflict, goes to your coordinator to rebase until GitHub sees it mergeable;
+  // it stays on your Inbox meanwhile.
   rebaseConflicts(): void {
     if (!this.loaded) return;
     const on = this.settings["agent.coordinator"];
@@ -3716,7 +3727,7 @@ export class Desk {
   inflightEntry(ref: string): Effect.Effect<Entry, RefError | BadRequest | Conflict> {
     return Effect.gen({ self: this }, function* () {
       const e = yield* this.pr(ref);
-      if (!e.inflight) return yield* new Conflict({ message: `${e.item.id} isn't one of your open PRs in Merging` });
+      if (!e.inflight && !e.rebasing) return yield* new Conflict({ message: `${e.item.id} isn't one of your open PRs in Merging` });
       return e;
     });
   }

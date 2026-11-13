@@ -10,7 +10,16 @@ export type ReviewDecision = "approved" | "changes_requested" | "required" | "no
 export type Mergeable = "clean" | "conflict" | "unknown";
 export type ReviewState = "approved" | "changes_requested" | "commented" | "dismissed" | "pending";
 // blocked and handed back: only Desk.card() sets them
-export type Stage = "draft" | "waiting for review" | "changes requested" | "approved" | "blocked" | "handed back" | "merged" | "closed";
+export type Stage =
+  | "draft"
+  | "waiting for review"
+  | "changes requested"
+  | "approved"
+  | "blocked"
+  | "handed back"
+  | "rebasing" // your agent is rebasing it: ready to merge but for a conflict
+  | "merged"
+  | "closed";
 
 // ---------------------------------------------------------------------------
 // What the desk reads of any source's item, stored whole as JSON. Its source is the id's prefix ("notes:1"); a bare id is GitHub's.
@@ -1092,7 +1101,7 @@ export interface InflightRow {
   threads_unresolved: number;
   mergeable: Mergeable;
   draft: boolean; // a draft PR
-  rebase: boolean; // the desk gave it to the coordinator only to rebase (ready to merge but conflicts); it leaves once mergeable
+  rebase: boolean; // the desk gave it to the coordinator only to rebase (ready to merge but conflicts); it stays on your Inbox, not in the window's Merging, and leaves once mergeable
   theirs: boolean; // someone else's approved PR you handed off: the coordinator merges it and nothing else
   blocked_by: { ref: string; waits: string } | null; // another PR must merge first: pr.blocker and pr.blocker_waits
   requires_closed: string[]; // PRs it needs that were closed without merging, as repo#number: pr.requires_closed

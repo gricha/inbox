@@ -126,7 +126,7 @@ One line, columns lining up row to row:
 | Why            | In pencil, `Card.reason`: a hand-back's words, the urgent criterion's name, an automation and its why, the score's line or the rules' why. |
 | Call to action | At most one ([below](#calls-to-action)).                                                                                                   |
 | By             | Who it's from, with their GitHub picture (none for you or a bot). "by you" a shade darker.                                                 |
-| Stage          | A PR's stage. On your own PR, "changes requested" is amber.                                                                                |
+| Stage          | A PR's stage. On your own PR, "changes requested" is amber; "rebasing" while your agent rebases your approved PR off a conflict.           |
 | Age            | How long it's waited.                                                                                                                      |
 
 In a narrow table the stage column goes first, then who it's from. On your own row the stage takes the place of "by you". Who placed an item (Claude or a rule) is never on the row; it's in the opened item's facts and rule trace.

@@ -32,7 +32,7 @@ export function Inflight({
         <SkRows count={4} />
       </div>
     );
-  const live = view.rows.filter((r) => r.state === "open");
+  const live = view.rows.filter((r) => r.state === "open" && !r.rebase); // one your agent only rebases stays on your Inbox
   const landed = view.rows.filter((r) => r.state !== "open");
   const row = (r: InflightRow) => (
     <Row key={r.card.id} row={r} now={now} on={selected === r.card.id} select={select} open={open} compact={compact} />

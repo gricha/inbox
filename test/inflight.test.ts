@@ -225,25 +225,25 @@ async function conflicts(c: TestContext, settings: Record<string, unknown> = {})
   return { ...t, woke, update, main, merging };
 }
 
-test("your PR that's ready to merge but conflicts goes to the coordinator to rebase, once, off your desk and unannounced", async (c) => {
+test("your PR that's ready to merge but conflicts goes to the coordinator to rebase, once and unannounced, and stays on your desk", async (c) => {
   const t = await conflicts(c);
   assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
   await t.update(3, { mergeable: "conflict" });
   assert.deepEqual(t.woke, [["acme/web#3", REBASE]]);
   assert.deepEqual(t.merging(), [["acme/web#3", "rebasing", true]]);
-  assert.deepEqual(t.main(), []);
+  assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]], "you can still hand it off for merge");
   await t.update(3, { comments_total: 1 });
   await run(t.desk.sync());
   assert.equal(t.woke.length, 1, "once per conflict, not every sync");
   assert.deepEqual(t.notes, []);
-  // GitHub sees it mergeable again: it leaves Merging by itself, and is ready to merge on your desk.
+  // GitHub sees it mergeable again: the coordinator's part is over by itself.
   await t.update(3, { mergeable: "unknown", head_oid: "def" });
   assert.deepEqual(t.merging(), [["acme/web#3", "rebasing", true]], "not while GitHub works it out");
   await t.update(3, { mergeable: "clean" });
   assert.deepEqual(t.merging(), []);
   assert.deepEqual(t.desk.merging("acme/web#3"), {});
   assert.deepEqual(t.main(), [["acme/web#3", "approved and green: ready to merge"]]);
-  assert.deepEqual(t.notes, ["web#3 · approved and green: ready to merge"]);
+  assert.deepEqual(t.notes, [], "it never left your desk, so nothing announces it again");
   await t.update(3, { mergeable: "conflict" });
   assert.equal(t.woke.length, 2, "a new conflict goes again");
 });
