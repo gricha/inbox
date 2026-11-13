@@ -1,0 +1,8 @@
+# Xcode's own
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.build/
+*.xcresult
+# ios/shots.sh writes here
+.shots/

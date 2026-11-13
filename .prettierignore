@@ -6,3 +6,4 @@ package-lock.json
 assets
 integrations/claude-desktop/inbox/.claude-plugin/types
 .shots
+ios
