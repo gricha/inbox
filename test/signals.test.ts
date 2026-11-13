@@ -218,7 +218,9 @@ test("stacked: a PR whose base isn't its repo's default branch; unknown until th
   const s = (o: Partial<Item>) => analyze(makeItem(o), makeContext(), cfg, NOW).signals.pr.stacked;
   assert.equal(s({ base: "ref/sa-narrow", default_branch: "master" }), true);
   assert.equal(s({ base: "master", default_branch: "master" }), false);
-  assert.equal(s({ base: "ref/sa-narrow", default_branch: undefined }), false, "stored before the default branch was fetched");
+  const unfetched = makeItem({ base: "ref/sa-narrow" });
+  delete unfetched.default_branch;
+  assert.equal(analyze(unfetched, makeContext(), cfg, NOW).signals.pr.stacked, false, "stored before the default branch was fetched");
 });
 
 test("pr.reviewers, pr.people_requested and pr.teams_requested: who's on a PR besides you, for rules that sort a team ask away", () => {
@@ -259,7 +261,7 @@ test("pr.paths: the files a PR changes, for a rule that says it touches an area 
   const of = (o: Partial<Item>) => analyze(makeItem({ author: "carol", ...o }), ctx, cfg, NOW).signals;
   const paths = ["src/sentry/seer/code_mode/tools.py", "tests/sentry/seer/test_tools.py", "README.md"];
   assert.deepEqual(of({ paths }).pr.paths, paths);
-  assert.deepEqual(of({ paths: undefined }).pr.paths, [], "stored before its files were fetched: no path matches");
+  assert.deepEqual(of({}).pr.paths, [], "stored before its files were fetched: no path matches");
   assert.ok(
     FIELDS.some((f) => f.path === "pr.paths" && f.type === "string[]"),
     "listed with the rest",

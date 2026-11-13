@@ -86,7 +86,7 @@ test("requiresOf reads a 100,000-character body built to make a regex backtrack 
 
 const deps = (items: Item[]) => dependencies(items, buildStacks(items));
 const pr = (id: string, o: Partial<Item> = {}) => {
-  const [repo, n] = id.split("#");
+  const [repo, n] = id.split("#") as [string, string];
   return makeItem({ repo, number: Number(n), ...o });
 };
 

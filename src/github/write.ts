@@ -1,8 +1,9 @@
 // The desk's only writes to GitHub: the mutations on ALLOWED, sent when you act in the UI, each one logged.
 // It doesn't go through the read client (client.ts), which keeps refusing every mutation.
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { GitHubGraphQLError, GitHubHttpError, GitHubWriteUncertain, type GitHubWriteError } from "../errors.ts";
-import { decode, readToken } from "./client.ts";
+import { field, str } from "../narrow.ts";
+import { decode, GQL_ANSWER, readToken } from "./client.ts";
 
 const ENDPOINT = "https://api.github.com/graphql";
 
@@ -90,7 +91,8 @@ export interface GitHubWriter {
   unrequest(repo: string, number: number, login: string): Effect.Effect<void, GitHubWriteError>; // you, off its reviewers
 }
 
-type Url = { url?: string } | null;
+// A field some keys down in what a mutation answered: undefined where it stops.
+const dig = (v: unknown, ...keys: string[]): unknown => keys.reduce<unknown>((x, k) => field(x, k), v);
 
 export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?: (msg: string) => void } = {}): GitHubWriter {
   const doFetch = opts.fetch ?? fetch;
@@ -121,8 +123,8 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
     if (!res.ok) return yield* new GitHubHttpError({ status: res.status, message: `GitHub HTTP ${res.status}: ${text.slice(0, 200)}` });
     // A 2xx whose body can't be read may have landed: uncertain, in the parser's words.
     const { data, errors } = yield* decode(() => {
-      const json = JSON.parse(text) as { data?: unknown; errors?: { type?: string; message: string }[] };
-      return { data: json.data, errors: (json.errors ?? []).map((e) => ({ type: e.type, message: e.message })) };
+      const json = Schema.decodeUnknownSync(GQL_ANSWER)(JSON.parse(text));
+      return { data: json.data, errors: json.errors ?? [] };
     }).pipe(Effect.mapError((e) => new GitHubWriteUncertain({ message: e.message, cause: e.cause })));
     const types = errors.flatMap((e) => (e.type ? [e.type] : []));
     if (errors.length)
@@ -158,43 +160,29 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
     return undefined;
   });
 
-  const url = (u: Url | undefined) => ({ url: u?.url ?? "" });
+  const url = (data: unknown, ...keys: string[]) => ({ url: str(dig(data, ...keys, "url")) ?? "" });
 
   return {
     approve: (pr, commit, body) =>
       send("approve", pr, { pr, commit, body: body ?? null }).pipe(
-        Effect.map((data) =>
-          url((data as { addPullRequestReview?: { pullRequestReview?: Url } | null } | null)?.addPullRequestReview?.pullRequestReview),
-        ),
+        Effect.map((data) => url(data, "addPullRequestReview", "pullRequestReview")),
       ),
     reply: (thread, body) =>
-      send("reply", thread, { thread, body }).pipe(
-        Effect.map((data) =>
-          url((data as { addPullRequestReviewThreadReply?: { comment?: Url } | null } | null)?.addPullRequestReviewThreadReply?.comment),
-        ),
-      ),
+      send("reply", thread, { thread, body }).pipe(Effect.map((data) => url(data, "addPullRequestReviewThreadReply", "comment"))),
     comment: (subject, body) =>
-      send("comment", subject, { subject, body }).pipe(
-        Effect.map((data) =>
-          url((data as { addComment?: { commentEdge?: { node?: Url } | null } | null } | null)?.addComment?.commentEdge?.node),
-        ),
-      ),
+      send("comment", subject, { subject, body }).pipe(Effect.map((data) => url(data, "addComment", "commentEdge", "node"))),
     inlineComment: (pr, commit, thread) =>
       send("inline_comment", pr, { pr, commit, thread }).pipe(
         Effect.flatMap((data): Effect.Effect<{ url: string }, GitHubWriteUncertain> => {
-          const review = (
-            data as {
-              addPullRequestReview?: {
-                pullRequestReview?: { url?: string; comments?: { nodes?: { url?: string }[] } | null } | null;
-              } | null;
-            } | null
-          )?.addPullRequestReview?.pullRequestReview;
+          const review = dig(data, "addPullRequestReview", "pullRequestReview");
           // GitHub has answered with no review and no error; better to keep your words than to say it landed.
           if (!review)
             return Effect.fail(
               new GitHubWriteUncertain({ message: "GitHub answered without the comment: check the PR before you send it again" }),
             );
-          return Effect.succeed({ url: review.comments?.nodes?.[0]?.url ?? review.url ?? "" });
+          const nodes = dig(review, "comments", "nodes");
+          const first = Array.isArray(nodes) ? str(field(nodes[0], "url")) : undefined;
+          return Effect.succeed({ url: first ?? str(field(review, "url")) ?? "" });
         }),
       ),
     ready: (pr) => send("ready", pr, { pr }).pipe(Effect.asVoid),
@@ -205,11 +193,7 @@ export function createWriter(opts: { token?: string; fetch?: typeof fetch; log?:
     merge: (pr, head, method) => send("merge", pr, { pr, head, method }).pipe(Effect.asVoid),
     reopen: (pr) => send("reopen", pr, { pr }).pipe(Effect.asVoid),
     requestChanges: (pr, commit, body) =>
-      send("request_changes", pr, { pr, commit, body }).pipe(
-        Effect.map((data) =>
-          url((data as { addPullRequestReview?: { pullRequestReview?: Url } | null } | null)?.addPullRequestReview?.pullRequestReview),
-        ),
-      ),
+      send("request_changes", pr, { pr, commit, body }).pipe(Effect.map((data) => url(data, "addPullRequestReview", "pullRequestReview"))),
     closeIssue: (issue) => send("close_issue", issue, { issue }).pipe(Effect.asVoid),
     unrequest: (repo, number, login) => sendRest("unrequest", repo, number, { reviewers: [login] }),
   };

@@ -26,7 +26,7 @@ export function newer(latest: string, current: string): boolean {
   const a = parseVersion(latest);
   const b = parseVersion(current);
   if (!a || !b) return false;
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return (a[i] as number) > (b[i] as number);
+  for (const i of [0, 1, 2] as const) if (a[i] !== b[i]) return a[i] > b[i];
   return b[3] && !a[3];
 }
 

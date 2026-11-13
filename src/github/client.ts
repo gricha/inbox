@@ -1,7 +1,7 @@
 // Read-only GitHub transport (GraphQL queries and REST GETs): token, retries, rate-limit tracking.
 
 import { execFile } from "node:child_process";
-import { Cache, Duration, Effect, Exit, Schedule } from "effect";
+import { Cache, Duration, Effect, Exit, Result, Schedule, Schema } from "effect";
 import {
   GitHubAuthError,
   GitHubBadResponse,
@@ -11,6 +11,7 @@ import {
   GitHubRateLimited,
   type GitHubReadError,
 } from "../errors.ts";
+import { field } from "../narrow.ts";
 
 const ENDPOINT = "https://api.github.com/graphql";
 const REST = "https://api.github.com";
@@ -68,14 +69,16 @@ export const decode = <A>(parse: () => A): Effect.Effect<A, GitHubBadResponse> =
     catch: (cause) => new GitHubBadResponse({ message: cause instanceof Error ? cause.message : String(cause), cause }),
   });
 
-interface GqlError {
-  type?: string;
-  message: string;
-}
-interface GqlResponse {
-  data?: { rateLimit?: { remaining: number; resetAt: string } } | null;
-  errors?: GqlError[];
-}
+// What GitHub sent, read as a schema says: a failure in its words when it isn't that shape.
+export const decodeAs = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, v: unknown): Effect.Effect<S["Type"], GitHubBadResponse> =>
+  decode(() => Schema.decodeUnknownSync(schema)(v));
+
+// A GraphQL answer, the read client's and the writer's: data is the query's to read.
+export const GQL_ANSWER = Schema.Struct({
+  data: Schema.optionalKey(Schema.Unknown),
+  errors: Schema.optionalKey(Schema.Array(Schema.Struct({ type: Schema.optionalKey(Schema.String), message: Schema.String }))),
+});
+const RATE_LIMIT = Schema.Struct({ remaining: Schema.Number, resetAt: Schema.String });
 
 export interface ClientOptions {
   token?: string;
@@ -91,7 +94,7 @@ interface RestResponse {
 }
 
 export interface Client {
-  query<T>(query: string, variables?: Record<string, unknown>): Effect.Effect<T, GitHubReadError>;
+  query(query: string, variables?: Record<string, unknown>): Effect.Effect<unknown, GitHubReadError>; // data, for decodeAs
   // A REST read, e.g. "/notifications?all=true". Anything but GET is refused, so it can't mark threads read.
   get(path: string, init?: { method?: string; headers?: Record<string, string> }): Effect.Effect<RestResponse, GitHubReadError>;
   rateLimit(): { remaining: number; reset_at: string } | null;
@@ -120,12 +123,12 @@ const retryable = (e: GitHubReadError) =>
 
 // What a GraphQL answer says: its data, and the errors that fail it.
 function answerOf(text: string) {
-  const json = JSON.parse(text) as GqlResponse;
+  const json = Schema.decodeUnknownSync(GQL_ANSWER)(JSON.parse(text));
   // Those nodes come back null and callers skip them; with no data at all, every error is fatal.
   const fatal = (json.errors ?? []).filter((e) => !(json.data && PARTIAL.has(e.type ?? "")));
   return {
     data: json.data,
-    rateLimit: json.data?.rateLimit,
+    rateLimit: Result.getOrUndefined(Schema.decodeUnknownResult(RATE_LIMIT)(field(json.data, "rateLimit"))),
     forbidden: json.data ? json.errors?.find((e) => e.type === "FORBIDDEN") : undefined,
     failed: fatal.length > 0,
     limited: fatal.some((e) => e.type === "RATE_LIMITED" || /rate limit/i.test(e.message)),
@@ -175,7 +178,7 @@ export function createClient(opts: ClientOptions = {}): Client {
         const answer = await doFetch(url, {
           method: init.method,
           headers: { authorization, "user-agent": "inbox", ...init.headers },
-          body: init.body,
+          ...(init.body !== undefined && { body: init.body }),
           signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
         });
         return { res: answer, text: await answer.text() };
@@ -201,7 +204,7 @@ export function createClient(opts: ClientOptions = {}): Client {
     return { status: res.status, text, headers: res.headers };
   });
 
-  const ask = Effect.fnUntraced(function* <T>(body: string): Effect.fn.Return<T, GitHubReadError> {
+  const ask = Effect.fnUntraced(function* (body: string): Effect.fn.Return<unknown, GitHubReadError> {
     const { text, headers } = yield* send(ENDPOINT, { method: "POST", headers: { "content-type": "application/json" }, body });
     const a = yield* decode(() => answerOf(text));
     if (a.rateLimit) last = { remaining: a.rateLimit.remaining, reset_at: a.rateLimit.resetAt };
@@ -211,20 +214,20 @@ export function createClient(opts: ClientOptions = {}): Client {
       return yield* new GitHubRateLimited({ resetAt, message: `GitHub rate limited until ${resetAt} (${a.msg})` });
     }
     if (a.failed) return yield* new GitHubGraphQLError({ message: `GitHub: ${a.msg}`, ...(a.types.length > 0 && { types: a.types }) });
-    return a.data as T;
+    return a.data;
   });
 
-  function query<T>(doc: string, variables: Record<string, unknown> = {}): Effect.Effect<T, GitHubReadError> {
+  function query(doc: string, variables: Record<string, unknown> = {}): Effect.Effect<unknown, GitHubReadError> {
     if (/\bmutation\b/i.test(doc)) return Effect.die(new Error("Inbox is read-only: refusing to send a mutation"));
     const body = JSON.stringify({ query: doc, variables });
-    return Effect.suspend((): Effect.Effect<T, GitHubReadError> => {
+    return Effect.suspend((): Effect.Effect<unknown, GitHubReadError> => {
       const budget = last;
       // Stop before spending the last of the budget; the sync loop waits for resetAt.
       if (budget && budget.remaining < MIN_REMAINING && Date.parse(budget.reset_at) > Date.now()) {
         const message = `GitHub rate limited until ${budget.reset_at} (${budget.remaining} points left)`;
         return Effect.fail(new GitHubRateLimited({ resetAt: budget.reset_at, message }));
       }
-      return retrying(ask<T>(body));
+      return retrying(ask(body));
     });
   }
 

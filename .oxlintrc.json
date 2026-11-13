@@ -12,7 +12,7 @@
     "eqeqeq": "error",
     "typescript/prefer-readonly-parameter-types": "off",
     "typescript/strict-boolean-expressions": "off",
-    "typescript/no-unsafe-type-assertion": "off",
+    "typescript/no-unsafe-type-assertion": "error",
     "react/react-in-jsx-scope": "off",
     "react/no-unescaped-entities": "off",
     "react/refs": "off",
@@ -41,7 +41,7 @@
   "ignorePatterns": ["node_modules", "web/dist", "release", "research", "integrations", ".claude/workflows"],
   "overrides": [
     {
-      "files": ["test/**", "web/test/**", "scripts/smoke-*.ts"],
+      "files": ["test/**", "web/test/**", "scripts/smoke-*.ts", "scripts/shots.ts"],
       "rules": {
         "typescript/no-floating-promises": "off",
         "typescript/no-unsafe-member-access": "off",
@@ -49,7 +49,8 @@
         "typescript/no-unsafe-assignment": "off",
         "typescript/no-unsafe-return": "off",
         "typescript/no-unsafe-argument": "off",
-        "typescript/no-explicit-any": "off"
+        "typescript/no-explicit-any": "off",
+        "typescript/no-unsafe-type-assertion": "off"
       }
     },
     {

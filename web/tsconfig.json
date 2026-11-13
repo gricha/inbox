@@ -19,7 +19,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "useUnknownInCatchVariables": true
+    "useUnknownInCatchVariables": true,
+    "exactOptionalPropertyTypes": true
   },
   "include": ["src/**/*", "mock/**/*", "test/**/*", "vite.config.ts"]
 }

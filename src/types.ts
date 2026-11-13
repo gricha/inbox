@@ -1,4 +1,5 @@
 // Shared types: GitHub items, rule signals, config, and the HTTP API shapes.
+import { isKeyOf } from "./narrow.ts";
 
 export type Bucket = "now" | "today" | "blocked" | "later" | "fyi" | "hide";
 export const BUCKETS: Bucket[] = ["now", "today", "blocked", "later", "fyi", "hide"];
@@ -1325,7 +1326,7 @@ const DID: Record<Verb, string> = {
 export function outcomeText(x: Pick<AutomationItem, "outcome" | "do" | "until">): string {
   const verb = x.do ?? "add";
   const u = x.until ?? "tomorrow";
-  const until = Object.hasOwn(UNTIL, u) ? `until ${UNTIL[u as Until]}` : /^\d+[hd]$/.test(u) ? `for ${u}` : `until ${u}`;
+  const until = isKeyOf(UNTIL, u) ? `until ${UNTIL[u]}` : /^\d+[hd]$/.test(u) ? `for ${u}` : `until ${u}`;
   if (x.outcome === "did") return verb === "snooze" ? `Snoozed ${u === "activity" ? "until new activity" : until}` : DID[verb];
   if (x.outcome === "failed") return verb === "add" ? "Couldn't add" : `Couldn't ${VERB[verb]}`;
   if (x.outcome === "kept" && verb !== "add") return "Already there";
@@ -1393,8 +1394,13 @@ export interface Criterion {
 // What a plugin comes with: a criterion in its own file, as BuiltInAutomation is.
 export type BuiltInCriterion = Pick<Criterion, "name" | "when" | "ask" | "urgent" | "weight"> & { id: string; help: string; on: boolean };
 
-// PUT /api/criteria/:id
-export type CriterionBody = Pick<Criterion, "name" | "when" | "ask"> & { urgent?: boolean; on?: boolean };
+// PUT /api/criteria/:id; undefined is left out, as JSON leaves it.
+export type CriterionBody = Pick<Criterion, "name"> & {
+  when?: string | undefined;
+  ask?: string | undefined;
+  urgent?: boolean | undefined;
+  on?: boolean | undefined;
+};
 
 // GET /api/criteria
 export interface CriteriaView {
@@ -1403,12 +1409,16 @@ export interface CriteriaView {
   scored: { by: string; at: string } | null; // the latest model score: who gave it, when
 }
 
-// PUT /api/automations/:id: the whole automation; what's left out is its default.
-export type AutomationBody = Pick<Automation, "name" | "events" | "when" | "rule" | "can"> & {
-  schedule?: string;
-  prompt?: string;
-  decide?: Way;
-  on?: boolean;
+// PUT /api/automations/:id: the whole automation; what's left out (or undefined, as JSON leaves it) is its default.
+export type AutomationBody = Pick<Automation, "name"> & {
+  events?: ActivityKind[] | undefined;
+  when?: string | undefined;
+  rule?: { do: Verb; why: string; until?: string | undefined } | undefined;
+  can?: Verb[] | undefined;
+  schedule?: string | undefined;
+  prompt?: string | undefined;
+  decide?: Way | undefined;
+  on?: boolean | undefined;
 };
 
 // GET /api/automations

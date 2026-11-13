@@ -1,7 +1,8 @@
 import { Effect } from "effect";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { AskLines, AsksView, CoordinatorView, Inquiry } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
+import { useKeyed, useKeyedLayout } from "../keyed.ts";
 import { shortId, sinceText } from "../format.ts";
 import { linesLabel } from "../view.ts";
 import { Prose } from "./Prose.tsx";
@@ -56,8 +57,7 @@ export function Chat({
   const [error, setError] = useState<string | null>(null);
   const log = useRef<HTMLOListElement>(null);
 
-  useEffect(() => {
-    const stop = new AbortController();
+  useKeyed(loads, (signal) => {
     runUi(
       api.asks().pipe(
         Effect.tap((v) =>
@@ -68,13 +68,9 @@ export function Chat({
         ),
         Effect.ignore, // the next update tries again
       ),
-      { signal: stop.signal },
+      { signal },
     );
-    return () => {
-      stop.abort();
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
-  }, [loads]);
+  });
 
   const off = view?.on === false;
 
@@ -91,7 +87,7 @@ export function Chat({
       api
         .ask({
           text: t,
-          item_id: about.item ?? undefined,
+          ...(about.item !== null && { item_id: about.item }),
           ...(s?.kind === "thread" && { thread_id: s.id, thread_url: s.url }),
           ...(s?.kind === "lines" && { lines: s.lines }),
         })
@@ -120,12 +116,11 @@ export function Chat({
   const mine = view?.asks ?? [];
   const answered = mine.filter((a) => a.answer).length;
   // The newest turn's top: your words and the answer's lead, not the end of a long answer.
-  useLayoutEffect(() => {
+  useKeyedLayout(`${mine.length} ${answered}`, () => {
     const l = log.current;
     const last = l?.lastElementChild;
     if (l && last instanceof HTMLElement) l.scrollTop = last.offsetTop - 16;
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a new turn or a new answer is when to scroll
-  }, [mine.length, answered]);
+  });
 
   return (
     <aside className="chat" aria-label="Your chat with your agent">

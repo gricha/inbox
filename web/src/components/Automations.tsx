@@ -2,7 +2,7 @@
 // comes with, which you only switch or copy. The part lists them (turn one on, run it now, write a new one); each opens a view of its own that says in plain words what starts it, its check, how it decides
 // and what it may do, with its editor and its runs. A run's summary and whys are an agent's words: shown as text, never markup.
 import { Effect } from "effect";
-import { useCallback, useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AskChange } from "./AskChange.tsx";
 import {
   ACTIVITY_KINDS,
@@ -19,7 +19,9 @@ import {
   type Verb,
   type Way,
 } from "../../../src/types.ts";
+import { isKeyOf, oneOf } from "../../../src/narrow.ts";
 import { api, runUi } from "../api.ts";
+import { useKeyed } from "../keyed.ts";
 import { ago, cls, copyText, issueUrl, MOD, when, aiName } from "../format.ts";
 import { changeAsk, resumeCommand, routeHash } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
@@ -134,14 +136,9 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     [],
   );
 
-  useEffect(() => {
-    const stop = new AbortController();
-    if (active) runUi(load(), { signal: stop.signal });
-    return () => {
-      stop.abort();
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- refresh only triggers a re-read
-  }, [active, load, refresh]);
+  useKeyed(active ? refresh : null, (signal) => {
+    runUi(load(), { signal });
+  });
 
   const failed = (e: { message: string }) =>
     Effect.sync(() => {
@@ -802,7 +799,8 @@ function Editor({
             value={d.decide}
             onKeyDown={keys}
             onChange={(e) => {
-              setD({ ...d, decide: e.target.value as Way });
+              const way = e.target.value;
+              if (isKeyOf(WAY, way)) setD({ ...d, decide: way });
             }}
           >
             {(["rule", "ask", "agent"] as const).map((w) => (
@@ -827,7 +825,8 @@ function Editor({
               value={rule.do}
               onKeyDown={keys}
               onChange={(e) => {
-                const verb = e.target.value as Verb;
+                const verb = oneOf(VERBS, e.target.value);
+                if (!verb) return;
                 const { until: _, ...kept } = rule;
                 setD({ ...d, rule: { ...kept, do: verb, ...(verb === "snooze" && { until: rule.until ?? "tomorrow" }) } });
               }}

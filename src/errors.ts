@@ -3,6 +3,7 @@
 // inside Effect code, or Effect.die) and never gets a class here. docs/effect.md has the rules. Tags are unique across
 // families (GitHub's 403 is GitHubHttpError with its status, or GitHubRateLimited for a read's rate limit; never Forbidden).
 import { Data } from "effect";
+import { codeOf } from "./narrow.ts";
 
 // What was thrown, in its words: an Error's message, else the value as text.
 export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -156,9 +157,7 @@ export class ListenFailed extends Data.TaggedError("ListenFailed")<{
   readonly cause: unknown;
 }> {
   override get message(): string {
-    const c = this.cause as { code?: unknown } | null;
-    if (typeof c === "object" && c !== null && c.code === "EADDRINUSE")
-      return `port ${this.port} is in use; is desk already running? (${this.url})`;
+    if (codeOf(this.cause) === "EADDRINUSE") return `port ${this.port} is in use; is desk already running? (${this.url})`;
     return this.cause instanceof Error ? this.cause.message : `couldn't listen on port ${this.port}: ${String(this.cause)}`;
   }
 }
@@ -186,8 +185,7 @@ type FsOp = "read" | "write" | "rename" | "copy" | "mkdir" | "realpath" | "readd
 // message is Node's, which already names the file.
 export class FsError extends Data.TaggedError("FsError")<{ readonly op: FsOp; readonly path: string; readonly cause: unknown }> {
   get code(): string | undefined {
-    const c = this.cause as { code?: unknown } | null;
-    return typeof c === "object" && c !== null && typeof c.code === "string" ? c.code : undefined;
+    return codeOf(this.cause);
   }
   override get message(): string {
     return this.cause instanceof Error ? this.cause.message : `couldn't ${this.op} ${this.path}: ${String(this.cause)}`;

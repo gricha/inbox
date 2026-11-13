@@ -1,4 +1,5 @@
 import { Result } from "effect";
+import { keysOf, oneOf } from "../../src/narrow.ts";
 import type {
   ActivityEvent,
   AgentName,
@@ -174,9 +175,10 @@ export function parseRoute(hash: string): Route {
   if (hash === "#/blocked" || hash === "#/waiting") return { name: "blocked" };
   if (hash === "#/archive") return { name: "archive" };
   const page = /^#\/(review|inquiry|item|doc)\/(.+)$/.exec(hash);
-  if (page) {
+  const name = oneOf(["review", "inquiry", "item", "doc"], page?.[1]);
+  if (page && name) {
     const id = Result.try({ try: () => decodeURIComponent(page[2]!), catch: () => "a mangled link" });
-    return Result.isSuccess(id) ? { name: page[1] as "review" | "inquiry" | "item" | "doc", id: id.success } : { name: "queue" };
+    return Result.isSuccess(id) ? { name, id: id.success } : { name: "queue" };
   }
   return { name: "queue" };
 }
@@ -361,9 +363,11 @@ export function parseFilter(s: string): { terms: FilterTerm[]; text: string } {
   const terms: FilterTerm[] = [];
   const text: string[] = [];
   for (const m of s.matchAll(/(\S+)(\s*)/g)) {
-    const t = TERM.exec(m[1] as string);
-    if (t) terms.push({ key: (t[1] as string).toLowerCase() as FilterKey, who: (t[2] as string).replace(/^@/, ""), done: !!m[2] });
-    else text.push(m[1] as string);
+    const word = m[1]!;
+    const t = TERM.exec(word);
+    const key = oneOf(FILTER_KEYS, t?.[1]?.toLowerCase());
+    if (t && key) terms.push({ key, who: t[2]!.replace(/^@/, ""), done: !!m[2] });
+    else text.push(word);
   }
   return { terms, text: text.join(" ") };
 }
@@ -371,7 +375,7 @@ export function parseFilter(s: string): { terms: FilterTerm[]; text: string } {
 // What the filter's box holds after its pills: the filter without its finished terms, as typed.
 export function filterRest(s: string): string {
   let out = "";
-  for (const m of s.matchAll(/(\S+)(\s*)/g)) if (!(TERM.test(m[1] as string) && m[2])) out += m[0];
+  for (const m of s.matchAll(/(\S+)(\s*)/g)) if (!(TERM.test(m[1]!) && m[2])) out += m[0];
   return out;
 }
 
@@ -476,7 +480,7 @@ export function groupsOf(view: QueueView | null, open: Record<GroupKey, boolean>
 // The list page and group that show a card: where a permalink to an issue opens it in place.
 export function whereIs(view: QueueView, id: string): { page: keyof typeof PAGE_GROUPS; group: GroupKey } | null {
   const group = groupsOf(view, DEFAULT_OPEN, "").find((g) => g.cards.some((c) => c.id === id))?.key;
-  const page = group && (Object.keys(PAGE_GROUPS) as (keyof typeof PAGE_GROUPS)[]).find((p) => PAGE_GROUPS[p].includes(group));
+  const page = group && keysOf(PAGE_GROUPS).find((p) => PAGE_GROUPS[p].includes(group));
   return group && page ? { page, group } : null;
 }
 

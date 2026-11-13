@@ -18,7 +18,10 @@ import { FIT, LEVEL, onLines, sections, STATUS, VERDICT, walk, type Section } fr
 import type { ReviewDiagram, ReviewFile, ReviewHunk } from "./types.ts";
 
 // CommonJS, whose default export TypeScript reads one way under Node's resolution and another under Vite's.
-const Elk = createRequire(import.meta.url)("elkjs/lib/elk.bundled.js") as new () => ELK;
+const isElk = (v: unknown): v is new () => ELK => typeof v === "function";
+const elkExport: unknown = createRequire(import.meta.url)("elkjs/lib/elk.bundled.js");
+if (!isElk(elkExport)) throw new Error("elkjs/lib/elk.bundled.js exports no ELK");
+const Elk = elkExport;
 const WEB = path.join(import.meta.dirname, "..", "web", "src");
 const FONTS: Record<string, string> = {
   "instrument-sans-latin-standard-normal.woff2": "",

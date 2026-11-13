@@ -612,7 +612,7 @@ test("details: a batch GitHub refuses, or answers with nodes it can't read, is s
   assert.equal(logs.length, 2);
   assert.ok(logs.includes("details batch of 20 failed: GitHub: Something went wrong"), logs.join("\n"));
   assert.ok(
-    logs.some((l) => l.startsWith("details batch of 20 failed: Cannot read properties of undefined")),
+    logs.some((l) => l.startsWith("details batch of 20 failed: Missing key")),
     logs.join("\n"),
   );
 
@@ -648,5 +648,5 @@ test("notifications: an answer that isn't a list of threads is a bad response", 
   const fake = (() => Promise.resolve(new Response(JSON.stringify({ message: "Not Found" })))) as unknown as typeof fetch;
   const e = await failure(createGitHub({ token: "t", fetch: fake }).notifications({ since: null, last_modified: null }));
   assert.equal(e._tag, "GitHubBadResponse");
-  assert.match(e.message, /not iterable/);
+  assert.match(e.message, /Expected array/);
 });

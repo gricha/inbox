@@ -7,6 +7,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { Effect, Result } from "effect";
 import { CommandFailed, type FsError } from "../src/errors.ts";
+import { field } from "../src/narrow.ts";
 import type { SourceStatus } from "../src/types.ts";
 import {
   backoff,
@@ -46,15 +47,16 @@ export const reap = (home: string, log: (m: string) => void): Effect.Effect<void
   Effect.gen(function* () {
     const saved = readJson(pidFile(home));
     if (saved === null) return; // none, or not JSON: left as it is
-    const { pids } = saved as { pids?: unknown };
-    for (const pid of Array.isArray(pids) ? pids : []) {
-      if (win || !Number.isInteger(pid) || !alive(pid as number)) continue;
+    const pids = field(saved, "pids");
+    const list: unknown[] = Array.isArray(pids) ? pids : [];
+    for (const pid of list) {
+      if (win || typeof pid !== "number" || !Number.isInteger(pid) || !alive(pid)) continue;
       const cmd = tryOr(() => execFileSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8" }), "");
       if (!/--watch-path=src|vite\/bin\/vite\.js/.test(cmd)) continue; // the pid went to something else since
       log(`stopping what an earlier run left going from source (pid ${pid})`);
-      signal(pid as number, "SIGTERM", true);
-      for (let i = 0; i < 30 && alive(pid as number); i++) yield* Effect.sleep(100);
-      signal(pid as number, "SIGKILL", true);
+      signal(pid, "SIGTERM", true);
+      for (let i = 0; i < 30 && alive(pid); i++) yield* Effect.sleep(100);
+      signal(pid, "SIGKILL", true);
     }
     yield* removeFile(pidFile(home));
   });
@@ -74,9 +76,9 @@ export const freePort = (): Effect.Effect<number, NoFreePort> =>
       resume(Effect.fail(new NoFreePort({ cause })));
     });
     s.listen(0, "127.0.0.1", () => {
-      const { port } = s.address() as net.AddressInfo;
+      const addr = s.address();
       s.close(() => {
-        resume(Effect.succeed(port));
+        resume(addr !== null && typeof addr === "object" ? Effect.succeed(addr.port) : Effect.fail(new NoFreePort({ cause: addr })));
       });
     });
     return Effect.sync(() => {
@@ -224,7 +226,7 @@ export const startSource = (o: {
 
     return {
       ui,
-      status: () => ({ dir: o.dir, state: failed ? "failed" : "running", detail: failed ? tail.join("\n") : undefined, log: logFile }),
+      status: () => ({ dir: o.dir, state: failed ? "failed" : "running", ...(failed ? { detail: tail.join("\n") } : {}), log: logFile }),
       uiReady: () =>
         Effect.gen(function* () {
           for (;;) {

@@ -39,6 +39,7 @@ import type {
   SettingValue,
   UpdateView,
 } from "../../src/types.ts";
+import { field, isKeyOf, oneOf, str, strings } from "../../src/narrow.ts";
 import { report } from "./sentry.ts";
 
 // ---------------------------------------------------------------- what an API call fails with
@@ -118,15 +119,40 @@ const BY_STATUS: Partial<Record<number, ErrorBody["tag"]>> = {
 // Saving over a base that changed is the only 409 these answer, whatever tag the desk sends.
 const STALE = new Set(["PUT /api/config", "PUT /api/config/builtin"]);
 
-function refusal(status: number, body: Partial<ErrorBody> | null, statusText: string, stale: boolean): ApiError {
-  const message = body?.error ?? (statusText || String(status));
-  const candidates = body?.candidates;
-  const tag = body?.tag ?? (status === 409 && candidates?.length ? "AmbiguousRef" : (BY_STATUS[status] ?? "Internal"));
-  if (status === 409 && stale) return new DeskConflict({ message, kind: "Stale", candidates });
+// Every tag the wire can carry, so an answer's tag is checked, not trusted.
+const TAGS = {
+  BadRequest: true,
+  Unauthorized: true,
+  Forbidden: true,
+  NotFound: true,
+  TooManyRequests: true,
+  AmbiguousRef: true,
+  Conflict: true,
+  Stale: true,
+  Busy: true,
+  Upstream: true,
+  ReviewersNotAsked: true,
+  Unavailable: true,
+  Internal: true,
+} satisfies Record<ErrorBody["tag"], true>;
+
+// body: the refusal's JSON, or null when it didn't parse.
+function refusal(status: number, body: unknown, statusText: string, stale: boolean): ApiError {
+  const message = str(field(body, "error")) ?? (statusText || String(status));
+  const candidates = strings(field(body, "candidates"));
+  const sent = field(body, "tag");
+  const tag =
+    typeof sent === "string" && isKeyOf(TAGS, sent)
+      ? sent
+      : status === 409 && candidates?.length
+        ? "AmbiguousRef"
+        : (BY_STATUS[status] ?? "Internal");
+  const more = candidates ? { candidates } : {};
+  if (status === 409 && stale) return new DeskConflict({ message, kind: "Stale", ...more });
   if (tag === "AmbiguousRef" || tag === "Stale" || tag === "Busy" || tag === "Conflict")
-    return new DeskConflict({ message, kind: tag, candidates });
+    return new DeskConflict({ message, kind: tag, ...more });
   if (tag === "Unavailable")
-    return (body?.reason ?? (message.includes("config") ? "config" : "starting")) === "config"
+    return (oneOf(["starting", "config"], field(body, "reason")) ?? (message.includes("config") ? "config" : "starting")) === "config"
       ? new DeskConfigBroken({ message })
       : new DeskStarting({ message });
   if (tag === "ReviewersNotAsked") return new DeskReviewersNotAsked({ message });
@@ -142,8 +168,7 @@ function call<T>(method: string, path: string, body?: unknown): Effect.Effect<T,
         try: () =>
           fetch(path, {
             method,
-            headers: body === undefined ? undefined : { "content-type": "application/json" },
-            body: body === undefined ? undefined : JSON.stringify(body),
+            ...(body !== undefined && { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
             signal: stop.signal,
           }),
         catch: (cause) => new DeskUnreachable({ cause }),
@@ -153,10 +178,11 @@ function call<T>(method: string, path: string, body?: unknown): Effect.Effect<T,
         try: (): Promise<unknown> => res.json(),
         catch: (cause) => new DeskBadResponse({ status: res.status, cause }),
       });
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk's own answer, typed by src/types.ts on both ends
       if (res.ok) return (yield* json) as T;
       // A refusal whose body doesn't parse still says what it is by its status.
       const answer = yield* json.pipe(Effect.orElseSucceed(() => null));
-      return yield* Effect.fail(refusal(res.status, answer as Partial<ErrorBody> | null, res.statusText, STALE.has(`${method} ${path}`)));
+      return yield* Effect.fail(refusal(res.status, answer, res.statusText, STALE.has(`${method} ${path}`)));
     }).pipe(
       Effect.onInterrupt(() =>
         Effect.sync(() => {

@@ -3,6 +3,7 @@
 // with none, nothing here runs. https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request
 import { Effect, Result } from "effect";
 import { DecisionModelDown, DecisionModelError } from "./errors.ts";
+import { field, fromEntries, isRecord, keysOf, str } from "./narrow.ts";
 
 const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 const TIMEOUT = 30_000;
@@ -30,13 +31,17 @@ const DOWN: Record<number, string> = {
 };
 
 function answerOf(raw: unknown): Answer | null {
-  const a = (raw ?? {}) as { type?: unknown; noul?: unknown; choice?: unknown; probabilities?: unknown };
-  if (a.type === "refusal") return { type: "refusal" };
-  if (a.type === "noul" && typeof a.noul === "number") return { type: "noul", noul: a.noul };
-  if (a.type !== "choice" || typeof a.choice !== "string") return null;
-  const p = a.probabilities && typeof a.probabilities === "object" ? (a.probabilities as Record<string, unknown>) : null;
-  const numbers = p && Object.values(p).every((v) => typeof v === "number") ? (p as Record<string, number>) : undefined;
-  return { type: "choice", choice: a.choice, ...(numbers && { probabilities: numbers }) };
+  const type = field(raw, "type");
+  const noul = field(raw, "noul");
+  const choice = field(raw, "choice");
+  if (type === "refusal") return { type: "refusal" };
+  if (type === "noul" && typeof noul === "number") return { type: "noul", noul };
+  if (type !== "choice" || typeof choice !== "string") return null;
+  const p = field(raw, "probabilities");
+  const entries = isRecord(p) ? Object.entries(p) : [];
+  const numbers = entries.flatMap(([k, v]) => (typeof v === "number" ? [[k, v] as const] : []));
+  const all = isRecord(p) && numbers.length === entries.length;
+  return { type: "choice", choice, ...(all && { probabilities: Object.fromEntries(numbers) }) };
 }
 
 // One request: every question is about the same state, and each is answered on its own. A question the answer leaves out,
@@ -67,11 +72,12 @@ export const decide = Effect.fn("decide")(function* <K extends string>(
   const down = DOWN[status];
   if (down) return yield* new DecisionModelDown({ status, message: down });
   const read = Result.try({
-    try: () => JSON.parse(text) as { answers?: unknown; error?: { message?: unknown } } | null,
+    try: (): unknown => JSON.parse(text),
     catch: (cause) => cause,
   });
   if (status >= 500) {
-    const said = Result.isSuccess(read) && typeof read.success?.error?.message === "string" ? `: ${safe(read.success.error.message)}` : "";
+    const message = Result.isSuccess(read) ? str(field(field(read.success, "error"), "message")) : undefined;
+    const said = message === undefined ? "" : `: ${safe(message)}`;
     return yield* new DecisionModelDown({ status, message: `OpenRouter's decision model failed${said} (HTTP ${status}).` });
   }
   if (Result.isFailure(read))
@@ -82,17 +88,18 @@ export const decide = Effect.fn("decide")(function* <K extends string>(
     });
   const body = read.success;
   if (status < 200 || status >= 300) {
-    const said = typeof body?.error?.message === "string" ? safe(body.error.message) : "no reason given";
+    const message = str(field(field(body, "error"), "message"));
+    const said = message === undefined ? "no reason given" : safe(message);
     return yield* new DecisionModelError({ status, message: `the decision model failed: ${said} (HTTP ${status})` });
   }
-  const answers = body?.answers && typeof body.answers === "object" ? (body.answers as Record<string, unknown>) : {};
-  const out = {} as Record<K, Answer>;
-  for (const name of Object.keys(questions) as K[]) {
-    const a = answerOf(answers[name]);
+  const answers = field(body, "answers");
+  const out: [K, Answer][] = [];
+  for (const name of keysOf(questions)) {
+    const a = answerOf(field(answers, name));
     const asked = questions[name].type;
     if (!a || (a.type !== "refusal" && a.type !== asked))
       return yield* new DecisionModelError({ status, message: `the decision model gave no ${asked} answer to "${name}"` });
-    out[name] = a;
+    out.push([name, a]);
   }
-  return out;
+  return fromEntries(out);
 });

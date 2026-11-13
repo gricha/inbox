@@ -1,10 +1,11 @@
 // What reviewers said on a PR, which of it waits on you, and Claude's read of what does. Read only: replies go through
 // Desk.reply(), on your click. Claude runs like the judge: your own claude, no tools, an empty directory.
 import { randomBytes } from "node:crypto";
-import { Cache, Cause, Duration, Effect, Exit, type Fiber } from "effect";
+import { Cache, Cause, Duration, Effect, Exit, Result, Schema, type Fiber } from "effect";
 import type { Desk } from "./desk.ts";
 import { messageOf, type GitHubReadError } from "./errors.ts";
 import type { PrContext } from "./github/index.ts";
+import { decode, field, str } from "./narrow.ts";
 import { askAgent, makeAgentDir } from "./review.ts";
 import { agentName } from "./settings.ts";
 import type { Conversation, Item, ReviewState, ReviewView, Take } from "./types.ts";
@@ -20,6 +21,12 @@ const CONTEXTS = 200; // PRs whose conversation is kept, the least recently aske
 type Said = PrContext["comments"][number];
 type Convo = Omit<Conversation, "take">;
 type Takes = Record<string, Take>; // by conversation id, kept per PR as take:<pr id>
+const TAKES = Schema.Record(
+  Schema.String,
+  Schema.Struct({ gist: Schema.String, take: Schema.String, comment_id: Schema.String, at: Schema.String }),
+);
+// What's kept for a PR: none when nothing is, or what's there isn't takes.
+const keptTakes = (v: unknown): Takes => Result.getOrElse(decode(TAKES, v), () => ({}));
 
 const lc = (s: string) => s.toLowerCase();
 // oxlint-disable-next-line no-control-regex -- one plain line, whatever Claude sent
@@ -141,14 +148,16 @@ export function buildTakePrompt(it: Item, me: string, convos: Convo[], ctx: PrCo
 // Model output: don't trust its field types. Unknown ids and entries missing a field are dropped.
 export function parseTakes(raw: unknown, last: Map<string, string>, at: string): Takes {
   const out: Takes = {};
-  const list = (raw as { items?: unknown } | null)?.items;
-  for (const v of Array.isArray(list) ? (list as Record<string, unknown>[]) : []) {
-    const id = typeof v?.id === "string" ? v.id.trim() : "";
+  const list = field(raw, "items");
+  for (const v of Array.isArray(list) ? list : []) {
+    const id = str(field(v, "id"))?.trim() ?? "";
     const comment = last.get(id);
-    if (!comment || out[id] || typeof v.gist !== "string" || typeof v.take !== "string") continue;
+    const gist = field(v, "gist");
+    const take = field(v, "take");
+    if (!comment || out[id] || typeof gist !== "string" || typeof take !== "string") continue;
     out[id] = {
-      gist: clip(oneLine(v.gist), 200),
-      take: clip(oneLine(v.take), 400),
+      gist: clip(oneLine(gist), 200),
+      take: clip(oneLine(take), 400),
       comment_id: comment,
       at,
     };
@@ -205,7 +214,7 @@ export class Conversations {
     return Effect.gen({ self: this }, function* () {
       const e = this.desk.snapshot().entries.get(id)!;
       const ctx = yield* this.context(id);
-      const takes = (this.desk.store.get(`take:${id}`) as Takes | null) ?? {};
+      const takes = keptTakes(this.desk.store.get(`take:${id}`));
       const me = this.desk.me();
       return conversation(ctx, me, e.analysis.signals.me.author, pushedAt(e.item, me)).map((c) => {
         const t = takes[c.id];
@@ -291,7 +300,7 @@ export class Conversations {
       const agent = desk.agent();
       const { answer } = yield* askAgent(prompt, { schema: TAKE_SCHEMA, dir, agent });
       const got = parseTakes(answer, new Map(unread.map((c) => [c.id, c.comments.at(-1)!.id])), new Date().toISOString());
-      desk.store.set(`take:${id}`, { ...(desk.store.get(`take:${id}`) as Takes | null), ...got });
+      desk.store.set(`take:${id}`, { ...keptTakes(desk.store.get(`take:${id}`)), ...got });
       this.errors.delete(id);
       desk.log(`${agentName(agent)} read ${Object.keys(got).length} of ${unread.length} conversations waiting on you on ${id}`);
     }).pipe(

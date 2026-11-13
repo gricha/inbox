@@ -4,6 +4,7 @@
 
 import { Data, Effect } from "effect";
 import type { ErrorBody } from "./errors.ts";
+import { codeOf, field, isKeyOf } from "./narrow.ts";
 import {
   UNTIL,
   type Action,
@@ -36,7 +37,6 @@ import {
   type SettingsView,
   type SettingValue,
   type SetupView,
-  type Until,
 } from "./types.ts";
 
 export interface ActResult {
@@ -48,7 +48,10 @@ export interface ActResult {
 export function untilText(until: string | undefined, s: ItemState, time: (iso: string) => string): string {
   if (!until) return "";
   if (until === "activity") return " until someone else acts";
-  if (s.snooze_when) return ` until ${UNTIL[s.snooze_when.split(":")[0] as Until]}`;
+  if (s.snooze_when) {
+    const u = s.snooze_when.split(":")[0] ?? "";
+    return ` until ${isKeyOf(UNTIL, u) ? UNTIL[u] : u}`;
+  }
   if (s.snooze_until) return ` until ${time(s.snooze_until)}${s.snooze_on_activity ? " or activity" : ""}`;
   return "";
 }
@@ -126,8 +129,9 @@ export function baseUrl(): string {
 }
 
 function refused(e: unknown): boolean {
-  const cause = (e as { cause?: { code?: string; errors?: { code?: string }[] } } | null)?.cause;
-  return cause?.code === "ECONNREFUSED" || !!cause?.errors?.some((x) => x.code === "ECONNREFUSED");
+  const cause = field(e, "cause");
+  const errors = field(cause, "errors");
+  return codeOf(cause) === "ECONNREFUSED" || (Array.isArray(errors) && errors.some((x) => codeOf(x) === "ECONNREFUSED"));
 }
 
 // A token only ever goes over HTTPS.
@@ -152,8 +156,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
           Promise.resolve(
             send(path, {
               method,
-              headers: json === undefined ? undefined : { "content-type": "application/json" },
-              body: json,
+              ...(json !== undefined && { headers: { "content-type": "application/json" }, body: json }),
               signal: timeoutMs ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : signal,
             }),
           ),
@@ -165,6 +168,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
         () => null,
       );
       if (!res.ok) return yield* refusal(res.status, data);
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk's own answer, typed by src/types.ts on both ends
       return data as T;
     });
   }
@@ -197,8 +201,14 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     answer: (id: string, text: string) => call<{ ok: true; ask: Ask }>("POST", `/api/asks/${q(id)}/answer`, { text }),
     askPlace: (id: string) => call<AskPlace>("GET", `/api/asks/${q(id)}`),
     // An agent's question for the user, and their answer once they give it.
-    inquire: (b: { question: string; from: string; context: string; options?: InquiryOption[]; links?: InquiryLink[]; item?: string }) =>
-      call<{ ok: true; inquiry: Inquiry }>("POST", "/api/inquiries", b),
+    inquire: (b: {
+      question: string;
+      from: string;
+      context: string;
+      options?: InquiryOption[] | undefined;
+      links?: InquiryLink[] | undefined;
+      item?: string | undefined;
+    }) => call<{ ok: true; inquiry: Inquiry }>("POST", "/api/inquiries", b),
     inquiry: (id: string) => call<Inquiry>("GET", `/api/inquiries/${q(id)}`),
     // A review document (docs/review-format.md), kept and rendered by the desk.
     submitDoc: (doc: unknown) => call<{ ok: true } & DocSaved>("POST", "/api/docs", doc, 60_000),
@@ -212,7 +222,9 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     deleteCriterion: (id: string) => call<{ ok: true }>("DELETE", `/api/criteria/${q(id)}`),
     setAutomation: (id: string, b: AutomationBody) => call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${q(id)}`, b),
     runAutomation: (id: string) => call<{ ok: true; running: string }>("POST", `/api/automations/${q(id)}/run`),
-    activity: (o: { after?: number; wait?: number; limit?: number; item?: string } = {}) => {
+    activity: (
+      o: { after?: number | undefined; wait?: number | undefined; limit?: number | undefined; item?: string | undefined } = {},
+    ) => {
       const params = new URLSearchParams();
       for (const [k, v] of Object.entries(o)) if (v !== undefined) params.set(k, String(v));
       return call<ActivityPage>("GET", `/api/activity?${params.toString()}`, undefined, ((o.wait ?? 0) + 15) * 1000);

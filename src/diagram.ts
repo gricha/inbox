@@ -10,6 +10,7 @@ import type {
   DiagramParticipant,
   DiagramShape,
 } from "./types.ts";
+import { oneOf } from "./narrow.ts";
 
 export type { DiagramGraph } from "./types.ts";
 
@@ -23,7 +24,7 @@ const MAX_MESSAGE = 48;
 const MIN_PARTS = 3;
 
 const ID = /^[A-Za-z][A-Za-z0-9_]{0,23}$/;
-const MARKS = new Set<string>(["new", "changed", "removed"]);
+const MARKS: readonly DiagramMark[] = ["new", "changed", "removed"];
 // Styling, links and config: dropped, never interpreted.
 const DROPPED = /^(classDef|style|linkStyle|click)\s/;
 
@@ -126,7 +127,7 @@ interface Flow {
 
 const newFlow = (): Flow => ({ nodes: new Map(), edges: [], groups: [], group: null, classes: [] });
 
-const mark = (name: string | undefined): DiagramMark | null => (name && MARKS.has(name) ? (name as DiagramMark) : null);
+const mark = (name: string | undefined): DiagramMark | null => oneOf(MARKS, name) ?? null;
 
 function node(f: Flow, rawId: string, shape?: DiagramShape, text?: string, cls?: string): string | Bad {
   const key = ident(rawId);

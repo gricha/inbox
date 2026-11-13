@@ -2,6 +2,7 @@
 import { Result } from "effect";
 import type { Signals } from "./types.ts";
 import { ExprEvalError, ExprSyntaxError } from "./errors.ts";
+import { field, messageOf } from "./narrow.ts";
 import { FIELDS } from "./signals.ts";
 import { andMore } from "./stage.ts";
 
@@ -221,8 +222,8 @@ function check(node: Node): void {
       return;
     case "name":
       if (!FIELD_PATHS.has(node.path)) {
-        const hint = suggest(node.path) ?? undefined;
-        throw new Bad(`unknown field "${node.path}"${hint ? `; did you mean "${hint}"?` : ""}`, { hint });
+        const hint = suggest(node.path);
+        throw new Bad(`unknown field "${node.path}"${hint ? `; did you mean "${hint}"?` : ""}`, hint ? { hint } : {});
       }
       return;
     case "list":
@@ -275,11 +276,15 @@ function distance(a: string, b: string): number {
   return row[b.length]!;
 }
 
+const isValue = (v: unknown): v is Value =>
+  v === null || v === undefined || ["string", "number", "boolean"].includes(typeof v) || (Array.isArray(v) && v.every(isValue));
+
 // Callers only pass FIELD_PATHS, whose leaves are Values.
 function lookup(s: Signals, path: string): Value {
   let v: unknown = s;
-  for (const k of path.split(".")) v = (v as Record<string, unknown> | undefined)?.[k];
-  return v as Value;
+  for (const k of path.split(".")) v = field(v, k);
+  if (!isValue(v)) throw new Error(`${path} isn't a field's value`);
+  return v;
 }
 
 function num(v: unknown, op: string): number {
@@ -288,8 +293,7 @@ function num(v: unknown, op: string): number {
 }
 
 // `matches` against what may not be a pattern: a literal is checked when it compiles, a field's value when it's used.
-const regex = (source: string): Result.Result<RegExp, string> =>
-  Result.try({ try: () => new RegExp(source, "i"), catch: (e) => (e as Error).message });
+const regex = (source: string): Result.Result<RegExp, string> => Result.try({ try: () => new RegExp(source, "i"), catch: messageOf });
 
 function glob(pattern: string): RegExp {
   return new RegExp(
@@ -398,7 +402,13 @@ export function compile(source: string): Result.Result<Compiled, ExprSyntaxError
       return { eval: (s) => Result.try({ try: () => evaluate(node, s), catch: evalError }) };
     },
     catch: (e) => {
-      if (e instanceof Bad) return new ExprSyntaxError({ source, message: e.message, pos: e.pos, hint: e.hint });
+      if (e instanceof Bad)
+        return new ExprSyntaxError({
+          source,
+          message: e.message,
+          ...(e.pos !== undefined && { pos: e.pos }),
+          ...(e.hint !== undefined && { hint: e.hint }),
+        });
       if (e instanceof RangeError) return new ExprSyntaxError({ source, message: e.message }); // nested deeper than the stack goes
       throw e; // a bug in the parser, not the expression's
     },
@@ -406,7 +416,7 @@ export function compile(source: string): Result.Result<Compiled, ExprSyntaxError
 }
 
 function evalError(e: unknown): ExprEvalError {
-  if (e instanceof Bad) return new ExprEvalError({ message: e.message, op: e.op });
+  if (e instanceof Bad) return new ExprEvalError({ message: e.message, ...(e.op !== undefined && { op: e.op }) });
   if (e instanceof RangeError) return new ExprEvalError({ message: e.message });
   throw e; // an unknown node, function or operator: a bug, since compile checked them
 }

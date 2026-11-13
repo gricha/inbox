@@ -7,6 +7,7 @@ import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
 import { CommandFailed, CommandNotFound, CommandTimeout, Conflict, fsError, type FsError, type UnsafeArgument } from "./errors.ts";
 import { ownersHome } from "./home.ts";
+import { field, isKeyOf, isRecord, str } from "./narrow.ts";
 import { claudeSpawn, runCommand } from "./review.ts";
 import type { AgentStatus } from "./types.ts";
 
@@ -44,7 +45,7 @@ const DRIVERS = {
       `Authorization: Bearer ${token}`,
     ],
     remove: (name) => ["mcp", "remove", "--scope", "user", name],
-    servers: (home) => (JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8")) as { mcpServers?: unknown }).mcpServers,
+    servers: (home) => field(JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8")), "mcpServers"),
     skills: (home) => path.join(home, ".claude", "skills"),
   },
   // Codex reads user skills from ~/.agents/skills (developers.openai.com/codex/skills).
@@ -62,14 +63,13 @@ const DRIVERS = {
     bin: "opencode",
     add: (name, url) => ["mcp", "add", name, "--url", url],
     addRemote: (url) => ["mcp", "add", NAME, "--url", url, "--header", `Authorization=Bearer {env:${TOKEN_VAR}}`],
-    servers: (home) =>
-      (JSON.parse(fs.readFileSync(path.join(home, ".config", "opencode", "opencode.json"), "utf8")) as { mcp?: unknown }).mcp,
+    servers: (home) => field(JSON.parse(fs.readFileSync(path.join(home, ".config", "opencode", "opencode.json"), "utf8")), "mcp"),
     skills: (home) => path.join(home, ".config", "opencode", "skills"),
   },
 } satisfies Record<string, Driver>;
 export type DriverId = keyof typeof DRIVERS;
 // agent.harness as a driver: a value this desk doesn't know is Claude Code's.
-export const driverOf = (id: string): DriverId => (Object.hasOwn(DRIVERS, id) ? (id as DriverId) : "claude-code");
+export const driverOf = (id: string): DriverId => (isKeyOf(DRIVERS, id) ? id : "claude-code");
 
 const sh = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replaceAll("'", `'\\''`)}'`);
 const commandOf = (d: Driver, args: string[]) => [d.bin, ...args].map(sh).join(" ");
@@ -85,26 +85,20 @@ const CLI = fileURLToPath(new URL(`cli${path.extname(import.meta.filename)}`, im
 // null: another server of the owner's may be named inbox, and a helpdesk's `mcp` isn't a desk's.
 function deskOf(entry: unknown): string | null {
   if (typeof entry !== "object" || entry === null) return null;
-  const e = entry as {
-    url?: unknown;
-    command?: unknown;
-    args?: unknown;
-    env?: { DESK_PORT?: unknown };
-    environment?: { DESK_PORT?: unknown };
-  };
+  const command = field(entry, "command");
+  const args = field(entry, "args");
   // OpenCode's command is the whole argv, its variables `environment`.
-  if (typeof e.command === "string" || Array.isArray(e.command)) {
-    const argv = (
-      Array.isArray(e.command) ? (e.command as unknown[]) : [e.command, ...(Array.isArray(e.args) ? (e.args as unknown[]) : [])]
-    ).map(String);
+  if (typeof command === "string" || Array.isArray(command)) {
+    const rest: unknown[] = Array.isArray(args) ? args : [];
+    const argv = (Array.isArray(command) ? command : [command, ...rest]).map(String);
     const prog = argv.at(-2) ?? "";
-    const vars = e.env ?? e.environment;
-    const own = typeof vars?.DESK_PORT === "string" ? vars.DESK_PORT : "";
+    const vars = field(entry, "env") ?? field(entry, "environment");
+    const own = str(field(vars, "DESK_PORT")) ?? "";
     const port = own || (process.env.DESK_PORT ?? "") || "47823";
     const desk = argv.at(-1) === "mcp" && (/^desk(\.cmd)?$/i.test(prog.split(/[\\/]/).at(-1) ?? "") || prog === CLI);
     return desk ? `http://localhost:${port}` : null;
   }
-  const at = urlOf(e.url);
+  const at = urlOf(field(entry, "url"));
   return at && LOOPBACK.has(at.hostname) && at.pathname === "/mcp" ? at.origin : null;
 }
 
@@ -117,7 +111,7 @@ const desks = (entry: unknown, url: string) => {
 // No config yet, or one that doesn't parse: none, and registering will say what's wrong.
 function listed(d: Driver, home: string): Record<string, unknown> {
   const servers = Result.getOrNull(Result.try({ try: () => d.servers(home), catch: () => null }));
-  return typeof servers === "object" && servers !== null ? (servers as Record<string, unknown>) : {};
+  return isRecord(servers) ? servers : {};
 }
 
 function server(d: Driver, home: string, name: string, url: string): "none" | "desk" | "other" {
@@ -128,10 +122,13 @@ function server(d: Driver, home: string, name: string, url: string): "none" | "d
 
 // Where another server points or what it runs, so a desk's on another port reads as that.
 function shown(entry: unknown): string {
-  const { url, command, args } = (typeof entry === "object" ? (entry ?? {}) : {}) as { url?: unknown; command?: unknown; args?: unknown };
+  const url = field(entry, "url");
+  const command = field(entry, "command");
+  const args = field(entry, "args");
   if (typeof url === "string") return ` (${url})`;
-  if (Array.isArray(command)) return ` (${(command as unknown[]).map(String).join(" ")})`; // OpenCode's whole argv
-  return typeof command === "string" ? ` (${[command, ...(Array.isArray(args) ? (args as unknown[]) : [])].map(String).join(" ")})` : "";
+  if (Array.isArray(command)) return ` (${command.map(String).join(" ")})`; // OpenCode's whole argv
+  const rest: unknown[] = Array.isArray(args) ? args : [];
+  return typeof command === "string" ? ` (${[command, ...rest].map(String).join(" ")})` : "";
 }
 
 // This desk's entry under any name: inbox, review-desk from before the rename, or the name Connect gave it beside another.
@@ -146,7 +143,7 @@ const answers = (origin: string) =>
     fetch(`${origin}/health`, { signal: AbortSignal.timeout(1000) })
       .then((r) => (r.ok ? r.json() : null))
       .then(
-        (b) => (b as { ok?: unknown } | null)?.ok === true,
+        (b) => field(b, "ok") === true,
         () => false,
       ),
   );
@@ -415,7 +412,7 @@ export const connectRemote = Effect.fn("agents.connectRemote")(function* (
       message: `${path.join(dir, "SKILL.md")} is another skill named ${NAME}, not the desk's: move it, then connect again`,
     });
   const entry = listed(d, home)[NAME];
-  const same = urlOf((entry as { url?: unknown } | undefined)?.url)?.href === urlOf(url)?.href;
+  const same = urlOf(field(entry, "url"))?.href === urlOf(url)?.href;
   if (entry !== undefined && !same)
     return yield* new Conflict({
       message: `${d.bin} has another MCP server named ${NAME}${shown(entry)}: remove it${d.remove ? ` (${commandOf(d, d.remove(NAME))})` : ""}, then connect again`,

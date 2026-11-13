@@ -18,7 +18,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "useUnknownInCatchVariables": true
+    "useUnknownInCatchVariables": true,
+    "exactOptionalPropertyTypes": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", "electron/**/*.ts"]
 }

@@ -4,7 +4,7 @@ import { GITHUB_AUTOMATIONS } from "./github-automations.ts";
 import { GITHUB_CRITERIA } from "./github-criteria.ts";
 import { GITHUB_RULES } from "./github-rules.ts";
 import type { Desk } from "../desk.ts";
-import { Cause, Effect, Result } from "effect";
+import { Cause, Effect, Result, Schema } from "effect";
 import {
   GitHubNotFetched,
   GitHubRateLimited,
@@ -15,6 +15,7 @@ import {
   type GitHubReadError,
 } from "../errors.ts";
 import type { GitHub, SearchHit } from "../github/index.ts";
+import { decode, isRecord, str } from "../narrow.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
 import type { BuiltInAutomation, BuiltInCriterion, BuiltInRules, ConnectorStatus, Context, Item } from "../types.ts";
@@ -48,6 +49,26 @@ interface Feed {
   interval: number; // seconds, from X-Poll-Interval
   seen: Record<string, { at: string; reason: string }>; // thread id → the update already handled
 }
+const FEED = Schema.Struct({
+  since: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  last_modified: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  interval: Schema.optionalKey(Schema.Number),
+  seen: Schema.optionalKey(Schema.Record(Schema.String, Schema.Struct({ at: Schema.String, reason: Schema.String }))),
+});
+const COUNTS = Schema.Record(Schema.String, Schema.Number);
+const STRINGS = Schema.mutable(Schema.Array(Schema.String));
+const CONTEXT = Schema.Struct({
+  me: Schema.String,
+  name: Schema.optionalKey(Schema.String),
+  teams: STRINGS,
+  affinity: COUNTS,
+  repo_prs: COUNTS,
+  orgs: COUNTS,
+  recent: Schema.optionalKey(STRINGS),
+  refreshed_at: Schema.String,
+  areas: Schema.optionalKey(Schema.Record(Schema.String, COUNTS)),
+  areas_at: Schema.optionalKey(Schema.String),
+});
 
 const hitOf = (
   id: string,
@@ -102,9 +123,11 @@ export class GitHubConnector implements Connector {
   constructor(desk: Desk, api: GitHub) {
     this.desk = desk;
     this.api = api;
-    this.ctx = desk.store.get("context") as Context | null;
-    this.syncedAt = desk.store.get("synced_at") as string | null;
-    this.feed = { since: null, last_modified: null, interval: 60, seen: {}, ...(desk.store.get("github.feed") as Partial<Feed> | null) };
+    // What's kept and isn't one counts as none: fetched again, or started over.
+    this.ctx = Result.getOrNull(decode(CONTEXT, desk.store.get("context")));
+    this.syncedAt = str(desk.store.get("synced_at")) ?? null;
+    const feed = Result.getOrElse(decode(FEED, desk.store.get("github.feed")), () => ({}));
+    this.feed = { since: null, last_modified: null, interval: 60, seen: {}, ...feed };
   }
 
   // ---------------------------------------------------------------- loops
@@ -300,12 +323,13 @@ export class GitHubConnector implements Connector {
     const queries = this.queriesFor(loaded, board, scope);
     const hits = this.desk.store.hits(queries);
     const fetched = this.desk.store.queries(queries);
+    const error = queries.map((q) => fetched.get(q)?.error).find(Boolean);
     return {
       ids: new Set(queries.flatMap((q) => [...(hits.get(q) ?? [])])),
       kept: this.desk.store.kept(),
       queries,
       unfetched: queries.filter((q) => !fetched.has(q)),
-      error: queries.map((q) => fetched.get(q)?.error).find(Boolean) ?? undefined,
+      ...(error && { error }),
     };
   }
 
@@ -410,7 +434,7 @@ export class GitHubConnector implements Connector {
       const still = new Set(hits.keys());
       for (const q of queries) if (!found.has(q)) for (const id of listed.get(q) ?? []) still.add(id);
       const gone = new Set(queries.flatMap((q) => [...(listed.get(q) ?? [])]).filter((id) => !still.has(id)));
-      const last = desk.store.get("reconciled_at") as string | null;
+      const last = str(desk.store.get("reconciled_at")) ?? null;
       const drops = [...gone].flatMap((id) => {
         const m = meta.get(id);
         // Only on the pass it left: an item kept to show as resolved was last listed before that.
@@ -455,10 +479,14 @@ export class GitHubConnector implements Connector {
   fillStacks(listed: Set<string>): Effect.Effect<{ fetched: number; members: Set<string> }, GitHubRateLimited> {
     const desk = this.desk;
     const at = desk.now();
-    const since = (key: string, ttl: number) =>
-      Object.fromEntries(
-        Object.entries((desk.store.get(key) as Record<string, string> | null) ?? {}).filter(([, t]) => at.getTime() - Date.parse(t) < ttl),
+    const since = (key: string, ttl: number): Record<string, string> => {
+      const kept = desk.store.get(key);
+      return Object.fromEntries(
+        Object.entries(isRecord(kept) ? kept : {}).flatMap(([k, t]) =>
+          typeof t === "string" && at.getTime() - Date.parse(t) < ttl ? [[k, t] as const] : [],
+        ),
       );
+    };
     const asked = since("stack_probes", PROBE_TTL);
     const misses = since("dep_misses", DEP_MISS_TTL);
     // What was asked counts even when a rate limit stops the rounds; the desk stopping keeps nothing.

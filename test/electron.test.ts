@@ -7,7 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { Effect, Fiber, Scheduler } from "effect";
+import { Effect, Fiber, Scheduler, Schema } from "effect";
 import { BadRequest } from "../src/errors.ts";
 import { failure, run } from "./helpers/run.ts";
 import {
@@ -622,16 +622,19 @@ test("getJson: the desk's answer, or null while it's starting, unreachable or un
   const desk = await serve((q, r) => {
     if (q.url === "/api/status") r.writeHead(200, { "content-type": "application/json" }).end(`{"now":2,"today":5}`);
     else if (q.url === "/api/bad") r.writeHead(200, { "content-type": "application/json" }).end("{");
+    else if (q.url === "/api/shape") r.writeHead(200, { "content-type": "application/json" }).end(`{"now":"2"}`);
     else r.writeHead(503, { "content-type": "application/json" }).end(`{"error":"desk is starting"}`);
   });
+  const Counts = Schema.Struct({ now: Schema.Number, today: Schema.Number });
   try {
-    assert.deepEqual(await run(getJson(`${desk.base}/api/status`)), { now: 2, today: 5 });
-    assert.equal(await run(getJson(`${desk.base}/api/focus`)), null, "starting");
-    assert.equal(await run(getJson(`${desk.base}/api/bad`)), null, "not JSON");
+    assert.deepEqual(await run(getJson(`${desk.base}/api/status`, Counts)), { now: 2, today: 5 });
+    assert.equal(await run(getJson(`${desk.base}/api/focus`, Counts)), null, "starting");
+    assert.equal(await run(getJson(`${desk.base}/api/bad`, Counts)), null, "not JSON");
+    assert.equal(await run(getJson(`${desk.base}/api/shape`, Counts)), null, "not its shape");
   } finally {
     desk.close();
   }
-  assert.equal(await run(getJson(`${desk.base}/api/status`)), null, "nothing there");
+  assert.equal(await run(getJson(`${desk.base}/api/status`, Counts)), null, "nothing there");
 });
 
 test("followEvents: each event until the stream ends; no answer, an HTTP error or a dropped stream is DeskCallFailed", async () => {

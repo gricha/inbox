@@ -4,13 +4,14 @@
 // with its why). An agent may write or change one, and it's on unless it says off, as yours is.
 import { randomBytes } from "node:crypto";
 import path from "node:path";
-import { Effect, Result, type Fiber } from "effect";
+import { Effect, Result, Schema, type Fiber } from "effect";
 import { serverName } from "./agents.ts";
 import { DENY as COORDINATOR_DENY, denyDir, wakeFor } from "./coordinator.ts";
 import type { Desk, Entry } from "./desk.ts";
 import { decide, type Question } from "./decisions.ts";
 import { compile } from "./expr.ts";
 import { describe, sortKey, textHash } from "./judge.ts";
+import { decodeEach, decodeValues, field, schemaOf, str } from "./narrow.ts";
 import { BadRequest, ClaudeBadOutput, DecisionModelDown, messageOf, NotFound, type FsError } from "./errors.ts";
 import {
   agentDown,
@@ -49,6 +50,50 @@ const SWITCHED = "automations_builtin"; // by a plugin's automation's id: whethe
 const SEEN = "automation_seen"; // by automation: the event log's seq its events are read up to
 const ASKED = "automation_asked"; // by automation: who a question last asked and each item as it was, so a schedule asks what's new
 const RUNS_KEPT = 10; // per automation
+const arrayOf = <S extends Schema.Top>(s: S) => Schema.mutable(Schema.Array(s));
+const opt = Schema.optionalKey;
+const AutomationSchema = schemaOf<Automation>()(
+  Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    schedule: Schema.String,
+    events: opt(arrayOf(Schema.Literals(ACTIVITY_KINDS))),
+    prompt: Schema.String,
+    when: opt(Schema.String),
+    decide: opt(Schema.Literals(["rule", "ask"])),
+    rule: opt(Schema.Struct({ do: Schema.Literals(VERBS), until: opt(Schema.String), why: Schema.String })),
+    can: opt(arrayOf(Schema.Literals(VERBS))),
+    on: Schema.Boolean,
+    by: Schema.Literals(["you", "an agent"]),
+    updated_at: Schema.String,
+    plugin: opt(Schema.String),
+    help: opt(Schema.String),
+  }),
+);
+const AutomationRunSchema = schemaOf<AutomationRun>()(
+  Schema.Struct({
+    id: Schema.String,
+    automation: Schema.String,
+    trigger: Schema.Literals(["schedule", "now", "event"]),
+    at: Schema.String,
+    done_at: Schema.NullOr(Schema.String),
+    error: Schema.NullOr(Schema.String),
+    summary: Schema.String,
+    items: arrayOf(
+      Schema.Struct({
+        item_id: Schema.String,
+        why: Schema.String,
+        do: opt(Schema.Literals(VERBS)),
+        until: opt(Schema.String),
+        outcome: Schema.Literals(["added", "did", "kept", "left", "resolved", "held", "refused", "failed"]),
+        error: opt(Schema.String),
+      }),
+    ),
+    session: Schema.NullOr(Schema.String),
+    agent: opt(Schema.Literals(["codex", "opencode"])),
+  }),
+);
+const SwitchSchema = Schema.Struct({ on: Schema.Boolean, at: Schema.String });
 const ITEMS_MAX = 20; // a run that lists more is told so, and the rest are dropped; a run is handed no more either
 const TIMEOUT = 20 * 60_000;
 const TICK = 60_000;
@@ -322,12 +367,12 @@ export class Automations {
   }
 
   own(): Automation[] {
-    return (this.desk.store.get(KEY) as Automation[] | null) ?? [];
+    return decodeEach(AutomationSchema, this.desk.store.get(KEY));
   }
 
   // What the plugins come with, as the code defines each now, on or off as you switched it (else as it comes).
   builtIns(): Automation[] {
-    const switched = (this.desk.store.get(SWITCHED) as Record<string, { on: boolean; at: string }> | null) ?? {};
+    const switched = decodeValues(SwitchSchema, this.desk.store.get(SWITCHED));
     return this.desk.connectors.flatMap((c) =>
       c.automations.map(({ id: own, help, on, ...def }) => {
         const id = `${c.id}.${own}`;
@@ -346,7 +391,7 @@ export class Automations {
     return Effect.suspend((): Effect.Effect<Automation, NotFound> => {
       const was = this.builtIn(id);
       if (!was) return Effect.fail(new NotFound({ message: `no automation "${id}" comes with a plugin` }));
-      const switched = (this.desk.store.get(SWITCHED) as Record<string, { on: boolean; at: string }> | null) ?? {};
+      const switched = decodeValues(SwitchSchema, this.desk.store.get(SWITCHED));
       const at = this.desk.now().toISOString();
       this.desk.store.set(SWITCHED, { ...switched, [id]: { on, at } });
       this.held.delete(id);
@@ -357,7 +402,7 @@ export class Automations {
   }
 
   runs(): AutomationRun[] {
-    return (this.desk.store.get(RUNS) as AutomationRun[] | null) ?? [];
+    return decodeEach(AutomationRunSchema, this.desk.store.get(RUNS));
   }
 
   get(id: string): Effect.Effect<Automation, NotFound> {
@@ -392,14 +437,14 @@ export class Automations {
     id: string,
     b: {
       name: string;
-      schedule?: string;
-      events?: readonly string[];
-      prompt?: string;
-      when?: string;
-      decide?: string;
-      rule?: { do?: unknown; until?: unknown; why?: unknown };
-      can?: readonly string[];
-      on?: boolean;
+      schedule?: string | undefined;
+      events?: readonly string[] | undefined;
+      prompt?: string | undefined;
+      when?: string | undefined;
+      decide?: string | undefined;
+      rule?: { do?: unknown; until?: unknown; why?: unknown } | undefined;
+      can?: readonly string[] | undefined;
+      on?: boolean | undefined;
     },
     byYou: boolean,
   ): Effect.Effect<Automation, BadRequest> {
@@ -495,7 +540,7 @@ export class Automations {
       this.running.get(id)?.fiber?.interruptUnsafe();
       this.running.delete(id);
       this.held.delete(id);
-      const sorts = this.desk.store.prefixed<{ automation: string } | null>("sorted:");
+      const sorts = this.desk.store.prefixed("sorted:", Schema.NullOr(Schema.Struct({ automation: Schema.String })));
       this.desk.store.pruneKv("sorted:", new Set([...sorts].flatMap(([item, s]) => (s?.automation === id ? [] : [item]))));
       this.desk.store.set(
         KEY,
@@ -506,7 +551,7 @@ export class Automations {
         this.runs().filter((r) => r.automation !== id),
       );
       this.look(id, null);
-      const { [id]: _, ...asked } = (this.desk.store.get(ASKED) as Record<string, Asked> | null) ?? {};
+      const { [id]: _, ...asked } = decodeValues(AskedSchema, this.desk.store.get(ASKED));
       this.desk.store.set(ASKED, asked);
       this.desk.changed();
     });
@@ -518,7 +563,7 @@ export class Automations {
     const now = this.desk.now().toISOString();
     for (const r of this.runs()) if (!r.done_at) this.record({ ...r, done_at: now, error: CUT });
     // A plugin's that's on with events and hasn't read the log yet starts where it ends now: a fresh desk's first sync is its news.
-    const seen = (this.desk.store.get(SEEN) as Record<string, number> | null) ?? {};
+    const seen = decodeValues(Schema.Number, this.desk.store.get(SEEN));
     for (const a of this.builtIns()) if (a.on && a.events && seen[a.id] === undefined) this.look(a.id, this.desk.store.lastSeq());
     this.timer = setInterval(() => {
       this.desk.runner.fork(
@@ -562,7 +607,7 @@ export class Automations {
 
   // Where an automation has read the event log up to; null forgets it.
   look(id: string, seq: number | null): void {
-    const { [id]: was, ...rest } = (this.desk.store.get(SEEN) as Record<string, number> | null) ?? {};
+    const { [id]: was, ...rest } = decodeValues(Schema.Number, this.desk.store.get(SEEN));
     if (was !== (seq ?? undefined)) this.desk.store.set(SEEN, seq === null ? rest : { ...rest, [id]: seq });
   }
 
@@ -576,7 +621,7 @@ export class Automations {
       if (!a.events?.length || this.running.has(a.id) || this.waits(a.id)) continue;
       // Read per automation: a run with no async step (a rule) ends inside run(), and the pump it starts there moves cursors.
       const last = desk.store.lastSeq();
-      const seen = (desk.store.get(SEEN) as Record<string, number> | null) ?? {};
+      const seen = decodeValues(Schema.Number, desk.store.get(SEEN));
       let from = a.on ? (seen[a.id] ?? last) : last;
       let ran = false;
       // Past what its check lets through, to the first batch with something in it.
@@ -733,7 +778,8 @@ export class Automations {
   byRule(a: Automation, run: AutomationRun, passed: string[]): Effect.Effect<boolean> {
     return Effect.gen({ self: this }, function* () {
       const act = a.rule!; // set() keeps no rule without one
-      for (const id of passed) run.items.push(yield* this.apply(a, { ref: id, why: act.why, do: act.do, until: act.until }));
+      for (const id of passed)
+        run.items.push(yield* this.apply(a, { ref: id, why: act.why, do: act.do, ...(act.until !== undefined && { until: act.until }) }));
       return true;
     });
   }
@@ -755,7 +801,7 @@ export class Automations {
       const asked = fresh.slice(0, ITEMS_MAX);
       const gone: string[] = [];
       const said = key
-        ? yield* this.askModel(a, asked, batch, { key, model, url: desk.decisions }, gone)
+        ? yield* this.askModel(a, asked, batch, { key, model, ...(desk.decisions !== undefined && { url: desk.decisions }) }, gone)
         : yield* this.askClaude(a, asked, batch);
       if (!this.all().some((x) => x.id === a.id)) return false; // deleted while it ran
       this.asked(a, who, asked);
@@ -779,7 +825,7 @@ export class Automations {
 
   // Of `ids`, the ones this question hasn't been asked about as they are now, by this model and as it reads now.
   unasked(a: Automation, who: string, ids: string[]): string[] {
-    const was = ((this.desk.store.get(ASKED) as Record<string, Asked> | null) ?? {})[a.id];
+    const was = decodeValues(AskedSchema, this.desk.store.get(ASKED))[a.id];
     if (was?.by !== askedBy(a, who)) return ids;
     const snap = this.desk.snapshot();
     return ids.filter((id) => was.items[id] !== itemKey(snap.entries.get(id)));
@@ -787,7 +833,7 @@ export class Automations {
 
   // It was asked about these, as they are now; what's left the desk is forgotten.
   asked(a: Automation, who: string, ids: string[]): void {
-    const all = (this.desk.store.get(ASKED) as Record<string, Asked> | null) ?? {};
+    const all = decodeValues(AskedSchema, this.desk.store.get(ASKED));
     const by = askedBy(a, who);
     const snap = this.desk.snapshot();
     const kept = all[a.id]?.by === by ? Object.entries(all[a.id]!.items).filter(([id]) => snap.entries.has(id)) : [];
@@ -805,13 +851,14 @@ export class Automations {
         dir,
         agent: desk.agent(),
       });
-      const list = (answer as { items?: unknown } | null)?.items;
+      const list = field(answer, "items");
       const said: Said[] = [];
       for (const raw of Array.isArray(list) ? list : []) {
-        const x = (raw ?? {}) as { ref?: unknown; why?: unknown; do?: unknown; until?: unknown };
-        if (typeof x.ref !== "string" || typeof x.why !== "string" || !x.why.trim()) continue;
-        const until = typeof x.until === "string" && x.until.trim() ? { until: x.until.trim() } : {};
-        said.push({ ref: x.ref.trim(), why: x.why, do: x.do, ...until });
+        const ref = str(field(raw, "ref"));
+        const why = str(field(raw, "why"));
+        if (ref === undefined || why === undefined || !why.trim()) continue;
+        const u = str(field(raw, "until"))?.trim();
+        said.push({ ref: ref.trim(), why, do: field(raw, "do"), ...(u && { until: u }) });
       }
       return said;
     });
@@ -941,18 +988,20 @@ export class Automations {
   // What an agent's run answered: its summary, and each item it listed through apply().
   took(a: Automation, run: AutomationRun, said: unknown, out: string, passed: string[] | null) {
     return Effect.gen({ self: this }, function* () {
-      const answer = (said ?? {}) as { summary?: unknown; items?: unknown };
-      if (typeof answer.summary !== "string")
+      const summary = str(field(said, "summary"));
+      if (summary === undefined)
         return yield* new ClaudeBadOutput({ message: "the run gave no answer: no summary and no list", excerpt: out.slice(0, 500) });
-      run.summary = answer.summary.trim();
-      const found = Array.isArray(answer.items) ? answer.items : [];
+      run.summary = summary.trim();
+      const items = field(said, "items");
+      const found: unknown[] = Array.isArray(items) ? items : [];
       for (const raw of found.slice(0, ITEMS_MAX)) {
-        const x = (raw ?? {}) as { ref?: unknown; why?: unknown; do?: unknown; until?: unknown };
-        if (typeof x.ref !== "string" || typeof x.why !== "string" || !x.why.trim()) continue;
-        const until = typeof x.until === "string" && x.until.trim() ? { until: x.until.trim() } : {};
+        const ref = str(field(raw, "ref"));
+        const why = str(field(raw, "why"));
+        if (ref === undefined || why === undefined || !why.trim()) continue;
+        const u = str(field(raw, "until"))?.trim();
         // One that only adds was never asked what to do: what it lists is added, as before.
-        const what = addsOnly(canOf(a)) ? "add" : (x.do ?? "add");
-        run.items.push(yield* this.apply(a, { ref: x.ref, why: x.why, do: what, ...until }));
+        const what = addsOnly(canOf(a)) ? "add" : (field(raw, "do") ?? "add");
+        run.items.push(yield* this.apply(a, { ref, why, do: what, ...(u && { until: u }) }));
       }
       if (found.length > ITEMS_MAX) run.summary += ` (It listed ${found.length}; the desk took the first ${ITEMS_MAX}.)`;
       if (passed && passed.length > ITEMS_MAX)
@@ -1002,7 +1051,8 @@ export class Automations {
     const board = p && (desk.loaded?.config.boards.find((b) => b.id === p.board)?.name ?? p.board);
     const where = p ? `on my desk: ${p.bucket}, on the "${board}" board${p.why ? ` (${p.why})` : ""}` : null;
     const what = happened?.get(id);
-    const item = away ? { ...e.item, paths: undefined } : e.item;
+    const { paths: _paths, ...unpathed } = e.item;
+    const item = away ? unpathed : e.item;
     return describe({ item, signals: e.analysis.signals, ai: away ? null : (snap.reviews.get(id) ?? null) }, desk.ctx, [
       where,
       what ? `what happened: ${what.join("; ")}` : null,
@@ -1071,6 +1121,7 @@ interface Asked {
   by: string;
   items: Record<string, string>;
 }
+const AskedSchema = schemaOf<Asked>()(Schema.Struct({ by: Schema.String, items: Schema.Record(Schema.String, Schema.String) }));
 const askedBy = (a: Automation, who: string) => textHash(does(a) + who);
 // The item as a sort holds for it, less the pin; "" for one the desk no longer holds.
 const itemKey = (e: Entry | undefined) => (e ? sortKey(e.item, e.analysis.activity_at, undefined, e.analysis.signals.pr.blocker) : "");
@@ -1165,7 +1216,7 @@ function failedItem(x: { ref: string; why: string }, error: string): AutomationI
 
 // What claude printed that isn't its envelope has no session.
 function sessionOf(out: string): string | null {
-  const parsed = Result.try({ try: () => (JSON.parse(out) as { session_id?: unknown }).session_id, catch: () => null });
+  const parsed = Result.try({ try: (): unknown => field(JSON.parse(out), "session_id"), catch: () => null });
   const id = Result.getOrElse(parsed, () => null);
   return typeof id === "string" ? id : null;
 }

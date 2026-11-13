@@ -199,36 +199,29 @@ test("CI rollup states map to green/red/pending/none", () => {
     const n = fixture("pr-review");
     const head = n.commits?.nodes[0];
     assert.ok(head, "the fixture has a head commit");
-    head.commit.statusCheckRollup = state ? { state } : null;
-    return normalize(n, NOW).ci;
+    const commit = { ...head.commit, statusCheckRollup: state ? { state } : null };
+    return normalize({ ...n, commits: { nodes: [{ commit }] } }, NOW).ci;
   };
   assert.deepEqual(
     [ci("SUCCESS"), ci("FAILURE"), ci("ERROR"), ci("PENDING"), ci("EXPECTED"), ci(null)],
     ["green", "red", "red", "pending", "pending", "none"],
   );
-  const noCommits = fixture("pr-review");
-  noCommits.commits = { nodes: [] };
-  assert.equal(normalize(noCommits, NOW).ci, "none");
+  assert.equal(normalize({ ...fixture("pr-review"), commits: { nodes: [] } }, NOW).ci, "none");
 });
 
 test("review decision and mergeable mappings", () => {
-  const n = fixture("pr-mine");
-  n.reviewDecision = "APPROVED";
-  n.mergeable = "MERGEABLE";
+  const n = { ...fixture("pr-mine"), reviewDecision: "APPROVED", mergeable: "MERGEABLE" };
   assert.deepEqual([normalize(n, NOW).review_decision, normalize(n, NOW).mergeable], ["approved", "clean"]);
-  n.mergeable = "UNKNOWN";
-  assert.equal(normalize(n, NOW).mergeable, "unknown");
-  n.state = "CLOSED";
-  assert.equal(normalize(n, NOW).state, "closed");
+  assert.equal(normalize({ ...n, mergeable: "UNKNOWN" }, NOW).mergeable, "unknown");
+  assert.equal(normalize({ ...n, state: "CLOSED" }, NOW).state, "closed");
 });
 
 test("your PR's repo's merge method, only when asked", () => {
   const n = fixture("pr-mine");
   assert.equal(normalize(n, NOW).merge_method, undefined);
-  n.repository = { ...n.repository, viewerDefaultMergeMethod: "SQUASH" };
-  assert.equal(normalize(n, NOW).merge_method, "SQUASH");
-  n.repository = { ...n.repository, viewerDefaultMergeMethod: "FAST_FORWARD" };
-  assert.equal(normalize(n, NOW).merge_method, undefined);
+  const method = (m: string) => normalize({ ...n, repository: { ...n.repository, viewerDefaultMergeMethod: m } }, NOW).merge_method;
+  assert.equal(method("SQUASH"), "SQUASH");
+  assert.equal(method("FAST_FORWARD"), undefined);
 });
 
 test("toHit builds the light search hit", () => {

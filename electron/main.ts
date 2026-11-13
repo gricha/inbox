@@ -19,15 +19,16 @@ import type { IpcMainInvokeEvent, MenuItemConstructorOptions, NativeImage } from
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Cause, Effect, Exit, Fiber, Result } from "effect";
+import { Cause, Effect, Exit, Fiber, Result, Schema } from "effect";
 import { BadRequest, Forbidden, messageOf, Upstream, type FsError } from "../src/errors.ts";
 import { readToken } from "../src/github/client.ts";
 import { deskHome, settleHome } from "../src/home.ts";
+import { field } from "../src/narrow.ts";
 import { report } from "../src/sentry.ts";
 import { DEFAULT_PORT, startServer } from "../src/server.ts";
 import { readSettings, settingsPath } from "../src/settings.ts";
 import { RELEASES } from "../src/updates.ts";
-import type { Card, FocusView, SettingsView, SourceStatus } from "../src/types.ts";
+import type { SourceStatus } from "../src/types.ts";
 import {
   appRunner,
   backoff,
@@ -74,7 +75,6 @@ import {
   trayTitle,
   trayTooltip,
   writeFile,
-  type Bounds,
   type DeskPlan,
   type DesktopSettings,
   type SSEvent,
@@ -98,7 +98,11 @@ let plan: DeskPlan = { run: "in-process" };
 let fromSource = "";
 const asset = (name: string) => path.join(app.getAppPath(), "assets", name);
 
-type Status = { now: number; today: number; new: number; text: string };
+// Only the parts of the desk's answers the tray uses.
+const Status = Schema.Struct({ now: Schema.Number, today: Schema.Number, text: Schema.String });
+const TrayCard = Schema.Struct({ repo: Schema.String, number: Schema.Number, title: Schema.String, url: Schema.String });
+const Focus = Schema.Struct({ sections: Schema.Struct({ now: Schema.Array(TrayCard), today: Schema.Array(TrayCard) }) });
+const Settings = Schema.Struct({ values: Schema.Record(Schema.String, Schema.Unknown) });
 type Server = Awaited<ReturnType<typeof startServer>>;
 
 let win: BrowserWindow | null = null;
@@ -110,8 +114,8 @@ let closing = false;
 let relaunching = false;
 let prefs: DesktopSettings = desktopSettings();
 let hotkey: { accelerator: string; ok: boolean; error?: string } = { accelerator: "", ok: true };
-let status: Status | null = null;
-let queueCards: Card[] = []; // the queue's top: now, then today
+let status: typeof Status.Type | null = null;
+let queueCards: (typeof TrayCard.Type)[] = []; // the queue's top: now, then today
 let loginApplied: boolean | null = null; // last applied, so a refused registration isn't retried on every update
 let theme: string | null = null; // this device's, as Settings → This device picked it; kept here, since the UI's origin can change
 let pendingHash: string | null = null; // where an inbox:// link asked the window to go before the UI loaded
@@ -407,7 +411,7 @@ function connect(): Effect.Effect<boolean> {
       log(`starting a desk on ${deskUrl}`);
       const started = yield* Effect.result(
         Effect.tryPromise({
-          try: () => startServer({ port, home: settled, notify, log, app: app.isPackaged ? updater() : undefined }),
+          try: () => startServer({ port, home: settled, notify, log, ...(app.isPackaged ? { app: updater() } : {}) }),
           catch: (cause) => new DeskFailed({ cause }),
         }),
       );
@@ -514,7 +518,7 @@ function refreshSoon(): void {
 function refresh(): Effect.Effect<void> {
   return Effect.gen(function* () {
     const [s, focus, settings] = yield* Effect.all(
-      [getJson<Status>(`${api}/api/status`), getJson<FocusView>(`${api}/api/focus`), getJson<SettingsView>(`${api}/api/settings`)],
+      [getJson(`${api}/api/status`, Status), getJson(`${api}/api/focus`, Focus), getJson(`${api}/api/settings`, Settings)],
       { concurrency: "unbounded" },
     );
     if (settings) yield* applySettings(desktopSettings(settings.values));
@@ -527,7 +531,7 @@ function refresh(): Effect.Effect<void> {
 
 function notify(title: string, body: string): void {
   if (!Notification.isSupported()) return;
-  const n = new Notification({ title, body, icon: mac ? undefined : asset("icon.png") });
+  const n = new Notification({ title, body, ...(mac ? {} : { icon: asset("icon.png") }) });
   shown.add(n);
   n.on("click", () => {
     shown.delete(n);
@@ -628,7 +632,7 @@ function carryOverFiles(): Effect.Effect<void> {
 }
 
 function readTheme(): string | null {
-  const t = (readJson(themeFile()) as { theme?: unknown } | null)?.theme;
+  const t = field(readJson(themeFile()), "theme");
   return isTheme(t) ? t : null;
 }
 
@@ -664,7 +668,7 @@ function showPage(text: string): void {
 // What the desk checks a newer release against, and the install where electron-updater can do one (selfUpdates).
 function updater(): { version: string; install?: () => Effect.Effect<void, Upstream> } {
   const nsis = fs.existsSync(path.join(path.dirname(process.execPath), `Uninstall ${app.getName()}.exe`));
-  return { version: app.getVersion(), install: selfUpdates(process.platform, process.env, nsis) ? installUpdate : undefined };
+  return { version: app.getVersion(), ...(selfUpdates(process.platform, process.env, nsis) ? { install: installUpdate } : {}) };
 }
 
 // The latest release, with the owner's token since the repo is private: downloaded, then the app quits into it.
@@ -720,11 +724,10 @@ function openLink(url: string): void {
 }
 
 function createWindow(): void {
-  const saved = readJson(stateFile()) as Partial<Bounds> | null; // restoreBounds type-checks each field
   const bg = paper();
   const w = new BrowserWindow({
     ...restoreBounds(
-      saved,
+      readJson(stateFile()),
       screen.getAllDisplays().map((d) => d.workArea),
       { width: 1180, height: 800 },
     ),
@@ -736,7 +739,7 @@ function createWindow(): void {
     // On macOS the UI's title bar holds the traffic lights (web/src/styles.css pads it for them).
     ...(mac ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 18, y: 19 } } : {}),
     autoHideMenuBar: !mac,
-    icon: mac ? undefined : asset("icon.png"),
+    ...(mac ? {} : { icon: asset("icon.png") }),
     webPreferences: {
       preload: path.join(app.getAppPath(), "electron", "preload.cjs"),
       contextIsolation: true,
@@ -900,7 +903,7 @@ function updateTray(): void {
     Menu.buildFromTemplate([
       {
         label: "Open Inbox",
-        accelerator: hotkey.ok && hotkey.accelerator ? hotkey.accelerator : undefined,
+        ...(hotkey.ok && hotkey.accelerator ? { accelerator: hotkey.accelerator } : {}),
         registerAccelerator: false,
         click: showWindow,
       },

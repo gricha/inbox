@@ -850,7 +850,7 @@ test("a hunk Claude wrote a note on but didn't rank stays in the reading list, a
     { id: "h4", path: "src/b.ts", level: "look", why: "the fix" },
     { id: "h2", path: "src/planner/plan.ts", level: "skim", why: "" },
   ]);
-  const o = reviewOrder(files, aiOf({ notes: r.notes, chunks: r.chunks }), false);
+  const o = reviewOrder(files, aiOf({ notes: r.notes, chunks: r.chunks! }), false);
   assert.deepEqual(
     o.chunks.map((h) => [h.id, h.rank, h.level, h.notes]),
     [
@@ -877,7 +877,7 @@ test("a hunk Claude wrote a note on but didn't rank stays in the reading list, a
     [["h1", "skim", ""]],
   );
   assert.deepEqual(
-    reviewOrder(files, aiOf({ notes: whole.notes, chunks: whole.chunks }), false).chunks.map((h) => [h.id, h.notes]),
+    reviewOrder(files, aiOf({ notes: whole.notes, chunks: whole.chunks! }), false).chunks.map((h) => [h.id, h.notes]),
     [["h1", [0]]],
   );
 });
@@ -1549,7 +1549,7 @@ async function setup(items: Item[], opts: { writer?: GitHubWriter; settings?: Re
   const log = (m: string) => {
     logs.push(m);
   };
-  const desk = new Desk({ home, github: gh, now: () => NOW, notify, log, review: f.deps, writer: opts.writer });
+  const desk = new Desk({ home, github: gh, now: () => NOW, notify, log, review: f.deps, ...(opts.writer && { writer: opts.writer }) });
   await run(desk.init());
   // Waits out a sync already running (approve starts one), then runs a fresh one.
   const sync = async () => {
@@ -2219,7 +2219,7 @@ test("reviews are for PRs: an issue answers 400", async () => {
 
 // `landed` plays GitHub taking the approval.
 function fakeWriter(landed = () => {}) {
-  const calls: { pr: string; commit: string; body?: string }[] = [];
+  const calls: { pr: string; commit: string; body: string | undefined }[] = [];
   let fail = false;
   const writer: GitHubWriter = {
     ...refuseWrites("approve tests only approve"),

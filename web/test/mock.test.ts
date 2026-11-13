@@ -48,7 +48,7 @@ after(() => {
 async function call<T>(method: string, path: string, body?: unknown): Promise<{ status: number; data: T }> {
   const res = await fetch(base + path, {
     method,
-    body: body === undefined ? undefined : JSON.stringify(body),
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     headers: { "content-type": "application/json" },
   });
   return { status: res.status, data: (await res.json()) as T };

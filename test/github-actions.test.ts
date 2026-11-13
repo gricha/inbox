@@ -108,7 +108,7 @@ test("the desk says which GitHub writes each item allows, on its card", async (c
     myPr(4, READY),
     myPr(5, { ci: "green", draft: true }),
     myPr(6, { ...READY, mergeable: "conflict" }),
-    myPr(8, { ...READY, merge_method: undefined }),
+    myPr(8, { ci: "green", review_decision: "approved", mergeable: "clean", head_oid: "h4" }),
     myPr(9, { ...READY, base: "feature-x", default_branch: "main" }),
     myPr(10, { ...READY, review_decision: "none", base: "main", default_branch: "main", review_requests: [] }),
     makeItem({ number: 7, kind: "issue", author: "me", node_id: "I_7" }),

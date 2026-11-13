@@ -24,6 +24,7 @@ import type {
   SettingValue,
 } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
+import { useKeyed } from "../keyed.ts";
 import { ago, aiName, cls, githubTip, MAC, orgsLine } from "../format.ts";
 import { AutomationRows, AutomationView, NewAutomation, useAutomations } from "./Automations.tsx";
 import { Criteria } from "./Criteria.tsx";
@@ -48,7 +49,7 @@ import {
   SHOWN,
   valueOf,
 } from "../view.ts";
-import { applyTheme, desktop, omarchyName, omarchyTheme, onOmarchy, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
+import { applyTheme, desktop, isThemeId, omarchyName, omarchyTheme, onOmarchy, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;
 // The value the server saved, or null when it was rejected (the row shows why): it never fails.
@@ -488,13 +489,12 @@ function Row({
   );
   // Not saved because the desk was down: once it answers again, the row shows what it has, not that old refusal.
   const away = useRef(false);
-  useEffect(() => {
+  useKeyed(loads, () => {
     if (!away.current) return;
     away.current = false;
     setStatus(null);
     setEpoch((n) => n + 1);
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a refresh is what says the desk is back
-  }, [loads]);
+  });
 
   // The settings as saved, or null when it wasn't (the row says why): it never fails.
   function put(patch: { set?: Record<string, SettingValue>; reset?: string[] }): Effect.Effect<SettingsView | null> {
@@ -544,7 +544,7 @@ function Row({
       key={epoch}
       id={id}
       def={def}
-      value={view.values[def.key] ?? (def.default as SettingValue)}
+      value={view.values[def.key] ?? (typeof def.default === "object" ? [...def.default] : def.default)}
       invalid={typeof status === "object" && status !== null}
       disabled={disabled}
       clear={() => {
@@ -669,15 +669,10 @@ function ClaudeStatus({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Re-read on every app refresh: the agent's own config can change outside the desk.
-  useEffect(() => {
-    const stop = new AbortController();
+  useKeyed(active ? loads : null, (signal) => {
     // Not answering: what's shown stays, and the next refresh asks again.
-    if (active) runUi(api.agents().pipe(Effect.map(setStatus), Effect.ignore), { signal: stop.signal });
-    return () => {
-      stop.abort();
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads only triggers a re-read
-  }, [active, loads]);
+    runUi(api.agents().pipe(Effect.map(setStatus), Effect.ignore), { signal });
+  });
 
   const need = status?.needs;
   const say = need && needs(status.driver === "codex" ? "Codex" : status.driver === "opencode" ? "OpenCode" : "Claude Code")[need];
@@ -773,7 +768,8 @@ function ThemeRow() {
           className="input choice"
           value={theme}
           onChange={(e) => {
-            const t = e.target.value as ThemeId;
+            const t = e.target.value;
+            if (!isThemeId(t)) return;
             applyTheme(t);
             setTheme(t);
           }}
@@ -835,27 +831,19 @@ function RemoteRows({
   const [view, setView] = useState<RemoteView | null>(null);
   const [tick, setTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const stop = new AbortController();
-    if (active) runUi(api.remote().pipe(Effect.map(setView), Effect.ignore), { signal: stop.signal });
-    return () => {
-      stop.abort();
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads, on and tick only trigger a re-read
-  }, [active, loads, on, tick]);
+  useKeyed(active ? `${loads} ${on} ${tick}` : null, (signal) => {
+    runUi(api.remote().pipe(Effect.map(setView), Effect.ignore), { signal });
+  });
   const turning = !!view && (view.on !== on || (on && !view.url && view.text === "Off.") || (!on && !!view.url));
   // Each answer still on its way sets a new view, which sets the next try.
-  useEffect(() => {
-    const t = turning
-      ? setTimeout(() => {
-          setTick((n) => n + 1);
-        }, 1000)
-      : undefined;
+  useKeyed(turning ? view : null, () => {
+    const t = setTimeout(() => {
+      setTick((n) => n + 1);
+    }, 1000);
     return () => {
       clearTimeout(t);
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- view only times the next read
-  }, [turning, view]);
+  });
 
   function revoke(id: string, name: string) {
     setError(null);
@@ -946,7 +934,7 @@ const LEAD: Record<string, (p: PartProps) => ReactNode> = {
       <GitHubStatusRow gh={p.view.github} />
       <ViewRow
         id="rules"
-        tone={p.configErrors > 0 ? "bad" : undefined}
+        {...(p.configErrors > 0 && { tone: "bad" })}
         help={
           p.configErrors > 0
             ? `${p.configErrors} ${p.configErrors === 1 ? "error" : "errors"} in your rules`
@@ -1073,10 +1061,9 @@ export function Settings({
 
   // A part or a view opens at its top.
   const ready = view !== null;
-  useEffect(() => {
-    if (active && ready) window.scrollTo({ top: 0 });
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a new section only triggers the scroll
-  }, [active, section, ready]);
+  useKeyed(active && ready ? section : null, () => {
+    window.scrollTo({ top: 0 });
+  });
 
   // Back from a view to its part, focus goes to what opened it (its row's Edit, an automation's name or Review), so Tab goes on
   // from there; after App's route change, which blurs whatever had it.
@@ -1109,7 +1096,7 @@ export function Settings({
         onView={onView}
         hidden={folded}
         disabled={DISABLED[d.key]?.(view.values) ?? false}
-        help={d.type === "hotkey" ? hotkeyHelp(String(view.values[d.key] ?? d.default), live?.hotkey ?? null, MAC) : undefined}
+        {...(d.type === "hotkey" && { help: hotkeyHelp(String(view.values[d.key] ?? d.default), live?.hotkey ?? null, MAC) })}
         extra={d.key === "app.source" && live && <SourceLine s={live.source ?? null} />}
       />
     );

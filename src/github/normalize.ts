@@ -1,90 +1,152 @@
 // GraphQL nodes -> Item / SearchHit.
 
+import { Schema } from "effect";
 import { requiresOf } from "../deps.ts";
+import { oneOf } from "../narrow.ts";
 import { requesterOf } from "./behalf.ts";
 import type { Check, Ci, Item, Mergeable, ReviewDecision, ReviewState } from "../types.ts";
 import type { SearchHit } from "./index.ts";
 
-export interface Actor {
-  __typename?: string;
-  login: string;
-}
-interface Reviewer {
-  __typename: string;
-  login?: string;
-  slug?: string;
-}
-interface Conn<T> {
-  totalCount?: number;
-  nodes: T[];
-}
-interface RawReview {
-  author: Actor | null;
-  authorAssociation?: string;
-  state: string;
-  submittedAt: string | null;
-  createdAt: string;
-  commit?: { oid: string } | null;
-}
-interface RawComment {
-  author: Actor | null;
-  authorAssociation?: string;
-  createdAt: string;
-  commit?: { oid: string } | null;
-}
-type RawCommit = { oid: string; committedDate: string; author: { user: { login: string } | null } | null };
+// The GraphQL nodes the queries ask for, as schemas: a node that isn't that shape fails its read, never a crash later.
+const conn = <T extends Schema.Top>(node: T) => Schema.Struct({ totalCount: Schema.optionalKey(Schema.Number), nodes: Schema.Array(node) });
+
+export const ACTOR = Schema.Struct({ __typename: Schema.optionalKey(Schema.String), login: Schema.String });
+export type Actor = typeof ACTOR.Type;
+const REVIEWER = Schema.Struct({
+  __typename: Schema.String,
+  login: Schema.optionalKey(Schema.String),
+  slug: Schema.optionalKey(Schema.String),
+});
+type Reviewer = typeof REVIEWER.Type;
+export const REVIEW_STATE = Schema.Literals(["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED", "PENDING"]);
+export const REVIEW_STATES: Record<typeof REVIEW_STATE.Type, ReviewState> = {
+  APPROVED: "approved",
+  CHANGES_REQUESTED: "changes_requested",
+  COMMENTED: "commented",
+  DISMISSED: "dismissed",
+  PENDING: "pending",
+};
+const OID = Schema.NullOr(Schema.Struct({ oid: Schema.String }));
+const RAW_REVIEW = Schema.Struct({
+  author: Schema.NullOr(ACTOR),
+  authorAssociation: Schema.optionalKey(Schema.String),
+  state: REVIEW_STATE,
+  submittedAt: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  commit: Schema.optionalKey(OID),
+});
+const RAW_COMMENT = Schema.Struct({
+  author: Schema.NullOr(ACTOR),
+  authorAssociation: Schema.optionalKey(Schema.String),
+  createdAt: Schema.String,
+  commit: Schema.optionalKey(OID),
+});
+export const COMMIT_AUTHOR = Schema.NullOr(Schema.Struct({ user: Schema.NullOr(Schema.Struct({ login: Schema.String })) }));
+const RAW_COMMIT = { oid: Schema.String, committedDate: Schema.String, author: COMMIT_AUTHOR };
 
 // Has a say on the repo. Anyone else can comment on a public PR.
 const COLLABORATORS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const collaborator = (association: string | undefined) => COLLABORATORS.has(association ?? "");
 
-export interface RawHit {
-  __typename: "PullRequest" | "Issue";
-  id: string;
-  number: number;
-  title?: string;
-  updatedAt: string;
-  repository: { nameWithOwner: string };
-  author: Actor | null;
-}
+const HIT = {
+  __typename: Schema.Literals(["PullRequest", "Issue"]),
+  id: Schema.String,
+  number: Schema.Number,
+  title: Schema.optionalKey(Schema.String),
+  updatedAt: Schema.String,
+  repository: Schema.Struct({ nameWithOwner: Schema.String }),
+  author: Schema.NullOr(ACTOR),
+};
+export const RAW_HIT = Schema.Struct(HIT);
+export type RawHit = typeof RAW_HIT.Type;
 
-export interface RawNode extends RawHit {
-  repository: { nameWithOwner: string; viewerDefaultMergeMethod?: string };
-  title: string;
-  url: string;
-  state: string;
-  createdAt: string;
-  closedAt?: string | null;
-  bodyText: string;
-  labels: Conn<{ name: string }>;
-  assignees: Conn<{ login: string }>;
-  comments: Conn<RawComment>;
+// A check run or a commit status, as the statusCheckRollup lists them.
+export const RAW_CHECK = Schema.Struct({
+  __typename: Schema.String,
+  name: Schema.optionalKey(Schema.String),
+  conclusion: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  context: Schema.optionalKey(Schema.String),
+  state: Schema.optionalKey(Schema.String),
+  status: Schema.optionalKey(Schema.String), // a check run's: QUEUED, IN_PROGRESS, COMPLETED, …
+  isRequired: Schema.optionalKey(Schema.Boolean), // for this PR's base branch; only asked of your own PRs, and of the PR whose review lists its checks
+  permalink: Schema.optionalKey(Schema.String), // a check run's page on GitHub; only asked for a review's list
+  targetUrl: Schema.optionalKey(Schema.NullOr(Schema.String)), // where a commit status points, which is its sender's to choose; only asked for a review's list
+});
+export type RawCheck = typeof RAW_CHECK.Type;
+
+export const RAW_NODE = Schema.Struct({
+  ...HIT,
+  repository: Schema.Struct({ nameWithOwner: Schema.String, viewerDefaultMergeMethod: Schema.optionalKey(Schema.String) }),
+  title: Schema.String,
+  url: Schema.String,
+  state: Schema.Literals(["OPEN", "CLOSED", "MERGED"]),
+  createdAt: Schema.String,
+  closedAt: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  bodyText: Schema.String,
+  labels: conn(Schema.Struct({ name: Schema.String })),
+  assignees: conn(Schema.Struct({ login: Schema.String })),
+  comments: conn(RAW_COMMENT),
   // PullRequest only
-  isDraft?: boolean;
-  body?: string; // markdown
-  additions?: number;
-  deletions?: number;
-  changedFiles?: number;
-  baseRefName?: string;
-  baseRepository?: { defaultBranchRef: { name: string } | null } | null;
-  headRefName?: string;
-  headRepository?: { nameWithOwner: string } | null;
-  reviewDecision?: string | null;
-  mergedBy?: { login: string } | null;
-  files?: Conn<{ path: string }> | null;
-  mergeable?: string;
-  checks?: Conn<{ commit: { statusCheckRollup: { contexts: Conn<RawCheck | null> } | null } }>;
-  reviewRequests?: Conn<{ asCodeOwner: boolean; requestedReviewer: Reviewer | null }>;
-  timelineItems?: Conn<{ createdAt: string; actor: Actor | null; requestedReviewer: Reviewer | null }>;
-  baseChanges?: Conn<{ previousRefName?: string; oldBase?: string; createdAt: string }>;
-  readied?: Conn<{ createdAt: string }>;
-  latestReviews?: Conn<RawReview>;
-  latestOpinionatedReviews?: Conn<RawReview>;
-  reviews?: Conn<RawReview>;
-  reviewThreads?: Conn<{ isResolved: boolean; isOutdated?: boolean; comments?: Conn<RawComment> }>;
-  commits?: Conn<{ commit: RawCommit & { statusCheckRollup: { state: string } | null } }>;
-  recent?: Conn<{ commit: RawCommit }>;
-}
+  isDraft: Schema.optionalKey(Schema.Boolean),
+  body: Schema.optionalKey(Schema.String), // markdown
+  additions: Schema.optionalKey(Schema.Number),
+  deletions: Schema.optionalKey(Schema.Number),
+  changedFiles: Schema.optionalKey(Schema.Number),
+  baseRefName: Schema.optionalKey(Schema.String),
+  baseRepository: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ defaultBranchRef: Schema.NullOr(Schema.Struct({ name: Schema.String })) })),
+  ),
+  headRefName: Schema.optionalKey(Schema.String),
+  headRepository: Schema.optionalKey(Schema.NullOr(Schema.Struct({ nameWithOwner: Schema.String }))),
+  reviewDecision: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  mergedBy: Schema.optionalKey(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
+  files: Schema.optionalKey(Schema.NullOr(conn(Schema.Struct({ path: Schema.String })))),
+  mergeable: Schema.optionalKey(Schema.String),
+  checks: Schema.optionalKey(
+    conn(
+      Schema.Struct({
+        commit: Schema.Struct({ statusCheckRollup: Schema.NullOr(Schema.Struct({ contexts: conn(Schema.NullOr(RAW_CHECK)) })) }),
+      }),
+    ),
+  ),
+  reviewRequests: Schema.optionalKey(conn(Schema.Struct({ asCodeOwner: Schema.Boolean, requestedReviewer: Schema.NullOr(REVIEWER) }))),
+  timelineItems: Schema.optionalKey(
+    conn(Schema.Struct({ createdAt: Schema.String, actor: Schema.NullOr(ACTOR), requestedReviewer: Schema.NullOr(REVIEWER) })),
+  ),
+  baseChanges: Schema.optionalKey(
+    conn(
+      Schema.Struct({
+        previousRefName: Schema.optionalKey(Schema.String),
+        oldBase: Schema.optionalKey(Schema.String),
+        createdAt: Schema.String,
+      }),
+    ),
+  ),
+  readied: Schema.optionalKey(conn(Schema.Struct({ createdAt: Schema.String }))),
+  latestReviews: Schema.optionalKey(conn(RAW_REVIEW)),
+  latestOpinionatedReviews: Schema.optionalKey(conn(RAW_REVIEW)),
+  reviews: Schema.optionalKey(conn(RAW_REVIEW)),
+  reviewThreads: Schema.optionalKey(
+    conn(
+      Schema.Struct({
+        isResolved: Schema.Boolean,
+        isOutdated: Schema.optionalKey(Schema.Boolean),
+        comments: Schema.optionalKey(conn(RAW_COMMENT)),
+      }),
+    ),
+  ),
+  commits: Schema.optionalKey(
+    conn(
+      Schema.Struct({
+        commit: Schema.Struct({ ...RAW_COMMIT, statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })) }),
+      }),
+    ),
+  ),
+  recent: Schema.optionalKey(conn(Schema.Struct({ commit: Schema.Struct(RAW_COMMIT) }))),
+});
+export type RawNode = typeof RAW_NODE.Type;
+
+const ITEM_STATES: Record<RawNode["state"], Item["state"]> = { OPEN: "open", CLOSED: "closed", MERGED: "merged" };
 
 const CI: Record<string, Ci> = { SUCCESS: "green", FAILURE: "red", ERROR: "red", PENDING: "pending", EXPECTED: "pending" };
 const DECISION: Record<string, ReviewDecision> = {
@@ -93,20 +155,8 @@ const DECISION: Record<string, ReviewDecision> = {
   REVIEW_REQUIRED: "required",
 };
 const MERGEABLE: Record<string, Mergeable> = { MERGEABLE: "clean", CONFLICTING: "conflict" };
-const MERGE_METHODS = new Set(["MERGE", "SQUASH", "REBASE"]);
+const MERGE_METHODS = ["MERGE", "SQUASH", "REBASE"] as const;
 
-// A check run or a commit status, as the statusCheckRollup lists them.
-export interface RawCheck {
-  __typename: string;
-  name?: string;
-  conclusion?: string | null;
-  context?: string;
-  state?: string;
-  status?: string; // a check run's: QUEUED, IN_PROGRESS, COMPLETED, …
-  isRequired?: boolean; // for this PR's base branch; only asked of your own PRs, and of the PR whose review lists its checks
-  permalink?: string; // a check run's page on GitHub; only asked for a review's list
-  targetUrl?: string | null; // where a commit status points, which is its sender's to choose; only asked for a review's list
-}
 // Cancelled and skipped runs aren't the code's fault, so they don't count.
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED", "ERROR"]);
 const checkFailed = (c: RawCheck) => FAILED.has((c.__typename === "CheckRun" ? c.conclusion : c.state) ?? "");
@@ -181,6 +231,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
   const checks = n.checks ? (n.checks.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).filter((c) => c !== null) : null;
   const { ci, optional } = ciOf(head?.statusCheckRollup?.state, checks);
   const moved = n.baseChanges?.nodes[0];
+  const mergeMethod = oneOf(MERGE_METHODS, n.repository.viewerDefaultMergeMethod);
   // reviews(last: 20) can be flooded by bot comments; the latest* lists keep each reviewer's verdict.
   const reviews = new Map<string, Item["reviews"][number]>();
   for (const r of [...(n.reviews?.nodes ?? []), ...(n.latestReviews?.nodes ?? []), ...(n.latestOpinionatedReviews?.nodes ?? [])]) {
@@ -189,7 +240,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
       author: login(r.author),
       author_bot: isBot(r.author),
       trusted: collaborator(r.authorAssociation),
-      state: r.state.toLowerCase() as ReviewState,
+      state: REVIEW_STATES[r.state],
       at,
       commit: r.commit?.oid ?? "",
     });
@@ -203,7 +254,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     number: n.number,
     author_bot: isBot(n.author),
     via: isBot(n.author) ? viaOf(n.bodyText) : "",
-    state: n.state.toLowerCase() as Item["state"],
+    state: ITEM_STATES[n.state],
     draft: n.isDraft ?? false,
     labels: n.labels.nodes.map((l) => l.name),
     assignees: n.assignees.nodes.map((a) => a.login),
@@ -240,9 +291,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     ...(n.files && { paths: n.files.nodes.map((f) => f.path) }),
     ...(checks && { checks_failed: checks.filter(checkFailed).map(checkName) }),
     ...(optional.length > 0 && { checks_optional: optional }),
-    ...(MERGE_METHODS.has(n.repository.viewerDefaultMergeMethod ?? "") && {
-      merge_method: n.repository.viewerDefaultMergeMethod as NonNullable<Item["merge_method"]>,
-    }),
+    ...(mergeMethod && { merge_method: mergeMethod }),
     review_requests: (n.reviewRequests?.nodes ?? [])
       .filter((r) => r.requestedReviewer)
       .map((r) => Object.assign(reviewer(r.requestedReviewer!), { codeowner: r.asCodeOwner })),

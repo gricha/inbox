@@ -1,6 +1,17 @@
 // SQLite cache of every source's items (GitHub's today), your local triage state, and the event log.
 import { DatabaseSync } from "node:sqlite";
-import type { ActivityEvent, ActivityKind, Device, Head, InboxSection, Item, ItemState, Job } from "./types.ts";
+import { Effect, Result, Schema } from "effect";
+import { decode, oneOf, schemaOf, str } from "./narrow.ts";
+import {
+  ACTIVITY_KINDS,
+  INBOX_SECTIONS,
+  type ActivityEvent,
+  type Device,
+  type Head,
+  type Item,
+  type ItemState,
+  type Job,
+} from "./types.ts";
 
 export interface ItemMeta {
   node_id: string;
@@ -43,6 +54,47 @@ export const emptyState = (id: string): StateRow => ({
   inflight_at: null,
   section: null,
 });
+
+// Undo entries logged before in-flight, snoozing until something happens, or sections existed don't carry them.
+const since = Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null)));
+const StateRowSchema = schemaOf<StateRow>()(
+  Schema.Struct({
+    id: Schema.String,
+    done_at: Schema.NullOr(Schema.String),
+    snooze_until: Schema.NullOr(Schema.String),
+    snooze_on_activity: Schema.Boolean,
+    snooze_when: since,
+    muted: Schema.Boolean,
+    pinned: Schema.Boolean,
+    seen_at: Schema.NullOr(Schema.String),
+    inflight_at: since,
+    section: Schema.NullOr(Schema.Literals(INBOX_SECTIONS)).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+    snoozed_at: Schema.NullOr(Schema.String),
+    acked_at: Schema.NullOr(Schema.String),
+  }),
+);
+const ActivityData = Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Boolean]));
+
+// A column's value, as the table declares it: anything else is a broken database, not data to skip.
+function text(v: unknown): string {
+  if (typeof v !== "string") throw new Error(`desk.db: expected text, got ${typeof v}`);
+  return v;
+}
+function int(v: unknown): number {
+  if (typeof v !== "number") throw new Error(`desk.db: expected an integer, got ${typeof v}`);
+  return v;
+}
+const textOrNull = (v: unknown): string | null => (v === null ? null : text(v));
+function lit<const T extends string>(values: readonly T[], v: unknown): T {
+  const x = oneOf(values, v);
+  if (x === undefined) throw new Error(`desk.db: unexpected ${String(v)}`);
+  return x;
+}
+// Stored JSON checked against its schema; undefined when it doesn't hold one.
+function json<S extends Schema.ConstraintDecoder<unknown>>(schema: S, v: unknown): S["Type"] | undefined {
+  const r = decode(schema, JSON.parse(text(v)));
+  return Result.isSuccess(r) ? r.success : undefined;
+}
 
 export class Store {
   db: DatabaseSync;
@@ -108,10 +160,13 @@ export class Store {
   // --- items
 
   items(): Item[] {
-    return this.db
-      .prepare("SELECT data FROM items")
-      .all()
-      .map((r) => JSON.parse(r.data as string) as Item);
+    return (
+      this.db
+        .prepare("SELECT data FROM items")
+        .all()
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk wrote it (putItems); plugins' items carry fields of their own
+        .map((r) => JSON.parse(text(r.data)) as Item)
+    );
   }
 
   itemsById(ids: string[]): Map<string, Item> {
@@ -119,7 +174,8 @@ export class Store {
     const out = new Map<string, Item>();
     for (const id of ids) {
       const r = stmt.get(id);
-      if (r) out.set(id, JSON.parse(r.data as string) as Item);
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk wrote it (putItems)
+      if (r) out.set(id, JSON.parse(text(r.data)) as Item);
     }
     return out;
   }
@@ -135,17 +191,18 @@ export class Store {
     return new Map(
       rows.map((r) => {
         const meta: ItemMeta = {
-          node_id: r.node_id as string,
+          node_id: text(r.node_id),
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- read from the item the desk wrote
           kind: r.kind as Item["kind"],
-          author: r.author as string,
+          author: str(r.author) ?? "",
           author_bot: r.author_bot === 1,
-          updated_at: r.updated_at as string,
-          detail_at: r.detail_at as string,
-          last_hit_at: r.last_hit_at as string,
+          updated_at: text(r.updated_at),
+          detail_at: text(r.detail_at),
+          last_hit_at: text(r.last_hit_at),
           lacks: r.lacks === 1,
           quiet: r.quiet === 1,
         };
-        return [r.id as string, meta];
+        return [text(r.id), meta];
       }),
     );
   }
@@ -170,7 +227,8 @@ export class Store {
     const out = new Map<string, Item | null>();
     for (const id of ids) {
       const r = stmt.get(id);
-      if (r) out.set(id, JSON.parse(r.said as string) as Item | null);
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk wrote it (putItems, quietly)
+      if (r) out.set(id, JSON.parse(text(r.said)) as Item | null);
     }
     return out;
   }
@@ -223,9 +281,9 @@ export class Store {
       ? this.db.prepare("SELECT query, item_id FROM hits WHERE query IN (SELECT value FROM json_each(?))").all(JSON.stringify(queries))
       : this.db.prepare("SELECT query, item_id FROM hits").all();
     for (const r of rows) {
-      const q = r.query as string;
+      const q = text(r.query);
       if (!out.has(q)) out.set(q, new Set());
-      out.get(q)!.add(r.item_id as string);
+      out.get(q)!.add(text(r.item_id));
     }
     return out;
   }
@@ -235,7 +293,7 @@ export class Store {
       this.db
         .prepare("SELECT DISTINCT item_id FROM hits WHERE kept = 1")
         .all()
-        .map((r) => r.item_id as string),
+        .map((r) => text(r.item_id)),
     );
   }
 
@@ -245,12 +303,7 @@ export class Store {
           .prepare("SELECT query, fetched_at, total, error FROM queries WHERE query IN (SELECT value FROM json_each(?))")
           .all(JSON.stringify(queries))
       : this.db.prepare("SELECT query, fetched_at, total, error FROM queries").all();
-    return new Map(
-      rows.map((r) => [
-        r.query as string,
-        { fetched_at: r.fetched_at as string, total: r.total as number, error: (r.error as string) ?? null },
-      ]),
-    );
+    return new Map(rows.map((r) => [text(r.query), { fetched_at: text(r.fetched_at), total: int(r.total), error: textOrNull(r.error) }]));
   }
 
   // --- local state
@@ -260,7 +313,7 @@ export class Store {
       this.db
         .prepare("SELECT * FROM state")
         .all()
-        .map((r) => [r.id as string, rowToState(r)]),
+        .map((r) => [text(r.id), rowToState(r)]),
     );
   }
 
@@ -324,7 +377,7 @@ export class Store {
 
   lastActionFor(itemId: string): ActionEvent | null {
     const r = this.db.prepare("SELECT seq FROM events WHERE item_id = ? AND undone = 0 ORDER BY seq DESC LIMIT 1").get(itemId);
-    return r ? this.lastAction(r.seq as number) : null;
+    return r ? this.lastAction(int(r.seq)) : null;
   }
 
   // Its latest pin still in effect: the agent behind it (null for you) and its seq.
@@ -332,7 +385,7 @@ export class Store {
     const r = this.db
       .prepare("SELECT agent, seq FROM events WHERE item_id = ? AND action = 'pin' AND undone = 0 ORDER BY seq DESC LIMIT 1")
       .get(itemId);
-    return r ? { agent: (r.agent as string | null) ?? null, seq: Number(r.seq) } : null;
+    return r ? { agent: textOrNull(r.agent), seq: Number(r.seq) } : null;
   }
 
   markUndone(seq: number): void {
@@ -355,19 +408,26 @@ export class Store {
     return this.db
       .prepare(`SELECT * FROM activity WHERE ${where} ORDER BY seq ${q.latest ? "DESC" : "ASC"} LIMIT ?`)
       .all(...args)
-      .map((r) => ({
-        seq: r.seq as number,
-        at: r.at as string,
-        source: r.source as string,
-        item_id: r.item_id as string,
-        kind: r.kind as ActivityKind,
-        actor: r.actor as string,
-        data: JSON.parse(r.data as string) as ActivityEvent["data"],
-      }));
+      .flatMap((r) => {
+        const data = json(ActivityData, r.data);
+        if (!data) return [];
+        return [
+          {
+            seq: int(r.seq),
+            at: text(r.at),
+            source: text(r.source),
+            item_id: text(r.item_id),
+            kind: lit(ACTIVITY_KINDS, r.kind),
+            actor: text(r.actor),
+            data,
+          },
+        ];
+      });
   }
 
   lastSeq(): number {
-    return (this.db.prepare("SELECT MAX(seq) AS seq FROM activity").get()?.seq as number | null) ?? 0;
+    const seq = this.db.prepare("SELECT MAX(seq) AS seq FROM activity").get()?.seq;
+    return seq === null || seq === undefined ? 0 : int(seq);
   }
 
   // --- jobs (the work Claude owes the owner: src/jobs.ts)
@@ -377,17 +437,17 @@ export class Store {
       .prepare("SELECT * FROM jobs ORDER BY rowid")
       .all()
       .map((r) => ({
-        kind: r.kind as Job["kind"],
-        key: r.key as string,
-        item: (r.item as string | null) ?? null,
-        head: (r.head as string | null) ?? null,
-        state: r.state as Job["state"],
-        attempts: r.attempts as number,
-        queued_at: r.queued_at as string,
-        started_at: (r.started_at as string | null) ?? null,
-        finished_at: (r.finished_at as string | null) ?? null,
-        retry_at: (r.retry_at as string | null) ?? null,
-        error: (r.error as string | null) ?? null,
+        kind: lit(["ai_review", "ask", "answer"], r.kind),
+        key: text(r.key),
+        item: textOrNull(r.item),
+        head: textOrNull(r.head),
+        state: lit(["queued", "running", "done", "failed"], r.state),
+        attempts: int(r.attempts),
+        queued_at: text(r.queued_at),
+        started_at: textOrNull(r.started_at),
+        finished_at: textOrNull(r.finished_at),
+        retry_at: textOrNull(r.retry_at),
+        error: textOrNull(r.error),
       }));
   }
 
@@ -410,12 +470,12 @@ export class Store {
   devices(): (Device & { hash: string })[] {
     const rows = this.db.prepare("SELECT id, name, kind, hash, created_at, last_used_at FROM devices ORDER BY created_at").all();
     return rows.map((r) => ({
-      id: r.id as string,
-      name: r.name as string,
-      kind: r.kind as Device["kind"],
-      hash: r.hash as string,
-      created_at: r.created_at as string,
-      last_used_at: (r.last_used_at as string | null) ?? null,
+      id: text(r.id),
+      name: text(r.name),
+      kind: lit(["browser", "device"], r.kind),
+      hash: text(r.hash),
+      created_at: text(r.created_at),
+      last_used_at: textOrNull(r.last_used_at),
     }));
   }
 
@@ -437,12 +497,24 @@ export class Store {
 
   get(key: string): unknown {
     const r = this.db.prepare("SELECT value FROM kv WHERE key = ?").get(key);
-    return r ? JSON.parse(r.value as string) : null;
+    return r ? JSON.parse(text(r.value)) : null;
   }
 
-  prefixed<T>(prefix: string): Map<string, T> {
+  // A value checked against its schema: null when absent, or stored in a shape it no longer has.
+  read<S extends Schema.ConstraintDecoder<unknown>>(key: string, schema: S): S["Type"] | null {
+    const r = this.db.prepare("SELECT value FROM kv WHERE key = ?").get(key);
+    return (r && json(schema, r.value)) ?? null;
+  }
+
+  // Each `prefix<id>` value by id, leaving out those not in the schema's shape.
+  prefixed<S extends Schema.ConstraintDecoder<unknown>>(prefix: string, schema: S): Map<string, S["Type"]> {
     const rows = this.db.prepare("SELECT key, value FROM kv WHERE key >= ? AND key < ?").all(prefix, prefix + "\uffff");
-    return new Map(rows.map((r) => [(r.key as string).slice(prefix.length), JSON.parse(r.value as string) as T]));
+    const out = new Map<string, S["Type"]>();
+    for (const r of rows) {
+      const v = json(schema, r.value);
+      if (v !== undefined) out.set(text(r.key).slice(prefix.length), v);
+    }
+    return out;
   }
 
   // Drops `prefix<id>` rows whose id isn't in `keep`.
@@ -450,7 +522,7 @@ export class Store {
     const rows = this.db.prepare("SELECT key FROM kv WHERE key >= ? AND key < ?").all(prefix, `${prefix}\uffff`);
     const del = this.db.prepare("DELETE FROM kv WHERE key = ?");
     for (const r of rows) {
-      const key = r.key as string;
+      const key = text(r.key);
       if (!keep.has(key.slice(prefix.length))) del.run(key);
     }
   }
@@ -462,31 +534,34 @@ export class Store {
   }
 }
 
-function rowToAction(r: Record<string, unknown>): ActionEvent {
+// null when `before` isn't a state any more: there's nothing it could restore.
+function rowToAction(r: Record<string, unknown>): ActionEvent | null {
+  const before = json(StateRowSchema, r.before);
+  if (!before) return null;
   return {
-    seq: r.seq as number,
-    at: r.at as string,
-    item_id: r.item_id as string,
-    action: r.action as string,
-    before: JSON.parse(r.before as string) as StateRow,
+    seq: int(r.seq),
+    at: text(r.at),
+    item_id: text(r.item_id),
+    action: text(r.action),
+    before,
     undone: r.undone === 1,
-    agent: (r.agent as string | null) ?? null,
+    agent: textOrNull(r.agent),
   };
 }
 
 function rowToState(r: Record<string, unknown>): StateRow {
   return {
-    id: r.id as string,
-    done_at: (r.done_at as string) ?? null,
-    snooze_until: (r.snooze_until as string) ?? null,
+    id: text(r.id),
+    done_at: textOrNull(r.done_at),
+    snooze_until: textOrNull(r.snooze_until),
     snooze_on_activity: r.snooze_on_activity === 1,
-    snooze_when: (r.snooze_when as string | null) ?? null,
-    snoozed_at: (r.snoozed_at as string) ?? null,
-    acked_at: (r.acked_at as string) ?? null,
+    snooze_when: textOrNull(r.snooze_when),
+    snoozed_at: textOrNull(r.snoozed_at),
+    acked_at: textOrNull(r.acked_at),
     muted: r.muted === 1,
     pinned: r.pinned === 1,
-    seen_at: (r.seen_at as string) ?? null,
-    inflight_at: (r.inflight_at as string) ?? null,
-    section: (r.section as InboxSection | null) ?? null,
+    seen_at: textOrNull(r.seen_at),
+    inflight_at: textOrNull(r.inflight_at),
+    section: r.section === null ? null : lit(INBOX_SECTIONS, r.section),
   };
 }

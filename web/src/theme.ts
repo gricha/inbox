@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { THEMES, themeOf, type Theme, type ThemeId as Named } from "../../src/themes.ts";
 import type { DesktopBridge, OmarchyTheme } from "../../src/types.ts";
 import { api, runUi } from "./api.ts";
@@ -17,17 +17,17 @@ export const THEME_GROUPS: { label: string; themes: Theme[] }[] = [
   { label: "Dark", themes: THEMES.filter((t) => t.scheme === "dark") },
 ];
 
-const known = (t: unknown): t is ThemeId => t === "system" || t === "omarchy" || themeOf(t) !== undefined;
+export const isThemeId = (t: unknown): t is ThemeId => t === "system" || t === "omarchy" || themeOf(t) !== undefined;
 export const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
 
 function stored(): ThemeId | null {
   const t = getStored(KEY);
-  return known(t) ? t : null;
+  return isThemeId(t) ? t : null;
 }
 
 function saved(): ThemeId {
   const app = desktop?.theme;
-  return known(app) ? app : (stored() ?? "system");
+  return isThemeId(app) ? app : (stored() ?? "system");
 }
 let picked = saved(); // the app's or this browser's at the start, then what Settings picks
 export const savedTheme = () => picked;
@@ -66,6 +66,16 @@ export function adoptTheme(): void {
   const t = stored();
   if (desktop?.theme === null && t) keepInApp(t);
 }
+
+// The event stream's `omarchy` payload.
+export const OmarchyAnswer = Schema.NullOr(
+  Schema.Struct({
+    name: Schema.String,
+    scheme: Schema.Literals(["light", "dark"]),
+    theme: Schema.NullOr(Schema.String),
+    tokens: Schema.NullOr(Schema.Record(Schema.String, Schema.String)),
+  }),
+);
 
 // The desk's reading of Omarchy's theme, at the start and on each switch: shown at once when Omarchy is this device's.
 export function omarchyIs(o: OmarchyTheme | null): void {

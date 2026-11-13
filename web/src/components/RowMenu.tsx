@@ -1,7 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Action, Card, GitHubAction, InboxSection, Inquiry, SessionAction, SessionCard } from "../../../src/types.ts";
 import { cls, fromName, SNOOZE, snoozeOptions } from "../format.ts";
+import { useKeyedLayout } from "../keyed.ts";
 import { MORE, rowActions } from "./More.tsx";
+import { isKeyOf } from "../../../src/narrow.ts";
 import { SESSION_ACTION } from "./Session.tsx";
 
 // Where a row on the Inbox can move: one section up or down.
@@ -135,7 +137,7 @@ export function SessionMenu({
       pick={(d) => {
         if ("snooze" in d) act(s, "snooze", d.snooze);
         else if ("act" in d) act(s, "done");
-        else if ("key" in d) start(s, d.key as SessionAction);
+        else if ("key" in d && isKeyOf(SESSION_ACTION, d.key)) start(s, d.key);
       }}
       reopen={reopen}
       onClose={onClose}
@@ -221,8 +223,9 @@ function Menu({
     e.stopImmediatePropagation();
     if (e.repeat && e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
     const items = [...(menu.current?.querySelectorAll<HTMLElement>(".ctx-item") ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    const inSub = !!(document.activeElement as HTMLElement | null)?.closest(".ctx-sub");
+    const active = document.activeElement;
+    const at = items.findIndex((el) => el === active);
+    const inSub = !!active?.closest(".ctx-sub");
     if (e.key === "Escape") {
       if (!inSub) onClose();
       else {
@@ -234,7 +237,7 @@ function Menu({
       const i = at < 0 ? -1 : scope.indexOf(items[at]!);
       const down = e.key === "ArrowDown";
       scope[i < 0 ? (down ? 0 : scope.length - 1) : (i + (down ? 1 : scope.length - 1)) % scope.length]?.focus();
-    } else if (e.key === "ArrowRight" && (document.activeElement as HTMLElement | null)?.classList.contains("ctx-has-sub")) {
+    } else if (e.key === "ArrowRight" && active?.classList.contains("ctx-has-sub")) {
       openSub();
     } else if (e.key === "ArrowLeft" && inSub) {
       setSub(false);
@@ -377,13 +380,12 @@ function SnoozeSub({
   const [shift, setShift] = useState(0);
   const shifted = useRef(0);
   // Up as far as it would run past the window's bottom, from where its menu is now.
-  useLayoutEffect(() => {
+  useKeyedLayout(top, () => {
     const r = box.current?.getBoundingClientRect();
     if (!r) return;
     shifted.current = Math.min(0, innerHeight - 8 - (r.bottom - shifted.current));
     setShift(shifted.current);
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- top only says its menu has moved
-  }, [top]);
+  });
   return (
     <div ref={box} className="ctx ctx-sub" role="menu" aria-label="Snooze" style={{ transform: `translateY(${shift}px)` }}>
       {options.map((o) => (

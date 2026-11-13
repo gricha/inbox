@@ -2,9 +2,10 @@
 // its weight, an automation's sort, the criteria's yeses), with where the first rule put it as its hint and a hard rule's
 // floor as a bound. Its own instructions are fixed here. Like the AI review it runs with no tools, no MCP and an empty directory.
 import { createHash, randomBytes } from "node:crypto";
-import { Effect, type Fiber } from "effect";
+import { Effect, Schema, type Fiber } from "effect";
 import { areaFiles, areasFor, touched } from "./areas.ts";
 import type { Desk } from "./desk.ts";
+import { field, oneOf, schemaOf, str } from "./narrow.ts";
 import { askAgent, makeAgentDir, notLoggedIn } from "./review.ts";
 import { agentName } from "./settings.ts";
 import { andMore, pushAnswered, pushesOf } from "./stage.ts";
@@ -23,6 +24,23 @@ import {
   type Signals,
 } from "./types.ts";
 import { report } from "./sentry.ts";
+
+const BucketSchema = Schema.Literals(BUCKETS);
+export const JudgeAnswerSchema = schemaOf<JudgeAnswer>()(
+  Schema.Struct({
+    key: Schema.String,
+    signals: Schema.optionalKey(
+      Schema.mutable(
+        Schema.Array(
+          Schema.Struct({ from: Schema.String, bucket: Schema.optionalKey(BucketSchema), weight: Schema.Number, key: Schema.String }),
+        ),
+      ),
+    ),
+    bucket: Schema.NullOr(BucketSchema),
+    why: Schema.String,
+    at: Schema.String,
+  }),
+);
 
 const BATCH = 20;
 const HOUR = 3_600_000;
@@ -88,8 +106,10 @@ export function judgeKey(item: Item, activityAt: string, ai: AiReview | null | u
 
 // What an automation's sort of an item holds for: the judge's key, less what the desk itself brings later (the PR's files,
 // its AI review). Those make Claude look again; they aren't the item changing.
-export const sortKey = (item: Item, activityAt: string, pinned?: string, blocker = ""): string =>
-  judgeKey({ ...item, paths: undefined }, activityAt, null, pinned, blocker);
+export const sortKey = (item: Item, activityAt: string, pinned?: string, blocker = ""): string => {
+  const { paths: _paths, ...unpathed } = item;
+  return judgeKey(unpathed, activityAt, null, pinned, blocker);
+};
 
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim();
@@ -340,12 +360,12 @@ export function buildJudgePrompt(items: JudgeItem[], me: string, ctx: Context | 
 export function parseVerdicts(raw: unknown, ids: string[]): Map<string, { bucket: Bucket; why: string }> {
   const out = new Map<string, { bucket: Bucket; why: string }>();
   const want = new Set(ids);
-  const list = (raw as { items?: unknown } | null)?.items;
-  for (const v of Array.isArray(list) ? (list as Record<string, unknown>[]) : []) {
-    const id = typeof v?.id === "string" ? v.id.trim() : "";
-    const bucket = JUDGE_BUCKETS.find((b) => b === v?.bucket);
+  const list = field(raw, "items");
+  for (const v of Array.isArray(list) ? list : []) {
+    const id = str(field(v, "id"))?.trim() ?? "";
+    const bucket = oneOf(JUDGE_BUCKETS, field(v, "bucket"));
     if (!want.has(id) || !bucket || out.has(id)) continue;
-    const why = typeof v.why === "string" ? oneLine(v.why).slice(0, MAX_WHY) : "";
+    const why = oneLine(str(field(v, "why")) ?? "").slice(0, MAX_WHY);
     out.set(id, { bucket, why });
   }
   return out;
@@ -372,7 +392,8 @@ export class Judge {
   // Item timestamps (ms) sent in the last hour; kept in kv so a restart doesn't reset the cap.
   spent(): number[] {
     const cutoff = Date.now() - HOUR;
-    return ((this.desk.store.get("judge_spent") as number[] | null) ?? []).filter((t) => t > cutoff);
+    const kept = this.desk.store.get("judge_spent");
+    return (Array.isArray(kept) ? kept : []).filter((t): t is number => typeof t === "number" && t > cutoff);
   }
 
   // Items waiting for an answer: active, open, unresolved, and not in flight (Merging has those, so an answer wouldn't
@@ -397,6 +418,7 @@ export class Judge {
         if (cur && RANK[cur.hint.bucket] <= RANK[p.hint.bucket]) continue;
         const j = snap.judging.get(id);
         if (!j) continue;
+        const pinned = snap.pins.get(id);
         out.set(id, {
           item: e.item,
           signals: e.analysis.signals,
@@ -407,11 +429,14 @@ export class Judge {
           ai: snap.reviews.get(id) ?? null,
           weighed: j.signals,
           key: j.key,
-          ...(snap.pins.has(id) && { pinned: snap.pins.get(id) }),
+          ...(pinned !== undefined && { pinned }),
         });
       }
     }
-    for (const g of out.values()) g.floor = floors.get(g.item.id);
+    for (const g of out.values()) {
+      const floor = floors.get(g.item.id);
+      if (floor) g.floor = floor;
+    }
     const later = (g: JudgeItem) => (g.bucket === "now" || g.bucket === "today" ? 0 : 1);
     return [...out.values()].sort(
       (a, b) => Number(a.answered) - Number(b.answered) || later(a) - later(b) || b.item.updated_at.localeCompare(a.item.updated_at),
@@ -558,7 +583,7 @@ export class Judge {
       waiting = queue.length;
       held = waiting > 0 && !this.next(queue, spent.length).length;
       const now = desk.snapshot().judging;
-      for (const [id, a] of desk.store.prefixed<JudgeAnswer>("judge:")) if (a.key === now.get(id)?.key) judged++;
+      for (const [id, a] of desk.store.prefixed("judge:", JudgeAnswerSchema)) if (a.key === now.get(id)?.key) judged++;
     }
     return {
       state: off ? "off" : this.running ? "running" : this.error ? "error" : "idle",

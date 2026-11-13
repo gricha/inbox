@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Effect } from "effect";
 import { fsError, type FsError } from "./errors.ts";
+import { isRecord } from "./narrow.ts";
 import { lineAt, readAnswer } from "./review.ts";
 import type { AiReview, DiagramGraph, ReviewFile, ReviewNote } from "./types.ts";
 
@@ -61,8 +62,7 @@ export type Kept = Omit<AiReview, "head_oid" | "model" | "at">;
 
 export type Read = { ok: true; doc: ReviewDoc; ai: Kept; dropped: string[] } | { ok: false; why: string };
 
-const obj = (v: unknown): Record<string, unknown> | null =>
-  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+const obj = (v: unknown): Record<string, unknown> | null => (isRecord(v) ? v : null);
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 // oxlint-disable-next-line no-control-regex -- a path or a name with a control character in it is refused
 const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -102,14 +102,15 @@ function readPr(v: unknown): ReviewDoc["pr"] | string {
   const repo = str(p.repo, 140);
   if (repo && !/^[\w.-]+\/[\w.-]+$/.test(repo)) return `pr.repo is owner/name: "${repo}"`;
   const number = p.number ?? null;
-  if (number !== null && !(Number.isInteger(number) && (number as number) > 0)) return "pr.number is a positive whole number";
+  const positive = typeof number === "number" && Number.isInteger(number) && number > 0 ? number : null;
+  if (number !== null && positive === null) return "pr.number is a positive whole number";
   const url = str(p.url, 500);
   if (url && !/^https:\/\/[^\s"<>]+$/.test(url)) return `pr.url is an https link: "${url.slice(0, 80)}"`;
   const author = str(p.author, 60);
   if (author && !/^[\w.[\]-]+$/.test(author)) return `pr.author is a login: "${author}"`;
   const head = str(p.head, 40);
   if (head && !/^[0-9a-f]{1,40}$/.test(head)) return "pr.head is a commit's sha";
-  return { title, repo, number: number as number | null, url, author, head };
+  return { title, repo, number: positive, url, author, head };
 }
 
 function readFiles(v: unknown): ReviewFile[] | string {
@@ -131,8 +132,11 @@ function readFiles(v: unknown): ReviewFile[] | string {
       if (total > MAX_PATCHES) return `the patches are over ${MAX_PATCHES} characters in all`;
     }
     const lines = (patch ?? "").split("\n");
-    const count = (k: string, sign: string) =>
-      patch === null ? (Number.isInteger(f?.[k]) ? Math.max(0, f![k] as number) : 0) : lines.filter((l) => l.startsWith(sign)).length;
+    const count = (k: string, sign: string) => {
+      const n = f?.[k];
+      if (patch !== null) return lines.filter((l) => l.startsWith(sign)).length;
+      return typeof n === "number" && Number.isInteger(n) ? Math.max(0, n) : 0;
+    };
     out.push({
       path: p,
       previous_path: prev,

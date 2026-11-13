@@ -30,7 +30,7 @@ function desk(status: number, body: string, type = "application/json; charset=ut
   const seen: string[] = [];
   globalThis.fetch = (input, init) => {
     seen.push(`${init?.method ?? "GET"} ${typeof input === "string" ? input : input instanceof URL ? input.href : input.url}`);
-    return Promise.resolve(new Response(body, { status, statusText: STATUS_CODES[status], headers: { "content-type": type } }));
+    return Promise.resolve(new Response(body, { status, statusText: STATUS_CODES[status] ?? "", headers: { "content-type": type } }));
   };
   return seen;
 }

@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Inquiry, InquiryView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
+import { useKeyed } from "../keyed.ts";
 import { age, ago, cls, fromName, issueUrl, MOD } from "../format.ts";
 import { shownUrl, urlPlace } from "../../../src/prose.ts";
 import { inquiryOf, routeHash } from "../view.ts";
@@ -133,9 +134,8 @@ export function InquiryPage({
   const [sent, setSent] = useState<Inquiry["answer"]>(null); // yours, until the desk's copy says so
   const seq = useRef(0);
 
-  useEffect(() => {
+  useKeyed(`${id} ${loads}`, (signal) => {
     const n = ++seq.current;
-    const stop = new AbortController();
     runUi(
       api.inquiry(id).pipe(
         Effect.match({
@@ -147,13 +147,9 @@ export function InquiryPage({
           },
         }),
       ),
-      { signal: stop.signal },
+      { signal },
     );
-    return () => {
-      stop.abort();
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
-  }, [id, loads]);
+  });
 
   const v = typeof q === "object" ? q : null;
   useEffect(() => {

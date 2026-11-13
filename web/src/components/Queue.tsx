@@ -216,9 +216,10 @@ export function Later({
           </h2>
           {g.open && (
             <div className="lines">
-              {g.cards.map((c, i) => (
-                <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} why tree={trees.get(g.key)![i]} />
-              ))}
+              {g.cards.map((c, i) => {
+                const guides = trees.get(g.key)?.[i];
+                return <CardRow key={c.id} card={c} variant={g.variant} ctx={ctx} why {...(guides && { tree: guides })} />;
+              })}
             </div>
           )}
         </section>

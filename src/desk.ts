@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Cache, Cause, Deferred, Duration, Effect, Exit, Fiber, Option, Result } from "effect";
+import { Cache, Cause, Deferred, Duration, Effect, Exit, Fiber, Option, Result, Schema } from "effect";
 import { stopAll } from "./children.ts";
 import {
   AmbiguousRef,
@@ -84,7 +84,6 @@ import type {
   SessionCard,
   Job,
   Criterion,
-  JudgeAnswer,
   JudgeSignal,
   JudgeStep,
   Overview,
@@ -101,11 +100,11 @@ import type {
   Signals,
   Stack,
   Status,
-  Until,
   UpdateView,
   Work,
 } from "./types.ts";
-import { byPart, isCoordinator, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
+import { BUCKETS, byPart, isCoordinator, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
+import { decodeEach, isKeyOf, keysOf, oneOf, schemaOf, strings } from "./narrow.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
 import { AGENTS, agentView, githubView } from "./setup.ts";
@@ -125,7 +124,16 @@ import {
   type LoadedConfig,
 } from "./config.ts";
 import { analyze, happened, plainWhy, waitable, type Analysis } from "./signals.ts";
-import { classify, placedBy, queueOrder, signalKey, weightOf, type BoardResult, type CompiledBoard } from "./rules.ts";
+import {
+  classify,
+  placedBy,
+  queueOrder,
+  signalKey,
+  weightOf,
+  type BoardResult,
+  type CompiledBoard,
+  type Entry as RuleEntry,
+} from "./rules.ts";
 import { compile, renderTemplate } from "./expr.ts";
 import { emptyState, Store, type StateRow } from "./store.ts";
 import { inQuietHours, notify } from "./notify.ts";
@@ -141,7 +149,7 @@ import {
   type PrText,
 } from "./review.ts";
 import * as agents from "./agents.ts";
-import { Judge, judgeKey, sortKey, textHash } from "./judge.ts";
+import { Judge, JudgeAnswerSchema, judgeKey, sortKey, textHash } from "./judge.ts";
 import { readOwnSkill, REVIEW_SKILL_VERSION, type OwnSkill } from "./connectors/github-review.ts";
 import { fixAskText, readOwnIssueSkill, type FetchIssueError, type IssueRun, type IssueText, type OwnIssueSkill } from "./issue.ts";
 import { Conversations, talked } from "./conversation.ts";
@@ -320,6 +328,238 @@ interface Merging {
   rebase?: string; // when the desk gave it to the coordinator to rebase, ready to merge but for a conflict
   back?: string; // when you brought it back with b
 }
+
+// What the desk keeps in kv, checked as it's read back: a value in a shape it no longer has reads as absent.
+const arrayOf = <S extends Schema.Top>(s: S) => Schema.mutable(Schema.Array(s));
+const opt = Schema.optionalKey;
+const lineSide = Schema.Literals(["new", "old"]);
+const SortedSchema = schemaOf<Sorted>()(
+  Schema.Struct({
+    automation: Schema.String,
+    name: Schema.String,
+    bucket: Schema.Literals(BUCKETS),
+    why: Schema.String,
+    key: Schema.String,
+    at: Schema.String,
+  }),
+);
+const ActedSchema = schemaOf<Acted>()(Schema.Struct({ name: Schema.String, why: Schema.String, seq: Schema.Number }));
+const HandoffSchema = schemaOf<Handoff>()(Schema.Struct({ why: Schema.String, from: Schema.String }));
+const AddedSchema = schemaOf<Added>()(Schema.Record(Schema.String, HandoffSchema));
+// An automation's find (kv `pushed:<id>`): who found it and why, and what it was each time it added it (`once`).
+const PushedSchema = Schema.Struct({ name: Schema.String, why: Schema.String, once: opt(Schema.Record(Schema.String, Schema.String)) });
+const MergingSchema = schemaOf<Merging>()(
+  Schema.Struct({
+    handback: opt(Schema.Struct({ reason: Schema.String, at: Schema.String })),
+    note: opt(Schema.Struct({ text: Schema.String, at: Schema.String })),
+    rebase: opt(Schema.String),
+    back: opt(Schema.String),
+  }),
+);
+const BlockedSchema = Schema.Record(Schema.String, Schema.Struct({ since: Schema.String, by: Schema.String }));
+const ReviewNoteSchema = Schema.Struct({ path: Schema.String, line: Schema.Number, side: lineSide, body: Schema.String });
+const DiagramGraphSchema = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("flow"),
+    direction: Schema.Literals(["LR", "TB"]),
+    nodes: arrayOf(
+      Schema.Struct({
+        id: Schema.String,
+        label: Schema.String,
+        shape: Schema.Literals(["box", "term", "store", "choice", "circle"]),
+        mark: Schema.NullOr(Schema.Literals(["new", "changed", "removed"])),
+        group: Schema.NullOr(Schema.String),
+      }),
+    ),
+    edges: arrayOf(
+      Schema.Struct({
+        from: Schema.String,
+        to: Schema.String,
+        label: Schema.String,
+        style: Schema.Literals(["arrow", "line", "dotted"]),
+      }),
+    ),
+    groups: arrayOf(Schema.Struct({ id: Schema.String, label: Schema.String })),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("sequence"),
+    participants: arrayOf(Schema.Struct({ id: Schema.String, label: Schema.String, actor: Schema.Boolean })),
+    messages: arrayOf(Schema.Struct({ from: Schema.String, to: Schema.String, text: Schema.String, reply: Schema.Boolean })),
+    notes: arrayOf(Schema.Struct({ over: arrayOf(Schema.String), text: Schema.String, at: Schema.Number })),
+  }),
+]);
+const AiReviewSchema = schemaOf<AiReview>()(
+  Schema.Struct({
+    verdict: Schema.Literals(["look", "skim", "skip"]),
+    risk: Schema.Literals(["low", "medium", "high"]),
+    summary: Schema.String,
+    since: opt(Schema.String),
+    concerns: arrayOf(Schema.String),
+    notes: arrayOf(ReviewNoteSchema),
+    dropped: opt(Schema.Number),
+    chunks: opt(
+      Schema.Struct({
+        ranked: arrayOf(
+          Schema.Struct({ id: Schema.String, path: Schema.String, level: Schema.Literals(["look", "skim"]), why: Schema.String }),
+        ),
+        unread: arrayOf(Schema.String),
+        total: Schema.Number,
+      }),
+    ),
+    guide: opt(
+      Schema.Struct({
+        steps: arrayOf(
+          Schema.Struct({
+            title: Schema.String,
+            body: Schema.String,
+            check: Schema.String,
+            note: opt(Schema.String),
+            diagram: opt(Schema.String),
+            hunks: arrayOf(Schema.Struct({ id: Schema.String, path: Schema.String })),
+          }),
+        ),
+      }),
+    ),
+    risk_reasons: opt(
+      arrayOf(
+        Schema.Struct({
+          factor: Schema.Literals(["data", "security", "contract", "concurrency", "deploy", "irreversible", "reach", "untested", "other"]),
+          why: Schema.String,
+        }),
+      ),
+    ),
+    intent: opt(
+      Schema.Struct({
+        goal: Schema.String,
+        fit: Schema.Literals(["matches", "partial", "differs", "undescribed"]),
+        gap: Schema.String,
+        stack: Schema.String,
+      }),
+    ),
+    look: opt(arrayOf(Schema.Struct({ path: Schema.String, side: lineSide, line: Schema.Number, end: Schema.Number, why: Schema.String }))),
+    interfaces: opt(
+      arrayOf(
+        Schema.Struct({
+          name: Schema.String,
+          kind: Schema.Literals(["function", "type", "endpoint", "schema", "config", "event", "cli", "permission", "other"]),
+          change: Schema.Literals(["added", "changed", "removed"]),
+          breaking: Schema.Boolean,
+          impact: Schema.String,
+          path: Schema.String,
+          side: lineSide,
+          line: Schema.Number,
+        }),
+      ),
+    ),
+    improvements: opt(arrayOf(ReviewNoteSchema)),
+    diagrams: opt(
+      arrayOf(
+        Schema.Struct({
+          id: Schema.String,
+          title: Schema.String,
+          caption: Schema.String,
+          source: opt(Schema.String),
+          graph: DiagramGraphSchema,
+        }),
+      ),
+    ),
+    skill: opt(Schema.String),
+    doc: opt(Schema.String),
+    refused: opt(arrayOf(Schema.String)),
+    head_oid: Schema.String,
+    model: Schema.String,
+    at: Schema.String,
+  }),
+);
+const IssueReviewSchema = schemaOf<IssueReview>()(
+  Schema.Struct({
+    updated_at: Schema.String,
+    at: Schema.String,
+    model: Schema.String,
+    injection: Schema.NullOr(Schema.Struct({ who: Schema.String, why: Schema.String })),
+    kind: Schema.Literals(["bug", "feature", "question", "other"]),
+    summary: Schema.String,
+    problem: Schema.String,
+    cause: Schema.String,
+    evidence: arrayOf(Schema.Struct({ path: Schema.String, line: Schema.Number, why: Schema.String })),
+    fix: Schema.String,
+    fixable: Schema.Boolean,
+    steps: arrayOf(Schema.Struct({ title: Schema.String, body: Schema.String })),
+    code: Schema.Boolean,
+    repo_dir: opt(Schema.String),
+    base: opt(Schema.String),
+  }),
+);
+const IssueFailSchema = Schema.Struct({ updated_at: Schema.String, error: Schema.String, at: Schema.String });
+const ReviewFileSchema = schemaOf<ReviewFile>()(
+  Schema.Struct({
+    path: Schema.String,
+    previous_path: Schema.NullOr(Schema.String),
+    status: Schema.Literals(["added", "removed", "modified", "renamed", "copied", "changed", "unchanged"]),
+    additions: Schema.Number,
+    deletions: Schema.Number,
+    patch: Schema.NullOr(Schema.String),
+  }),
+);
+// The changed files and description kept per head commit (kv `pr:<id>`); the owner's review.md is read fresh each run.
+const PrTextSchema = Schema.Struct({
+  body: Schema.String,
+  files: arrayOf(ReviewFileSchema),
+  head: opt(Schema.String),
+  since: opt(Schema.Struct({ base: Schema.String, files: arrayOf(ReviewFileSchema) })),
+  stack: opt(arrayOf(Schema.String)),
+  skill: opt(Schema.String),
+  head_oid: Schema.String,
+});
+const AskSchema = schemaOf<Ask>()(
+  Schema.Struct({
+    id: Schema.String,
+    at: Schema.String,
+    text: Schema.String,
+    item_id: Schema.NullOr(Schema.String),
+    thread_id: Schema.NullOr(Schema.String),
+    thread_url: Schema.NullOr(Schema.String),
+    lines: opt(
+      Schema.NullOr(
+        Schema.Struct({
+          path: Schema.String,
+          line: Schema.Number,
+          side: lineSide,
+          start: opt(Schema.Struct({ line: Schema.Number, side: lineSide })),
+          head: Schema.String,
+          note: opt(Schema.Boolean),
+        }),
+      ),
+    ),
+    fix: opt(Schema.Boolean),
+    answer: Schema.NullOr(Schema.Struct({ text: Schema.String, at: Schema.String })),
+  }),
+);
+const InquiryOptionSchema = Schema.Struct({ answer: Schema.String, next: Schema.String });
+// Questions asked before options said what follows had plain options and no links.
+const KeptInquirySchema = Schema.Struct({
+  id: Schema.String,
+  at: Schema.String,
+  from: Schema.String,
+  question: Schema.String,
+  context: Schema.String,
+  options: arrayOf(Schema.Union([Schema.String, InquiryOptionSchema])),
+  links: opt(arrayOf(Schema.Struct({ label: Schema.String, url: Schema.String }))),
+  item_id: Schema.NullOr(Schema.String),
+  answer: Schema.NullOr(
+    Schema.Struct({ text: Schema.String, at: Schema.String, dismissed: Schema.Boolean, read_at: opt(Schema.NullOr(Schema.String)) }),
+  ),
+});
+const NoteSchema = schemaOf<Note>()(
+  Schema.Struct({
+    id: Schema.String,
+    at: Schema.String,
+    text: Schema.String,
+    remind_at: Schema.NullOr(Schema.String),
+    reminded_at: Schema.NullOr(Schema.String),
+  }),
+);
+const UNTILS = keysOf(UNTIL);
 
 // Through a symlink to the real file, swapped in whole so a watcher never reads half of it.
 const replaceFile = Effect.fnUntraced(function* (file: string, text: string, backup = false): Effect.fn.Return<void, FsError> {
@@ -978,8 +1218,8 @@ export class Desk {
 
   // `set` changes values; `reset` drops keys back to their defaults. Nothing is written if any value is invalid.
   putSettings(patch: {
-    set?: Record<string, unknown>;
-    reset?: string[];
+    set?: Record<string, unknown> | undefined;
+    reset?: string[] | undefined;
   }): Effect.Effect<{ ok: boolean; errors: ConfigError[]; settings: SettingsView }, FsError> {
     return Effect.gen({ self: this }, function* () {
       if (this.settingsErrors.some((e) => e.path === "settings.json")) {
@@ -1251,7 +1491,12 @@ export class Desk {
 
   // Events after `after`, oldest first. With `wait` (seconds, up to 60) it answers as soon as one arrives; interrupted (the
   // client went away), it stops waiting.
-  activity(q: { after?: number; limit?: number; item?: string; wait?: number }): Effect.Effect<ActivityPage, RefError> {
+  activity(q: {
+    after?: number | undefined;
+    limit?: number | undefined;
+    item?: string | undefined;
+    wait?: number | undefined;
+  }): Effect.Effect<ActivityPage, RefError> {
     return Effect.gen({ self: this }, function* () {
       const after = q.after ?? 0;
       const limit = Math.min(Math.max(q.limit ?? 100, 1), 500);
@@ -1259,7 +1504,7 @@ export class Desk {
       const deadline = Date.now() + Math.min(q.wait ?? 0, 60) * 1000;
       for (;;) {
         if (this.stopped) return { events: [], last_seq: after };
-        const events = this.store.activity({ after, limit, item });
+        const events = this.store.activity({ after, limit, ...(item !== undefined && { item }) });
         const left = deadline - Date.now();
         if (events.length || left <= 0) return { events, last_seq: events.at(-1)?.seq ?? this.store.lastSeq() };
         yield* this.nextEvent(left);
@@ -1297,7 +1542,7 @@ export class Desk {
   dropStaleSorts(): void {
     if (!this.loaded) return;
     const snap = this.snapshot();
-    for (const [id, s] of this.store.prefixed<Sorted | null>("sorted:")) {
+    for (const [id, s] of this.store.prefixed("sorted:", Schema.NullOr(SortedSchema))) {
       const e = snap.entries.get(id);
       if (s && e && s.key !== sortKeyOf(e, snap.pins.get(id))) this.store.set(`sorted:${id}`, null);
     }
@@ -1328,7 +1573,7 @@ export class Desk {
       )
       .map((c) => ({ id: c.id, ref: shortRef(c), why: c.why }));
     // Held on the first pass, they were there before you looked, as the rest were.
-    const prev = this.store.get("notified_queue") as string[] | null;
+    const prev = strings(this.store.get("notified_queue")) ?? null;
     const keep = prev === null ? held : held.filter((id) => prev.includes(id));
     this.store.set("notified_queue", [...queued.map((x) => x.id), ...keep]);
     const fresh = prev === null ? [] : queued.filter((x) => !prev.includes(x.id));
@@ -1352,13 +1597,13 @@ export class Desk {
     const now = this.now();
     const ctx = this.ctx ?? NO_CONTEXT;
     const states = this.store.states();
-    const baseline = (this.store.get("baseline_at") as string | null) ?? now.toISOString();
+    const baseline = this.store.read("baseline_at", Schema.String) ?? now.toISOString();
     const entries = new Map<string, Entry>();
     const items = this.store.items();
     // Who blocks whom, before any status: a PR it needs merging is news for it, and the rules read the facts as fields.
     const stacks = buildStacks(items);
     const deps = dependencies(items, stacks);
-    const merging = this.store.prefixed<Merging>("sitter:");
+    const merging = this.store.prefixed("sitter:", MergingSchema);
     const blocked = this.blockedAuthors();
     for (const item of items) {
       const analysis = analyze(item, ctx, loaded.config, now);
@@ -1414,10 +1659,10 @@ export class Desk {
     const recent = (e: Entry) => !!e.resolved?.at && e.resolved.at > keepSince;
     const boards: Snapshot["boards"] = new Map();
     const best = new Map<string, Placement>();
-    const reviews = this.store.prefixed<AiReview>("review:");
+    const reviews = this.store.prefixed("review:", AiReviewSchema);
     const pins = new Map<string, string>();
-    const pushed = this.store.prefixed<{ name: string; why: string }>("pushed:");
-    const added = this.store.prefixed<Added>("added:");
+    const pushed = this.store.prefixed("pushed:", PushedSchema);
+    const added = this.store.prefixed("added:", AddedSchema);
     const auto = new Map<string, string>();
     const handed = new Map<string, Handoff>();
     const coordinatorAdded = new Set<string>();
@@ -1442,10 +1687,10 @@ export class Desk {
     };
     // An answer for what the item was (judgeKey: its activity, commit, reviews, files, AI review) or for other signals stays
     // until a fresh one lands, so the queue doesn't jump back to the rules' placements each time a rule changes.
-    const answers = this.judge.offReason() ? null : this.store.prefixed<JudgeAnswer>("judge:");
+    const answers = this.judge.offReason() ? null : this.store.prefixed("judge:", JudgeAnswerSchema);
     // An automation's sort is a signal for the judge, and stands in for its answer until the judge has weighed it: while
     // the item is what it sorted, and while the automation is on and may still sort there.
-    const sorts = this.store.prefixed<Sorted | null>("sorted:");
+    const sorts = this.store.prefixed("sorted:", Schema.NullOr(SortedSchema));
     const keyOf = (e: Entry) =>
       judgeKey(e.item, e.analysis.activity_at, reviews.get(e.item.id), pins.get(e.item.id), e.analysis.signals.pr.blocker);
     const automations = new Map(this.automations.all().map((a) => [a.id, a]));
@@ -1479,7 +1724,7 @@ export class Desk {
     const judge = answers ? claude : holding.size ? asSorted : undefined;
     // What an automation snoozed, marked done or muted says why, while that's still the last thing done to it.
     const acted = new Map<string, string>();
-    for (const [id, a] of this.store.prefixed<Acted | null>("acted:")) {
+    for (const [id, a] of this.store.prefixed("acted:", Schema.NullOr(ActedSchema))) {
       const e = entries.get(id);
       if (a && e && e.status !== "active" && this.store.lastActionFor(id)?.seq === a.seq) acted.set(id, `${a.name}: ${a.why}`);
     }
@@ -1498,26 +1743,31 @@ export class Desk {
         .filter((e): e is Entry => e !== undefined && (!m.kept.has(e.item.id) || e.resolved !== null));
       const result = classify(
         board,
-        list.map((e) => ({
-          id: e.item.id,
-          signals: e.analysis.signals,
-          waiting_since: e.analysis.waiting_since,
-          created_at: e.item.created_at,
-          activity_at: e.analysis.activity_at,
-          pinned: e.state.pinned,
+        list.map((e) => {
+          const x: RuleEntry = {
+            id: e.item.id,
+            signals: e.analysis.signals,
+            waiting_since: e.analysis.waiting_since,
+            created_at: e.item.created_at,
+            activity_at: e.analysis.activity_at,
+            pinned: e.state.pinned,
+            // Resolved and in-flight items leave the buckets (and the caps) like cleared ones.
+            active: e.status === "active" && !e.resolved && !e.inflight,
+            kept: m.kept.has(e.item.id) || recent(e),
+          };
           // Your pin keeps it on your desk; the coordinator's is an opinion Claude weighs.
-          floor: pins.get(e.item.id) === "them" ? "today" : undefined,
-          floor_why: auto.get(e.item.id),
-          // Resolved and in-flight items leave the buckets (and the caps) like cleared ones.
-          active: e.status === "active" && !e.resolved && !e.inflight,
-          kept: m.kept.has(e.item.id) || recent(e),
-          ai: call(e),
-        })),
+          if (pins.get(e.item.id) === "them") x.floor = "today";
+          const floorWhy = auto.get(e.item.id);
+          if (floorWhy !== undefined) x.floor_why = floorWhy;
+          const ai = call(e);
+          if (ai !== undefined) x.ai = ai;
+          return x;
+        }),
         judge,
         this.settings["queue.quiet_days"],
       );
       if (board === ADDED) for (const [id, p] of result.placements) p.why = auto.get(id) ?? p.why;
-      boards.set(board.config.id, { result, queries: m.queries, unfetched: m.unfetched, error: m.error });
+      boards.set(board.config.id, { result, queries: m.queries, unfetched: m.unfetched, ...(m.error !== undefined && { error: m.error }) });
       for (const [id, p] of result.placements) {
         const e = entries.get(id)!;
         if (e.status !== "active" || e.resolved || e.inflight) continue;
@@ -1625,6 +1875,7 @@ export class Desk {
     const back = !e.inflight && snap.needs.has(it.id);
     const handed = back && snap.needs.get(it.id) !== UNASKED;
     const shown = handed ? "handed back" : sig.blocked && (st === "approved" || st === "waiting for review") ? "blocked" : st;
+    const handoff = snap.handed.get(it.id);
     return {
       ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
       id: it.id,
@@ -1640,8 +1891,8 @@ export class Desk {
       ...(shown && { stage: shown }),
       bucket: p?.bucket ?? "fyi",
       why: e.resolved?.reason ?? this.flagged(it) ?? snap.acted.get(it.id) ?? p?.why ?? "",
-      ...(snap.handed.has(it.id) && { handoff: snap.handed.get(it.id) }),
-      demoted: p?.demoted,
+      ...(handoff && { handoff }),
+      ...(p?.demoted !== undefined && { demoted: p.demoted }),
       board: p?.board ?? "",
       boards,
       chips,
@@ -1656,7 +1907,7 @@ export class Desk {
       pinned: e.state.pinned,
       status: e.status,
       snooze_until: e.status === "snoozed" ? e.state.snooze_until : null,
-      snooze_when: e.status === "snoozed" && e.state.snooze_when ? (e.state.snooze_when.split(":")[0] as Until) : null,
+      snooze_when: e.status === "snoozed" && e.state.snooze_when ? (oneOf(UNTILS, e.state.snooze_when.split(":")[0]) ?? null) : null,
       ...(wake.length > 0 && { wake_on: wake }),
       ...(e.status === "done" && e.state.done_at ? { done_at: e.state.done_at } : {}),
       verdict: snap.reviews.get(it.id)?.head_oid === it.head_oid ? snap.reviews.get(it.id)!.verdict : null,
@@ -1717,11 +1968,11 @@ export class Desk {
     const cleared = b.result.inactive.filter((x) => !snap.entries.get(x)!.resolved && !laneOwned(snap.entries.get(x)!)).length;
     const counts = { now: 0, today: 0, blocked: 0, later: 0, fyi: 0, hide: 0, cleared };
     let fresh = 0;
-    for (const bucket of Object.keys(b.result.order) as Bucket[]) {
+    for (const bucket of keysOf(b.result.order)) {
       counts[bucket] = b.result.order[bucket].length;
       if (bucket !== "hide") fresh += b.result.order[bucket].filter((x) => snap.entries.get(x)!.isNew).length;
     }
-    return { id, name: cfg.name, space: cfg.space, counts, new: fresh, error: b.error };
+    return { id, name: cfg.name, space: cfg.space, counts, new: fresh, ...(b.error !== undefined && { error: b.error }) };
   }
 
   overview(): Effect.Effect<Overview, Unavailable> {
@@ -1924,7 +2175,7 @@ export class Desk {
         snap,
         [...byPart([...sections.now, ...sections.today]), ...sections.later, ...sections.fyi, ...lifted].map(quick),
       );
-      const blockedSince = (this.store.get("blocked") as Record<string, { since: string }> | null) ?? {};
+      const blockedSince = this.store.read("blocked", BlockedSchema) ?? {};
       const aged = (c: Card): Card => {
         const e = snap.entries.get(c.id)!;
         const asked = e.analysis.signals.me.author && e.analysis.signals.pr.waiting_on.length > 0;
@@ -2083,7 +2334,7 @@ export class Desk {
         .filter((p): p is Placement => p !== undefined);
       const { snoozed_at: _, acked_at: __, ...state } = e.state;
       const j = snap.judging.get(id);
-      const a = j ? (this.store.get(`judge:${id}`) as JudgeAnswer | null) : null;
+      const a = j ? this.store.read(`judge:${id}`, JudgeAnswerSchema) : null;
       return {
         card: this.card(e, this.shownAt(e, snap), snap),
         item: e.item,
@@ -2200,7 +2451,7 @@ export class Desk {
       const since = me.pushed_since_review
         ? item.reviews.findLast((r) => r.author.toLowerCase() === me.login.toLowerCase() && !!r.commit)?.commit
         : undefined;
-      const cached = this.store.get(`pr:${id}`) as (PrText & { head_oid: string }) | null;
+      const cached = this.store.read(`pr:${id}`, PrTextSchema);
       if (cached?.head_oid === item.head_oid) return Effect.succeed(cached);
       const fetch = Effect.tap(review.fetchPr(item, since), (t) =>
         Effect.sync(() => {
@@ -2587,16 +2838,16 @@ export class Desk {
 
   // Authors on your blocklist, in lower case: their items are muted, and no agent reads them.
   blockedAuthors(): Set<string> {
-    return new Set((this.store.get("blocked_authors") as string[] | null) ?? []);
+    return new Set(strings(this.store.get("blocked_authors")) ?? []);
   }
 
   issueReview(id: string): IssueReview | null {
-    return this.store.get(`issue_ai:${id}`) as IssueReview | null;
+    return this.store.read(`issue_ai:${id}`, IssueReviewSchema);
   }
 
   // Its last failed try: on which version of the issue, why, and when.
   issueFailure(id: string): { updated_at: string; error: string; at: string } | null {
-    return this.store.get(`issue_fail:${id}`) as { updated_at: string; error: string; at: string } | null;
+    return this.store.read(`issue_fail:${id}`, IssueFailSchema);
   }
 
   // ~/.inbox/issue.md, read on each run: the owner's changes to the analysis's instructions (the issue skill).
@@ -2934,11 +3185,11 @@ export class Desk {
             s.snooze_when = null;
             break;
           }
-          if (Object.hasOwn(UNTIL, u)) {
+          if (isKeyOf(UNTIL, u)) {
             const can = waitable(entry.analysis.signals, entry.item, this.me());
-            if (!can.includes(u as Until))
+            if (!can.includes(u))
               return yield* new Conflict({
-                message: `${id} can't wait until ${UNTIL[u as Until]}${can.length ? `; it can until ${can.map((x) => UNTIL[x]).join(", ")}` : ""}`,
+                message: `${id} can't wait until ${UNTIL[u]}${can.length ? `; it can until ${can.map((x) => UNTIL[x]).join(", ")}` : ""}`,
               });
             s.snooze_when = u === "push" ? `push:${entry.item.head_oid}` : u;
             s.snooze_until = null;
@@ -3108,7 +3359,7 @@ export class Desk {
   }
 
   // `agent`: not the desk's own window. Hand-offs are yours.
-  undo(seq?: number, agent?: string): Effect.Effect<{ id: string; state: ItemState; action: Action }, NotFound | Conflict> {
+  undo(seq?: number, agent?: string): Effect.Effect<{ id: string; state: ItemState; action: string }, NotFound | Conflict> {
     return Effect.gen({ self: this }, function* () {
       const ev = this.store.lastAction(seq);
       if (!ev) return yield* new NotFound({ message: "nothing to undo" });
@@ -3124,7 +3375,7 @@ export class Desk {
       this.store.markUndone(ev.seq);
       this.changed();
       const { snoozed_at: _, acked_at: __, ...state } = restored;
-      return { id: ev.item_id, state, action: ev.action as Action };
+      return { id: ev.item_id, state, action: ev.action };
     });
   }
 
@@ -3140,7 +3391,7 @@ export class Desk {
       // The coordinator's desk_add is its opinion, which Claude weighs: no floor, as the old desk-run coordinator's pins.
       const undo_seq = this.store.logAction(id, "pin", before, this.now().toISOString(), isCoordinator(who) ? "coordinator" : undefined);
       if (note !== null)
-        this.store.set(`added:${id}`, { ...(this.store.get(`added:${id}`) as Added | null), [undo_seq]: { why: note, from: who } });
+        this.store.set(`added:${id}`, { ...this.store.read(`added:${id}`, AddedSchema), [undo_seq]: { why: note, from: who } });
       this.changed();
       this.warmAdded(id);
       return { item: yield* this.item(id), undo_seq };
@@ -3156,7 +3407,7 @@ export class Desk {
     return Effect.gen({ self: this }, function* () {
       const id = yield* this.hold(ref);
       const note = yield* this.line(why, "why", 300);
-      const once = { ...(this.store.get(`pushed:${id}`) as { once?: Record<string, string> } | null)?.once };
+      const once = { ...this.store.read(`pushed:${id}`, PushedSchema)?.once };
       const snap = this.snapshot();
       const e = snap.entries.get(id)!;
       const queued = ["now", "today"].includes(snap.best.get(id)?.bucket ?? "");
@@ -3203,7 +3454,7 @@ export class Desk {
       if (e.analysis.signals.me.requested_direct) return { ...said, outcome: "held" as const, error: ASKED_BY_NAME };
       const key = sortKeyOf(e, snap.pins.get(id));
       // Its own sort of the item as it is still stands: nothing to do, and its first why stays.
-      const was = this.store.get(`sorted:${id}`) as Sorted | null;
+      const was = this.store.read(`sorted:${id}`, SortedSchema);
       if (was?.automation === a.id && was.bucket === bucket && was.key === key) return { ...said, why: was.why, outcome: "kept" as const };
       const sorted: Sorted = { automation: a.id, name: a.name, bucket, why: note, key, at: this.now().toISOString() };
       this.store.set(`sorted:${id}`, sorted);
@@ -3419,7 +3670,7 @@ export class Desk {
   }
 
   merging(id: string): Merging {
-    return (this.store.get(`sitter:${id}`) as Merging | null) ?? {};
+    return this.store.read(`sitter:${id}`, MergingSchema) ?? {};
   }
 
   // Your own PR on your desk, ready to merge but for a conflict, goes to your coordinator to rebase until GitHub sees it mergeable.
@@ -3427,7 +3678,7 @@ export class Desk {
     if (!this.loaded) return;
     const on = this.settings["agent.coordinator"];
     const snap = this.snapshot();
-    const merging = this.store.prefixed<Merging>("sitter:");
+    const merging = this.store.prefixed("sitter:", MergingSchema);
     let moved = false;
     for (const e of snap.entries.values()) {
       const it = e.item;
@@ -3547,7 +3798,7 @@ export class Desk {
   trackBlocked(): void {
     if (!this.loaded) return;
     const snap = this.snapshot();
-    const prev = this.store.get("blocked") as Record<string, { since: string; by: string }> | null;
+    const prev = this.store.read("blocked", BlockedSchema);
     const listed = new Set<string>();
     for (const b of snap.boards.values()) for (const id of b.result.placements.keys()) listed.add(id);
     const now = this.now().toISOString();
@@ -3621,7 +3872,7 @@ export class Desk {
   }
 
   asks(item?: string): Ask[] {
-    const all = (this.store.get("asks") as Ask[] | null) ?? [];
+    const all = decodeEach(AskSchema, this.store.get("asks"));
     return item === undefined ? all : all.filter((a) => a.item_id === item);
   }
 
@@ -3662,10 +3913,10 @@ export class Desk {
   // What cmd.exe can't pass is refused before anything is kept; once told, the ask and its rollback run to the end.
   ask(b: {
     text: string;
-    item_id?: string;
-    thread_id?: string;
-    thread_url?: string;
-    lines?: AskLines;
+    item_id?: string | undefined;
+    thread_id?: string | undefined;
+    thread_url?: string | undefined;
+    lines?: AskLines | undefined;
     fix?: boolean; // fixIssue()'s: never from the window's own words
   }): Effect.Effect<Ask, Conflict | RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
@@ -3733,10 +3984,7 @@ export class Desk {
 
   // Questions asked before options said what follows had plain options and no links.
   inquiries(): Inquiry[] {
-    const all =
-      (this.store.get("inquiries") as
-        (Omit<Inquiry, "options" | "links"> & { options: (string | InquiryOption)[]; links?: InquiryLink[] })[] | null) ?? [];
-    return all.map((q) =>
+    return decodeEach(KeptInquirySchema, this.store.get("inquiries")).map((q) =>
       Object.assign(q, { options: q.options.map((o) => (typeof o === "string" ? { answer: o, next: "" } : o)), links: q.links ?? [] }),
     );
   }
@@ -3769,9 +4017,9 @@ export class Desk {
     question: string;
     from: string;
     context: string;
-    options?: InquiryOption[];
-    links?: InquiryLink[];
-    item?: string;
+    options?: InquiryOption[] | undefined;
+    links?: InquiryLink[] | undefined;
+    item?: string | undefined;
   }): Effect.Effect<Inquiry, BadRequest | RefError> {
     return Effect.gen({ self: this }, function* () {
       // Refused, not cut: what's past the limit is often what an answer costs.
@@ -3861,7 +4109,7 @@ export class Desk {
   }
 
   notes(): Note[] {
-    return (this.store.get("notes") as Note[] | null) ?? [];
+    return decodeEach(NoteSchema, this.store.get("notes"));
   }
 
   notesView(): NotesView {
@@ -4236,7 +4484,7 @@ export class Desk {
           why: plainWhy(why),
           ...(h && { hard: true }),
           ...(final && { final: true }),
-          weight: weightOf({ weight }),
+          weight: weightOf(weight === undefined ? {} : { weight }),
           on: !b.off?.includes(id),
           yours: own !== undefined,
           ...(own !== undefined && { path: `boards[${i}].rules[${own}]` }),
@@ -4276,7 +4524,7 @@ export class Desk {
         const before = cur?.boards.get(id);
         const counts = countsOf(after.result);
         const moved: PreviewResult["boards"][number]["moved"] = [];
-        for (const bucket of Object.keys(after.result.order) as Bucket[]) {
+        for (const bucket of keysOf(after.result.order)) {
           for (const x of after.result.order[bucket]) {
             const prev = before?.result.placements.get(x)?.bucket ?? null;
             if (prev !== bucket) moved.push({ id: x, title: next.entries.get(x)!.item.title, from: prev, to: bucket });

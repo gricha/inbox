@@ -4,6 +4,7 @@
 import crypto from "node:crypto";
 import { Effect, Result } from "effect";
 import { Forbidden, NotFound, TailscaleError, TooManyRequests } from "./errors.ts";
+import { field, isRecord, str, strings } from "./narrow.ts";
 import { claudeSpawn, runCommand } from "./review.ts";
 import type { Store } from "./store.ts";
 import type { Device } from "./types.ts";
@@ -25,26 +26,19 @@ const tailscale = (args: string[]): Effect.Effect<string, TailscaleError> =>
 const parsed = (text: string, what: string): Effect.Effect<Record<string, unknown>, TailscaleError> => {
   const r = Result.try({ try: (): unknown => JSON.parse(text), catch: () => null });
   const v = Result.isSuccess(r) ? r.success : null;
-  return typeof v === "object" && v !== null
-    ? Effect.succeed(v as Record<string, unknown>)
-    : Effect.fail(new TailscaleError({ message: `${what} didn't answer JSON` }));
+  return isRecord(v) ? Effect.succeed(v) : Effect.fail(new TailscaleError({ message: `${what} didn't answer JSON` }));
 };
 
 // From `tailscale status --json`: Self.DNSName, its HTTPS certificate names, and the login that owns this machine.
 export const readTailnet = Effect.fnUntraced(function* (login: string): Effect.fn.Return<Tailnet, TailscaleError> {
-  const s = (yield* parsed(yield* tailscale(["status", "--json"]), "tailscale status")) as {
-    BackendState?: string;
-    Self?: { DNSName?: string; UserID?: number };
-    CertDomains?: string[] | null;
-    User?: Record<string, { LoginName?: string }> | null;
-  };
+  const s = yield* parsed(yield* tailscale(["status", "--json"]), "tailscale status");
   const fail = (message: string) => Effect.fail(new TailscaleError({ message }));
   if (s.BackendState !== "Running") return yield* fail("Tailscale isn't running or signed in here: open Tailscale and sign in.");
-  const name = (s.Self?.DNSName ?? "").replace(/\.$/, "").toLowerCase();
+  const name = (str(field(s.Self, "DNSName")) ?? "").replace(/\.$/, "").toLowerCase();
   if (!name) return yield* fail("Tailscale gives this machine no name: turn on MagicDNS in your tailnet's DNS settings.");
-  if (!(s.CertDomains ?? []).map((d) => d.toLowerCase()).includes(name))
+  if (!(strings(s.CertDomains) ?? []).map((d) => d.toLowerCase()).includes(name))
     return yield* fail("Your tailnet has no HTTPS certificates: turn on HTTPS in its DNS settings in Tailscale's admin console.");
-  const owner = s.User?.[String(s.Self?.UserID)]?.LoginName ?? "";
+  const owner = str(field(field(s.User, String(field(s.Self, "UserID"))), "LoginName")) ?? "";
   const who = (login.trim() || owner).toLowerCase();
   if (!who) return yield* fail("Tailscale doesn't say whose machine this is: set Tailscale login allowed in.");
   return { name, login: who };
@@ -57,13 +51,11 @@ export const serveOn = Effect.fnUntraced(function* (
   target: string,
   mine: string | null,
 ): Effect.fn.Return<void, TailscaleError> {
-  const cfg = (yield* parsed(yield* tailscale(["serve", "status", "--json"]), "tailscale serve status")) as {
-    TCP?: Record<string, unknown>;
-    Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>;
-  };
-  const handlers = Object.entries(cfg.Web?.[`${name}:443`]?.Handlers ?? {});
-  const used = handlers.length > 0 || !!cfg.TCP?.["443"];
-  const ours = handlers.length === 1 && handlers[0]![0] === "/" && !!mine && handlers[0]![1].Proxy === mine;
+  const cfg = yield* parsed(yield* tailscale(["serve", "status", "--json"]), "tailscale serve status");
+  const byPath = field(field(cfg.Web, `${name}:443`), "Handlers");
+  const handlers = isRecord(byPath) ? Object.entries(byPath) : [];
+  const used = handlers.length > 0 || !!field(cfg.TCP, "443");
+  const ours = handlers.length === 1 && handlers[0]![0] === "/" && !!mine && field(handlers[0]![1], "Proxy") === mine;
   if (used && !ours)
     return yield* new TailscaleError({
       message: `tailscale serve already serves https://${name}/: turn that off first (tailscale serve ${HTTPS} off)`,

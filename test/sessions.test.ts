@@ -150,6 +150,7 @@ const seen = (o: Partial<Seen>): Seen => ({
   ...o,
 });
 const live = (o: Partial<AgentRow> = {}): AgentRow => ({ sessionId: "s", cwd: "/w", kind: "interactive", pid: 1, status: "idle", ...o });
+const background = (state: string): AgentRow => ({ sessionId: "s", cwd: "/w", kind: "background", state });
 const says = (s: Seen, now = NOW.getTime()) => {
   const v = classify(s, now);
   return v && ("state" in v ? `${v.state}: ${v.reason}` : `ask: ${v.excerpt}`);
@@ -171,10 +172,7 @@ test("blocked and stalled are read from what the session shows, and anything els
   assert.equal(says(seen({ tail: q })), "blocked: asked a question");
   assert.equal(says(seen({ tail: tailOf(l.tool("p", "ExitPlanMode", { plan: "…" })) })), "blocked: waiting on plan approval");
   assert.equal(says(seen({ tail: tailOf(l.apiError("authentication_failed", 401)) })), "blocked: login expired");
-  assert.equal(
-    says(seen({ kind: "background", row: { ...live(), kind: "background", pid: undefined, status: undefined, state: "blocked" } })),
-    "blocked: needs you",
-  );
+  assert.equal(says(seen({ kind: "background", row: background("blocked") })), "blocked: needs you");
   const reset = NOW.getTime() + 2 * 3_600_000;
   assert.equal(
     says(seen({ tail: tailOf(l.apiError("rate_limit", 429, reset / 1000)) })),
@@ -188,13 +186,7 @@ test("blocked and stalled are read from what the session shows, and anything els
   assert.equal(says(seen({ tail: tailOf(l.apiError("overloaded", 529)) })), "stalled: API overloaded");
   assert.equal(says(seen({ tail: tailOf(l.apiError("unknown", 400)) })), null, "a request it got wrong isn't stalled");
   assert.equal(says(seen({ tail: bash })), "stalled: stopped mid-turn", "a turn left open, no process");
-  assert.equal(
-    says(
-      seen({ kind: "background", tail: bash, row: { ...live(), kind: "background", pid: undefined, status: undefined, state: "stopped" } }),
-    ),
-    null,
-    "you stopped it",
-  );
+  assert.equal(says(seen({ kind: "background", tail: bash, row: background("stopped") })), null, "you stopped it");
   assert.equal(says(seen({ row: live({ status: "busy" }), tail: bash })), null, "busy and writing");
   const quiet = NOW.getTime() - 30 * MIN;
   assert.equal(says(seen({ row: live({ status: "busy" }), tail: bash, written: quiet })), "stalled: no progress");
@@ -207,10 +199,7 @@ test("blocked and stalled are read from what the session shows, and anything els
     null,
     "a subagent at work",
   );
-  assert.equal(
-    says(seen({ kind: "background", row: { ...live(), kind: "background", pid: undefined, status: undefined, state: "failed" } })),
-    "stalled: failed",
-  );
+  assert.equal(says(seen({ kind: "background", row: background("failed") })), "stalled: failed");
   assert.equal(says(seen({ tail: tailOf(l.prompt("go"), l.interrupted()) })), null, "you interrupted it");
   // A turn that ended normally: only a question, in a running terminal, goes to the model.
   assert.equal(says(seen({ row: live(), tail: tailOf(l.said("Done.\nShould I push it?")) })), "ask: Should I push it?");

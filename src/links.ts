@@ -63,7 +63,9 @@ export function placeOf(link: string): Place | null {
   if (!web) return null;
   const route = web[1] ?? "";
   if (route === "" || route === "/") return { page: "inbox" };
-  const page = (Object.keys(PAGES) as Page[]).find((p) => PAGES[p].hash === `#${route}`);
+  const page = Object.keys(PAGES)
+    .filter(isPage)
+    .find((p) => PAGES[p].hash === `#${route}`);
   if (page) return { page };
   const asked = /^\/inquiry\/([\w-]+)$/.exec(route);
   if (asked) return { question: asked[1]! };

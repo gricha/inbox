@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import type * as SentrySdk from "@sentry/hono/node";
 import type { Hono } from "hono";
 import { isDeskHttpError } from "./errors.ts";
+import { codeOf, field } from "./narrow.ts";
 
 const SERVER_DSN = "https://67d41f6516775a8698be5de57fe53b85@o4511536895623168.ingest.us.sentry.io/4512382725718016";
 const WEB_DSN = "https://fde5d7d368ea4fb4b31bee7435f2b35b@o4511536895623168.ingest.us.sentry.io/4512382725783552";
@@ -23,7 +24,7 @@ export async function startSentry(): Promise<void> {
   // Loaded here, not on import: only `desk serve` pays for the SDK, and the app ships without it.
   // The SDK is a dev dependency: an npm install has none, and reports nothing.
   const s = await import("@sentry/hono/node").catch((e: unknown) => {
-    if ((e as { code?: unknown }).code === "ERR_MODULE_NOT_FOUND") return null;
+    if (codeOf(e) === "ERR_MODULE_NOT_FOUND") return null;
     throw e;
   });
   if (!s) return;
@@ -54,7 +55,7 @@ export function instrument(app: Hono): void {
   const shouldHandleError = (e: unknown) => {
     const status = isDeskHttpError(e) ? e.status : undefined;
     if (status === undefined) return true;
-    const cause = (e as { cause?: unknown }).cause;
+    const cause = field(e, "cause");
     return status >= 500 && status !== 503 && !(cause instanceof Object && sent.has(cause));
   };
   app.use(sdk.sentry(app, { shouldHandleError }));

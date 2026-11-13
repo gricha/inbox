@@ -5,16 +5,17 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import { Effect, Result, type Fiber } from "effect";
+import { Effect, Result, Schema, type Fiber } from "effect";
 import { decide, type Answer, type Question } from "./decisions.ts";
 import type { Desk, Entry, Snapshot } from "./desk.ts";
 import { BadRequest, DecisionModelDown, fsError, messageOf, NotFound } from "./errors.ts";
 import { compile, type Compiled } from "./expr.ts";
 import { sortKey, textHash } from "./judge.ts";
+import { decodeEach, decodeValues, field, keysOf, num, schemaOf, str } from "./narrow.ts";
 import { agentDown, askAgent, makeAgentDir } from "./review.ts";
 import { report } from "./sentry.ts";
 import { agentName } from "./settings.ts";
-import type { Bucket, Card, CriteriaView, Criterion, InboxSection } from "./types.ts";
+import { BUCKETS, type Bucket, type Card, type CriteriaView, type Criterion, type InboxSection } from "./types.ts";
 
 const KEY = "criteria";
 const SWITCHED = "criteria_builtin"; // by a plugin's criterion's id: whether you switched it, and when
@@ -44,6 +45,36 @@ interface Scored {
   by: string;
   at: string;
 }
+
+const CriterionSchema = schemaOf<Criterion>()(
+  Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    when: Schema.optionalKey(Schema.String),
+    ask: Schema.optionalKey(Schema.String),
+    urgent: Schema.Boolean,
+    weight: Schema.optionalKey(Schema.Number),
+    on: Schema.Boolean,
+    by: Schema.Literals(["you", "an agent"]),
+    updated_at: Schema.String,
+    plugin: Schema.optionalKey(Schema.String),
+    help: Schema.optionalKey(Schema.String),
+  }),
+);
+const SwitchSchema = Schema.Struct({ on: Schema.Boolean, at: Schema.String });
+const SaidSchema = schemaOf<Said>()(
+  Schema.Struct({ key: Schema.String, yes: Schema.NullOr(Schema.Boolean), by: Schema.String, at: Schema.String }),
+);
+const ScoredSchema = schemaOf<Scored>()(
+  Schema.Struct({
+    key: Schema.String,
+    bucket: Schema.Literals(BUCKETS),
+    score: Schema.Number,
+    why: Schema.String,
+    by: Schema.String,
+    at: Schema.String,
+  }),
+);
 
 export interface Outcome {
   c: Criterion;
@@ -135,11 +166,11 @@ export class Urgency {
   }
 
   own(): Criterion[] {
-    return (this.desk.store.get(KEY) as Criterion[] | null) ?? [];
+    return decodeEach(CriterionSchema, this.desk.store.get(KEY));
   }
 
   builtIns(): Criterion[] {
-    const switched = (this.desk.store.get(SWITCHED) as Record<string, { on: boolean; at: string }> | null) ?? {};
+    const switched = decodeValues(SwitchSchema, this.desk.store.get(SWITCHED));
     return this.desk.connectors.flatMap((c) =>
       c.criteria.map(({ id: own, help, on, ...def }) => {
         const id = `${c.id}.${own}`;
@@ -156,7 +187,7 @@ export class Urgency {
       const was = this.all().find((c) => c.id === id);
       if (!was) return Effect.fail(new NotFound({ message: `no criterion "${id}"` }));
       if (was.plugin) {
-        const switched = (this.desk.store.get(SWITCHED) as Record<string, { on: boolean; at: string }> | null) ?? {};
+        const switched = decodeValues(SwitchSchema, this.desk.store.get(SWITCHED));
         this.desk.store.set(SWITCHED, { ...switched, [id]: { on, at } });
       } else
         this.desk.store.set(
@@ -169,7 +200,11 @@ export class Urgency {
   }
 
   // Yours, or an agent's: it only orders the Inbox and never acts on an item, so an agent's is on as it's saved.
-  set(id: string, b: { name: string; when?: string; ask?: string; urgent?: boolean; on?: boolean }, byYou: boolean) {
+  set(
+    id: string,
+    b: { name: string; when?: string | undefined; ask?: string | undefined; urgent?: boolean | undefined; on?: boolean | undefined },
+    byYou: boolean,
+  ) {
     return Effect.gen({ self: this }, function* () {
       const plugin = this.builtIns().find((c) => c.id === id);
       if (plugin) return yield* new BadRequest({ message: `"${plugin.name}" comes with a plugin: only its switch is yours` });
@@ -267,7 +302,7 @@ export class Urgency {
   // Each criterion that's on, for one item: a rule's yes or no now; a question's kept answer, or waiting for one.
   outcomes(
     e: Entry,
-    said = this.desk.store.get(`said:${e.item.id}`) as Record<string, Said> | null,
+    said = decodeValues(SaidSchema, this.desk.store.get(`said:${e.item.id}`)),
     on = this.all().filter((c) => c.on),
   ): Outcome[] {
     const key = itemKey(e);
@@ -303,7 +338,7 @@ export class Urgency {
       const os = this.outcomes(e);
       const yes = os.filter((o) => o.yes);
       const urgent = yes.filter((o) => o.c.urgent);
-      const kept = scoring ? (this.desk.store.get(`score:${c.id}`) as Scored | null) : null;
+      const kept = scoring ? this.desk.store.read(`score:${c.id}`, ScoredSchema) : null;
       // A score kept from before the item changed holds until the new one lands, while it's where the rules put it then.
       const model = kept?.bucket === p.bucket ? kept : null;
       const score = model?.score ?? fallbackScore(p.bucket, pointsOf(yes.map((o) => o.c)));
@@ -316,7 +351,7 @@ export class Urgency {
       c.reason = [back ? c.why : "", named(urgent), automation ? c.why : "", model?.why ?? "", named(yes), c.why].find(Boolean) ?? "";
       out[c.section].push(c);
     }
-    for (const k of Object.keys(out) as InboxSection[]) out[k] = out[k].toSorted((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    for (const k of keysOf(out)) out[k] = out[k].toSorted((a, b) => (b.score ?? 0) - (a.score ?? 0));
     return out;
   }
 
@@ -346,7 +381,7 @@ export class Urgency {
       const p = snap.best.get(id)!;
       if (judging && p.judge?.pending) continue;
       const key = this.scoreKey(e, p.bucket, p.why, this.outcomes(e), by);
-      if ((desk.store.get(`score:${id}`) as Scored | null)?.key !== key) scores.push({ id, key });
+      if (desk.store.read(`score:${id}`, ScoredSchema)?.key !== key) scores.push({ id, key });
       if (scores.length === BATCH) break;
     }
     return scores.length ? { kind: "score", items: scores } : null;
@@ -486,14 +521,15 @@ export class Urgency {
           `</items-${tag}>`,
         ].join("\n");
         const { answer } = yield* askAgent(prompt, { schema: ASK_SCHEMA, dir: yield* makeAgentDir(desk.home), agent: desk.agent() });
-        const list = (answer as { items?: unknown } | null)?.items;
+        const list = field(answer, "items");
         const said = new Map<string, string[]>();
         for (const raw of Array.isArray(list) ? list : []) {
-          const x = (raw ?? {}) as { id?: unknown; yes?: unknown };
-          if (typeof x.id === "string" && Array.isArray(x.yes) && !said.has(x.id.trim()))
+          const id = str(field(raw, "id"))?.trim();
+          const yes = field(raw, "yes");
+          if (id !== undefined && Array.isArray(yes) && !said.has(id))
             said.set(
-              x.id.trim(),
-              x.yes.filter((y): y is string => typeof y === "string"),
+              id,
+              yes.filter((y): y is string => typeof y === "string"),
             );
         }
         for (const x of items) {
@@ -507,7 +543,7 @@ export class Urgency {
         const e = snap.entries.get(x.id);
         const m = got.get(x.id);
         if (!e || !m) continue;
-        const was = (desk.store.get(`said:${x.id}`) as Record<string, Said> | null) ?? {};
+        const was = decodeValues(SaidSchema, desk.store.get(`said:${x.id}`));
         const now = { ...was };
         for (const c of x.cs) {
           const a = m.get(c.id) ?? { yes: null };
@@ -589,13 +625,13 @@ export class Urgency {
           `</items-${tag}>`,
         ].join("\n");
         const { answer } = yield* askAgent(prompt, { schema: SCORE_SCHEMA, dir: yield* makeAgentDir(desk.home), agent: desk.agent() });
-        const list = (answer as { items?: unknown } | null)?.items;
+        const list = field(answer, "items");
         for (const raw of Array.isArray(list) ? list : []) {
-          const x = (raw ?? {}) as { id?: unknown; score?: unknown; why?: unknown };
-          const id = typeof x.id === "string" ? x.id.trim() : "";
-          if (!input.has(id) || got.has(id) || typeof x.score !== "number" || !Number.isFinite(x.score)) continue;
-          const why = typeof x.why === "string" ? x.why.replaceAll(/\s+/g, " ").trim().slice(0, 120) : "";
-          got.set(id, { score: Math.min(10, Math.max(0, x.score)), why });
+          const id = str(field(raw, "id"))?.trim() ?? "";
+          const score = num(field(raw, "score"));
+          if (!input.has(id) || got.has(id) || score === undefined) continue;
+          const why = str(field(raw, "why"))?.replaceAll(/\s+/g, " ").trim().slice(0, 120) ?? "";
+          got.set(id, { score: Math.min(10, Math.max(0, score)), why });
         }
       }
       const at = desk.now().toISOString();

@@ -8,7 +8,7 @@ import { Effect } from "effect";
 import { envVar, probeHealth } from "../electron/lib.ts";
 
 const root = path.join(import.meta.dirname, "..");
-const electron = createRequire(import.meta.url)("electron") as string; // outside Electron the package exports the binary's path
+const electron = String(createRequire(import.meta.url)("electron")); // outside Electron the package exports the binary's path
 const port = Number(envVar("DESK_PORT") ?? 47823);
 
 if ((await Effect.runPromise(probeHealth(`http://127.0.0.1:${port}`))).kind === "desk") {

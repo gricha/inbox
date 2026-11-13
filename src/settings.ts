@@ -5,6 +5,7 @@ import path from "node:path";
 import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
 import { fsError, type FsError } from "./errors.ts";
+import { field, isRecord, messageOf, strings } from "./narrow.ts";
 import { SECRET_SET, type AgentName, type ConfigError, type SettingDef, type SettingsSection, type SettingValue } from "./types.ts";
 
 const DEFAULT_PROMPT = `Review {item.url} by {item.author}.
@@ -379,15 +380,29 @@ const BYPASS = {
 export function agentDefs(harness: string): SettingDef[] {
   const name = agentName(harness);
   if (name === "Claude") return [...SETTINGS];
-  const say = (t: string | undefined) => t?.replaceAll(/Claude( Code)?/g, name);
+  const say = (t: string) => t.replaceAll(/Claude( Code)?/g, name);
   return SETTINGS.map((d: SettingDef) => {
-    if (AGENT_WORDED.has(d.key)) return { ...d, label: say(d.label)!, ...(d.help && { help: say(d.help) }) };
+    if (AGENT_WORDED.has(d.key)) return { ...d, label: say(d.label), ...(d.help && { help: say(d.help) }) };
     if (d.key === "agent.coordinator_bypass") return { ...d, help: BYPASS[name] };
     return d;
   });
 }
 export const settingDef = (key: string) => DEFS.get(key);
-export const DEFAULTS = Object.fromEntries(SETTINGS.map((d) => [d.key, d.default])) as unknown as Settings;
+const isSettingValue = (v: unknown): v is SettingValue =>
+  typeof v === "number" || typeof v === "boolean" || typeof v === "string" || strings(v) !== undefined;
+// Every setting there, each of its type.
+function isSettings(v: Record<string, unknown>): v is Settings {
+  return SETTINGS.every((d) => {
+    const x = v[d.key];
+    if (d.type === "number") return typeof x === "number";
+    if (d.type === "boolean") return typeof x === "boolean";
+    if (d.type === "list") return strings(x) !== undefined;
+    return typeof x === "string";
+  });
+}
+const defaults: Record<string, unknown> = Object.fromEntries(SETTINGS.map((d) => [d.key, d.default]));
+if (!isSettings(defaults)) throw new Error("a setting's default isn't of its type");
+export const DEFAULTS: Settings = defaults;
 
 // Returns an error message, or null when `value` is valid for `key`.
 export function checkSetting(key: string, value: unknown): string | null {
@@ -460,19 +475,19 @@ const unusable = (message: string, text: string | null): SettingsFile => ({
 });
 
 function settingsFrom(text: string): SettingsFile {
-  const parsed = Result.try({ try: (): unknown => JSON.parse(text), catch: (e) => (e as Error).message });
+  const parsed = Result.try({ try: (): unknown => JSON.parse(text), catch: messageOf });
   if (Result.isFailure(parsed)) return unusable(parsed.failure, text);
   const raw = parsed.success;
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return unusable("must be a JSON object", text);
+  if (!isRecord(raw)) return unusable("must be a JSON object", text);
   const overrides: Record<string, SettingValue> = {};
   const errors: ConfigError[] = [];
   for (const [k, v] of Object.entries(raw)) {
     if (REMOVED.has(k)) continue;
     const err = checkSetting(k, v);
     if (err) errors.push({ path: k, message: err });
-    else overrides[k] = v as SettingValue;
+    else if (isSettingValue(v)) overrides[k] = v;
   }
-  return { overrides, errors, raw: raw as Record<string, unknown>, text };
+  return { overrides, errors, raw, text };
 }
 
 // Reads settings.json, none yet being no overrides. Only reading it fails: what's in it is checked entry by entry.
@@ -491,10 +506,11 @@ export const readSettings = (file: string): SettingsFile =>
 export const effective = (overrides: Record<string, SettingValue>): Settings => ({ ...DEFAULTS, ...overrides });
 
 // The settings as anything outside the desk may see them: a secret that's set reads SECRET_SET, never its value.
-export const masked = (values: Settings): Settings =>
-  Object.fromEntries(
-    Object.entries(values).map(([k, v]) => [k, DEFS.get(k)?.type === "secret" && v !== "" ? SECRET_SET : v]),
-  ) as unknown as Settings;
+export function masked(values: Settings): Settings {
+  const out = { ...values };
+  for (const d of SETTINGS) if (d.type === "secret" && out[d.key] !== "") out[d.key] = SECRET_SET;
+  return out;
+}
 
 // Through a temporary file and a rename, so a reader never sees half of it, and through a symlinked settings.json.
 export const writeSettings = Effect.fn("writeSettings")(function* (file: string, values: Record<string, unknown>) {
@@ -585,13 +601,13 @@ export function migrateLegacy(configText: string): { moved: Record<string, Setti
   const moved: Record<string, SettingValue> = {};
   for (const [old, key] of Object.entries(LEGACY)) {
     const [a = "", b] = old.split(".");
-    const v = b === undefined ? raw[a] : (raw[a] as Record<string, unknown> | undefined)?.[b];
+    const v = b === undefined ? raw[a] : field(raw[a], b);
     if (v === undefined) continue;
     // TOML's """ strings end with a newline the defaults don't have.
     const value =
       typeof v === "string" ? v.trimEnd() : key === "github.poll_seconds" && typeof v === "number" ? Math.max(30, Math.round(v)) : v;
-    if (checkSetting(key, value) === null && JSON.stringify(value) !== JSON.stringify(settingDef(key)!.default))
-      moved[key] = value as SettingValue;
+    if (checkSetting(key, value) === null && isSettingValue(value) && JSON.stringify(value) !== JSON.stringify(settingDef(key)!.default))
+      moved[key] = value;
   }
 
   // Drop `poll_seconds = …` and the legacy tables, line by line, minding multi-line strings.

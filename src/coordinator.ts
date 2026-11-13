@@ -7,7 +7,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Effect, Result } from "effect";
+import { Effect, Result, Schema } from "effect";
 import type { Desk } from "./desk.ts";
 import { parse } from "smol-toml";
 import { kill, OWN_GROUP, track } from "./children.ts";
@@ -28,6 +28,7 @@ import {
 } from "./errors.ts";
 import { oldHome, ownersHome } from "./home.ts";
 import { answerOf, askOf } from "./jobs.ts";
+import { decode, field, isRecord, num, oneOf, str, strings } from "./narrow.ts";
 import {
   CODEX_DOWN,
   claudeCommand,
@@ -124,13 +125,11 @@ interface TurnKind {
 }
 
 function codexFailure(line: string): string | null {
-  const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as {
-    type?: unknown;
-    message?: unknown;
-    error?: { message?: unknown };
-  } | null;
-  if (e?.type === "error" && typeof e.message === "string") return e.message;
-  if (e?.type === "turn.failed") return typeof e.error?.message === "string" ? e.error.message : "codex failed";
+  const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null }));
+  const type = field(e, "type");
+  const message = str(field(e, "message"));
+  if (type === "error" && message !== undefined) return message;
+  if (type === "turn.failed") return str(field(field(e, "error"), "message")) ?? "codex failed";
   return null;
 }
 
@@ -170,15 +169,16 @@ export const REBASE =
 export const denyDir = Effect.fnUntraced(function* (home: string, name: string, deny: string[]): Effect.fn.Return<string, FsError> {
   const dir = path.join(home, name);
   const file = path.join(dir, ".claude", "settings.json");
-  type Settings = { permissions?: { deny?: string[] } };
-  const s: Settings = fs.existsSync(file)
-    ? yield* Effect.try({ try: () => JSON.parse(fs.readFileSync(file, "utf8")) as Settings, catch: fsError("read", file) })
+  const s: unknown = fs.existsSync(file)
+    ? yield* Effect.try({ try: (): unknown => JSON.parse(fs.readFileSync(file, "utf8")), catch: fsError("read", file) })
     : {};
-  const have = s.permissions?.deny ?? [];
+  const permissions = field(s, "permissions");
+  const denied = field(permissions, "deny");
+  const have: unknown[] = Array.isArray(denied) ? denied : [];
   const missing = deny.filter((r) => !have.includes(r));
   if (missing.length > 0) {
     yield* Effect.try({ try: () => fs.mkdirSync(path.dirname(file), { recursive: true }), catch: fsError("mkdir", path.dirname(file)) });
-    const next = { ...s, permissions: { ...s.permissions, deny: [...have, ...missing] } };
+    const next = { ...(isRecord(s) ? s : {}), permissions: { ...(isRecord(permissions) ? permissions : {}), deny: [...have, ...missing] } };
     yield* Effect.try({
       try: () => {
         fs.writeFileSync(file, JSON.stringify(next, null, 2) + "\n");
@@ -200,10 +200,39 @@ export interface Agent {
   startedAt?: number;
 }
 
+const SAVED = Schema.Struct({
+  id: Schema.String,
+  url: Schema.optionalKey(Schema.String),
+  mode: Schema.optionalKey(Schema.Literals(["bypass", "default", "unknown"])),
+});
+const STATUSES = ["busy", "shell", "waiting", "idle", "stopped"] as const;
+
+// A background agent's row in claude agents --json; another kind, or one without its ids, isn't one.
+function backgroundAgent(x: unknown): Agent | null {
+  const id = str(field(x, "id"));
+  const sessionId = str(field(x, "sessionId"));
+  const cwd = str(field(x, "cwd"));
+  if (field(x, "kind") !== "background" || id === undefined || sessionId === undefined || cwd === undefined) return null;
+  const name = str(field(x, "name"));
+  const status = str(field(x, "status"));
+  const pid = num(field(x, "pid"));
+  const startedAt = num(field(x, "startedAt"));
+  return {
+    id,
+    sessionId,
+    cwd,
+    kind: "background",
+    ...(name !== undefined && { name }),
+    ...(status !== undefined && { status }),
+    ...(pid !== undefined && { pid }),
+    ...(startedAt !== undefined && { startedAt }),
+  };
+}
+
 // A minute at most; what cmd.exe can't pass fails before anything starts. Interrupted, it stops the command and waits for it.
 export const claude = (args: string[], cwd?: string): Effect.Effect<string, CommandError> =>
   Effect.flatMap(claudeSpawn(claudeCommand(), args), (s) =>
-    runCommand(s, { cwd, timeout: 60_000, missing: claudeMissing(claudeCommand()) }),
+    runCommand(s, { ...(cwd !== undefined && { cwd }), timeout: 60_000, missing: claudeMissing(claudeCommand()) }),
   );
 
 // What a run fails with: a claude command, what it printed, or the coordinator's folder.
@@ -328,22 +357,26 @@ export class Coordinator {
   }
 
   // The chosen agent's session. A record from before the bypass setting has no mode: that session was started in default.
-  saved(): { id: string; url?: string; mode?: Mode | "unknown" } | null {
+  saved(): typeof SAVED.Type | null {
     const key = this.own === "codex" ? CODEX_KEY : this.own === "opencode" ? OPENCODE_KEY : KEY;
-    return this.desk.store.get(key) as { id: string; url?: string; mode?: Mode | "unknown" } | null;
+    return Result.getOrNull(decode(SAVED, this.desk.store.get(key)));
   }
 
   // [PR id, what changed], oldest first; only appended to until delivered.
   news(): [string, string][] {
-    return (this.desk.store.get(NEWS) as [string, string][] | null) ?? [];
+    const kept = this.desk.store.get(NEWS);
+    return (Array.isArray(kept) ? kept : []).flatMap((n): [string, string][] => {
+      const [id, what] = strings(n) ?? [];
+      return id !== undefined && what !== undefined ? [[id, what]] : [];
+    });
   }
 
   asks(): string[] {
-    return (this.desk.store.get(ASKS) as string[] | null) ?? [];
+    return strings(this.desk.store.get(ASKS)) ?? [];
   }
 
   error(): string | null {
-    return (this.desk.store.get(ERROR) as string | null) ?? null;
+    return str(this.desk.store.get(ERROR)) ?? null;
   }
 
   // Shown in Merging until a run succeeds, and notified once: news waits on it, and the log alone went unseen for hours.
@@ -664,7 +697,7 @@ export class Coordinator {
       });
       if (!Array.isArray(listed))
         return yield* new CommandBadOutput({ command: claudeCommand(), detail: "claude agents --json didn't print a list" });
-      const all = (listed as (Agent | null)[]).filter((a): a is Agent => a?.kind === "background");
+      const all = listed.flatMap((x: unknown) => backgroundAgent(x) ?? []);
       const dir = yield* this.dir();
       const real = yield* Effect.try({ try: () => fs.realpathSync(dir), catch: fsError("realpath", dir) });
       const here = new Set([dir, real]);
@@ -690,7 +723,9 @@ export class Coordinator {
         this.desk.store.set(KEY, a && { id: a.id, mode: "unknown" });
         this.desk.changed();
       }
-      this.saw(a ? (a.pid ? ((a.status as CoordinatorView["status"]) ?? "idle") : "stopped") : null);
+      const status = a?.pid ? oneOf(STATUSES, a.status) : undefined;
+      if (a?.pid && !status) this.desk.log(`coordinator: ${a.id} says "${String(a.status)}", which the desk doesn't know: shown as idle`);
+      this.saw(a ? (a.pid ? (status ?? "idle") : "stopped") : null);
       return a;
     });
   }
@@ -753,12 +788,9 @@ export class Coordinator {
       });
       const real = yield* Effect.try({ try: () => fs.realpathSync(dir), catch: fsError("realpath", dir) });
       const config = path.join(process.env.CODEX_HOME?.trim() ? process.env.CODEX_HOME : path.join(os.homedir(), ".codex"), "config.toml");
-      const read = Result.try({
-        try: () => parse(fs.readFileSync(config, "utf8")) as { projects?: Record<string, unknown> },
-        catch: () => null,
-      });
-      const projects = Result.getOrNull(read)?.projects ?? {};
-      const trust = (d: string) => (projects[d] as { trust_level?: unknown } | undefined)?.trust_level === "trusted";
+      const read = Result.try({ try: () => parse(fs.readFileSync(config, "utf8")), catch: () => null });
+      const projects = field(Result.getOrNull(read), "projects");
+      const trust = (d: string) => field(field(projects, d), "trust_level") === "trusted";
       if (!trust(real) && !trust(dir)) return yield* new CodexUntrusted({ dir: real, config });
       return dir;
     });
@@ -884,14 +916,13 @@ export class Coordinator {
 // The home's move to ~/.inbox left Claude Code's trust on the coordinator's old folder: the owner's yes there carries over to
 // the new one, once, so it starts as before. A folder never trusted is still the owner's to trust; this grants nothing new.
 export function carryTrust(from: string, to: string, file = claudeConfig()): boolean {
-  const read = Result.try({
-    try: () => JSON.parse(fs.readFileSync(file, "utf8")) as { projects?: Record<string, Record<string, unknown>> },
-    catch: () => null,
-  });
+  const read = Result.try({ try: (): unknown => JSON.parse(fs.readFileSync(file, "utf8")), catch: () => null });
   const conf = Result.getOrNull(read);
-  const projects = conf?.projects;
-  if (!conf || !projects || projects[from]?.hasTrustDialogAccepted !== true || projects[to]?.hasTrustDialogAccepted === true) return false;
-  projects[to] = { ...projects[to], hasTrustDialogAccepted: true };
+  const projects = field(conf, "projects");
+  const accepted = (d: string) => field(field(projects, d), "hasTrustDialogAccepted") === true;
+  if (!isRecord(projects) || !accepted(from) || accepted(to)) return false;
+  const was = projects[to];
+  projects[to] = { ...(isRecord(was) ? was : {}), hasTrustDialogAccepted: true };
   const tmp = `${file}.inbox-${process.pid}`;
   return Result.isSuccess(
     Result.try({

@@ -58,7 +58,8 @@ const contrast = (a: string, b: string) => {
 };
 // Its hue (0–360) and HSL saturation (0–1).
 function hueOf(hex: string): { hue: number; sat: number } {
-  const [r, g, b] = rgb(hex).map((v) => v / 255) as [number, number, number];
+  const [r255, g255, b255] = rgb(hex);
+  const [r, g, b] = [r255 / 255, g255 / 255, b255 / 255];
   const [hi, lo] = [Math.max(r, g, b), Math.min(r, g, b)];
   const d = hi - lo;
   if (d === 0) return { hue: 0, sat: 0 };

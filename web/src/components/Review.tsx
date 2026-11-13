@@ -25,6 +25,7 @@ import {
 } from "../../../src/types.ts";
 import { andMore } from "../../../src/stage.ts";
 import { api, runUi } from "../api.ts";
+import { useKeyed } from "../keyed.ts";
 import { age, cls, handoffLabel, MOD, modelName, sinceText, shortRef, when, aiName } from "../format.ts";
 import { blocks, inline, lead, unlinked, urlPlace } from "../../../src/prose.ts";
 import { reviewOf } from "../reviews.ts";
@@ -286,9 +287,8 @@ export function Review({
     };
   }, []);
 
-  useEffect(() => {
+  useKeyed(`${id} ${loads}`, (signal) => {
     const n = ++seq.current;
-    const stop = new AbortController();
     runUi(
       reviewOf(id).pipe(
         Effect.match({
@@ -303,13 +303,9 @@ export function Review({
           },
         }),
       ),
-      { signal: stop.signal },
+      { signal },
     );
-    return () => {
-      stop.abort();
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- loads changes on every server update; that's when to refetch
-  }, [id, loads]);
+  });
 
   function addReviewers() {
     if (!showSide) toggleSide();
@@ -398,7 +394,7 @@ export function Review({
   }, []);
 
   // The sidebar scrolls on its own to keep the current file in sight; the page doesn't move.
-  useEffect(() => {
+  useKeyed(secIdx, () => {
     const box = document.querySelector<HTMLElement>(".rv-side");
     const on = box?.querySelector<HTMLElement>(".rv-file.on");
     if (!box || !on || box.scrollHeight <= box.clientHeight) return;
@@ -406,8 +402,7 @@ export function Review({
     if (on.offsetTop < box.scrollTop + strip) box.scrollTop = on.offsetTop - strip - 8;
     else if (on.offsetTop + on.offsetHeight > box.scrollTop + box.clientHeight)
       box.scrollTop = on.offsetTop + on.offsetHeight - box.clientHeight + 8;
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- reads the DOM the new secIdx just rendered
-  }, [secIdx]);
+  });
 
   // A comment on this PR that GitHub refused after you'd left the review it was sent from comes back here.
   const draftNow = useRef(draft);
@@ -1390,7 +1385,13 @@ function Shell({
   const pf = card?.preflight;
   const ai =
     pf?.verdict && pf.risk && pf.summary
-      ? { verdict: pf.verdict, risk: pf.risk, summary: pf.summary, since: pf.since, concerns: pf.concerns ?? [] }
+      ? {
+          verdict: pf.verdict,
+          risk: pf.risk,
+          summary: pf.summary,
+          ...(pf.since !== undefined && { since: pf.since }),
+          concerns: pf.concerns ?? [],
+        }
       : null;
   // Opening it starts the review unless AI reviews are off or paused.
   const writing = pf?.state === "running" || pf?.state === "queued" || pf?.state === "stale";

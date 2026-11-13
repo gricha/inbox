@@ -1,11 +1,26 @@
 // GitHub module: light search, batched details, daily context. Read only.
 
-import { Effect, Result } from "effect";
+import { Effect, Result, Schema } from "effect";
 import { buildAreas, type AreaPr } from "../areas.ts";
 import type { GitHubRateLimited, GitHubReadError } from "../errors.ts";
 import type { Areas, Check, Context, Item, Reviewer, ReviewState } from "../types.ts";
-import { createClient, decode } from "./client.ts";
-import { isBot, login, normalize, toChecks, toHit, type Actor, type RawCheck, type RawHit, type RawNode } from "./normalize.ts";
+import { field, str } from "../narrow.ts";
+import { createClient, decode, decodeAs } from "./client.ts";
+import {
+  ACTOR,
+  COMMIT_AUTHOR,
+  isBot,
+  login,
+  normalize,
+  RAW_CHECK,
+  RAW_HIT,
+  RAW_NODE,
+  REVIEW_STATE,
+  REVIEW_STATES,
+  toChecks,
+  toHit,
+  type RawCheck,
+} from "./normalize.ts";
 import {
   BLOB,
   branchPrs as branchPrsQuery,
@@ -94,30 +109,53 @@ export interface GitHub {
   latestRelease(repo: string): Effect.Effect<{ tag: string; url: string } | null, GitHubReadError>;
 }
 
-type RawSaid = { id: string; author: Actor | null; body: string; createdAt: string; url: string };
-interface RawPrContext {
-  node: {
-    reviewThreads?: {
-      nodes: {
-        id: string;
-        isResolved: boolean;
-        isOutdated: boolean;
-        path: string;
-        line: number | null;
-        diffSide: "LEFT" | "RIGHT";
-        hunk?: { nodes: { diffHunk: string }[] };
-        comments: { nodes: (RawSaid & { commit?: { oid: string } | null })[] };
-      }[];
-    };
-    reviews?: { nodes: (RawSaid & { state: string; submittedAt: string | null })[] };
-    comments?: { nodes: RawSaid[] };
-    history?: {
-      nodes: {
-        commit: { oid: string; messageHeadline: string; committedDate: string; author: { user: { login: string } | null } | null };
-      }[];
-    };
-  } | null;
-}
+// What each query's data is read as: only the fields asked for, and a node that isn't one fails the read.
+const RAW_SAID = {
+  id: Schema.String,
+  author: Schema.NullOr(ACTOR),
+  body: Schema.String,
+  createdAt: Schema.String,
+  url: Schema.String,
+};
+type RawSaid = Schema.Struct<typeof RAW_SAID>["Type"];
+const nodesOf = <T extends Schema.Top>(node: T) => Schema.Struct({ nodes: Schema.Array(node) });
+const PAGE_INFO = Schema.Struct({ hasNextPage: Schema.Boolean, endCursor: Schema.NullOr(Schema.String) });
+const PR_CONTEXT_DATA = Schema.Struct({
+  node: Schema.NullOr(
+    Schema.Struct({
+      reviewThreads: Schema.optionalKey(
+        nodesOf(
+          Schema.Struct({
+            id: Schema.String,
+            isResolved: Schema.Boolean,
+            isOutdated: Schema.Boolean,
+            path: Schema.String,
+            line: Schema.NullOr(Schema.Number),
+            diffSide: Schema.Literals(["LEFT", "RIGHT"]),
+            hunk: Schema.optionalKey(nodesOf(Schema.Struct({ diffHunk: Schema.String }))),
+            comments: nodesOf(
+              Schema.Struct({ ...RAW_SAID, commit: Schema.optionalKey(Schema.NullOr(Schema.Struct({ oid: Schema.String }))) }),
+            ),
+          }),
+        ),
+      ),
+      reviews: Schema.optionalKey(nodesOf(Schema.Struct({ ...RAW_SAID, state: REVIEW_STATE, submittedAt: Schema.NullOr(Schema.String) }))),
+      comments: Schema.optionalKey(nodesOf(Schema.Struct(RAW_SAID))),
+      history: Schema.optionalKey(
+        nodesOf(
+          Schema.Struct({
+            commit: Schema.Struct({
+              oid: Schema.String,
+              messageHeadline: Schema.String,
+              committedDate: Schema.String,
+              author: COMMIT_AUTHOR,
+            }),
+          }),
+        ),
+      ),
+    }),
+  ),
+});
 
 const said = (c: RawSaid, at = c.createdAt): Said => ({
   id: c.id,
@@ -128,7 +166,7 @@ const said = (c: RawSaid, at = c.createdAt): Said => ({
   url: c.url,
 });
 
-function parsePrContext(data: RawPrContext): PrContext {
+function parsePrContext(data: typeof PR_CONTEXT_DATA.Type): PrContext {
   const n = data.node;
   return {
     threads: (n?.reviewThreads?.nodes ?? []).map((t) => ({
@@ -142,9 +180,7 @@ function parsePrContext(data: RawPrContext): PrContext {
       commit: t.comments.nodes.at(-1)?.commit?.oid ?? "",
       comments: t.comments.nodes.map((c) => said(c)),
     })),
-    reviews: (n?.reviews?.nodes ?? []).map((r) =>
-      Object.assign(said(r, r.submittedAt ?? r.createdAt), { state: r.state.toLowerCase() as ReviewState }),
-    ),
+    reviews: (n?.reviews?.nodes ?? []).map((r) => Object.assign(said(r, r.submittedAt ?? r.createdAt), { state: REVIEW_STATES[r.state] })),
     comments: (n?.comments?.nodes ?? []).map((c) => said(c)),
     commits: (n?.history?.nodes ?? []).map(({ commit: c }) => ({
       oid: c.oid,
@@ -154,25 +190,30 @@ function parsePrContext(data: RawPrContext): PrContext {
     })),
   };
 }
-interface RawChecks {
-  node: {
-    commits?: {
-      nodes: {
-        commit: {
-          statusCheckRollup: {
-            contexts: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: (RawCheck | null)[] };
-          } | null;
-        };
-      }[];
-    };
-  } | null;
-}
-interface RawThread {
-  id: string;
-  reason: string;
-  updated_at: string;
-  subject: { type: string; url: string | null };
-}
+const CHECKS_DATA = Schema.Struct({
+  node: Schema.NullOr(
+    Schema.Struct({
+      commits: Schema.optionalKey(
+        nodesOf(
+          Schema.Struct({
+            commit: Schema.Struct({
+              statusCheckRollup: Schema.NullOr(
+                Schema.Struct({ contexts: Schema.Struct({ pageInfo: PAGE_INFO, nodes: Schema.Array(Schema.NullOr(RAW_CHECK)) }) }),
+              ),
+            }),
+          }),
+        ),
+      ),
+    }),
+  ),
+});
+const RAW_THREAD = Schema.Struct({
+  id: Schema.String,
+  reason: Schema.String,
+  updated_at: Schema.String,
+  subject: Schema.Struct({ type: Schema.String, url: Schema.NullOr(Schema.String) }),
+});
+type RawThread = typeof RAW_THREAD.Type;
 
 const NOTIFICATION_PAGES = 5;
 
@@ -182,23 +223,53 @@ function threadItem(t: RawThread): string | null {
   return m ? `${m[1]}/${m[2]}#${m[3]}` : null;
 }
 
-interface SearchData {
-  search: { issueCount: number; pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: ({ id?: string } | null)[] };
-}
-interface RawFiles {
-  id: string;
-  repository: { nameWithOwner: string };
-  changedFiles: number;
-  files: { nodes: { path: string }[] } | null;
-}
-type BranchNode = RawHit & { headRepository: { nameWithOwner: string } | null };
-interface BranchData {
-  // A page of PRs for up and down; one node for pr, {} when the number is an issue's.
-  repository: Record<string, { nodes: (BranchNode | null)[] } | BranchNode | null> | null;
-}
-interface TeamsData {
-  viewer: { name?: string | null; organizations: { nodes: ({ login: string; teams: { nodes: { slug: string }[] } } | null)[] } };
-}
+// A search's nodes stay unread until the caller's schema reads them: each query asks for its own fields.
+const SEARCH_DATA = Schema.Struct({
+  search: Schema.Struct({ issueCount: Schema.Number, pageInfo: PAGE_INFO, nodes: Schema.Array(Schema.Unknown) }),
+});
+const RAW_FILES = Schema.Struct({
+  id: Schema.String,
+  repository: Schema.Struct({ nameWithOwner: Schema.String }),
+  changedFiles: Schema.Number,
+  files: Schema.NullOr(nodesOf(Schema.Struct({ path: Schema.String }))),
+});
+const BRANCH_NODE = Schema.Struct({ ...RAW_HIT.fields, headRepository: Schema.NullOr(Schema.Struct({ nameWithOwner: Schema.String })) });
+const TEAMS_DATA = Schema.Struct({
+  viewer: Schema.Struct({
+    name: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    organizations: nodesOf(Schema.NullOr(Schema.Struct({ login: Schema.String, teams: nodesOf(Schema.Struct({ slug: Schema.String })) }))),
+  }),
+});
+const USER = Schema.Struct({ id: Schema.String, login: Schema.String, name: Schema.NullOr(Schema.String) });
+const REVIEWERS_DATA = Schema.Struct({
+  repository: Schema.NullOr(
+    Schema.Struct({
+      pullRequest: Schema.NullOr(Schema.Struct({ suggestedReviewers: Schema.Array(Schema.Struct({ reviewer: USER })) })),
+      assignableUsers: nodesOf(USER),
+    }),
+  ),
+  organization: Schema.NullOr(
+    Schema.Struct({ teams: nodesOf(Schema.Struct({ id: Schema.String, slug: Schema.String, name: Schema.String })) }),
+  ),
+});
+// Not a Blob (a tree, say) comes back {}: none of these.
+const BLOB_DATA = Schema.Struct({
+  repository: Schema.NullOr(
+    Schema.Struct({
+      object: Schema.NullOr(
+        Schema.Struct({
+          text: Schema.optionalKey(Schema.NullOr(Schema.String)),
+          isBinary: Schema.optionalKey(Schema.Boolean),
+          isTruncated: Schema.optionalKey(Schema.Boolean),
+        }),
+      ),
+    }),
+  ),
+});
+const LOOKUP_DATA = Schema.Struct({
+  repository: Schema.NullOr(Schema.Struct({ issueOrPullRequest: Schema.NullOr(RAW_HIT) })),
+});
+const VIEWER_DATA = Schema.Struct({ viewer: Schema.Struct({ login: Schema.String }) });
 
 const RECENT = 20; // your latest PRs' titles, for the judge
 const PROBES = 40; // stack probes (aliases) a query
@@ -215,6 +286,8 @@ function tally(keys: string[]): Record<string, number> {
 export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?: (msg: string) => void } = {}): GitHub {
   const client = createClient(opts);
   const log = (m: string) => opts.log?.(m);
+  const ask = <S extends Schema.ConstraintDecoder<unknown>>(schema: S, doc: string, variables?: Record<string, unknown>) =>
+    client.query(doc, variables).pipe(Effect.flatMap((d) => decodeAs(schema, d)));
 
   // A search's nodes, `per` a page, in whatever shape `doc` asks for.
   const pages = Effect.fnUntraced(function* (doc: string, q: string, max: number, per: number) {
@@ -223,40 +296,35 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     let total = 0;
     let after: string | null = null;
     while (nodes.size < max) {
-      const data: SearchData = yield* client.query<SearchData>(doc, { q, first: Math.min(per, max - nodes.size), after });
-      const page = yield* decode(() => {
-        const { search: p } = data;
-        for (const n of p.nodes) if (n?.id) nodes.set(n.id, n);
-        return { total: p.issueCount, next: p.pageInfo.hasNextPage ? p.pageInfo.endCursor : null };
-      });
-      total = page.total;
-      if (!page.next) break;
-      after = page.next;
+      const { search: p }: typeof SEARCH_DATA.Type = yield* ask(SEARCH_DATA, doc, { q, first: Math.min(per, max - nodes.size), after });
+      for (const n of p.nodes) {
+        const id = str(field(n, "id"));
+        if (id) nodes.set(id, n);
+      }
+      total = p.issueCount;
+      const next: string | null = p.pageInfo.hasNextPage ? p.pageInfo.endCursor : null;
+      if (!next) break;
+      after = next;
     }
     return { nodes: [...nodes.values()], total };
   });
 
   const search = Effect.fn("GitHub.search")(function* (q: string, max: number = 300) {
     const { nodes, total } = yield* pages(LIGHT_SEARCH, q, max, 100);
-    return { hits: yield* decode(() => (nodes as RawHit[]).map(toHit)), total };
+    return { hits: (yield* decodeAs(Schema.Array(RAW_HIT), nodes)).map(toHit), total };
   });
 
   // A failed batch is skipped, not fatal: its items stay stale and are retried next sync. A rate limit stops them all.
   const batch = Effect.fnUntraced(
     function* (b: { mine: boolean; ids: string[] }, now: string) {
-      const data = b.mine
-        ? yield* client.query<Record<string, RawNode | null>>(
-            detailsMine(b.ids.length),
-            Object.fromEntries(b.ids.map((id, i) => [`id${i}`, id])),
-          )
-        : yield* client.query<{ nodes: (RawNode | null)[] }>(DETAILS_REVIEW, { ids: b.ids });
-      // normalize is pure: a node it can't read fails its batch, not the sync.
-      return yield* decode(() => {
-        const nodes = b.mine
-          ? b.ids.map((_, i) => (data as Record<string, RawNode | null>)[`n${i}`] ?? null)
-          : (data as { nodes: (RawNode | null)[] }).nodes;
-        return nodes.filter((n) => n !== null).map((n) => normalize(n, now));
-      });
+      const raw = b.mine
+        ? yield* client
+            .query(detailsMine(b.ids.length), Object.fromEntries(b.ids.map((id, i) => [`id${i}`, id])))
+            .pipe(Effect.map((data) => b.ids.map((_, i) => field(data, `n${i}`) ?? null)))
+        : field(yield* client.query(DETAILS_REVIEW, { ids: b.ids }), "nodes");
+      // A node it can't read fails its batch, not the sync.
+      const nodes = yield* decodeAs(Schema.Array(Schema.NullOr(RAW_NODE)), raw);
+      return yield* decode(() => nodes.filter((n) => n !== null).map((n) => normalize(n, now)));
     },
     (effect, b) =>
       effect.pipe(
@@ -291,7 +359,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     // Keep whatever parts succeed; a failed part comes back empty and is logged.
     const settled = yield* Effect.all(
       {
-        teams: client.query<TeamsData>(TEAMS, { me }),
+        teams: ask(TEAMS_DATA, TEAMS, { me }),
         reviewed: search(`is:pr reviewed-by:@me -author:@me updated:>=${since}`, 1000),
         commented: search(`is:pr commenter:@me -author:@me updated:>=${since}`, 1000),
         authored: search(`is:pr author:@me created:>=${since}`, 1000),
@@ -334,13 +402,15 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     const prs = (q: string, authored: boolean) =>
       pages(FILES_SEARCH, `is:pr ${q}`, 500, 50).pipe(
         Effect.flatMap(({ nodes }) =>
-          decode((): AreaPr[] =>
-            (nodes as RawFiles[]).map((n) => ({
-              repo: n.repository.nameWithOwner,
-              files: n.changedFiles,
-              paths: n.files?.nodes.map((f) => f.path) ?? [],
-              authored,
-            })),
+          decodeAs(Schema.Array(RAW_FILES), nodes).pipe(
+            Effect.map((files): AreaPr[] =>
+              files.map((n) => ({
+                repo: n.repository.nameWithOwner,
+                files: n.changedFiles,
+                paths: n.files?.nodes.map((f) => f.path) ?? [],
+                authored,
+              })),
+            ),
           ),
         ),
       );
@@ -360,36 +430,33 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     const out = new Map<string, SearchHit>();
     for (const part of chunk(probes, PROBES)) {
       const vars = Object.fromEntries(part.map((p, i) => [`b${i}`, p.dir === "pr" ? Number(p.branch) : p.branch]));
-      const data = yield* client.query<BranchData>(branchPrsQuery(part.map((p) => p.dir)), { owner, name, ...vars });
-      yield* decode(() => {
-        part.forEach((p, i) => {
-          const got = data.repository?.[`p${i}`];
-          for (const n of !got ? [] : "nodes" in got ? got.nodes : [got]) {
-            if (!n?.id || (p.dir === "up" && n.headRepository?.nameWithOwner.toLowerCase() !== repo.toLowerCase())) continue;
-            out.set(n.id, toHit(n));
-          }
-        });
-      });
+      const data = yield* client.query(branchPrsQuery(part.map((p) => p.dir)), { owner, name, ...vars });
+      // A page of PRs for up and down; one node for pr, {} when the number is an issue's.
+      for (const [i, p] of part.entries()) {
+        const got = field(field(data, "repository"), `p${i}`);
+        const page = field(got, "nodes");
+        for (const raw of Array.isArray(page) ? page : [got]) {
+          if (!field(raw, "id")) continue;
+          const n = yield* decodeAs(BRANCH_NODE, raw);
+          if (p.dir === "up" && n.headRepository?.nameWithOwner.toLowerCase() !== repo.toLowerCase()) continue;
+          out.set(n.id, toHit(n));
+        }
+      }
     }
     return [...out.values()];
   });
 
   const lookup = Effect.fn("GitHub.lookup")(function* (repo: string, number: number) {
     const [owner, name] = repo.split("/");
-    const data = yield* client.query<{ repository: { issueOrPullRequest: RawHit | null } | null }>(LOOKUP, { owner, name, number });
-    return yield* decode(() => {
-      const n = data.repository?.issueOrPullRequest;
-      return n ? toHit(n) : null;
-    });
+    const data = yield* ask(LOOKUP_DATA, LOOKUP, { owner, name, number });
+    const n = data.repository?.issueOrPullRequest;
+    return n ? toHit(n) : null;
   });
 
   const reviewers = Effect.fn("GitHub.reviewers")(function* (repo: string, number: number, q: string) {
     const [owner, name] = repo.split("/");
-    type U = { id: string; login: string; name: string | null };
-    const data = yield* client.query<{
-      repository: { pullRequest: { suggestedReviewers: { reviewer: U }[] } | null; assignableUsers: { nodes: U[] } } | null;
-      organization: { teams: { nodes: { id: string; slug: string; name: string }[] } } | null;
-    }>(REVIEWERS, { owner, name, number, q: q || null });
+    type U = typeof USER.Type;
+    const data = yield* ask(REVIEWERS_DATA, REVIEWERS, { owner, name, number, q: q || null });
     return yield* decode(() => {
       const user = (u: U, suggested: boolean): Reviewer => ({ id: u.id, login: u.login, name: u.name ?? "", team: false, suggested });
       const needle = q.toLowerCase();
@@ -412,9 +479,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
 
   const blob = Effect.fn("GitHub.blob")(function* (repo: string, oid: string, path: string) {
     const [owner, name] = repo.split("/");
-    const data = yield* client.query<{
-      repository: { object: { text: string | null; isBinary: boolean; isTruncated: boolean } | null } | null;
-    }>(BLOB, { owner, name, expr: `${oid}:${path}` });
+    const data = yield* ask(BLOB_DATA, BLOB, { owner, name, expr: `${oid}:${path}` });
     const o = data.repository?.object;
     return o && !o.isBinary && !o.isTruncated && typeof o.text === "string" ? o.text : null;
   });
@@ -423,12 +488,10 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     const raw: RawCheck[] = [];
     let after: string | null = null;
     for (let page = 0; page < CHECK_PAGES; page++) {
-      const data: RawChecks = yield* client.query<RawChecks>(PR_CHECKS, { id, after });
-      const next = yield* decode(() => {
-        const got = data.node?.commits?.nodes[0]?.commit.statusCheckRollup?.contexts;
-        for (const c of got?.nodes ?? []) if (c) raw.push(c);
-        return got?.pageInfo.hasNextPage ? got.pageInfo.endCursor : null;
-      });
+      const data: typeof CHECKS_DATA.Type = yield* ask(CHECKS_DATA, PR_CHECKS, { id, after });
+      const got = data.node?.commits?.nodes[0]?.commit.statusCheckRollup?.contexts;
+      for (const c of got?.nodes ?? []) if (c) raw.push(c);
+      const next: string | null = got?.pageInfo.hasNextPage ? got.pageInfo.endCursor : null;
       if (!next) break;
       after = next;
     }
@@ -448,16 +511,13 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     for (let page = 1; page <= NOTIFICATION_PAGES; page++) {
       const q = new URLSearchParams({ all: "true", per_page: "50", page: String(page) });
       if (feed.since) q.set("since", feed.since);
-      const conditional = page === 1 && feed.last_modified ? { "if-modified-since": feed.last_modified } : undefined;
-      const r = yield* client.get(`/notifications?${q.toString()}`, { headers: conditional });
+      const conditional = page === 1 && feed.last_modified ? { headers: { "if-modified-since": feed.last_modified } } : {};
+      const r = yield* client.get(`/notifications?${q.toString()}`, conditional);
       first ??= head(r.headers, r.status !== 304);
       if (r.status === 304) break;
-      const more = yield* decode(() => {
-        const list = r.data as RawThread[];
-        for (const t of list) threads.push({ thread: t.id, item: threadItem(t), reason: t.reason, updated_at: t.updated_at });
-        return list.length >= 50;
-      });
-      if (!more) break;
+      const list = yield* decodeAs(Schema.Array(RAW_THREAD), r.data);
+      for (const t of list) threads.push({ thread: t.id, item: threadItem(t), reason: t.reason, updated_at: t.updated_at });
+      if (list.length < 50) break;
     }
     return first ?? head(new Headers(), false);
   });
@@ -466,9 +526,10 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     client.get(`/repos/${repo}/releases/latest`).pipe(
       Effect.flatMap((r) =>
         decode(() => {
-          const d = r.data as { tag_name: string; html_url: string };
-          if (typeof d.tag_name !== "string" || typeof d.html_url !== "string") throw new Error("no tag_name or html_url");
-          return { tag: d.tag_name, url: d.html_url };
+          const tag = str(field(r.data, "tag_name"));
+          const url = str(field(r.data, "html_url"));
+          if (tag === undefined || url === undefined) throw new Error("no tag_name or html_url");
+          return { tag, url };
         }),
       ),
       Effect.catchIf(
@@ -478,13 +539,13 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     );
 
   return {
-    viewer: () => client.query<{ viewer: { login: string } }>(VIEWER).pipe(Effect.flatMap((d) => decode(() => d.viewer.login))),
+    viewer: () => ask(VIEWER_DATA, VIEWER).pipe(Effect.map((d) => d.viewer.login)),
     search,
     details,
     context,
     areas,
     notifications,
-    prContext: (id) => client.query<RawPrContext>(PR_CONTEXT, { id }).pipe(Effect.flatMap((d) => decode(() => parsePrContext(d)))),
+    prContext: (id) => ask(PR_CONTEXT_DATA, PR_CONTEXT, { id }).pipe(Effect.map(parsePrContext)),
     checks,
     branchPrs,
     lookup,

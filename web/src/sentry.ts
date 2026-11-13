@@ -26,7 +26,11 @@ export function report(error: unknown): void {
 
 // React's own error hooks: a render error the Reload boundary catches is reported too. Setting them replaces React's
 // console logging, so they log as well.
-const log = Sentry.reactErrorHandler((error: unknown, info) => {
+const handle = Sentry.reactErrorHandler((error: unknown, info) => {
   console.error(error, info.componentStack);
 });
+// React hands an absent stack as undefined; Sentry's type wants null.
+const log = (error: unknown, info: { componentStack?: string | undefined }) => {
+  handle(error, { ...info, componentStack: info.componentStack ?? null });
+};
 export const reactErrors = { onUncaughtError: log, onCaughtError: log, onRecoverableError: log };

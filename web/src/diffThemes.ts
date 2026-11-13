@@ -1,4 +1,5 @@
 import { registerCustomTheme, resolveTheme, type DiffsTheme } from "@pierre/diffs";
+import { isRecord } from "../../src/narrow.ts";
 
 // Copies of a few syntax themes, each colour swapped where it doesn't read on the theme's sheet or changed lines; every other
 // colour, and so each theme's look, stays its own. src/themes.ts's `diff` names them.
@@ -160,13 +161,28 @@ const COPIES: Record<string, { of: string; colours: Record<string, string> }> = 
   },
 };
 
+// Every colour in a theme's strings swapped in place. An 8-digit colour keeps its alpha: only its first six digits match.
+function recolour(v: unknown, colours: Record<string, string>): void {
+  const swap = (s: string) => s.replaceAll(/#[0-9a-f]{6}/gi, (hex) => colours[hex.toLowerCase()] ?? hex);
+  if (Array.isArray(v)) {
+    for (const [i, x] of v.entries()) {
+      if (typeof x === "string") v[i] = swap(x);
+      else recolour(x, colours);
+    }
+  } else if (isRecord(v)) {
+    for (const [k, x] of Object.entries(v)) {
+      if (typeof x === "string") v[k] = swap(x);
+      else recolour(x, colours);
+    }
+  }
+}
+
 for (const [name, { of, colours }] of Object.entries(COPIES))
   registerCustomTheme(
     name,
     async () => {
-      // An 8-digit colour keeps its alpha: only its first six digits match.
-      const json = JSON.stringify(await resolveTheme(of)).replaceAll(/#[0-9a-f]{6}/gi, (hex) => colours[hex.toLowerCase()] ?? hex);
-      const theme = JSON.parse(json) as DiffsTheme;
+      const theme: DiffsTheme = structuredClone(await resolveTheme(of));
+      recolour(theme, colours);
       return { ...theme, name, ...(theme.textmate && { textmate: { ...theme.textmate, name } }) };
     },
     "diffs",

@@ -9,6 +9,7 @@ import { Effect, Result } from "effect";
 import { alive, claude, halt, type Agent } from "../coordinator.ts";
 import type { Desk } from "../desk.ts";
 import { Conflict, NotFound, type CommandError } from "../errors.ts";
+import { isRecord, num, str } from "../narrow.ts";
 import { askAgent, makeAgentDir, runCommand } from "../review.ts";
 import { isCoordinator, SESSION_PREFIX, type SessionAction, type SessionCard, type SessionKind } from "../types.ts";
 
@@ -40,11 +41,8 @@ function roots(env: NodeJS.ProcessEnv = process.env): Roots {
   };
 }
 
-const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 const filled = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v : undefined);
-const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
-const obj = (v: unknown): Record<string, unknown> | null =>
-  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+const obj = (v: unknown): Record<string, unknown> | null => (isRecord(v) ? v : null);
 const parse = (text: string): unknown =>
   Result.getOrElse(Result.try({ try: (): unknown => JSON.parse(text), catch: () => null }), () => null);
 
@@ -80,8 +78,14 @@ export function parseAgents(out: string): AgentRow[] | null {
     const kind = o?.kind;
     if (!o || !sessionId || !cwd || (kind !== "interactive" && kind !== "background")) return [];
     const row: AgentRow = { sessionId, cwd, kind };
-    for (const k of ["id", "name", "state", "status", "waitingFor"] as const) if (str(o[k])) row[k] = str(o[k]);
-    for (const k of ["pid", "startedAt"] as const) if (num(o[k]) !== undefined) row[k] = num(o[k]);
+    for (const k of ["id", "name", "state", "status", "waitingFor"] as const) {
+      const v = str(o[k]);
+      if (v) row[k] = v;
+    }
+    for (const k of ["pid", "startedAt"] as const) {
+      const v = num(o[k]);
+      if (v !== undefined) row[k] = v;
+    }
     return [row];
   });
 }
@@ -234,7 +238,8 @@ export function readTranscript(text: string): Tail | null {
   if (stop === "end_turn") return { ...tail, end: "turn", text: turnText };
   if (stop === "tool_use" && pending.size) {
     const [tool] = [...pending.values()].slice(-1);
-    const asked = tool!.name === "AskUserQuestion" ? obj((tool!.input?.questions as unknown[] | undefined)?.[0]) : null;
+    const questions = tool!.input?.questions;
+    const asked = tool!.name === "AskUserQuestion" && Array.isArray(questions) ? obj(questions[0]) : null;
     return {
       ...tail,
       pending: { name: tool!.name, line: toolLine(tool!.name, tool!.input) },

@@ -1,9 +1,10 @@
 // Settings → Automation Rules → Urgency: your criteria and the plugins', each a yes or no about an item that orders the Inbox and never acts on
 // it. Yours first, with New criterion; then what GitHub comes with, which you only switch.
 import { Effect } from "effect";
-import { Fragment, useCallback, useEffect, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useState, type KeyboardEvent } from "react";
 import type { CriteriaView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
+import { useKeyed } from "../keyed.ts";
 import { ago, aiName, MOD } from "../format.ts";
 import { AskChange } from "./AskChange.tsx";
 import { changeAsk } from "../view.ts";
@@ -62,14 +63,9 @@ export function Criteria({
       ),
     [],
   );
-  useEffect(() => {
-    const stop = new AbortController();
-    if (active) runUi(load(), { signal: stop.signal });
-    return () => {
-      stop.abort();
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- refresh only triggers a re-read
-  }, [active, load, refresh]);
+  useKeyed(active ? refresh : null, (signal) => {
+    runUi(load(), { signal });
+  });
 
   // A write, then the list again; what fails says so and leaves the list as it was.
   const write = (e: Effect.Effect<unknown, { message: string }>, done: string, after?: () => void) => {

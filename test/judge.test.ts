@@ -469,12 +469,7 @@ test("each item says who it's really from and what state it's in: via a bot, sta
     ],
   });
   const pinned = makeItem({ number: 4, author: "carol" });
-  const p = buildJudgePrompt(
-    [g(forThem), g(forYou), g(stacked), g(pinned, { pinned: "the coordinator", floor: undefined })],
-    "me",
-    c,
-    "TAG",
-  );
+  const p = buildJudgePrompt([g(forThem), g(forYou), g(stacked), g(pinned, { pinned: "the coordinator" })], "me", c, "TAG");
   const lines = (n: number) => p.slice(p.indexOf(`- id: acme/api#${n}\n`)).split("\n- id: ")[0]!;
   assert.match(lines(1), /\n {2}PR by sentry-junior \(bot\) for Michelle Tran, opened 2d ago/);
   assert.match(lines(2), /\n {2}their own PR, opened through sentry-junior \(bot\), opened 2d ago/);

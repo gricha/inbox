@@ -1,7 +1,6 @@
 // HTTP API + web UI on 127.0.0.1.
 import fs from "node:fs";
-import type { IncomingMessage, Server } from "node:http";
-import type { AddressInfo } from "node:net";
+import { Server, type IncomingMessage } from "node:http";
 import net from "node:net";
 import path from "node:path";
 import type { Duplex } from "node:stream";
@@ -45,9 +44,10 @@ import { fetchIssue, findClone, generateIssueReview } from "./issue.ts";
 import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
 import { FIELDS } from "./signals.ts";
-import { GITHUB_ACTIONS, type Action, type AskLines, type GitHubAction, type InlineAt, type RemoteView } from "./types.ts";
+import { field as fieldOf, isRecord, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
+import { GITHUB_ACTIONS, type Action, type AskLines, type InlineAt, type RemoteView } from "./types.ts";
 
-const VERSION = (JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }).version;
+const VERSION = stringOf(fieldOf(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")), "version")) ?? "";
 export const DEFAULT_PORT = 47823;
 const DIST = fileURLToPath(new URL("../web/dist/", import.meta.url));
 const TYPES: Record<string, string> = {
@@ -191,7 +191,7 @@ else
 
 // docs/effect.md Boundaries → HTTP: the value or its Response, a refusal's status, 499 for a client gone, else a logged 500 Sentry sees.
 function reply<A, E>(c: Context, exit: Exit.Exit<A, E>, log: (m: string) => void): Response {
-  if (Exit.isSuccess(exit)) return exit.value instanceof Response ? exit.value : c.json(exit.value as object);
+  if (Exit.isSuccess(exit)) return exit.value instanceof Response ? exit.value : c.json(exit.value);
   if (Cause.hasInterruptsOnly(exit.cause)) return new Response(null, { status: 499 });
   const failed = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
   if (isDeskHttpError(failed)) {
@@ -220,8 +220,8 @@ function inlineAtOf(b: Record<string, unknown>): InlineAt | null {
   const { path: file, line: at, side: on, start } = b;
   if (typeof file !== "string" || !file || !line(at) || !side(on)) return null;
   if (start === undefined) return { path: file, line: at, side: on };
-  if (typeof start !== "object" || start === null) return null;
-  const { line: from, side: was } = start as Record<string, unknown>;
+  if (!isRecord(start)) return null;
+  const { line: from, side: was } = start;
   return line(from) && side(was) ? { path: file, line: at, side: on, start: { line: from, side: was } } : null;
 }
 
@@ -464,7 +464,8 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   const reviewerIds = (b: Record<string, unknown>): Effect.Effect<{ users: string[]; teams: string[] }, BadRequest> => {
     const ids = (v: unknown): string[] | null => {
       if (v === undefined) return [];
-      return Array.isArray(v) && v.every((x) => typeof x === "string" && x !== "") ? (v as string[]) : null;
+      const list = stringsOf(v);
+      return list?.every((x) => x !== "") ? list : null;
     };
     const users = ids(b.users);
     const teams = ids(b.teams);
@@ -485,11 +486,12 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   // The More menu's GitHub writes (close, draft, ready, merge, reopen, request changes), from the desk's own window only.
   app.post("/api/github", (c) =>
     write(c, "GitHub actions are yours, from the desk's window", (b) => {
-      if (typeof b.id !== "string" || !GITHUB_ACTIONS.includes(b.action as GitHubAction)) return bad("need { id, action }");
+      const action = oneOf(GITHUB_ACTIONS, b.action);
+      if (typeof b.id !== "string" || !action) return bad("need { id, action }");
       if (b.head_oid !== undefined && typeof b.head_oid !== "string") return bad("head_oid must be a string");
       if (b.body !== undefined && typeof b.body !== "string") return bad("body must be a string");
-      const opts = { head: b.head_oid, body: b.body };
-      return Effect.map(desk.githubAct(b.id, b.action as GitHubAction, opts), (r) => ({ ok: true, ...r }));
+      const opts = { ...(b.head_oid !== undefined && { head: b.head_oid }), ...(b.body !== undefined && { body: b.body }) };
+      return Effect.map(desk.githubAct(b.id, action, opts), (r) => ({ ok: true, ...r }));
     }),
   );
   // Merging: your own PRs you handed off (Hand off for merge and Back to desk, through /api/act), which the coordinator gets merged.
@@ -533,7 +535,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       if (typeof b.text !== "string") return yield* new BadRequest({ message: "need { text }" });
       let lines: AskLines | undefined;
       if (b.lines !== undefined) {
-        const l = typeof b.lines === "object" && b.lines !== null ? (b.lines as Record<string, unknown>) : null;
+        const l = isRecord(b.lines) ? b.lines : null;
         const at = l && inlineAtOf(l);
         if (!l || !at || typeof l.head !== "string" || (l.note !== undefined && typeof l.note !== "boolean"))
           return yield* new BadRequest({ message: "need lines: { path, line, side: new|old, start?: { line, side }, head, note? }" });
@@ -675,19 +677,15 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     const inquire = Effect.gen(function* () {
       yield* up;
       const b = yield* bodyOf(c);
-      const pairs = (k: string, a: string, z: string): Effect.Effect<Record<string, string>[], BadRequest> => {
+      const pairs = (k: string, a: string, z: string): Effect.Effect<(readonly [string, string])[], BadRequest> => {
         const v = b[k] ?? [];
-        if (
-          Array.isArray(v) &&
-          v.every(
-            (o: unknown) =>
-              !!o &&
-              typeof o === "object" &&
-              typeof (o as Record<string, unknown>)[a] === "string" &&
-              typeof (o as Record<string, unknown>)[z] === "string",
-          )
-        )
-          return Effect.succeed(v as Record<string, string>[]);
+        const got: unknown[] = Array.isArray(v) ? v : [];
+        const read = got.flatMap((o) => {
+          const x = stringOf(fieldOf(o, a));
+          const y = stringOf(fieldOf(o, z));
+          return x !== undefined && y !== undefined ? [[x, y] as const] : [];
+        });
+        if (Array.isArray(v) && read.length === got.length) return Effect.succeed(read);
         return Effect.fail(new BadRequest({ message: `${k} must be a list of { ${a}, ${z} }` }));
       };
       const question = yield* str(b, "question");
@@ -698,8 +696,8 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
         question,
         from,
         context,
-        options: (yield* pairs("options", "answer", "next")).map((o) => ({ answer: o.answer!, next: o.next! })),
-        links: (yield* pairs("links", "label", "url")).map((l) => ({ label: l.label!, url: l.url! })),
+        options: (yield* pairs("options", "answer", "next")).map(([answer, next]) => ({ answer, next })),
+        links: (yield* pairs("links", "label", "url")).map(([label, url]) => ({ label, url })),
         item: yield* str(b, "item"),
       });
       return { ok: true, inquiry };
@@ -1126,7 +1124,7 @@ const shut = (s: ServerType) =>
     s.close(() => {
       resume(Effect.void);
     });
-    (s as { closeAllConnections?: () => void }).closeAllConnections?.();
+    if (s instanceof Server) s.closeAllConnections();
   });
 
 // Served over Tailscale while `wanted()`: `tailscale serve` on https://<tailnet name>/ to a listener on a free loopback
@@ -1139,7 +1137,9 @@ function overTailnet(app: Hono, remote: Remote, desk: Desk, wanted: () => boolea
   const on = Effect.gen(function* () {
     const tn = yield* readTailnet(desk.settings["app.tailscale_login"]);
     const s = yield* listen(remoteFetch(app), 0, "a free loopback port");
-    const target = `http://127.0.0.1:${(s.address() as AddressInfo).port}`;
+    const at = s.address();
+    const listening = at !== null && typeof at === "object" ? at.port : yield* Effect.die(new Error("the tailnet's listener has no port"));
+    const target = `http://127.0.0.1:${listening}`;
     const mine = desk.store.get("tailscale_serve");
     // Ready before serve points at it, so the first request through isn't refused.
     remote.tailnet = tn;
@@ -1227,12 +1227,12 @@ export const startDesk = Effect.fnUntraced(function* (
     home,
     github: createGitHub({ log }),
     log,
-    notify: opts.notify,
+    ...(opts.notify && { notify: opts.notify }),
     review: { fetchPr, generate: generateReview, loggedIn, installed },
     issues: { fetch: fetchIssue, generate: generateIssueReview, clone: (repo) => findClone(repo) },
     writer: opts.writer ?? createWriter({ log }),
     mcpUrl: `http://localhost:${port}/mcp`,
-    app: opts.app,
+    ...(opts.app && { app: opts.app }),
   });
   const remote = new Remote(desk.store);
   const app = createApp(desk, port, remote);
@@ -1247,7 +1247,7 @@ export const startDesk = Effect.fnUntraced(function* (
     ),
   );
   const ui = process.env.DESK_UI_ORIGIN;
-  const dropUpgrades = ui ? proxyUpgrades(server as Server, port, ui) : () => {};
+  const dropUpgrades = ui && server instanceof Server ? proxyUpgrades(server, port, ui) : () => {};
   log(`Inbox on ${url} (home ${home})${ui ? `, its UI from ${ui}` : ""}`);
 
   yield* desk.init().pipe(
@@ -1270,7 +1270,7 @@ export const startDesk = Effect.fnUntraced(function* (
     server.close(() => {
       resume(Effect.void);
     });
-    (server as { closeAllConnections?: () => void }).closeAllConnections?.();
+    if (server instanceof Server) server.closeAllConnections();
     dropUpgrades();
   });
   // The port is let go even when closing the desk dies.

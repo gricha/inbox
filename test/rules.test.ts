@@ -104,7 +104,7 @@ test("over a cap, the lightest AI call leaves first: skip, then skim, then not r
   const items = [1, 2, 3, 4].map((n) => makeItem({ number: n, created_at: hoursAgo(100 - n) }));
   const r = classify(
     b,
-    items.map((it) => entry(it, { ai: it.number === 1 ? "skip" : undefined })),
+    items.map((it) => entry(it, it.number === 1 ? { ai: "skip" } : {})),
   );
   assert.deepEqual(r.order.today, ["acme/api#2", "acme/api#3"]);
   assert.deepEqual(r.order.later, ["acme/api#1", "acme/api#4"]);
@@ -112,7 +112,10 @@ test("over a cap, the lightest AI call leaves first: skip, then skim, then not r
   assert.equal(r.placements.get("acme/api#4")!.demoted, "the Inbox has 2 from B already");
   const calls = classify(
     b,
-    items.map((it) => entry(it, { ai: (["skim", undefined, "skim", "look"] as const)[it.number - 1] })),
+    items.map((it) => {
+      const ai = (["skim", undefined, "skim", "look"] as const)[it.number - 1];
+      return entry(it, ai ? { ai } : {});
+    }),
   );
   assert.deepEqual(calls.order.today, ["acme/api#2", "acme/api#4"]);
   // Under the cap, a skip keeps its place.
@@ -226,7 +229,12 @@ test("default review rules: a CODEOWNERS ping hints Later when it changes code y
   const review = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.boards.find((x) => x.config.id === "acme-review")!;
   const areas = makeContext({ areas: { "acme/api": { "src/auth/": 6 } } });
   const ping = (number: number, paths?: string[]) =>
-    makeItem({ number, author: "carol", paths, review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }] });
+    makeItem({
+      number,
+      author: "carol",
+      ...(paths && { paths }),
+      review_requests: [{ reviewer: "ml-team", type: "team", codeowner: true }],
+    });
   const items = [ping(1, ["src/auth/token.ts", "web/x.ts"]), ping(2, ["web/x.ts"]), ping(3)];
   const r = classify(
     review,

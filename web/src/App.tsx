@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Result, Schema } from "effect";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type {
@@ -11,7 +11,6 @@ import type {
   SessionAction,
   SessionCard,
   ItemDetail,
-  OmarchyTheme,
   Overview,
   QueueView,
   Reviewer,
@@ -20,13 +19,15 @@ import type {
   Work,
 } from "../../src/types.ts";
 import { permalink } from "../../src/links.ts";
+import { parseJson } from "../../src/narrow.ts";
 import { isCoordinator } from "../../src/types.ts";
 import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
 import { cls, copyText, fromName, MAC, shortId, shortRef, SNOOZE, snoozeOptions, aiName, setAiName, when } from "./format.ts";
 import { restOn } from "./reviews.ts";
 import { holdKeys, keysHeld } from "./drafts.ts";
-import { adoptTheme, desktop, loadOmarchy, omarchyIs } from "./theme.ts";
+import { adoptTheme, desktop, loadOmarchy, OmarchyAnswer, omarchyIs } from "./theme.ts";
 import { getStored, setStored } from "./storage.ts";
+import { useKeyed } from "./keyed.ts";
 import {
   attachCommand,
   beside,
@@ -112,10 +113,8 @@ const CHAT = "desk.chat"; // the chat open in this window, about this item ("" f
 const DISMISSED = "desk.notices"; // this device's: the notices you dismissed, each as it was then
 function dismissedAtStart(): Dismissed {
   const raw = getStored(DISMISSED);
-  const parsed: unknown = raw
-    ? Effect.runSync(Effect.try({ try: () => JSON.parse(raw) as unknown, catch: (e) => e }).pipe(Effect.orElseSucceed(() => null)))
-    : null;
-  return parsed && typeof parsed === "object" ? (parsed as Dismissed) : {};
+  const parsed = raw ? parseJson(Schema.Record(Schema.String, Schema.String), raw) : null;
+  return parsed && Result.isSuccess(parsed) ? parsed.success : {};
 }
 const LIST_PAGES = new Set<Route["name"]>(["queue", "blocked", "archive"]);
 // The sidebar's pages, top to bottom: ⌘1 to ⌘4 (Ctrl elsewhere) open them, as tabs' numbers do in a browser.
@@ -431,7 +430,10 @@ export function App() {
         runUi(loadOmarchy());
       });
       es.addEventListener("omarchy", (e) => {
-        omarchyIs(JSON.parse((e as MessageEvent<string>).data) as OmarchyTheme | null);
+        // One that doesn't read leaves the theme as it is.
+        const data: unknown = e instanceof MessageEvent ? e.data : null;
+        const o = typeof data === "string" ? parseJson(OmarchyAnswer, data) : null;
+        if (o && Result.isSuccess(o)) omarchyIs(o.success);
       });
       es.addEventListener("error", () => {
         // While the browser retries, the stream sits in CONNECTING; a fetch tells us whether the server is gone.
@@ -698,11 +700,10 @@ export function App() {
   }
 
   // An open issue whose pre-review is on its way is read again on each update, so it shows once it's written.
-  useEffect(() => {
+  useKeyed(loads, () => {
     const d = expanded ? details[expanded] : undefined;
     if (expanded && typeof d === "object" && d.issue_ai_state === "running") runUi(fetchDetail(expanded));
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- loads changes on every server update; that's when to look
-  }, [loads]);
+  });
 
   function toggle(c: Card) {
     setSelected(c.id);
@@ -1878,7 +1879,7 @@ export function App() {
           card={menuCard}
           x={menuAt.x}
           y={menuAt.y}
-          snooze={menuAt.snooze}
+          {...(menuAt.snooze !== undefined && { snooze: menuAt.snooze })}
           me={me}
           run={run}
           act={(c, a, until) => {

@@ -648,6 +648,8 @@ test("the selected card's facts leave out what the card already says", () => {
   ]);
   // A sorted-away row shows its note already.
   assert.ok(!cardFacts(pr, "me", true).includes("3 from B are urgent already"));
+  const { demoted: _demoted, ...kept } = pr;
+  const { preflight: _preflight, ...bare } = kept;
   assert.ok(says("conflicts with main", "merge conflict"));
   assert.ok(!says("asked you directly", "merge conflict"));
   // A rule's why in its own words says the same problem: a sorted-away row shows it once.
@@ -659,28 +661,20 @@ test("the selected card's facts leave out what the card already says", () => {
   assert.ok(!says("CI failing", "CI passing"));
   assert.ok(!says("waiting on reviewers", "optional check failing"));
   assert.ok(!says("required by CODEOWNERS", "CI failing"));
-  assert.deepEqual(cardFacts({ ...pr, why: "3 unresolved threads", author: "me", demoted: undefined }, "me"), [
-    "medium risk",
-    "5 notes on the changes",
-  ]);
+  assert.deepEqual(cardFacts({ ...kept, why: "3 unresolved threads", author: "me" }, "me"), ["medium risk", "5 notes on the changes"]);
   assert.deepEqual(
     cardFacts(
       {
-        ...pr,
+        ...kept,
         chips: ["1 unresolved", "approved"],
         ci: "green",
         preflight: { state: "stale", risk: "high", notes: 2 },
-        demoted: undefined,
       },
       "me",
     ),
     ["by dana", "CI passing", "approved", "1 unresolved thread"],
   );
-  assert.deepEqual(cardFacts({ ...pr, chips: ["draft"], ci: "pending", preflight: undefined, demoted: undefined }, "me"), [
-    "by dana",
-    "CI running",
-    "draft",
-  ]);
+  assert.deepEqual(cardFacts({ ...bare, chips: ["draft"], ci: "pending" }, "me"), ["by dana", "CI running", "draft"]);
   assert.deepEqual(cardFacts(card("acme/api#2", { kind: "issue", ci: "none", author: "nina" }), "me"), ["by nina"]);
   // A team-only ask says so when the why doesn't; "approved and green" already says CI passes; the coordinator says why.
   assert.deepEqual(

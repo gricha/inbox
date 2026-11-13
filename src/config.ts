@@ -14,6 +14,7 @@ import {
   type SpaceConfig,
 } from "./types.ts";
 import { compileBoard, type CompiledBoard } from "./rules.ts";
+import { field, isRecord, oneOf, strings } from "./narrow.ts";
 import { DEFAULTS, LEGACY_TABLES, type Settings } from "./settings.ts";
 import { GITHUB_RULES } from "./connectors/github-rules.ts";
 
@@ -77,11 +78,11 @@ export function parseConfig(
   };
   const table = (v: unknown, path: string): Raw => {
     if (v === undefined) return {};
-    if (typeof v !== "object" || v === null || Array.isArray(v)) {
+    if (!isRecord(v)) {
       err(path, "must be a table");
       return {};
     }
-    return v as Raw;
+    return v;
   };
   const str = (v: unknown, path: string, dflt: string): string => {
     if (v === undefined) return dflt;
@@ -102,23 +103,25 @@ export function parseConfig(
   const strs = (v: unknown, path: string): string[] => {
     if (v === undefined) return [];
     if (typeof v === "string") return [v];
-    if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) {
+    const list = strings(v);
+    if (!list) {
       err(path, "must be a list of strings");
       return [];
     }
-    return v as string[];
+    return list;
   };
   const bucket = (v: unknown, path: string, dflt: Bucket): Bucket => {
     if (v === undefined) return dflt;
-    if (!BUCKETS.includes(v as Bucket)) {
+    const b = oneOf(BUCKETS, v);
+    if (b === undefined) {
       err(path, `must be one of ${BUCKETS.join(", ")}`);
       return dflt;
     }
-    return v as Bucket;
+    return b;
   };
   const ruleBucket = (v: unknown, path: string): RuleBucket => {
     if (v === "judge") return v;
-    if (v !== undefined && !BUCKETS.includes(v as Bucket)) {
+    if (v !== undefined && oneOf(BUCKETS, v) === undefined) {
       err(path, `must be one of ${BUCKETS.join(", ")}, or judge`);
       return "later";
     }
@@ -249,21 +252,20 @@ export function parseConfig(
       name: str(t.name, `${path}.name`, id),
       ...(source !== undefined && { source }),
       queries,
-      filter: filter === "" ? undefined : filter,
-      priority: priority === "" ? undefined : priority,
+      ...(filter && { filter }),
+      ...(priority && { priority }),
       rules,
       ...(builtin !== undefined && { builtin }),
       ...(off.length > 0 && { off }),
       default: bucket(t.default, `${path}.default`, "later"),
       default_why: str(t.default_why, `${path}.default_why`, ""),
-      sort: (SORTS as readonly string[]).includes(sort) ? (sort as BoardConfig["sort"]) : "waiting",
-      caps:
-        t.caps === undefined
-          ? undefined
-          : {
-              now: caps.now === undefined ? undefined : num(caps.now, `${path}.caps.now`, 3),
-              today: caps.today === undefined ? undefined : num(caps.today, `${path}.caps.today`, 6),
-            },
+      sort: oneOf(SORTS, sort) ?? "waiting",
+      ...(t.caps !== undefined && {
+        caps: {
+          ...(caps.now !== undefined && { now: num(caps.now, `${path}.caps.now`, 3) }),
+          ...(caps.today !== undefined && { today: num(caps.today, `${path}.caps.today`, 6) }),
+        },
+      }),
     };
     const c = compileBoard(board, path);
     errors.push(...c.errors);
@@ -667,8 +669,10 @@ export function migrateBuiltIns(text: string, sources: readonly Source[] = [GITH
   if (!changed) return null;
   const next = parts.join("");
   const after = parseConfig(next, DEFAULTS, sources).loaded;
-  const same = (b: BoardConfig) =>
-    JSON.stringify(b, (k, v: unknown) => (k === "builtin" || k === "off" ? undefined : k === "rules" ? (v as Rule[]).map(plain) : v));
+  const same = (b: BoardConfig) => {
+    const { builtin: _builtin, off: _off, ...rest } = b;
+    return JSON.stringify({ ...rest, rules: b.rules.map(plain) });
+  };
   if (!after || after.config.boards.length !== boards.length || after.config.boards.some((b, i) => same(b) !== same(boards[i]!)))
     return null;
   return next;
@@ -679,13 +683,14 @@ export function migrateBuiltIns(text: string, sources: readonly Source[] = [GITH
 export function switchBuiltIn(text: string, board: string, rule: string, on: boolean): string | null {
   const parsed = Result.try({ try: (): Raw => parse(text), catch: tomlError });
   if (Result.isFailure(parsed) || !Array.isArray(parsed.success.boards)) return null;
-  const raw = parsed.success.boards as Raw[];
-  const i = raw.findIndex((b) => b.id === board);
+  const raw: unknown[] = parsed.success.boards;
+  const i = raw.findIndex((b) => field(b, "id") === board);
   const parts = boardTables(text, raw.length);
   if (i < 0 || !parts) return null;
   const part = parts[i + 1]!;
   const own = part.slice(0, tableEnd(part));
-  const was = Array.isArray(raw[i]!.off) ? (raw[i]!.off as unknown[]).map(String) : [];
+  const off = field(raw[i], "off");
+  const was = Array.isArray(off) ? off.map(String) : [];
   const next = on ? was.filter((x) => x !== rule) : was.includes(rule) ? was : [...was, rule];
   if (next.length === was.length && next.every((x, k) => x === was[k])) return text;
   const line = `off = [${next.map(toml).join(", ")}]`;

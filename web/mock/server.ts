@@ -5,7 +5,7 @@
 // POST /api/mock/ai-paused { paused } flips it, and POST /api/mock/agents-busy { busy } sets the judge to work.
 // POST /api/mock/setup { needed, github } shows the first-run page (GitHub signed out when github is false).
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { Effect, Result } from "effect";
+import { Effect, Result, Schema } from "effect";
 import { homedir } from "node:os";
 import { areaFiles } from "../../src/areas.ts";
 import { onBehalf } from "../../src/github/behalf.ts";
@@ -39,12 +39,10 @@ import type {
   Areas,
   AiReview,
   Ask,
-  AskLines,
   Automation,
   AutomationRun,
   AutomationView,
   RuleAction,
-  Verb,
   BoardConfig,
   BoardSummary,
   BoardView,
@@ -99,7 +97,18 @@ import type {
   Work,
   RemoteView,
 } from "../../src/types.ts";
-import { byPart, COORDINATOR_NAME, INBOX_SECTIONS, RANK, SECRET_SET, UNTIL } from "../../src/types.ts";
+import {
+  ACTIVITY_KINDS,
+  byPart,
+  COORDINATOR_NAME,
+  GITHUB_ACTIONS,
+  INBOX_SECTIONS,
+  RANK,
+  SECRET_SET,
+  UNTIL,
+  VERBS,
+} from "../../src/types.ts";
+import { decode, isKeyOf, isRecord, messageOf, num, oneOf, strings } from "../../src/narrow.ts";
 
 const PORT = process.env.MOCK_PORT ? Number(process.env.MOCK_PORT) : 47824;
 const ME = "me";
@@ -113,6 +122,45 @@ const T0 = Date.now();
 const iso = (hoursAgo: number) => new Date(T0 - hoursAgo * HOUR).toISOString();
 const hoursSince = (at: string) => Math.round((Date.now() - Date.parse(at)) / HOUR);
 const BUCKET_LIST = new Set<Bucket>(["now", "today", "blocked", "later", "fyi", "hide"]);
+// Every action /api/act takes, so a body's is checked.
+const ACTIONS = {
+  done: true,
+  snooze: true,
+  mute: true,
+  unmute: true,
+  pin: true,
+  unpin: true,
+  seen: true,
+  restore: true,
+  inflight: true,
+  takeback: true,
+  undo: true,
+  urgent: true,
+  standard: true,
+  fyi: true,
+} satisfies Record<Action, true>;
+const SIDE = Schema.Literals(["new", "old"]);
+const ASK_LINES = Schema.Struct({
+  path: Schema.String,
+  line: Schema.Number,
+  side: SIDE,
+  start: Schema.optionalKey(Schema.Struct({ line: Schema.Number, side: SIDE })),
+  head: Schema.String,
+  note: Schema.optionalKey(Schema.Boolean),
+});
+// A snooze's stored `when` ("push:<oid>", "review") as the Until it waits on.
+function untilOf(when: string | null): Until | null {
+  const u = when?.split(":")[0];
+  return u && isKeyOf(UNTIL, u) ? u : null;
+}
+const isSettingValue = (v: unknown): v is SettingValue =>
+  typeof v === "number" || typeof v === "boolean" || typeof v === "string" || strings(v) !== undefined;
+// An automation's rule from a PUT body: { rule } when it names a verb, else nothing.
+function ruleOf(v: unknown): { rule: RuleAction } | false {
+  const verb = oneOf(VERBS, isRecord(v) ? v.do : undefined);
+  if (!isRecord(v) || !verb) return false;
+  return { rule: { do: verb, ...(typeof v.until === "string" && { until: v.until }), why: typeof v.why === "string" ? v.why : "" } };
+}
 
 // ---------------------------------------------------------------------------
 // Config
@@ -1486,15 +1534,9 @@ const TALK = new Map<string, Conversation[]>([
 
 const recs: Rec[] = SEEDS.map((s) => {
   const id = `${s.repo}#${s.n}`;
-  return {
+  const rec: Rec = {
     seed: s,
     id,
-    paths:
-      (s.kind ?? "pr") === "pr"
-        ? canned(id, s.repo, s.n, s.title, s.size)
-            .files.map((f) => f.path)
-            .slice(0, 50)
-        : undefined,
     fresh: !!s.fresh,
     activity_at: iso(s.upd ?? s.age),
     snoozed_at: iso(0),
@@ -1513,6 +1555,11 @@ const recs: Rec[] = SEEDS.map((s) => {
       ...s.st,
     },
   };
+  if ((s.kind ?? "pr") === "pr")
+    rec.paths = canned(id, s.repo, s.n, s.title, s.size)
+      .files.map((f) => f.path)
+      .slice(0, 50);
+  return rec;
 });
 
 // ---------------------------------------------------------------------------
@@ -1523,7 +1570,13 @@ const isBot = (login: string) => login.endsWith("[bot]") || config.signals.bots.
 const mineOf = (s: Seed) =>
   s.author === ME ||
   onBehalf(
-    { kind: s.kind ?? "pr", author: s.author, author_bot: isBot(s.author), assignees: s.assignee ? [ME] : [], requester: s.requester },
+    {
+      kind: s.kind ?? "pr",
+      author: s.author,
+      author_bot: isBot(s.author),
+      assignees: s.assignee ? [ME] : [],
+      ...(s.requester !== undefined && { requester: s.requester }),
+    },
     ME,
     config.signals.my_names,
     isBot,
@@ -1543,7 +1596,7 @@ function signals(r: Rec): Signals {
   const myReview = reviews.findLast(([a]) => a === ME);
   // Removing the ask, or your approval, clears it.
   const asked = (!!s.direct || !!s.team) && s.resolved !== "no longer requested" && s.resolved !== "you approved";
-  const myAreaFiles = areaFiles({ repo: s.repo, paths: r.paths }, { areas: AREAS });
+  const myAreaFiles = areaFiles({ repo: s.repo, ...(r.paths && { paths: r.paths }) }, { areas: AREAS });
   const needs = needsOf(s);
   const named = (s.asked2 ?? []).filter((a) => !a.startsWith("@"));
   // The seeds don't say when it went ready or who was asked when: both since it opened.
@@ -1836,6 +1889,7 @@ function cardOf(r: Rec, p: Placement): Card {
   // As Desk.card(): a hand-back says so; an open PR another one blocks says so, unless it's a draft or changes are requested.
   const st = handedBack(r) ? "handed back" : sig.pr.blocked && (was === "approved" || was === "waiting for review") ? "blocked" : was;
   const wake = waitable(sig, itemOf(r), ME);
+  const by = placedBy(p);
   return {
     ...(team && { team_ask: me.requested_codeowner ? `CODEOWNERS ping to @${team}` : `asked @${team}` }),
     id: r.id,
@@ -1851,7 +1905,7 @@ function cardOf(r: Rec, p: Placement): Card {
     ...(st && { stage: st }),
     bucket: p.bucket,
     why: s.resolved ?? p.why,
-    demoted: p.demoted,
+    ...(p.demoted !== undefined && { demoted: p.demoted }),
     board: p.board,
     boards: config.boards.filter((b) => place(r, b)).map((b) => b.id),
     chips: chips(r),
@@ -1866,7 +1920,7 @@ function cardOf(r: Rec, p: Placement): Card {
     pinned: r.state.pinned,
     status: status(r),
     snooze_until: r.state.snooze_until,
-    snooze_when: status(r) === "snoozed" && r.state.snooze_when ? (r.state.snooze_when.split(":")[0] as Until) : null,
+    snooze_when: status(r) === "snoozed" ? untilOf(r.state.snooze_when) : null,
     ...(wake.length > 0 && !inFlight(r) && { wake_on: wake }),
     ...(status(r) === "done" && r.state.done_at ? { done_at: r.state.done_at } : {}),
     verdict: reviews.get(r.id)?.head_oid === itemOf(r).head_oid ? reviews.get(r.id)!.verdict : null,
@@ -1878,7 +1932,7 @@ function cardOf(r: Rec, p: Placement): Card {
     ...(me.author && sig.pr.review_optional && { review_optional: true as const }),
     ...(!!TALK.get(r.id)?.length && { talk: true as const }),
     ...(actions.length > 0 && { actions }),
-    ...(!inFlight(r) && !handedBack(r) && placedBy(p) && { placed_by: placedBy(p) }),
+    ...(!inFlight(r) && !handedBack(r) && by && { placed_by: by }),
     ...(stack && { stack }),
     ...(s.blocker && {
       blocker: { id: `${s.repo.split("/")[0]}/${s.blocker[0].split(" ")[0]}`, ref: s.blocker[0], waits: s.blocker[1] },
@@ -2728,7 +2782,7 @@ function addAsk(b: Record<string, unknown>): Ask {
     item_id: str("item_id"),
     thread_id: str("thread_id"),
     thread_url: str("thread_url"),
-    lines: typeof b.lines === "object" && b.lines ? (b.lines as AskLines) : null,
+    lines: Result.getOrNull(decode(ASK_LINES, b.lines)),
     answer: null,
   };
   ASKS.push(a);
@@ -2845,9 +2899,8 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
   const now = new Date().toISOString();
   const st = r.state;
   if (action === "done") st.done_at = now;
-  else if (action === "snooze" && until && Object.hasOwn(UNTIL, until)) {
-    if (!waitable(signals(r), itemOf(r), ME).includes(until as Until))
-      throw new HttpError(409, `${r.id} can't wait until ${UNTIL[until as Until]}`);
+  else if (action === "snooze" && until && isKeyOf(UNTIL, until)) {
+    if (!waitable(signals(r), itemOf(r), ME).includes(until)) throw new HttpError(409, `${r.id} can't wait until ${UNTIL[until]}`);
     Object.assign(st, {
       snooze_when: until === "push" ? `push:${itemOf(r).head_oid}` : until,
       snooze_until: null,
@@ -2872,7 +2925,7 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
     if (st.inflight_at) throw new HttpError(409, `${r.id} is in Merging already`);
     if (r.seed.draft) throw new HttpError(409, `${r.id} is a draft: mark it ready first (a a)`);
     st.inflight_at = now;
-    r.seed.back = undefined;
+    delete r.seed.back;
   } else if (action === "takeback") {
     if (!st.inflight_at) throw new HttpError(409, `${r.id} isn't in Merging`);
     st.inflight_at = null;
@@ -3306,7 +3359,7 @@ async function generate(r: Rec, ms = Number(process.env.MOCK_AI_MS ?? 2500)): Pr
     jobs.delete(`ai_review ${r.id}`);
     return ai;
   } catch (e) {
-    const why = (e as Error).message;
+    const why = messageOf(e);
     aiErrors.set(r.id, why);
     // Like the desk (Jobs.held), a run the pause stopped is a try to come, not a review Claude gave up on, and not counted.
     if (why === LOGGED_OUT)
@@ -3579,7 +3632,7 @@ function parseToml(text: string): { cfg: Config; errors: ConfigError[] } {
   const errors: ConfigError[] = [];
   const cfg: Config = { ...structuredClone(config), spaces: [], boards: [] };
   const lines = text.split("\n");
-  let cur: Record<string, unknown> = cfg as unknown as Record<string, unknown>;
+  let cur: object = cfg; // the table the next key = value lines go in
   let path = "";
   for (let i = 0; i < lines.length; i++) {
     const line = stripComment(lines[i] ?? "").trim();
@@ -3589,17 +3642,29 @@ function parseToml(text: string): { cfg: Config; errors: ConfigError[] } {
       const t = head[1] ?? "";
       const arr = line.startsWith("[[");
       if (arr && t === "spaces") {
-        cfg.spaces.push({ id: "", name: "", scope: "" });
-        cur = cfg.spaces.at(-1) as unknown as Record<string, unknown>;
+        const space = { id: "", name: "", scope: "" };
+        cfg.spaces.push(space);
+        cur = space;
         path = `spaces[${cfg.spaces.length - 1}]`;
       } else if (arr && t === "boards") {
-        cfg.boards.push({ id: "", space: "", name: "", queries: [], rules: [], default: "later", default_why: "", sort: "waiting" });
-        cur = cfg.boards.at(-1) as unknown as Record<string, unknown>;
+        const board: BoardConfig = {
+          id: "",
+          space: "",
+          name: "",
+          queries: [],
+          rules: [],
+          default: "later",
+          default_why: "",
+          sort: "waiting",
+        };
+        cfg.boards.push(board);
+        cur = board;
         path = `boards[${cfg.boards.length - 1}]`;
       } else if (arr && t === "boards.rules" && cfg.boards.length) {
         const b = cfg.boards.at(-1)!;
-        b.rules.push({ when: "", bucket: "later" });
-        cur = b.rules.at(-1) as unknown as Record<string, unknown>;
+        const rule: Rule = { when: "", bucket: "later" };
+        b.rules.push(rule);
+        cur = rule;
         path = `boards[${cfg.boards.length - 1}].rules[${b.rules.length - 1}]`;
       } else if (!arr && LEGACY_TABLES.includes(t)) {
         errors.push({ path: t, message: `"${t}" moved to Settings (settings.json); delete it here` });
@@ -3633,9 +3698,10 @@ function parseToml(text: string): { cfg: Config; errors: ConfigError[] } {
       while (depth(raw) > 0 && i + 1 < lines.length) raw += " " + stripComment(lines[++i] ?? "").trim();
     }
     try {
-      cur[key] = value(raw);
+      // Any key on any table: validate() checks what was read.
+      Reflect.set(cur, key, value(raw));
     } catch (e) {
-      errors.push({ path: path ? `${path}.${key}` : key, message: (e as Error).message });
+      errors.push({ path: path ? `${path}.${key}` : key, message: messageOf(e) });
     }
   }
   return { cfg, errors: errors.concat(validate(cfg)) };
@@ -3646,7 +3712,7 @@ function validate(c: Config): ConfigError[] {
   const spaces = new Set(c.spaces.map((s) => s.id));
   const ids = new Set<string>();
   const bucket = (p: string, v: unknown) => {
-    if (!BUCKET_LIST.has(v as Bucket))
+    if (!oneOf([...BUCKET_LIST], v))
       errors.push({ path: p, message: `"${String(v)}" is not a bucket (now, today, blocked, later, fyi, hide)` });
   };
   const expr = (p: string, v: string) => {
@@ -3821,7 +3887,7 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
   for (const [k, v] of Object.entries(set)) {
     if (settingDef(k)!.type === "secret" && v === SECRET_SET) continue;
     if (JSON.stringify(v) === JSON.stringify(settingDef(k)!.default)) delete next[k];
-    else next[k] = v as SettingValue;
+    else if (isSettingValue(v)) next[k] = v;
   }
   for (const k of reset) delete next[k];
   overrides = next;
@@ -3933,7 +3999,8 @@ function send(res: ServerResponse, body: unknown, code = 200) {
 async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   let s = "";
   for await (const chunk of req) s += chunk;
-  return s ? (JSON.parse(s) as Record<string, unknown>) : {};
+  const body: unknown = s ? JSON.parse(s) : {};
+  return isRecord(body) ? body : {};
 }
 
 const textOf = (body: Record<string, unknown>) => (typeof body.text === "string" ? body.text : "");
@@ -3956,13 +4023,16 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const session = SESSIONS.find((x) => x.id === body.id);
     if (session) {
       const done = { done: "done", snooze: "snoozed", mute: "muted", unmute: "active", restore: "active" } as const;
-      const to = done[body.action as keyof typeof done] as SessionCard["status"] | undefined;
+      const to: SessionCard["status"] | undefined =
+        typeof body.action === "string" && isKeyOf(done, body.action) ? done[body.action] : undefined;
       if (!to) throw new HttpError(409, `a session takes done, snooze, mute, unmute and restore; not ${String(body.action)}`);
       sessionTriage.set(session.id, to);
       bump();
       return { ok: true, state: { id: session.id, muted: to === "muted" }, undo_seq: 0 };
     }
-    return act(resolve(String(body.id)), body.action as Action, body.until as string | undefined);
+    if (typeof body.action !== "string" || !isKeyOf(ACTIONS, body.action))
+      throw new HttpError(400, `unknown action ${String(body.action)}`);
+    return act(resolve(String(body.id)), body.action, typeof body.until === "string" ? body.until : undefined);
   }
   // A session's Kick and Open: the rate-limited one refuses as the desk does; nothing runs.
   const sessionAt = /^\/api\/sessions\/([^/]+)\/(kick|open)$/.exec(url.pathname);
@@ -3980,7 +4050,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const r = resolve(decodeURIComponent(ready[1]!));
     if (!mineOf(r.seed) || !r.seed.draft || r.seed.resolved) throw new HttpError(409, `${r.id} isn't an open draft of yours`);
     const body = await readBody(req);
-    const ids = [...((body.users as string[] | undefined) ?? []), ...((body.teams as string[] | undefined) ?? [])];
+    const ids = [...(strings(body.users) ?? []), ...(strings(body.teams) ?? [])];
     r.seed.draft = false;
     r.seed.asked = [...(r.seed.asked ?? []), ...ids.map((id) => ROSTER.find((x) => x.id === id)?.login ?? id)];
     bump();
@@ -4052,8 +4122,8 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "POST /api/github") {
     const body = await readBody(req);
     const r = resolve(String(body.id));
-    const action = body.action as GitHubAction;
-    if (!actionsOf(r).includes(action)) throw new HttpError(409, `can't ${action} ${r.id} now`);
+    const action = oneOf(GITHUB_ACTIONS, body.action);
+    if (!action || !actionsOf(r).includes(action)) throw new HttpError(409, `can't ${String(body.action)} ${r.id} now`);
     if (action === "request_changes" && !body.head_oid) throw new HttpError(400, "need head_oid");
     if (action === "close" || action === "merge") {
       r.seed.resolved = action === "close" ? "closed" : "merged";
@@ -4129,12 +4199,12 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
         id,
         name: String(b.name),
         schedule: Array.isArray(b.events) && b.events.length ? "" : String(b.schedule),
-        ...(Array.isArray(b.events) && b.events.length > 0 && { events: b.events as ActivityKind[] }),
+        ...(Array.isArray(b.events) && b.events.length > 0 && { events: b.events.flatMap((e) => oneOf(ACTIVITY_KINDS, e) ?? []) }),
         prompt: typeof b.prompt === "string" ? b.prompt : "",
         ...(typeof b.when === "string" && b.when.trim() && { when: b.when.trim() }),
         ...((b.decide === "rule" || b.decide === "ask") && { decide: b.decide }),
-        ...(b.decide === "rule" && !!b.rule && { rule: b.rule as RuleAction }),
-        ...(Array.isArray(b.can) && b.can.join() !== "add" && { can: b.can as Verb[] }),
+        ...(b.decide === "rule" && ruleOf(b.rule)),
+        ...(Array.isArray(b.can) && b.can.join() !== "add" && { can: b.can.flatMap((v) => oneOf(VERBS, v) ?? []) }),
         on: b.on !== false,
         by: "you",
         updated_at: new Date().toISOString(),
@@ -4222,7 +4292,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (route === "POST /api/undo") {
     const body = await readBody(req);
-    return { ok: true, id: undo(body.seq as number | undefined) };
+    return { ok: true, id: undo(num(body.seq)) };
   }
   if (route === "POST /api/sync") {
     sync();
@@ -4257,7 +4327,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
           why: plainWhy(why),
           ...(h && { hard: true }),
           ...(final && { final: true }),
-          weight: weightOf({ weight }),
+          weight: weightOf(weight === undefined ? {} : { weight }),
           on: !b.off?.includes(id),
           yours: own >= 0,
           ...(own >= 0 && { path: `boards[${i}].rules[${own}]` }),
@@ -4293,7 +4363,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "GET /api/settings") return settingsView();
   if (route === "PUT /api/settings") {
     const body = await readBody(req);
-    return putSettings((body.set ?? {}) as Record<string, unknown>, (body.reset ?? []) as string[]);
+    return putSettings(isRecord(body.set) ? body.set : {}, strings(body.reset) ?? []);
   }
   if (route === "GET /api/agents") return agentStatus();
   if (route === "GET /api/setup" || route === "POST /api/setup/check") return setupView();
@@ -4378,7 +4448,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     send(res, await respond(req, url));
   } catch (e) {
     if (e instanceof HttpError) send(res, e.body, e.status);
-    else send(res, { error: (e as Error).message, tag: "Internal" } satisfies ErrorBody, 500);
+    else send(res, { error: messageOf(e), tag: "Internal" } satisfies ErrorBody, 500);
   }
 }
 
@@ -4415,6 +4485,7 @@ const server = createServer((req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  const { port } = server.address() as { port: number };
+  const at = server.address();
+  const port = typeof at === "object" && at ? at.port : PORT;
   console.log(`mock desk API on http://127.0.0.1:${port}`);
 });

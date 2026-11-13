@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { Cause, Data, Effect, Exit } from "effect";
 import { messageOf } from "../src/errors.ts";
+import { field, isRecord, str } from "../src/narrow.ts";
 import { releaseVersion } from "../src/updates.ts";
 
 class Refused extends Data.TaggedError("Refused")<{ readonly message: string }> {}
@@ -16,9 +17,9 @@ const git = (...args: string[]) =>
 
 const readJson = (file: string) =>
   Effect.try({
-    try: () => JSON.parse(fs.readFileSync(file, "utf8")) as { version: string; packages?: Record<string, { version?: string }> },
+    try: (): unknown => JSON.parse(fs.readFileSync(file, "utf8")),
     catch: (cause) => new Refused({ message: `reading ${file}: ${messageOf(cause)}` }),
-  });
+  }).pipe(Effect.filterOrFail(isRecord, () => new Refused({ message: `reading ${file}: not a JSON object` })));
 
 const writeJson = (file: string, data: unknown) =>
   Effect.try({
@@ -30,7 +31,9 @@ const writeJson = (file: string, data: unknown) =>
 
 const release = Effect.gen(function* () {
   const pkg = yield* readJson("package.json");
-  const asked = releaseVersion(process.argv[2], pkg.version);
+  const current = str(pkg.version);
+  if (current === undefined) return yield* new Refused({ message: "package.json has no version" });
+  const asked = releaseVersion(process.argv[2], current);
   if ("refused" in asked) return yield* new Refused({ message: asked.refused });
   const { version } = asked;
   const tag = `v${version}`;
@@ -40,8 +43,8 @@ const release = Effect.gen(function* () {
   const lock = yield* readJson("package-lock.json");
   pkg.version = version;
   lock.version = version;
-  const root = lock.packages?.[""];
-  if (root) root.version = version;
+  const root = field(lock.packages, "");
+  if (isRecord(root)) root.version = version;
   yield* writeJson("package.json", pkg);
   yield* writeJson("package-lock.json", lock);
   yield* git(

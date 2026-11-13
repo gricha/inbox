@@ -59,7 +59,7 @@ test("sends the token and variables, returns data, tracks the rate limit", async
   const fake = fakeFetch(ok({ viewer: { login: "octo-dev" } }));
   const c = client(fake.fetch);
   assert.equal(c.rateLimit(), null);
-  const d = await run(c.query<{ viewer: { login: string } }>("query($a: Int) { viewer { login } }", { a: 1 }));
+  const d = (await run(c.query("query($a: Int) { viewer { login } }", { a: 1 }))) as { viewer: { login: string } };
   assert.equal(d.viewer.login, "octo-dev");
   assert.equal(fake.calls[0]?.headers.authorization, "bearer t0ken");
   assert.deepEqual(fake.calls[0]?.variables, { a: 1 });
@@ -134,14 +134,14 @@ test("retries a GraphQL-level timeout", async () => {
       ),
     ok({ x: 2 }),
   );
-  assert.equal((await run(client(fake.fetch).query<{ x: number }>("query { x }"))).x, 2);
+  assert.deepEqual(await run(client(fake.fetch).query("query { x }")), { rateLimit: RL, x: 2 });
 });
 
 test("NOT_FOUND errors are not fatal; other errors throw", async () => {
   const notFound = fakeFetch(
     ok({ nodes: [{ id: "a" }, null] }, { errors: [{ type: "NOT_FOUND", path: ["nodes", 1], message: "Could not resolve to a node" }] }),
   );
-  assert.deepEqual((await run(client(notFound.fetch).query<{ nodes: unknown[] }>("query { nodes }"))).nodes, [{ id: "a" }, null]);
+  assert.deepEqual(((await run(client(notFound.fetch).query("query { nodes }"))) as { nodes: unknown[] }).nodes, [{ id: "a" }, null]);
 
   const broken = fakeFetch(ok({}, { errors: [{ type: "INVALID", message: "Field 'nope' doesn't exist" }] }));
   const e = await failure(client(broken.fetch).query("query { nope }"));
@@ -160,7 +160,10 @@ test("FORBIDDEN (e.g. SAML) with partial data is skipped and logged; with no dat
     message: "Resource protected by organization SAML enforcement",
   };
   const partial = fakeFetch(ok({ orgs: [{ login: "acme" }, null] }, { errors: [saml] }));
-  assert.deepEqual((await run(client(partial.fetch, logs).query<{ orgs: unknown[] }>("query { orgs }"))).orgs, [{ login: "acme" }, null]);
+  assert.deepEqual(((await run(client(partial.fetch, logs).query("query { orgs }"))) as { orgs: unknown[] }).orgs, [
+    { login: "acme" },
+    null,
+  ]);
   assert.match(logs[0] ?? "", /SAML/);
 
   const empty = fakeFetch(

@@ -5,6 +5,7 @@ import type { BoardConfig, Bucket, Card, ConfigError, JudgeSignal, JudgeStep, Pl
 import { RANK, RULE_WEIGHT } from "./types.ts";
 import type { ExprSyntaxError } from "./errors.ts";
 import { compile, renderTemplate, type Compiled } from "./expr.ts";
+import { fromEntries, keysOf } from "./narrow.ts";
 
 type Expr = Result.Result<Compiled, ExprSyntaxError>;
 
@@ -217,7 +218,7 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
   const rank = (e: Entry) => prio.get(e.id) ?? 0;
   // An earlier rule is a stronger reason, so it also wins the capped slots.
   const ruleOf = (e: Entry) => placements.get(e.id)!.rule ?? Infinity;
-  for (const b of Object.keys(byBucket) as Bucket[]) {
+  for (const b of keysOf(byBucket)) {
     byBucket[b].sort(
       (x, y) => Number(y.pinned) - Number(x.pinned) || ruleOf(x) - ruleOf(y) || rank(y) - rank(x) || sort(x, y) || x.id.localeCompare(y.id),
     );
@@ -267,6 +268,6 @@ export function classify(board: CompiledBoard, entries: Entry[], judge?: JudgeLo
   demote("now", "today", cfg.caps?.now);
   demote("today", "later", cfg.caps?.today);
 
-  const order = Object.fromEntries(Object.entries(byBucket).map(([b, list]) => [b, list.map((e) => e.id)])) as Record<Bucket, string[]>;
+  const order = fromEntries(keysOf(byBucket).map((b) => [b, byBucket[b].map((e) => e.id)] as const));
   return { placements, order, inactive };
 }

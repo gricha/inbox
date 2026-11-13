@@ -1010,7 +1010,8 @@ test("a rule acts with no model: every item its check passes gets its action, on
   );
   assert.equal(fake.calls(), 0);
   // Run now on one with only events has nothing to act on, and says so.
-  const now = await t.desk.automations.run(runSync(t.desk.automations.set("red", { ...red, when: undefined, on: true }, true)), "now").p;
+  const { when: _when, ...eventsOnly } = red;
+  const now = await t.desk.automations.run(runSync(t.desk.automations.set("red", { ...eventsOnly, on: true }, true)), "now").p;
   assert.deepEqual([now.summary, now.items], ["It acts on the items its events land on, so there's nothing to run it on now.", []]);
 });
 

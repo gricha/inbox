@@ -5,10 +5,11 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import type { DriverId } from "./agents.ts";
 import { ClaudeBadOutput, CommandBadOutput, type ClaudeError, type CommandError } from "./errors.ts";
 import { GH_MISSING } from "./github/client.ts";
+import { field, isRecord, oneOf } from "./narrow.ts";
 import { askAgent, claudeCommand, claudeEnvelope, claudeMissing, claudeSpawn, runCommand } from "./review.ts";
 import type { IssueReview, Item } from "./types.ts";
 
@@ -32,6 +33,14 @@ export interface IssueText {
 
 export type FetchIssueError = CommandError | CommandBadOutput;
 
+const GH_ISSUE = Schema.Struct({ body: Schema.String, author: Schema.String, association: Schema.String });
+const GH_COMMENT = Schema.Struct({
+  author: Schema.String,
+  association: Schema.String,
+  at: Schema.String,
+  body: Schema.NullOr(Schema.String),
+});
+
 // Read-only GETs: the issue, its comments (the first page), the repo's default branch.
 export const fetchIssue = Effect.fn("fetchIssue")(function* (item: Item): Effect.fn.Return<IssueText, FetchIssueError> {
   const gh = (args: string[]) => runCommand({ file: "gh", args, shell: false }, { timeout: 60_000, missing: GH_MISSING });
@@ -51,11 +60,11 @@ export const fetchIssue = Effect.fn("fetchIssue")(function* (item: Item): Effect
   );
   return yield* Effect.try({
     try: () => {
-      const i = JSON.parse(issue) as { body: string; author: string; association: string };
+      const i = Schema.decodeUnknownSync(GH_ISSUE)(JSON.parse(issue));
       const cs = comments
         .split("\n")
         .filter((l) => l.trim())
-        .map((l) => JSON.parse(l) as { author: string; association: string; at: string; body: string | null });
+        .map((l) => Schema.decodeUnknownSync(GH_COMMENT)(JSON.parse(l)));
       return {
         body: i.body.trimEnd(),
         author: i.author,
@@ -248,26 +257,27 @@ export function parseIssueReview(
   raw: unknown,
   dir: string | null,
 ): Omit<IssueReview, "updated_at" | "at" | "model" | "injection" | "code"> {
-  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const r = isRecord(raw) ? raw : {};
   const kinds = ["bug", "feature", "question", "other"] as const;
-  const kind = kinds.find((k) => k === r.kind) ?? "other";
+  const kind = oneOf(kinds, r.kind) ?? "other";
   const inClone = (p: string) => {
     if (!dir || !p || path.isAbsolute(p)) return false;
     const full = path.resolve(dir, p);
     return full.startsWith(path.resolve(dir) + path.sep) && fs.existsSync(full);
   };
   const evidence = (Array.isArray(r.evidence) ? r.evidence : [])
-    .map((e) => (e && typeof e === "object" ? (e as Record<string, unknown>) : {}))
-    .map((e) => ({
-      path: str(e.path, 300).replace(/^\.\//, ""),
-      line: typeof e.line === "number" ? Math.max(0, Math.trunc(e.line)) : 0,
-      why: str(e.why, 300),
-    }))
+    .map((e) => {
+      const line = field(e, "line");
+      return {
+        path: str(field(e, "path"), 300).replace(/^\.\//, ""),
+        line: typeof line === "number" ? Math.max(0, Math.trunc(line)) : 0,
+        why: str(field(e, "why"), 300),
+      };
+    })
     .filter((e) => inClone(e.path))
     .slice(0, MAX_EVIDENCE);
   const steps = (Array.isArray(r.steps) ? r.steps : [])
-    .map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>) : {}))
-    .map((x) => ({ title: str(x.title, 80), body: str(x.body, 2000) }))
+    .map((x) => ({ title: str(field(x, "title"), 80), body: str(field(x, "body"), 2000) }))
     .filter((x) => x.title && x.body)
     .slice(0, MAX_STEPS);
   return {
@@ -377,14 +387,13 @@ export const generateIssueReview = Effect.fn("generateIssueReview")(function* (
   const parts = outsiders(item, t, o.me);
   if (parts.length && !o.trusted) {
     const { answer, model } = yield* askAgent(buildScreenPrompt(item, parts), { dir: o.dir, agent: o.agent, schema: SCREEN_SCHEMA });
-    const s = (answer && typeof answer === "object" ? answer : {}) as { injection?: unknown; who?: unknown; why?: unknown };
-    if (s.injection === true) {
-      const named = parts.find((p) => p.who.toLowerCase() === str(s.who, 100).replace(/^@/, "").toLowerCase());
+    if (field(answer, "injection") === true) {
+      const named = parts.find((p) => p.who.toLowerCase() === str(field(answer, "who"), 100).replace(/^@/, "").toLowerCase());
       return {
         ...stamp,
         ...empty,
         model,
-        injection: { who: named?.who ?? parts[0]!.who, why: str(s.why, 300) || "it reads as instructions to an agent" },
+        injection: { who: named?.who ?? parts[0]!.who, why: str(field(answer, "why"), 300) || "it reads as instructions to an agent" },
       };
     }
   }

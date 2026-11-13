@@ -304,7 +304,10 @@ const eventLine = (e: ActivityEvent) => {
   return oneLine(`#${e.seq}  ${e.at}  ${e.item_id}  ${e.kind}${e.actor ? ` by ${e.actor}` : ""}${data ? `  ${data}` : ""}`);
 };
 
-const eventsText = (api: DeskClient, q: { after?: number; wait?: number; limit?: number; item?: string }) =>
+const eventsText = (
+  api: DeskClient,
+  q: { after?: number | undefined; wait?: number | undefined; limit?: number | undefined; item?: string | undefined },
+) =>
   Effect.map(api.activity(q), (page) => {
     const head = `${page.events.length} event(s) after ${q.after ?? 0}${q.item ? ` on ${q.item}` : ""} · last_seq ${page.last_seq}: pass it as \`after\` next time`;
     if (!page.events.length) return `${head}\n${json(page)}`;

@@ -2,9 +2,10 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { Cause, Data, Effect, Result } from "effect";
+import { Cause, Data, Effect, Result, type Schema } from "effect";
 import { fsError, messageOf, type FsError } from "../src/errors.ts";
 import { hashOf, placeOf } from "../src/links.ts";
+import { codeOf, decode, field, num } from "../src/narrow.ts";
 import { Runner } from "../src/runner.ts";
 import { detached, report } from "../src/sentry.ts";
 import { DEFAULTS } from "../src/settings.ts";
@@ -302,7 +303,7 @@ export const request = (
         ...(opts.signal ? [opts.signal] : []),
         ...(opts.timeoutMs === undefined ? [] : [AbortSignal.timeout(opts.timeoutMs)]),
       ];
-      return fetch(url, { method: opts.method, signal: AbortSignal.any(signals) });
+      return fetch(url, { method: opts.method ?? "GET", signal: AbortSignal.any(signals) });
     },
     catch: (cause) => new DeskCallFailed({ url, cause }),
   });
@@ -311,10 +312,14 @@ export const request = (
 const json = (res: Response, url: string): Effect.Effect<unknown, DeskCallFailed> =>
   Effect.tryPromise({ try: (): Promise<unknown> => res.json(), catch: (cause) => new DeskCallFailed({ url, cause }) });
 
-// What the desk answers at url, or null while it's starting (503), unreachable, or answering with what doesn't parse.
-export const getJson = <T>(url: string, timeoutMs = 5000): Effect.Effect<T | null> =>
+// What the desk answers at url, or null while it's starting (503), unreachable, or answering with what isn't schema's shape.
+export const getJson = <S extends Schema.ConstraintDecoder<unknown>>(
+  url: string,
+  schema: S,
+  timeoutMs = 5000,
+): Effect.Effect<S["Type"] | null> =>
   request(url, { timeoutMs }).pipe(
-    Effect.flatMap((res) => (res.ok ? json(res, url).pipe(Effect.map((v) => v as T)) : Effect.succeed(null))),
+    Effect.flatMap((res) => (res.ok ? json(res, url).pipe(Effect.map((v) => Result.getOrNull(decode(schema, v)))) : Effect.succeed(null))),
     Effect.orElseSucceed(() => null),
   );
 
@@ -325,17 +330,13 @@ export const probeHealth = (base: string, timeoutMs = 1000): Effect.Effect<Probe
       json(res, `${base}/health`).pipe(
         Effect.orElseSucceed(() => null),
         Effect.map((body): Probe =>
-          res.ok && (body as { ok?: unknown } | null)?.ok === true
-            ? { kind: "desk" }
-            : { kind: "other", detail: `HTTP ${res.status} on /health` },
+          res.ok && field(body, "ok") === true ? { kind: "desk" } : { kind: "other", detail: `HTTP ${res.status} on /health` },
         ),
       ),
     ),
     Effect.catch((e) => {
-      const code = (e.cause as { cause?: { code?: unknown } } | undefined)?.cause?.code;
-      return Effect.succeed<Probe>(
-        code === "ECONNREFUSED" ? { kind: "free" } : { kind: "other", detail: typeof code === "string" ? code : e.message },
-      );
+      const code = codeOf(field(e.cause, "cause"));
+      return Effect.succeed<Probe>(code === "ECONNREFUSED" ? { kind: "free" } : { kind: "other", detail: code ?? e.message });
     }),
   );
 
@@ -360,10 +361,10 @@ export function parseSSE(buf: string): { events: SSEvent[]; rest: string } {
     for (const line of block.split("\n")) {
       if (!line || line.startsWith(":")) continue;
       const i = line.indexOf(":");
-      const field = i < 0 ? line : line.slice(0, i);
+      const name = i < 0 ? line : line.slice(0, i);
       const value = i < 0 ? "" : line.slice(i + 1).replace(/^ /, "");
-      if (field === "event") event = value;
-      else if (field === "data") data.push(value);
+      if (name === "event") event = value;
+      else if (name === "data") data.push(value);
       else continue;
       any = true;
     }
@@ -589,14 +590,16 @@ export interface Bounds {
 }
 
 // Saved bounds, or just the saved size when its spot is off every screen (a display was unplugged).
-export function restoreBounds(saved: Partial<Bounds> | null, screens: Bounds[], def: { width: number; height: number }): Partial<Bounds> {
-  const width = typeof saved?.width === "number" ? saved.width : def.width;
-  const height = typeof saved?.height === "number" ? saved.height : def.height;
-  if (typeof saved?.x !== "number" || typeof saved?.y !== "number") return { width, height };
-  const px = saved.x + width / 2;
-  const py = saved.y + 10; // the title bar has to be reachable
+export function restoreBounds(saved: unknown, screens: Bounds[], def: { width: number; height: number }): Partial<Bounds> {
+  const width = num(field(saved, "width")) ?? def.width;
+  const height = num(field(saved, "height")) ?? def.height;
+  const x = num(field(saved, "x"));
+  const y = num(field(saved, "y"));
+  if (x === undefined || y === undefined) return { width, height };
+  const px = x + width / 2;
+  const py = y + 10; // the title bar has to be reachable
   const onScreen = screens.some((s) => px >= s.x && px < s.x + s.width && py >= s.y && py < s.y + s.height);
-  return onScreen ? { x: saved.x, y: saved.y, width, height } : { width, height };
+  return onScreen ? { x, y, width, height } : { width, height };
 }
 
 // Where the window was is a nicety: unsaved (it's gone, or the file can't be written), it opens at its default size.

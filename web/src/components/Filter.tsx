@@ -1,4 +1,5 @@
 import { useRef, useState, type KeyboardEvent } from "react";
+import { oneOf } from "../../../src/narrow.ts";
 import { cls } from "../format.ts";
 import { FILTER_KEYS, filterOf, filterRest, parseFilter, type FilterKey } from "../view.ts";
 import { Avatar } from "./Avatar.tsx";
@@ -16,13 +17,13 @@ type Pick = { key: FilterKey; login: string }; // login "": the key alone, to pi
 // What the word being typed can turn into: a key's people, or for a name, who it is as author or as anyone involved.
 function suggest(word: string, people: FilterPerson[]): Pick[] {
   const t = /^(author|involves):(\S*)$/i.exec(word);
-  if (t) {
-    const key = (t[1] as string).toLowerCase() as FilterKey;
-    const q = (t[2] as string).replace(/^@/, "").toLowerCase();
+  const typed = oneOf(FILTER_KEYS, t?.[1]?.toLowerCase());
+  if (t && typed) {
+    const q = t[2]!.replace(/^@/, "").toLowerCase();
     return people
-      .filter((p) => (key === "involves" || p.author) && p.login.toLowerCase().includes(q))
+      .filter((p) => (typed === "involves" || p.author) && p.login.toLowerCase().includes(q))
       .slice(0, 8)
-      .map((p) => ({ key, login: p.login }));
+      .map((p) => ({ key: typed, login: p.login }));
   }
   const q = word.replace(/^@/, "").toLowerCase();
   if (!q) return FILTER_KEYS.map((key) => ({ key, login: "" }));
@@ -87,7 +88,8 @@ export function Filter({
       setOpen(true);
     } else if (e.key === "Enter" && shown) {
       e.preventDefault();
-      pick(list[Math.min(hi, list.length - 1)] as Pick);
+      const at = list[Math.min(hi, list.length - 1)];
+      if (at) pick(at);
     } else if (e.key === "Enter" || e.key === "ArrowDown") e.currentTarget.blur();
     else if (e.key === "Backspace" && pills.length && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
       e.preventDefault();

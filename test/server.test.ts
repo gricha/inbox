@@ -1139,7 +1139,7 @@ test("a desk whose config never loaded answers 503: starting until the config's 
   for (const [method, p] of [
     ["PUT", "/api/automations/warden"],
     ["POST", "/api/automations/warden/run"],
-  ]) {
+  ] as const) {
     const res = await app.request(`http://127.0.0.1:47823${p}`, { method, body: "{}" });
     assert.deepEqual([res.status, await res.json()], [503, starting], `${method} ${p}`);
   }

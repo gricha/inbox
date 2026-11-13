@@ -32,6 +32,7 @@ import type { DriverId } from "./agents.ts";
 import { BUDGETS, skillText, type OwnSkill } from "./connectors/github-review.ts";
 import { parseDiagram } from "./diagram.ts";
 import { GH_MISSING } from "./github/client.ts";
+import { field, isRecord, num, str } from "./narrow.ts";
 import type {
   AiReview,
   ChunkRanking,
@@ -343,9 +344,9 @@ export function filesHead(ndjson: string): string | undefined | null {
   const refs = new Set<string>();
   for (const l of ndjson.split("\n")) {
     if (!l.trim()) continue;
-    const f = JSON.parse(l) as { contents_url?: unknown; status?: unknown };
-    if (f.status === "removed") continue;
-    const url = f.contents_url;
+    const f: unknown = JSON.parse(l);
+    if (field(f, "status") === "removed") continue;
+    const url = field(f, "contents_url");
     const ref = typeof url === "string" ? /[?&]ref=([0-9a-f]{40})\b/.exec(url)?.[1] : undefined;
     if (ref) refs.add(ref);
   }
@@ -359,14 +360,14 @@ export function parseFiles(ndjson: string): ReviewFile[] {
     .split("\n")
     .filter((l) => l.trim())
     .map((l) => {
-      const f = JSON.parse(l) as Record<string, unknown>;
+      const f: unknown = JSON.parse(l);
       return {
-        path: String(f.filename),
-        previous_path: typeof f.previous_filename === "string" ? f.previous_filename : null,
-        status: STATUSES.find((s) => s === f.status) ?? "modified",
-        additions: Number(f.additions) || 0,
-        deletions: Number(f.deletions) || 0,
-        patch: typeof f.patch === "string" ? f.patch : null,
+        path: String(field(f, "filename")),
+        previous_path: str(field(f, "previous_filename")) ?? null,
+        status: STATUSES.find((s) => s === field(f, "status")) ?? "modified",
+        additions: Number(field(f, "additions")) || 0,
+        deletions: Number(field(f, "deletions")) || 0,
+        patch: str(field(f, "patch")) ?? null,
       };
     });
 }
@@ -676,7 +677,7 @@ interface Listed {
 // `codex mcp list --json`: a list of servers ({ name, enabled, transport }), or one keyed by name; anything else is unreadable.
 function listedOf(list: unknown): Listed[] | null {
   const entries = Array.isArray(list)
-    ? list.map((e) => [(e as { name?: unknown } | null)?.name, e] as const)
+    ? list.map((e: unknown) => [field(e, "name"), e] as const)
     : list && typeof list === "object"
       ? Object.entries(list)
       : null;
@@ -684,9 +685,8 @@ function listedOf(list: unknown): Listed[] | null {
   const listed: Listed[] = [];
   for (const [name, e] of entries) {
     if (typeof name !== "string" || !name || !e || typeof e !== "object") return null;
-    const x = e as { enabled?: unknown; url?: unknown; transport?: { url?: unknown } };
-    const url = x.transport?.url ?? x.url;
-    listed.push({ name, enabled: x.enabled !== false, url: typeof url === "string" ? url : null });
+    const url = field(field(e, "transport"), "url") ?? field(e, "url");
+    listed.push({ name, enabled: field(e, "enabled") !== false, url: typeof url === "string" ? url : null });
   }
   return listed;
 }
@@ -780,8 +780,8 @@ export function strictSchema(s: unknown): unknown {
 // The thread `codex exec --json` says it started: its first event.
 export function codexThread(events: string): string | null {
   for (const line of events.split("\n")) {
-    const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as { thread_id?: unknown } | null;
-    if (typeof e?.thread_id === "string" && e.thread_id) return e.thread_id;
+    const id = str(field(Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })), "thread_id"));
+    if (id) return id;
   }
   return null;
 }
@@ -804,11 +804,10 @@ const codexAnswer = Effect.fnUntraced(function* (events: string, last: string): 
   let failed: string | null = null;
   for (const line of events.split("\n")) {
     const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null }));
-    if (typeof e !== "object" || e === null) continue;
-    const ev = e as { type?: unknown; model?: unknown; message?: unknown; error?: { message?: unknown } };
-    if (typeof ev.model === "string" && ev.model) model = ev.model;
-    if (ev.type === "error" && typeof ev.message === "string") failed = ev.message;
-    if (ev.type === "turn.failed") failed = typeof ev.error?.message === "string" ? ev.error.message : "codex failed";
+    if (!isRecord(e)) continue;
+    if (typeof e.model === "string" && e.model) model = e.model;
+    if (e.type === "error" && typeof e.message === "string") failed = e.message;
+    if (e.type === "turn.failed") failed = str(field(e.error, "message")) ?? "codex failed";
   }
   if (!last.trim() && failed !== null) return yield* codexError(failed);
   if (!last.trim()) return yield* new ClaudeBadOutput({ message: "codex gave no answer", excerpt: events.slice(-500) });
@@ -866,7 +865,7 @@ const opencodeServers = Effect.fnUntraced(function* (command: string, dir: strin
     }),
   );
   const parsed = Result.try({ try: (): unknown => JSON.parse(out), catch: (cause) => cause });
-  const mcp = Result.isFailure(parsed) ? null : (parsed.success as { mcp?: unknown } | null)?.mcp;
+  const mcp = Result.isFailure(parsed) ? null : field(parsed.success, "mcp");
   const listed = mcp === undefined ? [] : listedOf(mcp);
   if (!listed) return yield* unknown("`opencode debug config` printed no config the desk could read");
   ocServers = { command, at: Date.now(), listed };
@@ -894,9 +893,9 @@ export const opencodeConfig = Effect.fnUntraced(function* (command: string, dir:
 // Your own OPENCODE_CONFIG_CONTENT, if you set one, stays under the desk's: its servers and agents merged by name.
 function withYours(ours: { mcp: object; agent: object }, yours: string | undefined): object {
   const parsed = yours?.trim() ? Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(yours), catch: () => null })) : null;
-  if (!parsed || typeof parsed !== "object") return ours;
-  const y = parsed as { mcp?: object; agent?: object };
-  return { ...y, ...ours, mcp: { ...y.mcp, ...ours.mcp }, agent: { ...y.agent, ...ours.agent } };
+  if (!isRecord(parsed)) return ours;
+  const objectOr = (v: unknown) => (isRecord(v) ? v : {});
+  return { ...parsed, ...ours, mcp: { ...objectOr(parsed.mcp), ...ours.mcp }, agent: { ...objectOr(parsed.agent), ...ours.agent } };
 }
 
 // The schema goes in the prompt: opencode run has no option for one, and the answer is read from its last text.
@@ -950,23 +949,22 @@ const dropSession = (command: string, dir: string, session: string): Effect.Effe
 // The session `opencode run --format json` names on each event.
 export function opencodeSession(events: string): string | null {
   for (const line of events.split("\n")) {
-    const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as { sessionID?: unknown } | null;
-    if (typeof e?.sessionID === "string" && e.sessionID) return e.sessionID;
+    const id = str(field(Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })), "sessionID"));
+    if (id) return id;
   }
   return null;
 }
 
 // An `error` event's words, its HTTP status first when it has one ("401 User not found."), so a login or a limit reads as one.
 export function opencodeFailure(line: string): string | null {
-  const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as {
-    type?: unknown;
-    error?: { name?: unknown; data?: { message?: unknown; statusCode?: unknown } };
-  } | null;
-  if (e?.type !== "error") return null;
-  const d = e.error?.data;
-  const words =
-    typeof d?.message === "string" && d.message ? d.message : typeof e.error?.name === "string" ? e.error.name : "opencode failed";
-  return typeof d?.statusCode === "number" ? `${d.statusCode} ${words}` : words;
+  const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null }));
+  if (field(e, "type") !== "error") return null;
+  const error = field(e, "error");
+  const d = field(error, "data");
+  const message = str(field(d, "message")) ?? "";
+  const words = message.length > 0 ? message : (str(field(error, "name")) ?? "opencode failed");
+  const status = field(d, "statusCode");
+  return typeof status === "number" ? `${status} ${words}` : words;
 }
 
 const OPENCODE_LOGIN = /not logged in|\b401\b|unauthori[sz]ed|invalid api key|ProviderAuthError|opencode auth login/i;
@@ -987,11 +985,9 @@ const opencodeAnswer = Effect.fnUntraced(function* (events: string): Effect.fn.R
   let failed: string | null = null;
   for (const line of events.split("\n")) {
     failed = opencodeFailure(line) ?? failed;
-    const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null })) as {
-      type?: unknown;
-      part?: { text?: unknown };
-    } | null;
-    if (e?.type === "text" && typeof e.part?.text === "string" && e.part.text.trim()) last = e.part.text;
+    const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null }));
+    const part = str(field(field(e, "part"), "text"));
+    if (field(e, "type") === "text" && part?.trim()) last = part;
   }
   if (!last.trim() && failed !== null) return yield* opencodeError(failed);
   if (!last.trim()) return yield* new ClaudeBadOutput({ message: "opencode gave no answer", excerpt: events.slice(-500) });
@@ -1051,10 +1047,9 @@ export function loggedIn(agent: DriverId): Effect.Effect<boolean> {
 // which `codex login status` doesn't count: set in the desk's environment, that's logged in.
 function codexKeyed(env: NodeJS.ProcessEnv = process.env): boolean {
   const file = path.join(env.CODEX_HOME?.trim() ? env.CODEX_HOME : path.join(os.homedir(), ".codex"), "config.toml");
-  type Conf = { model_provider?: unknown; model_providers?: Record<string, { env_key?: unknown } | undefined> };
-  const conf = Result.getOrNull(Result.try({ try: () => parseToml(fs.readFileSync(file, "utf8")) as Conf, catch: () => null }));
-  const provider = conf?.model_provider;
-  const key = typeof provider === "string" ? conf?.model_providers?.[provider]?.env_key : undefined;
+  const conf = Result.getOrNull(Result.try({ try: () => parseToml(fs.readFileSync(file, "utf8")), catch: () => null }));
+  const provider = field(conf, "model_provider");
+  const key = typeof provider === "string" ? field(field(field(conf, "model_providers"), provider), "env_key") : undefined;
   return typeof key === "string" && !!env[key]?.trim();
 }
 
@@ -1083,14 +1078,6 @@ export interface ClaudeAnswer {
   model: string; // the first model in claude's modelUsage, else "claude-code"
 }
 
-interface Envelope {
-  is_error?: boolean;
-  result?: string;
-  api_error_status?: number;
-  structured_output?: unknown;
-  modelUsage?: unknown;
-}
-
 // What claude printed, as JSON; what doesn't parse fails with the parser's words.
 const readJson = (json: string, excerpt: string) =>
   Effect.try({
@@ -1100,10 +1087,12 @@ const readJson = (json: string, excerpt: string) =>
   });
 
 export const claudeEnvelope = Effect.fnUntraced(function* (out: string): Effect.fn.Return<ClaudeAnswer, ClaudeError> {
-  const env = (yield* readJson(out, out)) as Envelope;
-  if (env.is_error) return yield* claudeError(env.result ?? "claude failed", env.api_error_status);
-  const usage = env.modelUsage && typeof env.modelUsage === "object" ? Object.keys(env.modelUsage) : [];
-  const result = env.result ?? "";
+  // { is_error, result, api_error_status, structured_output, modelUsage }
+  const env = yield* readJson(out, out);
+  if (!isRecord(env)) return yield* new ClaudeBadOutput({ message: "claude printed no JSON object", excerpt: out.slice(0, 500) });
+  if (env.is_error) return yield* claudeError(str(env.result) ?? "claude failed", num(env.api_error_status));
+  const usage = isRecord(env.modelUsage) ? Object.keys(env.modelUsage) : [];
+  const result = str(env.result) ?? "";
   return {
     answer: env.structured_output ?? (yield* readJson(/\{[\s\S]*\}/.exec(result)?.[0] ?? "{}", result)),
     model: usage[0] ?? "claude-code",
@@ -1208,7 +1197,7 @@ function buildCheckPrompt(item: Item, pr: PrText, comments: Placed[], tag = rand
 const checkClaims = Effect.fnUntraced(function* (item: Item, pr: PrText, comments: Placed[], dir: string, agent: DriverId) {
   const { answer } = yield* askAgent(buildCheckPrompt(item, pr, comments), { dir, schema: CHECK_SCHEMA, agent });
   const held = new Set<number>();
-  for (const c of list(((answer ?? {}) as Record<string, unknown>).comments)) {
+  for (const c of list(field(answer, "comments"))) {
     const n = Number(/^c(\d+)$/i.exec(text(c?.id))?.[1]);
     if (c?.holds === true && n >= 1 && n <= comments.length) held.add(n - 1);
   }
@@ -1218,14 +1207,15 @@ const checkClaims = Effect.fnUntraced(function* (item: Item, pr: PrText, comment
 // ---------------------------------------------------------------- the answer
 
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-const list = (v: unknown) => (Array.isArray(v) ? (v as (Record<string, unknown> | undefined)[]) : []);
+// Model output's list: what isn't an object in it reads as one with no fields.
+const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.map((x: unknown) => (isRecord(x) ? x : {})) : []);
 
 type Placed = ReviewNote & { quote: string };
 
 // What Claude wrote, its comments placed on the diff and kept only where their quote is code in that file's diff (the
 // evidence they rest on); nothing capped yet. Model output: don't trust its field types. An empty summary is the caller's to refuse.
 function readReview(answer: unknown, files: ReviewFile[]) {
-  const raw = (answer ?? {}) as Record<string, unknown>;
+  const raw = isRecord(answer) ? answer : {};
   const summary = text(raw.summary);
   // "side:line" as the model may name it → where the note goes. An unchanged line shows once, numbered in the new file.
   const anchors = new Map<string, Map<string, { side: ReviewNote["side"]; line: number }>>();
@@ -1262,20 +1252,21 @@ function readReview(answer: unknown, files: ReviewFile[]) {
     return { path: p, ...at, body, quote };
   };
   const placed = (v: unknown, max: number) => list(v).flatMap((n) => place(n, text(n?.body).slice(0, max)) ?? []);
-  const intent = (raw.intent ?? {}) as Record<string, unknown>;
+  const intent = isRecord(raw.intent) ? raw.intent : {};
   const diagrams: ReviewDiagram[] = [];
   const failed: string[] = [];
   for (const d of list(raw.diagrams)) {
     const id = text(d?.id);
     if (!/^[A-Za-z][\w-]{0,15}$/.test(id) || diagrams.some((x) => x.id === id)) continue;
-    const got = parseDiagram(typeof d?.source === "string" ? d.source : "");
+    const source = str(d.source) ?? "";
+    const got = parseDiagram(source);
     if (!got.ok) failed.push(`${id}: ${got.why}`);
     else
       diagrams.push({
         id,
         title: text(d?.title).slice(0, 60),
         caption: text(d?.caption).slice(0, 200),
-        source: d!.source as string,
+        source,
         graph: got.graph,
       });
   }
@@ -1434,7 +1425,7 @@ function parseChunks(raw: unknown, files: ReviewFile[], notes: ReviewNote[], cap
   const { hunks, read } = promptDiff(files, true);
   const byId = new Map(hunks.map((h) => [h.id, h]));
   const ranked: ChunkRanking["ranked"] = [];
-  for (const c of raw as Record<string, unknown>[]) {
+  for (const c of list(raw)) {
     const n = /^h?(\d+)$/i.exec(text(c?.id))?.[1];
     const h = n ? byId.get(`h${Number(n)}`) : undefined;
     const level = c?.level === "look" || c?.level === "skim" ? c.level : null;
@@ -1544,17 +1535,20 @@ export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boo
   const looks = new Map<string, number[]>();
   for (const [i, spot] of noteSpots(hunks, fresh?.look ?? []).entries())
     if (spot) looks.set(spot.hunk.id, [...(looks.get(spot.hunk.id) ?? []), i]);
-  const view = (h: Hunk, level: ReviewHunk["level"], rank: number | null, why: string | null): ReviewHunk => ({
-    ...h,
-    level,
-    rank,
-    why,
-    ...(looks.has(h.id) && { looks: looks.get(h.id) }),
-    notes: take(
-      h.path,
-      (onHunk.get(h.id) ?? []).toSorted((a, b) => a.at - b.at || a.note - b.note).map((x) => x.note),
-    ),
-  });
+  const view = (h: Hunk, level: ReviewHunk["level"], rank: number | null, why: string | null): ReviewHunk => {
+    const hunkLooks = looks.get(h.id);
+    return {
+      ...h,
+      level,
+      rank,
+      why,
+      ...(hunkLooks && { looks: hunkLooks }),
+      notes: take(
+        h.path,
+        (onHunk.get(h.id) ?? []).toSorted((a, b) => a.at - b.at || a.note - b.note).map((x) => x.note),
+      ),
+    };
+  };
 
   const ranked = new Set(ranking?.ranked.map((c) => c.id));
   const unread = new Set(ranking?.unread);

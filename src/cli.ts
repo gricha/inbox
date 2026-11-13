@@ -10,6 +10,7 @@ import * as agents from "./agents.ts";
 import * as api from "./client.ts";
 import { untilText } from "./client.ts";
 import { fsError, messageOf } from "./errors.ts";
+import { codeOf, strings } from "./narrow.ts";
 import { deskHome } from "./home.ts";
 import { judgeText, weighedLines } from "./judge.ts";
 import { permalink } from "./links.ts";
@@ -425,9 +426,14 @@ function parseSetting(d: SettingDef, raw: string): Effect.Effect<SettingValue, C
           .filter(Boolean),
       );
     return Effect.try({
-      try: () => JSON.parse(raw) as string[],
-      catch: (cause) => new CliError({ message: `${d.key}: bad JSON list (${(cause as Error).message})`, cause }),
-    });
+      try: (): unknown => JSON.parse(raw),
+      catch: (cause) => new CliError({ message: `${d.key}: bad JSON list (${messageOf(cause)})`, cause }),
+    }).pipe(
+      Effect.flatMap((v) => {
+        const list = strings(v);
+        return list ? Effect.succeed(list) : bad(`${d.key} must be a list of strings`);
+      }),
+    );
   }
   return Effect.succeed(raw);
 }
@@ -734,9 +740,8 @@ const command = Effect.fnUntraced(function* (cmd: string, rest: string[], io: IO
     catch: (cause) => cause,
   }).pipe(
     Effect.catch((cause): Effect.Effect<never, UsageError> => {
-      const code = (cause as { code?: unknown }).code;
-      const typed = typeof code === "string" && code.startsWith("ERR_PARSE_ARGS");
-      return typed ? Effect.fail(new UsageError({ message: (cause as Error).message })) : Effect.die(cause);
+      const typed = codeOf(cause)?.startsWith("ERR_PARSE_ARGS");
+      return typed ? Effect.fail(new UsageError({ message: messageOf(cause) })) : Effect.die(cause);
     }),
   );
   if (values.help) return (io.stdout.write(USAGE), 0);

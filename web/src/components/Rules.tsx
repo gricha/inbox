@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BUCKETS, type ConfigDoc, type ConfigError, type FieldDoc, type PreviewResult } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
+import { useKeyed } from "../keyed.ts";
 import { BUCKET_LABEL, cls, MOD, shortId, tilde, aiName } from "../format.ts";
 import { lineOf, weightText } from "../view.ts";
 import { ActButton } from "./Detail.tsx";
@@ -74,16 +75,10 @@ export function Rules({
   }, []);
 
   // Re-read the file each time the page opens: it may have been edited outside (desk config edit, an editor).
-  useEffect(() => {
-    // Read through the ref: finishing an edit (dirty to clean) must not trigger a re-read.
-    const { doc: d, text: t } = latest.current;
-    const stop = new AbortController();
-    if (active && (d === null || t === d.text)) runUi(load(), { signal: stop.signal });
-    return () => {
-      stop.abort();
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- refresh only triggers a re-read
-  }, [active, load, refresh]);
+  // Not on an edit: finishing one (dirty to clean) must not trigger a re-read.
+  useKeyed(active ? refresh : null, (signal) => {
+    if (doc === null || text === doc.text) runUi(load(), { signal });
+  });
   useEffect(() => {
     onDirty(dirty);
   }, [dirty, onDirty]);
