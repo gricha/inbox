@@ -46,7 +46,7 @@ import {
 const LIST_BUCKETS = ["now", "today", "blocked", "later", "fyi", "hide", "cleared"] as const;
 // The owner may paste an item's link from the desk (Copy link) in place of its ref.
 const REF = "owner/repo#123, repo#123 if unique, a GitHub URL, or the item's link from the desk (inbox://item/owner/repo/123)";
-const ACTIONS = ["done", "snooze", "mute", "unmute", "pin", "unpin", "restore"] as const;
+const ACTIONS = ["done", "snooze", "mute", "unmute", "pin", "unpin", "restore", "urgent", "standard", "fyi"] as const;
 
 const json = (v: unknown) => "```json\n" + JSON.stringify(v) + "\n```";
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point
@@ -455,7 +455,7 @@ export function createMcpServer(
     "desk_act",
     {
       description:
-        "Local triage on an item (never touches GitHub): done (hide until someone else acts), snooze, mute, unmute, pin, unpin, restore.",
+        "Local triage on an item (never touches GitHub): done (hide until someone else acts), snooze, mute, unmute, pin, unpin, restore; urgent, standard, fyi move it to that section of the Inbox until it's done, snoozed or muted.",
       inputSchema: {
         ref: z.string().describe(REF),
         action: z.enum(ACTIONS),

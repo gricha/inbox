@@ -171,6 +171,9 @@ test("lists the tools", async () => {
     "pin",
     "unpin",
     "restore",
+    "urgent",
+    "standard",
+    "fyi",
   ]);
 });
 

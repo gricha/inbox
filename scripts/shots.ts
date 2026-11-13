@@ -5070,6 +5070,33 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
+    // Move to Urgent from a Standard row's menu: it's in Urgent at once; an Urgent row's menu offers only Move to Standard.
+    name: "row-menu-move",
+    go: async (page) => {
+      await at("#/")(page);
+      const row = page.locator('.g-standard .line[data-id*="#"]').first(); // an item's row, not a note's
+      const id = await row.getAttribute("data-id");
+      await row.locator(".row-main").click({ button: "right" });
+      const offered = await page.locator(".ctx-item").allTextContents();
+      if (!offered.includes("Move to Urgent") || !offered.includes("Move to FYI"))
+        failures.push(`row-menu-move: a Standard row's menu reads ${JSON.stringify(offered)}`);
+      await page.locator(".ctx-item", { hasText: "Move to Urgent" }).click();
+      await page
+        .locator(`.g-urgent .line[data-id="${id}"]`)
+        .waitFor({ timeout: 5000 })
+        .catch(() => {
+          failures.push(`row-menu-move: ${id} isn't in Urgent after Move to Urgent`);
+        });
+      await page.locator(`.g-urgent .line[data-id="${id}"] .row-main`).click({ button: "right" });
+      const back = (await page.locator(".ctx-item").allTextContents()).filter((t) => t.startsWith("Move to"));
+      if (JSON.stringify(back) !== JSON.stringify(["Move to Standard"]))
+        failures.push(`row-menu-move: an Urgent row offers ${JSON.stringify(back)}`);
+      await page.locator(".ctx-item", { hasText: "Move to Standard" }).click();
+      await page.waitForTimeout(300);
+    },
+    after: fresh,
+  },
+  {
     // Right-click an agent's question: what its page offers, Answer, Copy link and Dismiss. Then each: Copy link copies its
     // inbox:// link (the clipboard stubbed); Dismiss takes its row off the list at once (held, so the mock keeps the
     // question for the next size); Answer opens its page.

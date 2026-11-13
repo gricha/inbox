@@ -1508,6 +1508,7 @@ const recs: Rec[] = SEEDS.map((s) => {
       pinned: false,
       seen_at: null,
       inflight_at: null,
+      section: null,
       ...s.st,
     },
   };
@@ -2110,10 +2111,9 @@ function inboxOf(cards: Card[]): Record<InboxSection, Card[]> {
     const score = model?.score ?? fallbackScore(c.bucket, yes.length);
     const floor = signals(r).me.requested_direct ? true : c.pinned;
     // A settled desk: the scorer has been through every item, keeping the desk's own score for those it left out.
-    const section = sectionOf(
-      { score, urgent: !!c.handed_back || urgent.length > 0, bucket: c.bucket, floor, scored: setting("agent.score") },
-      t,
-    );
+    const section =
+      r.state.section ??
+      sectionOf({ score, urgent: !!c.handed_back || urgent.length > 0, bucket: c.bucket, floor, scored: setting("agent.score") }, t);
     const names = (xs: Criterion[]) => xs.map((x) => x.name).join(" \u00b7 ");
     const reason =
       [c.handed_back ? c.why : "", names(urgent), c.placed_by === "automation" ? c.why : "", model?.why ?? "", names(yes), c.why].find(
@@ -2862,6 +2862,7 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
   else if (action === "restore")
     Object.assign(st, { done_at: null, snooze_until: null, snooze_on_activity: false, snooze_when: null, muted: false });
   else if (action === "seen") st.seen_at = now;
+  else if (action === "urgent" || action === "standard" || action === "fyi") st.section = action;
   else if (action === "inflight") {
     if (r.seed.resolved || (r.seed.kind ?? "pr") !== "pr")
       throw new HttpError(409, `only open PRs are handed off for merge; ${r.id} isn't one`);
@@ -2875,6 +2876,7 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
     if (!st.inflight_at) throw new HttpError(409, `${r.id} isn't in Merging`);
     st.inflight_at = null;
   } else throw new HttpError(400, `unknown action: ${action as string}`);
+  if (action === "done" || action === "snooze" || action === "mute") st.section = null;
   const fresh = r.fresh;
   if (action === "seen") r.fresh = false;
   else events.push({ seq: ++seq, id: r.id, before, fresh });

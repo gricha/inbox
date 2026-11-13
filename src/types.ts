@@ -423,6 +423,7 @@ export interface ItemState {
   pinned: boolean;
   seen_at: string | null;
   inflight_at: string | null; // your own PR, handed off for merge with m: the coordinator takes it from here
+  section: InboxSection | null; // the Inbox section you moved it to, until you're done with it, snooze or mute it
 }
 
 // Someone you can ask for a review of your PR: a user (login) or a team (its slug). id is the node id a review request takes.
@@ -434,7 +435,8 @@ export interface Reviewer {
   suggested: boolean; // GitHub's own pick for this PR
 }
 
-export type Action = "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "inflight" | "takeback" | "undo";
+export type Action =
+  "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "inflight" | "takeback" | "undo" | InboxSection; // move it to that section of the Inbox
 // The More menu's GitHub writes, only from the desk's window: close (your PR, or an issue you opened or are assigned), draft and
 // merge your open PR, reopen your closed one, request changes on someone else's (in its review, with what you wrote).
 export type GitHubAction = "close" | "draft" | "ready" | "merge" | "reopen" | "request_changes" | "rerequest" | "unrequest";

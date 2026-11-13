@@ -24,28 +24,28 @@ A `ref` is `owner/repo#123`, `repo#123` when unique, a GitHub URL, or an item's 
 
 **MCP tools** (preferred):
 
-| Tool               | Use                                                                                                                                                  |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `desk_overview`    | Counts per board, sync status, config errors, how many PRs are in Merging. Start here when unsure.                                                   |
-| `desk_list`        | The queue in order (`now`, `today`), sessions that need the user first. Pass `board` and `buckets` for `blocked`, `later`, `fyi`, `hide`, `cleared`. |
-| `desk_item`        | One item: facts, bucket and why per board, the rule trace, its AI review, the hand-off prompt, its `inbox://` link.                                  |
-| `desk_act`         | Local triage: `done`, `snooze` (with `until`), `mute`, `unmute`, `pin`, `unpin`, `restore`. Returns an undo `seq`.                                   |
-| `desk_add`         | Put a PR or issue on the user's desk with `why` and `from`; pins it and starts a PR's pre-review. Returns an undo `seq`.                             |
-| `desk_undo`        | Undo by `seq`. Always pass it: without one it undoes the latest action from anyone.                                                                  |
-| `desk_brief`       | A PR's AI review (look/skim/skip, risk, summary, concerns, notes). Cached per commit; otherwise a model call of a minute or two.                     |
-| `desk_doc`         | Render a review document (`doc` or `path`), or a PR's own AI review (`ref`), as one HTML page.                                                       |
-| `desk_sync`        | Start a GitHub sync now (read only). The desk also syncs every minute or two.                                                                        |
-| `desk_events`      | The event log (asked, reviewed, pushed, CI, commented, merged, …). Pass `last_seq` back as `after`; `wait` up to 60 s; `item` to filter.             |
-| `desk_config`      | `get` config.toml (with its hash and the built-in rules), `preview` a full new text, `save` it with `base` = the hash.                               |
-| `desk_criteria`    | Urgency criteria: `list`, `set`, `delete`.                                                                                                           |
-| `desk_automations` | The user's automations: `list`, `set` (a draft, off until they turn it on), `run` (one that's on, now).                                              |
-| `desk_inquire`     | Ask the user a question in their desk. See "Asking in the desk".                                                                                     |
-| `desk_inquiry`     | The answer to your `desk_inquire` (`id`, `wait` up to 60 s). No `id`: answers nobody has picked up yet.                                              |
-| `desk_merging`     | Coordinator: the PRs in Merging with CI, reviews, threads, mergeability, base, blockers, merge method, last note.                                    |
-| `desk_note`        | Coordinator: a status line on a PR in Merging (`ref`, `text`). Only the latest shows.                                                                |
-| `desk_hand_back`   | Coordinator: give a PR in Merging back to the user (`ref`, `why`); it goes to the top of the Inbox.                                                  |
-| `desk_ask`         | Coordinator: where the user's ask is (their words, the item, the thread or diff lines, whether a push is allowed).                                   |
-| `desk_answer`      | Coordinator: answer the user's ask (`ask_id`, `text`).                                                                                               |
+| Tool               | Use                                                                                                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `desk_overview`    | Counts per board, sync status, config errors, how many PRs are in Merging. Start here when unsure.                                                                            |
+| `desk_list`        | The queue in order (`now`, `today`), sessions that need the user first. Pass `board` and `buckets` for `blocked`, `later`, `fyi`, `hide`, `cleared`.                          |
+| `desk_item`        | One item: facts, bucket and why per board, the rule trace, its AI review, the hand-off prompt, its `inbox://` link.                                                           |
+| `desk_act`         | Local triage: `done`, `snooze` (with `until`), `mute`, `unmute`, `pin`, `unpin`, `restore`; `urgent`, `standard`, `fyi` move it to that Inbox section. Returns an undo `seq`. |
+| `desk_add`         | Put a PR or issue on the user's desk with `why` and `from`; pins it and starts a PR's pre-review. Returns an undo `seq`.                                                      |
+| `desk_undo`        | Undo by `seq`. Always pass it: without one it undoes the latest action from anyone.                                                                                           |
+| `desk_brief`       | A PR's AI review (look/skim/skip, risk, summary, concerns, notes). Cached per commit; otherwise a model call of a minute or two.                                              |
+| `desk_doc`         | Render a review document (`doc` or `path`), or a PR's own AI review (`ref`), as one HTML page.                                                                                |
+| `desk_sync`        | Start a GitHub sync now (read only). The desk also syncs every minute or two.                                                                                                 |
+| `desk_events`      | The event log (asked, reviewed, pushed, CI, commented, merged, …). Pass `last_seq` back as `after`; `wait` up to 60 s; `item` to filter.                                      |
+| `desk_config`      | `get` config.toml (with its hash and the built-in rules), `preview` a full new text, `save` it with `base` = the hash.                                                        |
+| `desk_criteria`    | Urgency criteria: `list`, `set`, `delete`.                                                                                                                                    |
+| `desk_automations` | The user's automations: `list`, `set` (a draft, off until they turn it on), `run` (one that's on, now).                                                                       |
+| `desk_inquire`     | Ask the user a question in their desk. See "Asking in the desk".                                                                                                              |
+| `desk_inquiry`     | The answer to your `desk_inquire` (`id`, `wait` up to 60 s). No `id`: answers nobody has picked up yet.                                                                       |
+| `desk_merging`     | Coordinator: the PRs in Merging with CI, reviews, threads, mergeability, base, blockers, merge method, last note.                                                             |
+| `desk_note`        | Coordinator: a status line on a PR in Merging (`ref`, `text`). Only the latest shows.                                                                                         |
+| `desk_hand_back`   | Coordinator: give a PR in Merging back to the user (`ref`, `why`); it goes to the top of the Inbox.                                                                           |
+| `desk_ask`         | Coordinator: where the user's ask is (their words, the item, the thread or diff lines, whether a push is allowed).                                                            |
+| `desk_answer`      | Coordinator: answer the user's ask (`ask_id`, `text`).                                                                                                                        |
 
 `until` for a snooze: `1h`, `3h`, `2d`, `tomorrow` (09:00, the default), `monday` (09:00), `YYYY-MM-DD`, an ISO time, `activity` (until someone else acts), or an event from the card's `wake_on`: `ci` (CI passes), `push`, `approved`, `ready`, `conflict` (fixed). `done` also lasts until someone else acts.
 

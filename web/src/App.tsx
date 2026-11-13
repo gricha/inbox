@@ -87,6 +87,9 @@ const VERB: Partial<Record<Action, string>> = {
   pin: "Pinned",
   unpin: "Unpinned",
   restore: "Restored",
+  urgent: "Moved to Urgent",
+  standard: "Moved to Standard",
+  fyi: "Moved to FYI",
 };
 // What a More menu write says it did; the toast's Undo undoes close and draft (reopen, ready for review).
 const DID: Record<GitHubAction, string> = {

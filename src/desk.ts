@@ -2769,6 +2769,12 @@ export class Desk {
         case "unpin":
           s.pinned = false;
           break;
+        case "urgent":
+        case "standard":
+        case "fyi":
+          if (entry.inflight) return yield* new Conflict({ message: `${id} is in Merging, not on the Inbox` });
+          s.section = action;
+          break;
         case "seen":
           s.seen_at = now.toISOString();
           break;
@@ -2800,6 +2806,8 @@ export class Desk {
         default:
           return yield* new BadRequest({ message: `unknown action "${action as string}"` }); // reachable: the HTTP body isn't checked against Action
       }
+      // Where you moved it holds while it's on your Inbox; off it, it comes back where the desk puts it.
+      if (action === "done" || action === "snooze" || action === "mute") s.section = null;
       // An automation's pin was its opinion; once you deal with the item it's yours, and undo brings the pin back.
       if (["done", "snooze", "mute", "inflight"].includes(action) && s.pinned && this.store.lastPin(id)?.agent?.startsWith("automation:"))
         s.pinned = false;
@@ -2864,6 +2872,9 @@ export class Desk {
         case "unpin":
         case "inflight":
         case "takeback":
+        case "urgent":
+        case "standard":
+        case "fyi":
           return yield* new Conflict({ message: `a session takes done, snooze, mute, unmute and restore; not ${action}` });
         default:
           return yield* new BadRequest({ message: `unknown action "${action as string}"` });

@@ -1,8 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Action, Card, GitHubAction, Inquiry, SessionAction, SessionCard } from "../../../src/types.ts";
+import type { Action, Card, GitHubAction, InboxSection, Inquiry, SessionAction, SessionCard } from "../../../src/types.ts";
 import { cls, fromName, SNOOZE, snoozeOptions } from "../format.ts";
 import { MORE, rowActions } from "./More.tsx";
 import { SESSION_ACTION } from "./Session.tsx";
+
+// Where a row on the Inbox can move: one section up or down.
+const MOVES: Record<InboxSection, InboxSection[]> = { urgent: ["standard"], standard: ["urgent", "fyi"], fyi: ["standard"] };
+const SECTION_NAME: Record<InboxSection, string> = { urgent: "Urgent", standard: "Standard", fyi: "FYI" };
 
 // What an entry does: the row's action (as run() takes it), a desk action, a More menu write, or a snooze.
 type Do = { key: string } | { act: Action } | { github: GitHubAction } | { snooze: string };
@@ -40,6 +44,9 @@ export function RowMenu({ card, x, y, snooze, run, act, github, reopen, onClose 
             ? { label: "Done", do: { act: "done" as const } }
             : { label: "Back on the desk", do: { act: "restore" as const } },
         ],
+    card.section && card.status === "active" && !card.inflight
+      ? MOVES[card.section].map((to) => ({ label: `Move to ${SECTION_NAME[to]}`, do: { act: to } }))
+      : [],
     rowActions(card)
       .filter((a) => a === "close")
       .map((a) => ({ label: `${MORE[a]} on GitHub`, do: { github: a } })),

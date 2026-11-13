@@ -166,6 +166,7 @@ Right-click any row (Inbox, Blocked, Merging, Archive) for a menu at the pointer
 
 - **Done** (or **Back on the desk** once cleared).
 - **Snooze**, opening to the side: a time, until activity, or what the PR can wait on now (`wake_on`: CI passes, new commits, it's approved, it's ready for review, the merge conflict is fixed).
+- **Move to Urgent** / **Move to Standard** / **Move to FYI**, on the Inbox: one section up or down (Standard offers both; Urgent and FYI offer Standard). It stays there until you're done with it, snooze or mute it; Undo moves it back.
 - **Close on GitHub**, where it can be closed.
 - **Copy link**, **Copy GitHub link** (the PR or issue on GitHub).
 

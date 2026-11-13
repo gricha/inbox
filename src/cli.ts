@@ -40,6 +40,7 @@ const USAGE = `usage: desk <command>
   add <ref> [why] [--from <task>]     put a PR or issue on your desk (fetched if new, pinned) and start its pre-review;
                                       why: the line it shows as why it's there
   done|mute|unmute|pin|unpin|restore <ref>
+  urgent|standard|fyi <ref>           move it to that section of the Inbox, until you're done with it, snooze or mute it
   snooze <ref> [until]                1h, 3h, tomorrow (default), monday, activity, ISO time, or ci|push|approved|ready|conflict
   undo [seq]                          undo the last action (or the one with that number)
   sync                                sync with GitHub now (read only)
@@ -86,6 +87,9 @@ const PAST: Record<string, string> = {
   unpin: "unpinned",
   restore: "restored",
   snooze: "snoozed",
+  urgent: "moved to Urgent",
+  standard: "moved to Standard",
+  fyi: "moved to FYI",
 };
 
 const OPTIONS: Record<string, ParseArgsConfig["options"]> = {
@@ -131,6 +135,9 @@ const ARITY: Record<string, [number, number]> = {
   pin: [1, 1],
   unpin: [1, 1],
   restore: [1, 1],
+  urgent: [1, 1],
+  standard: [1, 1],
+  fyi: [1, 1],
 };
 
 function palette(on: boolean) {
@@ -623,6 +630,9 @@ const COMMANDS: Record<string, Command> = {
   pin: act("pin"),
   unpin: act("unpin"),
   restore: act("restore"),
+  urgent: act("urgent"),
+  standard: act("standard"),
+  fyi: act("fyi"),
   snooze: act("snooze"),
   open: () =>
     Effect.map(api.health(), () => {

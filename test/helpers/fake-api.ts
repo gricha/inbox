@@ -253,6 +253,7 @@ function state(id: string, patch: Partial<ItemState> = {}): ItemState {
     pinned: false,
     seen_at: null,
     inflight_at: null,
+    section: null,
     ...patch,
   };
 }

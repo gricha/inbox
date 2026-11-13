@@ -1,6 +1,6 @@
 // SQLite cache of every source's items (GitHub's today), your local triage state, and the event log.
 import { DatabaseSync } from "node:sqlite";
-import type { ActivityEvent, ActivityKind, Device, Head, Item, ItemState, Job } from "./types.ts";
+import type { ActivityEvent, ActivityKind, Device, Head, InboxSection, Item, ItemState, Job } from "./types.ts";
 
 export interface ItemMeta {
   node_id: string;
@@ -41,6 +41,7 @@ export const emptyState = (id: string): StateRow => ({
   pinned: false,
   seen_at: null,
   inflight_at: null,
+  section: null,
 });
 
 export class Store {
@@ -74,6 +75,7 @@ export class Store {
     if (!cols.has("acked_at")) this.db.exec("ALTER TABLE state ADD COLUMN acked_at TEXT");
     if (!cols.has("inflight_at")) this.db.exec("ALTER TABLE state ADD COLUMN inflight_at TEXT");
     if (!cols.has("snooze_when")) this.db.exec("ALTER TABLE state ADD COLUMN snooze_when TEXT");
+    if (!cols.has("section")) this.db.exec("ALTER TABLE state ADD COLUMN section TEXT");
     if (!columns("hits").includes("kept")) this.db.exec("ALTER TABLE hits ADD COLUMN kept INTEGER NOT NULL DEFAULT 0");
     // kept() runs once per board a recompute places: this reads only the few kept rows.
     this.db.exec("CREATE INDEX IF NOT EXISTS hits_kept ON hits (item_id) WHERE kept = 1");
@@ -270,10 +272,10 @@ export class Store {
   putState(s: StateRow): void {
     this.db
       .prepare(
-        `INSERT INTO state (id, done_at, snooze_until, snooze_on_activity, snoozed_at, acked_at, muted, pinned, seen_at, inflight_at, snooze_when) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO state (id, done_at, snooze_until, snooze_on_activity, snoozed_at, acked_at, muted, pinned, seen_at, inflight_at, snooze_when, section) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET done_at = excluded.done_at, snooze_until = excluded.snooze_until, snooze_on_activity = excluded.snooze_on_activity,
            snoozed_at = excluded.snoozed_at, acked_at = excluded.acked_at, muted = excluded.muted, pinned = excluded.pinned, seen_at = excluded.seen_at,
-           inflight_at = excluded.inflight_at, snooze_when = excluded.snooze_when`,
+           inflight_at = excluded.inflight_at, snooze_when = excluded.snooze_when, section = excluded.section`,
       )
       .run(
         s.id,
@@ -287,6 +289,7 @@ export class Store {
         s.seen_at,
         s.inflight_at ?? null, // undo entries logged before in-flight existed don't carry it
         s.snooze_when ?? null, // nor, from before snoozing until something happens, this
+        s.section ?? null, // nor, from before moving between sections, this
       );
   }
 
@@ -484,5 +487,6 @@ function rowToState(r: Record<string, unknown>): StateRow {
     pinned: r.pinned === 1,
     seen_at: (r.seen_at as string) ?? null,
     inflight_at: (r.inflight_at as string) ?? null,
+    section: (r.section as InboxSection | null) ?? null,
   };
 }

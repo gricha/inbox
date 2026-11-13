@@ -310,7 +310,7 @@ export class Urgency {
       const back = snap.needs.has(c.id);
       const floor = e.analysis.signals.me.requested_direct || snap.pins.get(c.id) === "them";
       c.score = Math.round(score * 10) / 10;
-      c.section = sectionOf({ score, urgent: back || urgent.length > 0, bucket: p.bucket, floor, scored: !!model }, t);
+      c.section = e.state.section ?? sectionOf({ score, urgent: back || urgent.length > 0, bucket: p.bucket, floor, scored: !!model }, t);
       // Why it's here: a hand-back's own words, an urgent yes, an automation's why, the score's, the yeses, the rules'.
       const automation = snap.auto.has(c.id) || !!p.judge?.by;
       c.reason = [back ? c.why : "", named(urgent), automation ? c.why : "", model?.why ?? "", named(yes), c.why].find(Boolean) ?? "";

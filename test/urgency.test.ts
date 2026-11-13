@@ -465,3 +465,27 @@ test(
     assert.notEqual(where(t, "acme/api#5")?.[0], "urgent");
   },
 );
+
+test(
+  "you move a row a section up or down: it stays there until you're done with it, snooze or mute it; undo moves it back",
+  posix,
+  async (c) => {
+    const t = await setup([reviewAsk(1), teamPing(2)], { settings: QUIET });
+    c.after(t.cleanup);
+    await run(t.desk.sync());
+    const [was] = where(t, "acme/api#1")!;
+    assert.equal(was, "urgent");
+    const moved = runSync(t.desk.act("acme/api#1", "standard"));
+    assert.equal(where(t, "acme/api#1")![0], "standard", "a direct ask, moved down by you");
+    runSync(t.desk.act("acme/api#1", "undo"));
+    assert.equal(where(t, "acme/api#1")![0], "urgent", "undo puts it back");
+    assert.ok(moved.undo_seq > 0);
+    runSync(t.desk.act("acme/api#2", "urgent"));
+    assert.equal(where(t, "acme/api#2")![0], "urgent", "a team ping, moved up");
+    runSync(t.desk.act("acme/api#1", "fyi"));
+    assert.equal(where(t, "acme/api#1")![0], "fyi");
+    runSync(t.desk.act("acme/api#1", "done"));
+    runSync(t.desk.act("acme/api#1", "restore"));
+    assert.equal(where(t, "acme/api#1")![0], "urgent", "done ends the move");
+  },
+);
