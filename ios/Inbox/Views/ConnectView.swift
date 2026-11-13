@@ -104,7 +104,8 @@ struct ConnectView: View {
     error = nil
     focus = nil
     Task {
-      error = await store.connect(typed: typed, code: code)
+      // Only a code field that's on screen is sent.
+      error = await store.connect(typed: typed, code: asksCode ? code : "")
       busy = false
     }
   }

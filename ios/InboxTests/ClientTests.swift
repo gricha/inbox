@@ -224,6 +224,25 @@ final class StoreTests: XCTestCase {
     XCTAssertEqual(again.deviceName, "Greg's iPhone")
   }
 
+  // A code typed before (and already tried) never rides along with a pasted link: the link's own code is the one traded.
+  func testAPairingLinksCodeWinsOverOneTypedBefore() async throws {
+    StubProtocol.reset(["/api/pair": pair])
+    let store = Store(defaults: defaults, session: StubProtocol.session())
+    var said = await store.connect(typed: "https://desk.tail1234.ts.net/pair#WXYZ-6789", code: "ABCD-2345")
+    store.stopLive()
+    XCTAssertNil(said)
+    let sent = StubProtocol.requests().filter { $0.url?.path == "/api/pair" }
+    XCTAssertEqual(sent.count, 1)
+    let body = try JSONDecoder().decode([String: String].self, from: try XCTUnwrap(sent[0].sentBody))
+    XCTAssertEqual(body["code"], "WXYZ6789")
+    // Nor does a leftover that isn't a code's shape stop the link.
+    store.disconnect()
+    StubProtocol.reset(["/api/pair": pair])
+    said = await store.connect(typed: "desk.tail1234.ts.net/pair#wxyz-6789", code: "ABC")
+    store.stopLive()
+    XCTAssertNil(said)
+  }
+
   func testACodeThatCannotBeOneIsNeverSent() async {
     StubProtocol.reset(["/api/pair": pair])
     let store = Store(defaults: defaults, session: StubProtocol.session())

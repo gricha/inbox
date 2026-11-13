@@ -104,8 +104,8 @@ final class Store {
         // The desk's own computer: no code, no token. Just see that a desk answers.
         deskVersion = try await fresh.health().version
       } else {
-        let typedCode = typedCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let code = typedCode.isEmpty ? parsed.code : PairingCode.normalize(typedCode) else {
+        // A pasted pairing link's code wins: whatever was typed before it is a code already tried, and any try burns the new one.
+        guard let code = parsed.code ?? PairingCode.normalize(typedCode) else {
           return "A pairing code is 8 letters and digits, like ABCD-2345: desk pair prints one on the desk's computer."
         }
         let answer = try await fresh.pair(code: code, name: UIDevice.current.name)
