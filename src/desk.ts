@@ -2,7 +2,7 @@
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Cache, Cause, Deferred, Duration, Effect, Exit, Fiber, Result } from "effect";
+import { Cache, Cause, Deferred, Duration, Effect, Exit, Fiber, Option, Result } from "effect";
 import { stopAll } from "./children.ts";
 import {
   AmbiguousRef,
@@ -2499,8 +2499,8 @@ export class Desk {
     return this.autoAiOn() && !this.aiPausedNow();
   }
 
-  // Background AI reviews, a couple at a time: first the failed tries whose backoff is over, then in the queue's order, Now,
-  // then Today from the top, so the cards on screen are ready first.
+  // Background AI reviews, a couple at a time: first the failed tries whose backoff is over, then Now and Today (the cards
+  // held for theirs among them), then the Inbox's Urgent and Standard from the top, whatever bucket the rules gave them.
   pumpAi(): void {
     if (this.stopped || !this.loaded || !this.autoAi()) return;
     let room = this.settings["review.at_once"] - this.generating.size; // counted here: a run that fails at once frees its slot before startAi returns
@@ -2517,14 +2517,20 @@ export class Desk {
       }
     }
     const top = this.top(snap, new Set(), true);
-    for (const c of [...top.now, ...top.today]) {
-      if (room <= 0 || !this.autoAi()) return; // a run that failed at once may have paused them
-      const e = snap.entries.get(c.id);
-      if (e && this.wantsAi(e, snap)) {
-        this.startAi(c.id);
-        room--;
+    const want = (ids: string[]) => {
+      for (const id of ids) {
+        if (room <= 0 || !this.autoAi()) return; // a run that failed at once may have paused them
+        const e = snap.entries.get(id);
+        if (e && this.wantsAi(e, snap)) {
+          this.startAi(id);
+          room--;
+        }
       }
-    }
+    };
+    want([...top.now, ...top.today].map((c) => c.id));
+    if (room <= 0) return;
+    const inbox = Effect.runSync(Effect.option(this.queue()));
+    if (Option.isSome(inbox)) want([...inbox.value.inbox.urgent, ...inbox.value.inbox.standard].map((c) => c.id));
   }
 
   canApprove(e: Entry): ReviewView["approve"] {

@@ -2496,3 +2496,24 @@ test("someone else's small PR its review calls low risk gets a bolt on the Inbox
   assert.equal(again({ interfaces: [{ ...iface, breaking: false }] }), `Quick to review: low risk, ${lines} lines`);
   t.cleanup();
 });
+
+test("a PR in the Inbox's Standard gets its AI review in the background too, whatever bucket the rules put it in", async () => {
+  // New commits since your review: the rules say later, the Inbox shows it in Standard.
+  const t = await setup([
+    ask(5, {
+      review_requests: [{ reviewer: "dana", type: "user", codeowner: false }],
+      request_events: [],
+      reviews: [{ author: "me", author_bot: false, state: "commented", at: hoursAgo(10), commit: "h5-old" }],
+    }),
+  ]);
+  await t.sync();
+  const q = runSync(t.desk.queue());
+  assert.equal(t.desk.snapshot().best.get("acme/api#5")?.bucket, "later");
+  assert.deepEqual(
+    q.inbox.standard.map((c) => c.id),
+    ["acme/api#5"],
+  );
+  assert.deepEqual(t.f.started, ["acme/api#5"], "reviewed before you open it");
+  await t.f.release("acme/api#5");
+  t.cleanup();
+});
