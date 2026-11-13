@@ -5544,15 +5544,13 @@ a.rv-part-row:hover {
   gap: 2px 16px;
 }
 
+/* The verdict line sits under the goal, at the section's size: the goal is what to read first. */
 .rv-verdict .verdict {
-  font-size: clamp(15px, 13.5px + 0.2vw, 16.5px);
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-weight: 600;
 }
 
 .rv-verdict .v-skim,
 .rv-verdict .v-skip {
-  font-size: clamp(14px, 12.5px + 0.2vw, 15.5px);
   font-weight: 500;
 }
 
@@ -5561,7 +5559,7 @@ a.rv-part-row:hover {
 }
 
 .sk-verdict {
-  font-size: clamp(15px, 13.5px + 0.2vw, 16.5px);
+  font-size: inherit;
 }
 
 .sk-verdict .sk {
@@ -5603,9 +5601,11 @@ a.rv-part-row:hover {
   color: var(--ink);
 }
 
-/* The summary's first sentence in ink; the rest a step quieter, at the section's size. */
+/* The goal leads, in ink and a step larger; the rest a step quieter, at the section's size. */
 .rv-gist {
   color: var(--ink);
+  font-size: clamp(14px, 12.5px + 0.2vw, 15.5px);
+  line-height: 1.45;
   overflow-wrap: anywhere;
 }
 

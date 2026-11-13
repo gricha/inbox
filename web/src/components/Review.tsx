@@ -1439,8 +1439,8 @@ function Shell({
           ) : (
             (!isMine || !!card?.verdict) && (
               <section className="rv-ai" aria-label="AI review">
-                <SkLines count={1} className="sk-verdict" />
                 <SkLines count={1} className="rv-gist" />
+                <SkLines count={1} className="sk-verdict" />
               </section>
             )
           )}
@@ -1751,7 +1751,7 @@ function AiSection({
   const [more, setMore] = useState(false); // the rest of the summary, on this PR only: every PR opens folded
   const summary = ai?.summary ?? "";
   const goal = ai?.intent?.goal ?? "";
-  // A review with a goal leads with it and folds its whole summary; an older one leads with the summary's first sentence.
+  // The goal leads, above the verdict; an older review without one leads with its summary's first sentence.
   const { first, rest } = useMemo(() => (goal ? { first: inline(goal), rest: blocks(summary) } : lead(blocks(summary))), [goal, summary]);
   const reasons = ai?.risk_reasons ?? [];
   const lead1 = ai && ai.risk !== "low" ? reasons[0] : undefined;
@@ -1825,6 +1825,7 @@ function AiSection({
       )}
       {ai && (
         <>
+          {first.length > 0 && <p className="rv-gist">{spans(unlinked(first))}</p>}
           <p className="rv-verdict" title={ai.model && ai.at ? `AI review by ${modelName(ai.model)}, ${when(ai.at)}` : undefined}>
             {folds ? (
               <button
@@ -1844,7 +1845,6 @@ function AiSection({
               verdict
             )}
           </p>
-          {first.length > 0 && <p className="rv-gist">{spans(unlinked(first))}</p>}
           {ai.intent?.stack && (
             <p className="rv-since">
               <b>In the stack:</b> {spans(unlinked(inline(ai.intent.stack)))}

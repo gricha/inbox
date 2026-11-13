@@ -276,9 +276,10 @@ Sections, each open: its name, where it stands in one line that reads first (red
 
 No heading; right under the header.
 
-- **Verdict**: "Look closely" (a step larger, semibold), "Skim it" or "Skip it". The model and time are in its tooltip.
-- **Risk**: in colour with a three-step meter. "on an earlier commit" in pencil when it is.
-- **Summary**: its first sentence. A chevron (or a click on the verdict) opens the rest. Every PR opens folded.
+- **Goal** first: what the PR sets out to do, in ink, a step larger. A review written before goals leads with its summary's first sentence.
+- **Verdict** under it, at the section's size: "Look closely" (semibold), "Skim it" or "Skip it". The model and time are in its tooltip.
+- **Risk** after the verdict: in colour with a three-step meter, then its first reason. "on an earlier commit" in pencil when it is.
+- **The rest of the summary**: a chevron (or a click on the verdict) opens it. Every PR opens folded.
 - **Since your review**: on a re-review, under the summary, never folded.
 - **Concerns**: each is also a note in the code. They're listed only when no note can sit there (none, or an earlier commit's review).
 - All of it is drawn as plain prose (`code`, **bold**, lists), never HTML. URLs stay text: the PR's author can steer what Claude writes.

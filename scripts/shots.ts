@@ -1574,6 +1574,7 @@ const SHOTS: Shot[] = [
       if (await page.locator(".rv-ai .prose").count()) failures.push("review: the AI review doesn't open folded");
       if (!inOrder(await tops(page, [".rv-ai", ".rv-convo", ".rv-comment"])))
         failures.push("review: the AI review isn't above the conversation and your comment");
+      if (!inOrder(await tops(page, [".rv-gist", ".rv-verdict"]))) failures.push("review: the goal doesn't lead the verdict");
       await faces(page, "review", ".rv-ref .rv-by:last-child, .cv-author");
     },
   },
