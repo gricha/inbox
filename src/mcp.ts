@@ -890,6 +890,8 @@ function linesWhere(l: AskLines, head: string | null): string {
   return `On ${linesText(l)} of its diff (${sides}, read at ${l.head}; ${now}).${l.note ? " desk_brief lists its notes by path:line." : ""}`;
 }
 
+const asksFix = (p: AskPlace) => !!p.ask.fix;
+
 function pushText(p: AskPlace): string {
   const b = p.about;
   if (p.push && b?.merging)
@@ -898,7 +900,10 @@ function pushText(p: AskPlace): string {
     return `Push: yes, only to the branch below of ${oneLine(p.push.repo)}: a plain push, never forced; it isn't handed off, so never merge it.`;
   if (!p.ask.item_id) return "Push: no: it isn't about a PR.";
   if (!b) return "Push: no: it isn't on the desk now.";
-  if (b.whose === "issue") return "Push: no: it's an issue.";
+  if (b.whose === "issue" && p.fix)
+    return `Push: a new branch off ${oneLine(p.fix.repo)}'s default branch (below) for a draft PR with this fix (Make PR with fix): as "Make PR with fix" says.`;
+  if (b.whose === "issue")
+    return asksFix(p) ? "Push: no: the issue is closed, or its pre-review no longer has the fix." : "Push: no: it's an issue.";
   if (b.whose === "theirs") return "Push: no. Someone else's PR is read only: never push to it or post on it.";
   if (b.state !== "open") return `Push: no: it's ${b.state}.`;
   return "Push: no: the desk doesn't know its branch.";
@@ -927,6 +932,7 @@ function askText(p: AskPlace): string {
     ...(l ? [`file: ${oneLine(l.path)}`, `file_arg: ${shellArg(oneLine(l.path))}`] : []),
     ...(p.base ? [`base: ${oneLine(p.base)}`] : []),
     ...(p.push ? [`branch: ${oneLine(p.push.branch)}`] : []),
+    ...(p.fix ? [`default branch: ${oneLine(p.fix.base)}`] : []),
   ];
   return [
     `Ask ${a.id}, ${a.answer ? `answered ${ago(a.answer.at)}` : "not answered yet"}, ${about}.`,

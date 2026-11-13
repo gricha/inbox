@@ -51,6 +51,7 @@ import type {
   SetupView,
   AiReview,
   Ask,
+  IssueReview,
   AskAbout,
   AskLines,
   AskPlace,
@@ -142,6 +143,7 @@ import {
 import * as agents from "./agents.ts";
 import { Judge, judgeKey, sortKey, textHash } from "./judge.ts";
 import { readOwnSkill, REVIEW_SKILL_VERSION, type OwnSkill } from "./connectors/github-review.ts";
+import { fixAskText, readOwnIssueSkill, type FetchIssueError, type IssueRun, type IssueText, type OwnIssueSkill } from "./issue.ts";
 import { Conversations, talked } from "./conversation.ts";
 import { checksView } from "./checks.ts";
 import { askLine, Coordinator, REBASE, wakeFor } from "./coordinator.ts";
@@ -178,6 +180,8 @@ const QUICK_LINES = 200; // at most this many lines changed for a PR to be quick
 const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead after a sync, this many at a time
 const CHECKS_KEPT = 200; // PRs whose checks are kept, the least recently asked for going first
 const AI_RETRY = 30 * 60_000; // how long failures in a row pause AI reviews nobody asked for
+const ISSUE_AGAIN_MS = 6 * 3_600_000; // an issue that moved on is pre-reviewed again by the pump at most this often; opening it asks at once
+const ISSUE_RETRY_MS = 3_600_000; // a failed try on a version of an issue waits this long
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
 const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"], agents.driverOf(s["agent.harness"])]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
@@ -297,6 +301,7 @@ export interface DeskOptions {
   notify?: (title: string, body: string) => void;
   log?: (msg: string) => void;
   review?: ReviewDeps; // diffs and AI reviews; without it the review view has no diff and no AI
+  issues?: IssueDeps; // issues' pre-reviews; without it issues get none
   writer?: GitHubWriter; // the desk's GitHub writes; without it they're off
   decisions?: string; // the Decisions API's URL, in place of OpenRouter's: tests point it at a local server
   mcpUrl?: string; // its /mcp, which a Codex run is given as the desk's own MCP server
@@ -368,9 +373,16 @@ export interface ReviewDeps {
   installed?(agent: agents.DriverId): boolean; // its CLI is on PATH; absent: none is
 }
 
+export interface IssueDeps {
+  fetch(item: Item): Effect.Effect<IssueText, FetchIssueError>;
+  generate(item: Item, t: IssueText, run: IssueRun): Effect.Effect<IssueReview, CommandError | ClaudeError>;
+  clone(repo: string): string | null; // your local clone of the repo, for reading its code
+}
+
 // What a PR's diff fails with: a desk without diffs, or the fetch. And an AI review: that, or claude.
 type PrTextError = Conflict | FetchPrError;
 type AiError = PrTextError | CommandError | ClaudeError;
+type IssueError = Conflict | FetchIssueError | ClaudeError;
 
 export class Desk {
   store: Store;
@@ -390,6 +402,7 @@ export class Desk {
   notifyFn: (title: string, body: string) => void;
   log: (msg: string) => void;
   review: ReviewDeps | null;
+  issues: IssueDeps | null;
   writer: GitHubWriter | null;
   githubError: GitHubReadError | Upstream | null = null; // why a first run couldn't read GitHub yet: no config until it can
   decisions: string | undefined;
@@ -415,6 +428,7 @@ export class Desk {
   stopped = false;
   private noteTimer: ReturnType<typeof setInterval> | null = null;
   generating = new Map<string, Deferred.Deferred<AiReview, AiError>>(); // the AI reviews on their way (see shared()), each a running job
+  issueRuns = new Map<string, Deferred.Deferred<IssueReview, IssueError>>(); // issues' pre-reviews on their way, one at a time
   aiFailures = 0; // in a row, across PRs
   aiLastFailed: string | null = null; // the PR of the latest: its retries aren't more in a row
   aiPaused: { why: string; until: number } | null = null;
@@ -454,6 +468,7 @@ export class Desk {
       detached,
     );
     this.review = opts.review ?? null;
+    this.issues = opts.issues ?? null;
     this.writer = opts.writer ?? null;
     this.decisions = opts.decisions;
     fs.mkdirSync(this.home, { recursive: true });
@@ -1104,10 +1119,13 @@ export class Desk {
     this.automations.pump();
     this.notifyNew();
     this.pumpAi();
+    this.pumpIssues();
     this.warmReviewers();
     this.recheckLogin();
     const kept = new Set(this.store.itemMeta().keys());
     this.store.pruneKv("review:", kept);
+    this.store.pruneKv("issue_ai:", kept);
+    this.store.pruneKv("issue_fail:", kept);
     this.store.pruneKv("pr:", kept);
     this.store.pruneKv("judge:", kept);
     this.store.pruneKv("sitter:", kept);
@@ -1341,6 +1359,7 @@ export class Desk {
     const stacks = buildStacks(items);
     const deps = dependencies(items, stacks);
     const merging = this.store.prefixed<Merging>("sitter:");
+    const blocked = this.blockedAuthors();
     for (const item of items) {
       const analysis = analyze(item, ctx, loaded.config, now);
       let state = states.get(item.id) ?? emptyState(item.id);
@@ -1354,7 +1373,7 @@ export class Desk {
       const inflight = !!state.inflight_at && item.kind === "pr" && item.state === "open";
       const freed = deps.get(item.id)?.merged.at(-1)?.at ?? "";
       const activityAt = freed > analysis.activity_at ? freed : analysis.activity_at;
-      const status = statusOf(state, activityAt, now);
+      const status = blocked.has(item.author.toLowerCase()) ? "muted" : statusOf(state, activityAt, now);
       const back = merging.get(item.id)?.handback;
       analysis.signals.me.handed_back =
         !!back && !inflight && status === "active" && item.state === "open" && (state.done_at ?? "") <= back.at;
@@ -1620,7 +1639,7 @@ export class Desk {
       people: peopleOf(it),
       ...(shown && { stage: shown }),
       bucket: p?.bucket ?? "fyi",
-      why: e.resolved?.reason ?? snap.acted.get(it.id) ?? p?.why ?? "",
+      why: e.resolved?.reason ?? this.flagged(it) ?? snap.acted.get(it.id) ?? p?.why ?? "",
       ...(snap.handed.has(it.id) && { handoff: snap.handed.get(it.id) }),
       demoted: p?.demoted,
       board: p?.board ?? "",
@@ -2086,6 +2105,7 @@ export class Desk {
         held: this.awaitsAi(e, snap) && ["now", "today"].includes(snap.best.get(id)?.bucket ?? ""),
         activity: this.store.activity({ after: 0, limit: ITEM_ACTIVITY, item: id, latest: true }),
         stack: this.stack(id, snap),
+        ...(e.item.kind === "issue" && this.issueView(e)),
       };
     });
   }
@@ -2534,6 +2554,185 @@ export class Desk {
     if (room <= 0) return;
     const inbox = Effect.runSync(Effect.option(this.queue()));
     if (Option.isSome(inbox)) want([...inbox.value.inbox.urgent, ...inbox.value.inbox.standard].map((c) => c.id));
+  }
+
+  // ---------------------------------------------------------------- issues
+
+  // An open issue the screen flagged says so in place of its why, until you analyze it anyway or block its author.
+  flagged(it: Item): string | null {
+    if (it.kind !== "issue" || it.state !== "open") return null;
+    const r = this.issueReview(it.id);
+    return r?.injection ? `possible prompt injection from @${r.injection.who}: no agent read it further` : null;
+  }
+
+  // An issue's pre-review for its view; opening it starts one when none is written for this version (auto AI on).
+  issueView(e: Entry): Pick<ItemDetail, "issue_ai" | "issue_ai_state" | "issue_ai_error" | "blocked_author"> {
+    const id = e.item.id;
+    if (this.issueAiOn() && this.wantsIssue(e, true)) this.startIssue(id);
+    const f = this.issueFailure(id);
+    const failed = !!f && f.updated_at === e.item.updated_at;
+    return {
+      issue_ai: this.issueReview(id),
+      issue_ai_state: this.issueRuns.has(id)
+        ? "running"
+        : failed
+          ? "failed"
+          : !this.issues || !this.settings["review.auto_ai"]
+            ? "off"
+            : null,
+      issue_ai_error: failed ? f.error : null,
+      blocked_author: this.blockedAuthors().has(e.item.author.toLowerCase()),
+    };
+  }
+
+  // Authors on your blocklist, in lower case: their items are muted, and no agent reads them.
+  blockedAuthors(): Set<string> {
+    return new Set((this.store.get("blocked_authors") as string[] | null) ?? []);
+  }
+
+  issueReview(id: string): IssueReview | null {
+    return this.store.get(`issue_ai:${id}`) as IssueReview | null;
+  }
+
+  // Its last failed try: on which version of the issue, why, and when.
+  issueFailure(id: string): { updated_at: string; error: string; at: string } | null {
+    return this.store.get(`issue_fail:${id}`) as { updated_at: string; error: string; at: string } | null;
+  }
+
+  // ~/.inbox/issue.md, read on each run: the owner's changes to the analysis's instructions (the issue skill).
+  issueSkill(): Effect.Effect<OwnIssueSkill | null> {
+    const file = path.join(this.home, "issue.md");
+    return Effect.try({ try: () => (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""), catch: fsError("read", file) }).pipe(
+      Effect.catch((e) =>
+        Effect.as(
+          Effect.sync(() => {
+            this.log(`${e.message}: analyzing issues with the default instructions`);
+          }),
+          "",
+        ),
+      ),
+      Effect.map((md) => (md.trim() ? readOwnIssueSkill(md) : null)),
+    );
+  }
+
+  // An open issue wants a pre-review: none for this version of it, its author not blocked, nothing flagged it (a flag stands
+  // until you say otherwise), no try on this version failed lately, and from the pump at most one per ISSUE_AGAIN_MS.
+  wantsIssue(e: Entry, opened = false): boolean {
+    const it = e.item;
+    if (it.kind !== "issue" || it.state !== "open" || !this.issues || this.issueRuns.has(it.id)) return false;
+    if (this.blockedAuthors().has(it.author.toLowerCase())) return false;
+    const r = this.issueReview(it.id);
+    if (r?.injection || r?.updated_at === it.updated_at) return false;
+    const now = this.now().getTime();
+    if (r && !opened && now - Date.parse(r.at) < ISSUE_AGAIN_MS) return false;
+    const f = this.issueFailure(it.id);
+    return !(f && f.updated_at === it.updated_at && now - Date.parse(f.at) < ISSUE_RETRY_MS);
+  }
+
+  // Its pre-review, unless one is on its way. `trust` skips the screen: you said what it flagged isn't an injection.
+  startIssue(id: string, trust = false): Deferred.Deferred<IssueReview, IssueError> {
+    const running = this.issueRuns.get(id);
+    if (running) return running;
+    const d = this.shared(this.issueRuns, "issue_review", id, this.runIssue(id, trust), (ok) => {
+      if (this.stopped) return;
+      this.changed();
+      if (ok) this.pumpIssues();
+    });
+    this.changed();
+    return d;
+  }
+
+  runIssue(id: string, trust: boolean): Effect.Effect<IssueReview, IssueError> {
+    return Effect.gen({ self: this }, function* () {
+      const e = this.snapshot().entries.get(id);
+      const issues = this.issues;
+      if (!e || e.item.kind !== "issue" || !issues)
+        return yield* new Conflict({ message: "issue pre-reviews aren't available in this desk" });
+      const it = e.item;
+      const work = Effect.gen({ self: this }, function* () {
+        const t = yield* issues.fetch(it);
+        const own = yield* this.issueSkill();
+        const run = { me: this.me(), dir: this.agentDir(), agent: this.agent(), own, clone: issues.clone(it.repo), trusted: trust };
+        return yield* issues.generate(it, t, run);
+      });
+      return yield* work.pipe(
+        Effect.tap((r) =>
+          Effect.sync(() => {
+            this.store.set(`issue_ai:${id}`, r);
+            this.store.set(`issue_fail:${id}`, null);
+            if (r.injection) this.log(`issue ${id}: possible prompt injection from @${r.injection.who}; stood down`);
+          }),
+        ),
+        Effect.tapError((err) =>
+          Effect.sync(() => {
+            this.store.set(`issue_fail:${id}`, { updated_at: it.updated_at, error: err.message, at: this.now().toISOString() });
+            this.log(`issue pre-review of ${id}: ${err.message}`);
+          }),
+        ),
+      );
+    });
+  }
+
+  // Issues' pre-reviews follow AI reviews' setting and their pause.
+  issueAiOn(): boolean {
+    return !!this.issues && this.settings["review.auto_ai"] && !this.aiPausedNow();
+  }
+
+  // Issues' pre-reviews nobody asked for, one at a time: the Inbox from the top.
+  pumpIssues(): void {
+    if (this.stopped || !this.loaded || !this.issueAiOn() || this.issueRuns.size > 0) return;
+    const inbox = Effect.runSync(Effect.option(this.queue()));
+    if (Option.isNone(inbox)) return;
+    const snap = this.snapshot();
+    for (const c of [...inbox.value.inbox.urgent, ...inbox.value.inbox.standard, ...inbox.value.inbox.fyi]) {
+      const e = snap.entries.get(c.id);
+      if (e && this.wantsIssue(e)) {
+        this.startIssue(c.id);
+        return;
+      }
+    }
+  }
+
+  // POST /api/issue/:id/analyze: its pre-review now; `trust`, after a flag you judged wrong, without the screen.
+  analyzeIssue(ref: string, trust = false): Effect.Effect<{ ok: true }, RefError | BadRequest | Conflict> {
+    return Effect.gen({ self: this }, function* () {
+      const id = yield* this.resolve(ref);
+      const e = this.snapshot().entries.get(id)!;
+      if (e.item.kind !== "issue") return yield* new BadRequest({ message: `${id} is a PR: its AI review is in its review` });
+      if (!this.issues) return yield* new Conflict({ message: "issue pre-reviews aren't available in this desk" });
+      if (this.blockedAuthors().has(e.item.author.toLowerCase()))
+        return yield* new Conflict({ message: `@${e.item.author} is blocked: no agent reads their issues` });
+      this.startIssue(id, trust);
+      return { ok: true as const };
+    });
+  }
+
+  // POST /api/issue/:id/block and /unblock: the author's items muted, or back as they were; local, nothing on GitHub.
+  blockAuthor(ref: string, on: boolean): Effect.Effect<{ ok: true; author: string }, RefError> {
+    return Effect.gen({ self: this }, function* () {
+      const id = yield* this.resolve(ref);
+      const author = this.snapshot().entries.get(id)!.item.author;
+      const set = this.blockedAuthors();
+      if (on) set.add(author.toLowerCase());
+      else set.delete(author.toLowerCase());
+      this.store.set("blocked_authors", [...set].sort());
+      this.log(`${on ? "blocked" : "unblocked"} @${author} on the desk`);
+      this.changed();
+      return { ok: true as const, author };
+    });
+  }
+
+  // POST /api/issue/:id/fix: Make PR with fix. Your agent gets our analysis (never the issue's words) as an ask it may open a
+  // draft PR for; the desk itself writes nothing.
+  fixIssue(ref: string): Effect.Effect<Ask, Conflict | RefError | BadRequest | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      const id = yield* this.resolve(ref);
+      const it = this.snapshot().entries.get(id)!.item;
+      const r = this.issueReview(id);
+      if (it.kind !== "issue" || it.state !== "open") return yield* new Conflict({ message: `${id} isn't an open issue` });
+      if (!r?.fixable || r.injection) return yield* new Conflict({ message: `${id}'s pre-review has no fix to make` });
+      return yield* this.ask({ text: fixAskText(it, r), item_id: id, fix: true });
+    });
   }
 
   canApprove(e: Entry): ReviewView["approve"] {
@@ -3445,12 +3644,15 @@ export class Desk {
       const it = about && ask.item_id ? this.snapshot().entries.get(ask.item_id)?.item : undefined;
       const pr = it?.kind === "pr" ? it : null;
       const mayPush = !!pr && about?.whose === "mine" && pr.state === "open" && !!pr.head_ref && !!pr.head_repo;
+      // Make PR with fix: only while the issue is open and its pre-review still has the fix.
+      const r = ask.fix && it?.kind === "issue" && it.state === "open" ? this.issueReview(it.id) : null;
       return {
         ask,
         about,
         head: pr ? pr.head_oid || null : null,
         base: pr ? pr.base || null : null,
         push: mayPush ? { repo: pr.head_repo!, branch: pr.head_ref! } : null,
+        fix: r?.fixable && !r.injection && r.base && it ? { repo: it.repo, base: r.base } : null,
       };
     });
   }
@@ -3463,6 +3665,7 @@ export class Desk {
     thread_id?: string;
     thread_url?: string;
     lines?: AskLines;
+    fix?: boolean; // fixIssue()'s: never from the window's own words
   }): Effect.Effect<Ask, Conflict | RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
       if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings → Agent" });
@@ -3499,6 +3702,7 @@ export class Desk {
               ...(l.note && { note: true }),
             }
           : null,
+        ...(b.fix && item?.kind === "issue" && { fix: true }),
         answer: null,
       };
       const line = askLine(a, this.askAbout(a.item_id));

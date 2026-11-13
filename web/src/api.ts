@@ -241,6 +241,11 @@ export const api = {
   asks: () => call<AsksView>("GET", "/api/asks"),
   ask: (b: { text: string; item_id?: string; thread_id?: string; thread_url?: string; lines?: AskLines }) =>
     call<{ ok: true; ask: Ask }>("POST", "/api/ask", b),
+  analyzeIssue: (id: string, trust = false) =>
+    call<{ ok: true }>("POST", `/api/issue/${encodeURIComponent(id)}/analyze`, trust ? { trust } : {}),
+  fixIssue: (id: string) => call<{ ok: true; ask: Ask }>("POST", `/api/issue/${encodeURIComponent(id)}/fix`, {}),
+  blockAuthor: (id: string, on: boolean) =>
+    call<{ ok: true; author: string }>("POST", `/api/issue/${encodeURIComponent(id)}/${on ? "block" : "unblock"}`, {}),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
   update: () => call<UpdateView>("POST", "/api/update", {}),

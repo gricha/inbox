@@ -2489,6 +2489,61 @@ p {
   margin-top: 4px;
 }
 
+/* An issue's pre-review, opened in place: its sentence, its fields, where in the code, and a walk through it. */
+.pre {
+  display: grid;
+  gap: 8px;
+}
+
+.pre p {
+  margin: 0;
+}
+
+.pre-sum {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.pre-from,
+.pre-label {
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
+.pre-field {
+  display: grid;
+  gap: 2px;
+}
+
+.pre-state,
+.pre-flag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.pre-state .act {
+  height: 26px;
+  padding: 0 8px;
+}
+
+.pre-where {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.pre-walk {
+  display: grid;
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 2px solid var(--rule-strong);
+}
+
 /* A session opened in place: what it last said, quoted in pencil, and where it runs. */
 .session-said {
   margin: 0;

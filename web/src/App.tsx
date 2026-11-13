@@ -697,6 +697,13 @@ export function App() {
     );
   }
 
+  // An open issue whose pre-review is on its way is read again on each update, so it shows once it's written.
+  useEffect(() => {
+    const d = expanded ? details[expanded] : undefined;
+    if (expanded && typeof d === "object" && d.issue_ai_state === "running") runUi(fetchDetail(expanded));
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- loads changes on every server update; that's when to look
+  }, [loads]);
+
   function toggle(c: Card) {
     setSelected(c.id);
     if (expanded === c.id) {
@@ -1016,6 +1023,30 @@ export function App() {
   }
 
   // Back to desk: your PR leaves Merging for your desk.
+  // An issue's pre-review buttons: analyze it (anyway, after a flag), Make PR with fix (your agent's chat opens on it), and
+  // the desk's blocklist. Each refetches the issue as it's drawn.
+  function issueAct(c: Card, k: "analyze" | "trust" | "fix" | "block" | "unblock"): Effect.Effect<void> {
+    const call =
+      k === "fix"
+        ? Effect.map(api.fixIssue(c.id), () => `Asked your agent for a PR with the fix: ${shortRef(c)}`)
+        : k === "block" || k === "unblock"
+          ? Effect.map(api.blockAuthor(c.id, k === "block"), (r) => `${k === "block" ? "Blocked" : "Unblocked"} @${r.author} on your desk`)
+          : Effect.as(api.analyzeIssue(c.id, k === "trust"), `Analyzing ${shortRef(c)}`);
+    return call.pipe(
+      Effect.match({
+        onSuccess: (words) => {
+          flash(words);
+          if (k === "fix") setAsking({ item: c.id, spot: null });
+        },
+        onFailure: (e) => {
+          flash(e.message, true);
+        },
+      }),
+      Effect.andThen(fetchDetail(c.id)),
+      Effect.andThen(refreshNow),
+    );
+  }
+
   function back(c: Card): Effect.Effect<void> {
     return Effect.suspend(() => {
       if (!c.inflight) {
@@ -1270,6 +1301,7 @@ export function App() {
     else if (k === "close") setExpanded(null);
     else if (k === "t") openAsk(c.id);
     else if (k === "b") runUi(back(c));
+    else if (k === "analyze" || k === "trust" || k === "fix" || k === "block" || k === "unblock") runUi(issueAct(c, k));
     else if (k === "a" && c.cta === "ready") markReady(c);
     else if (k === "a" && c.cta === "merge") runUi(github(c, "merge"));
     else if (k === "a" && c.cta === "reviewers")

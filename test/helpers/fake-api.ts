@@ -363,6 +363,7 @@ const askPlace = (id: string, path: string): AskPlace => ({
   head: "3b9f0c1".padEnd(40, "0"),
   base: "main",
   push: null,
+  fix: null,
 });
 
 // An agent's question, as the owner left it: answered and not picked up yet, still open, or dismissed.

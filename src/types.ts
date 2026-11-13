@@ -906,6 +906,32 @@ export interface ItemDetail {
   held: boolean; // in Now or Today, but kept off the queue until Claude's first review of it is written
   activity: ActivityEvent[]; // the latest events for this item, newest first
   stack: Stack | null; // its stack, with it current
+  issue_ai?: IssueReview | null; // an issue's pre-review, the latest even if the issue has moved on since
+  issue_ai_state?: "running" | "failed" | "off" | null; // its run: on its way, failed on this version (issue_ai_error says why), or AI reviews are off
+  issue_ai_error?: string | null;
+  blocked_author?: boolean; // its author is on your desk's blocklist: their items are muted and no agent reads them
+}
+
+// An issue's pre-review (src/issue.ts), written by your own agent for the issue as it was at `updated_at`. Every field but
+// the dates is model output read from untrusted issue text: drawn as plain prose, never as HTML.
+export interface IssueReview {
+  updated_at: string;
+  at: string;
+  model: string;
+  // Text from someone outside the repo's collaborators read as an attempt to steer an agent: nothing else read it, and every
+  // field below is empty.
+  injection: { who: string; why: string } | null;
+  kind: "bug" | "feature" | "question" | "other";
+  summary: string; // one sentence: what it's about, in our words
+  problem: string; // what is actually wrong or wanted, not what the report says to do
+  cause: string; // a bug's root cause, from the code when it was read; "" when unknown
+  evidence: { path: string; line: number; why: string }[]; // places in the code, checked to exist
+  fix: string; // what we'd change, our own proposal
+  fixable: boolean; // a small, clear bug fix it has conviction about: Make PR with fix
+  steps: { title: string; body: string }[]; // a walk through a complicated one, to decide what to do; empty when simple
+  code: boolean; // it read the repo's code in your local clone; false: only the issue's text
+  repo_dir?: string; // that clone
+  base?: string; // the repo's default branch, which a fix branches off
 }
 
 // GET /api/review/:id: one PR's review view.
@@ -1131,6 +1157,7 @@ export interface Ask {
   thread_id: string | null; // a conversation in the PR's review
   thread_url: string | null;
   lines?: AskLines | null; // absent on asks kept before it; the file's name never goes in the wake line (desk_ask gives it)
+  fix?: boolean; // Make PR with fix on an issue: your agent may open a draft PR with its fix
   answer: { text: string; at: string } | null; // untrusted: an agent wrote it; in paragraphs, drawn by src/prose.ts, never as HTML
 }
 
@@ -1155,6 +1182,7 @@ export interface AskPlace {
   head: string | null; // the PR's head at the desk's last sync
   base: string | null; // the PR's base branch: removed lines are numbered there
   push: { repo: string; branch: string } | null; // only your own open PR's branch, in Merging or not; else null
+  fix: { repo: string; base: string } | null; // Make PR with fix on an open issue: a new branch off base and a draft PR in repo; else null
 }
 
 // A question an agent session put to you through the desk (desk_inquire): a row on the main page until you answer it, and

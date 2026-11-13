@@ -41,6 +41,7 @@ import { readOmarchy, watchOmarchy } from "./omarchy.ts";
 import type { AppUpdater } from "./updates.ts";
 import { Remote, readTailnet, serveOff, serveOn } from "./remote.ts";
 import { dropHostSession, fetchPr, generateReview, installed, loggedIn } from "./review.ts";
+import { fetchIssue, findClone, generateIssueReview } from "./issue.ts";
 import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
 import { FIELDS } from "./signals.ts";
@@ -549,6 +550,38 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, ask, { log });
   });
+  // An issue's pre-review now; `trust` (skip the screen after a flag) only from the window.
+  app.post("/api/issue/:id/analyze", (c) => {
+    const go = Effect.gen(function* () {
+      yield* up;
+      const b = yield* bodyOf(c);
+      const trust = b.trust === true;
+      if (trust && !fromDesk(c)) return yield* new Forbidden({ message: "analyze a flagged issue anyway from the desk's window" });
+      return yield* desk.analyzeIssue(c.req.param("id"), trust);
+    });
+    return respond(c, go, { log });
+  });
+  // Make PR with fix, and the desk's own blocklist: the window's only.
+  app.post("/api/issue/:id/fix", (c) => {
+    const go = Effect.gen(function* () {
+      yield* up;
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "make a PR with a fix from the desk's window" });
+      return { ok: true, ask: yield* desk.fixIssue(c.req.param("id")) };
+    });
+    return respond(c, go, { log });
+  });
+  for (const [route, on] of [
+    ["block", true],
+    ["unblock", false],
+  ] as const)
+    app.post(`/api/issue/:id/${route}`, (c) => {
+      const go = Effect.gen(function* () {
+        yield* up;
+        if (!fromDesk(c)) return yield* new Forbidden({ message: `${route} an author from the desk's window` });
+        return yield* desk.blockAuthor(c.req.param("id"), on);
+      });
+      return respond(c, go, { log });
+    });
   app.get("/api/asks", (c) =>
     total(c, () => ({ on: desk.settings["agent.coordinator"], asks: desk.asks(), coordinator: desk.coordinator.view() })),
   );
@@ -1196,6 +1229,7 @@ export const startDesk = Effect.fnUntraced(function* (
     log,
     notify: opts.notify,
     review: { fetchPr, generate: generateReview, loggedIn, installed },
+    issues: { fetch: fetchIssue, generate: generateIssueReview, clone: (repo) => findClone(repo) },
     writer: opts.writer ?? createWriter({ log }),
     mcpUrl: `http://localhost:${port}/mcp`,
     app: opts.app,

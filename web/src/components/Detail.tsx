@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
-import type { Bucket, Card, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
+import { useState, type ReactNode } from "react";
+import type { Bucket, Card, IssueReview, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
 import { age, BUCKET_LABEL, cls, eventText, handoffLabel, aiName } from "../format.ts";
 import { cardFacts, handsOff, judgeStepText, says } from "../view.ts";
 import type { RowCtx } from "./CardRow.tsx";
+import { Prose } from "./Prose.tsx";
 import { SkLines } from "./Skeleton.tsx";
 
 const PLACE: Record<Bucket, string> = { ...BUCKET_LABEL, now: "In the Inbox", today: "In the Inbox" };
@@ -53,6 +54,8 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
     ctx.run(card, k);
   };
   const asked = request(s);
+  const pre = detail.issue_ai;
+  const fixable = !!pre?.fixable && !pre.injection && item.state === "open" && !detail.blocked_author;
   // Its activity, less the desk's own "first seen" and what the why already says ("assigned to you").
   const events = detail.activity.filter((e) => e.kind !== "new" && !says(card.why, eventText(e, ctx.me)));
   // The why, the board and the trace, saying only what the card's own why doesn't. Claude's bucket, or an automation's,
@@ -137,9 +140,14 @@ export function Detail({ card, detail, ctx }: { card: Card; detail: ItemDetail |
         ))}
       </p>
       {why}
+      {item.kind === "issue" && <IssuePre detail={detail} run={run} />}
       {activity}
       <div className="actions card-keys">
+        {fixable && (
+          <ActButton k="fix" label="Make PR with fix" className="primary" title="Your agent opens a draft PR with this fix" run={run} />
+        )}
         {card.kind === "issue" && !card.resolved && <ActButton k="comment" label="Comment" run={run} />}
+        {card.kind === "issue" && !card.resolved && !detail.blocked_author && <ActButton k="t" label="Ask your agent" run={run} />}
         <ActButton k="o" label="Open on GitHub" run={run} />
         {mine && <HandButton card={card} run={run} />}
         <ActButton k="e" label={card.status === "active" ? "Done" : "Back on the desk"} run={run} />
@@ -267,5 +275,142 @@ export function ActButton({
     >
       {label}
     </button>
+  );
+}
+
+const KIND: Record<IssueReview["kind"], string> = { bug: "A bug", feature: "A feature request", question: "A question", other: "An issue" };
+
+// An issue's pre-review: what's actually wrong and what we'd do, from the code in your clone when it read it; a walk
+// through it when it isn't simple; or the screen's flag, with nothing else read.
+function IssuePre({ detail, run }: { detail: ItemDetail; run: (k: string) => void }) {
+  const r = detail.issue_ai ?? null;
+  const st = detail.issue_ai_state ?? null;
+  const author = detail.item.author;
+  const [at, setAt] = useState(0);
+  if (detail.blocked_author)
+    return (
+      <div className="pre">
+        <h4 className="d-head">Pre-review</h4>
+        <p className="quiet">
+          @{author} is blocked on your desk: their items are muted and no agent reads them.{" "}
+          <ActButton k="unblock" label={`Unblock @${author}`} run={run} />
+        </p>
+      </div>
+    );
+  const stale = !!r && r.updated_at !== detail.item.updated_at;
+  const status =
+    st === "running" ? (
+      <p className="pre-state">
+        <span className="busy" aria-hidden="true" />
+        {r ? "Reading it again since its latest activity" : "Your agent is reading it"}
+      </p>
+    ) : st === "failed" ? (
+      <p className="pre-state t-bad">
+        The pre-review failed: {detail.issue_ai_error} <ActButton k="analyze" label="Try again" run={run} />
+      </p>
+    ) : stale && st !== "off" ? (
+      <p className="pre-state quiet">
+        Written before its latest activity. <ActButton k="analyze" label="Read it again" run={run} />
+      </p>
+    ) : null;
+  if (!r)
+    return status || st !== "off" ? (
+      <div className="pre">
+        <h4 className="d-head">Pre-review</h4>
+        {status ?? (
+          <p className="pre-state quiet">
+            None yet. <ActButton k="analyze" label="Analyze it" run={run} />
+          </p>
+        )}
+      </div>
+    ) : null;
+  if (r.injection)
+    return (
+      <div className="pre">
+        <h4 className="d-head">Pre-review</h4>
+        <p className="pre-flag t-bad">
+          <b>Possible prompt injection from @{r.injection.who}.</b> {r.injection.why} No agent read it further.
+        </p>
+        <p className="actions">
+          <ActButton
+            k="block"
+            label={`Block @${r.injection.who}`}
+            className="primary"
+            title="Mutes their items on your desk; nothing on GitHub"
+            run={run}
+          />
+          <ActButton k="trust" label="Not an injection: analyze it" run={run} />
+        </p>
+      </div>
+    );
+  const steps = r.steps;
+  const step = steps[Math.min(at, steps.length - 1)];
+  return (
+    <div className="pre">
+      <h4 className="d-head">Pre-review</h4>
+      {status}
+      <p className="pre-sum">
+        <b>{KIND[r.kind]}.</b> {r.summary}
+      </p>
+      <p className="pre-from quiet">{r.code ? "From the code in your clone" : "From the issue's text alone: no local clone to read"}</p>
+      <PreField label="What's wrong" text={r.problem} />
+      <PreField label="Cause" text={r.cause} />
+      {r.evidence.length > 0 && (
+        <ul className="pre-where">
+          {r.evidence.map((e) => (
+            <li key={`${e.path}:${e.line}`}>
+              <code>
+                {e.path}:{e.line}
+              </code>{" "}
+              <span className="quiet">{e.why}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <PreField label={r.fixable ? "The fix" : "What we'd do"} text={r.fix} />
+      {step && (
+        <div className="pre-walk">
+          <p className="pre-step-head">
+            <b>{step.title}</b>{" "}
+            <span className="quiet">
+              Step {Math.min(at, steps.length - 1) + 1} of {steps.length}
+            </span>
+          </p>
+          <Prose text={step.body} />
+          <p className="actions">
+            <button
+              type="button"
+              className="act"
+              disabled={at <= 0}
+              onClick={() => {
+                setAt((n) => Math.max(0, n - 1));
+              }}
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              className="act"
+              disabled={at >= steps.length - 1}
+              onClick={() => {
+                setAt((n) => Math.min(steps.length - 1, n + 1));
+              }}
+            >
+              Next
+            </button>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PreField({ label, text }: { label: string; text: string }) {
+  if (!text) return null;
+  return (
+    <div className="pre-field">
+      <p className="pre-label">{label}</p>
+      <Prose text={text} />
+    </div>
   );
 }
