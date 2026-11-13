@@ -115,6 +115,21 @@ enum Words {
     }
   }
 
+  // The same fact in other words, as rules write whys: "conflicts with main", "red CI", "you requested changes", "2 approvals".
+  static let meanings = [
+    #"conflict"#,
+    #"\bCI\b.*\b(?:fail\w*|red|broken)\b|\b(?:fail\w*|red|broken)\b.*\bCI\b"#,
+    #"\bchanges requested\b|\brequested changes\b"#,
+    #"\bapprov(?:ed|als?)\b"#,
+  ]
+
+  // Whether a why already says a fact, in its words or in other words for the same thing (view.ts's says()).
+  static func says(_ why: String, _ fact: String) -> Bool {
+    if fact.isEmpty || why.lowercased().contains(fact.lowercased()) { return true }
+    let has = { (s: String, pattern: String) in s.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil }
+    return meanings.contains { has(why, $0) && has(fact, $0) }
+  }
+
   // One event in plain words, without its time: "alice approved", "CI went red". `me` reads as "you".
   static func eventText(_ e: ActivityEvent, me: String) -> String {
     let d = e.data ?? [:]

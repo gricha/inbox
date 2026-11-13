@@ -207,8 +207,8 @@ struct ItemPage: View {
 
   @ViewBuilder
   private func activity(_ c: Card) -> some View {
-    // Less the desk's own "first seen".
-    let events = (detail?.activity ?? []).filter { $0.kind != "new" }
+    // Less the desk's own "first seen" and what the why already says ("assigned to you").
+    let events = (detail?.activity ?? []).filter { $0.kind != "new" && !Words.says(c.why ?? "", Words.eventText($0, me: store.me)) }
     if !events.isEmpty {
       VStack(alignment: .leading, spacing: 6) {
         SmallHead(text: "Recent activity")

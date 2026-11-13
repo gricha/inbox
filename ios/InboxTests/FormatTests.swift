@@ -93,6 +93,19 @@ final class FormatTests: XCTestCase {
     XCTAssertEqual(Words.eventText(try event(#"{"kind":"teleported","actor":"x"}"#), me: "me"), "teleported", "an event this app doesn't know reads as its kind")
   }
 
+  // An item's recent activity leaves out what its why already says, in its words or in others for the same thing.
+  func testAWhySaysAFact() {
+    XCTAssertTrue(Words.says("Assigned to you", "assigned to you"))
+    XCTAssertTrue(Words.says("red CI on your PR", "CI went red"))
+    XCTAssertTrue(Words.says("conflicts with main", "merge conflict"))
+    XCTAssertTrue(Words.says("you requested changes", "dana requested changes"))
+    XCTAssertTrue(Words.says("2 approvals", "alice approved"))
+    XCTAssertFalse(Words.says("assigned to you", "nina commented"))
+    XCTAssertFalse(Words.says("", "nina commented"))
+    XCTAssertFalse(Words.says("asked you directly", "CI went red"))
+    XCTAssertFalse(Words.says("a credible plan", "CI went red"), "red inside a word isn't red")
+  }
+
   func testTheInboxCountsWhatNeedsYou() throws {
     let q: QueueView = try Fixture.decode("queue")
     // Urgent and Standard, the questions and the sessions; FYI and notes aren't counted.
