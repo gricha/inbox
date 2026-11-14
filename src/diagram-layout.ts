@@ -13,6 +13,7 @@ const SMALL = 11.5;
 const PAD_X = 12;
 const NODE_H = 30;
 const MAX_H = 320;
+const MAX_W = 720; // past this an LR flowchart is drawn top down, so its text isn't shrunk to fit the column
 const MIN_SCALE = 0.85;
 
 export type Measure = (text: string, size: number, weight: number) => number;
@@ -65,7 +66,14 @@ export const fontMeasure: Measure = (text, size, weight) => {
 // ---------------------------------------------------------------------------- layout
 
 export function layout(graph: DiagramGraph, elk: ElkLayout, measure: Measure): Promise<Drawn> {
-  return graph.kind === "sequence" ? Promise.resolve(sequence(graph, measure)) : flow(graph, elk, measure);
+  return graph.kind === "sequence" ? Promise.resolve(sequence(graph, measure)) : fitted(graph, elk, measure);
+}
+
+async function fitted(graph: Extract<DiagramGraph, { kind: "flow" }>, elk: ElkLayout, measure: Measure): Promise<Drawn> {
+  const drawn = await flow(graph, elk, measure, graph.direction);
+  if (graph.direction !== "LR" || drawn.w <= MAX_W) return drawn;
+  const down = await flow(graph, elk, measure, "TB");
+  return down.w < drawn.w ? down : drawn;
 }
 
 function nodeSize(n: { shape: DiagramNode["shape"]; label: string }, measure: Measure): { w: number; h: number } {
@@ -75,7 +83,12 @@ function nodeSize(n: { shape: DiagramNode["shape"]; label: string }, measure: Me
 
 const DIRECTION = { LR: "RIGHT", TB: "DOWN" } as const;
 
-async function flow(graph: Extract<DiagramGraph, { kind: "flow" }>, elk: ElkLayout, measure: Measure): Promise<Drawn> {
+async function flow(
+  graph: Extract<DiagramGraph, { kind: "flow" }>,
+  elk: ElkLayout,
+  measure: Measure,
+  dir: keyof typeof DIRECTION,
+): Promise<Drawn> {
   const kids = (group: string | null): ElkNode[] =>
     graph.nodes
       .filter((n) => n.group === group)
@@ -90,7 +103,7 @@ async function flow(graph: Extract<DiagramGraph, { kind: "flow" }>, elk: ElkLayo
     id: "root",
     layoutOptions: {
       "elk.algorithm": "layered",
-      "elk.direction": DIRECTION[graph.direction],
+      "elk.direction": DIRECTION[dir],
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.layered.spacing.nodeNodeBetweenLayers": "40",
       "elk.spacing.nodeNode": "22",

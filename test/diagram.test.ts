@@ -1,7 +1,9 @@
 // An AI review's diagram: the strict Mermaid subset, its limits, and that nothing outside it gets through.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { diagramText, parseDiagram, type DiagramGraph } from "../src/diagram.ts";
+import { fontMeasure, layout } from "../src/diagram-layout.ts";
 
 const parse = (src: string): DiagramGraph => {
   const r = parseDiagram(src);
@@ -328,4 +330,23 @@ test("a sequence's message or note in quotes reads without them; a quote inside 
     [...r.graph.messages.map((m) => m.text), ...r.graph.notes.map((n) => n.text)],
     ["commit the queue", "ok", 'say "hi"', 'the "fill" job'],
   );
+});
+
+test("an LR flowchart too wide for the column is drawn top down; a short one stays across", async () => {
+  const { default: Elk } = createRequire(import.meta.url)("elkjs/lib/elk.bundled.js") as {
+    default: new () => { layout: (r: object) => Promise<object> };
+  };
+  const elk = new Elk();
+  const draw = (src: string) => layout(parse(src), (root) => elk.layout(root) as never, fontMeasure);
+  // The feature path from a review: eight nodes in one row.
+  const long = await draw(`flowchart LR
+  a["ExplorerState.billing_feature"] --> b["get_explorer_billing_feature"]
+  b -->|"enum or UNSPECIFIED"| c["seer_feature_scope"] --> d["handle_before_task_publish"]
+  d -->|"enum + legacy label headers"| e["handle_task_prerun"] --> f["_proxy_feature"]
+  f -->|"X-Seer-Feature label"| g["LLM proxy"]`);
+  assert.ok(long.w <= 720, `${long.w} wide`);
+  assert.ok(long.h > long.w, "drawn top down");
+  const short = await draw(`flowchart LR
+  a["fetch"] --> b["parse"] --> c["store"]`);
+  assert.ok(short.w > short.h, "kept across");
 });
