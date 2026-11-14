@@ -79,6 +79,7 @@ import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { ProseBlocks, SaidText, spans, Words } from "./Prose.tsx";
 import { focusReviewers, Reviewers } from "./Reviewers.tsx";
 import { SkLines } from "./Skeleton.tsx";
+import { Splitter, type Width } from "./Splitter.tsx";
 
 // What sits under a line of the diff: an AI note (index: its place in reading order), a review thread, the comment you're
 // writing, or one you sent that the conversation doesn't show yet.
@@ -118,6 +119,7 @@ const SIDE_ROWS = 6; // a sidebar part longer than this folds its quiet rows
 const LINE = 96; // px below the window's top where "the section you're in" is read off
 const REST = "Not worth reviewing"; // the fold's line
 const STACK_SHOWN = 4; // the PR below this one, this one and two above; the rest of a long stack is a click away
+const SIDE: Width = { key: "desk.review.side.width", cssVar: "--rv-side-w-user", min: 220, max: 0.45 };
 const ROOM = 700; // px of the page's column (styles.css's @container pane): narrower, the sidebar opens over the diff, folded
 const ROW = 19; // px: .rv-diff's --diffs-line-height
 const VIEW = "desk.review.view"; // this device's choice: the guided review or traditional, when a review has steps
@@ -1084,6 +1086,15 @@ export function Review({
           </div>
         )}
       </div>
+      {showSide && room && (
+        <Splitter
+          width={SIDE}
+          edge="left"
+          column={() => document.querySelector<HTMLElement>("#rv-side")}
+          label="the sidebar"
+          className="rv-side-resize"
+        />
+      )}
       {showSide && (
         <aside id="rv-side" className="rv-side" aria-label="Stack, checks, reviewers and files">
           <div className="rv-side-top" aria-hidden="true" />

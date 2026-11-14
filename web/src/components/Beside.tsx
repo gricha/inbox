@@ -1,6 +1,6 @@
-import { useEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { cls } from "../format.ts";
-import { getStored, setStored } from "../storage.ts";
+import { Splitter, type Width } from "./Splitter.tsx";
 
 // The list a review or a question was opened from, beside it: its name, its filter and its rows, scrolling on their own; or,
 // folded, a thin rail with the same button. App keeps the review where it is in the tree, so this coming and going never
@@ -42,56 +42,9 @@ export function Beside({
   });
   const label = open ? "Hide the list" : "Show the list";
   const aside = useRef<HTMLElement>(null);
-  // This device's width for it, dragged by its edge; unset, the stylesheet's.
-  useEffect(() => {
-    widen(Number(getStored(WIDTH)) || null);
-  }, []);
-  const dragTo = (x: number) => {
-    const left = aside.current?.getBoundingClientRect().left ?? 0;
-    widen(x - left, true);
-  };
-  const onDown = (e: PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
-    document.documentElement.classList.add("resizing");
-    const move = (m: globalThis.PointerEvent) => {
-      dragTo(m.clientX);
-    };
-    const up = () => {
-      el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", up);
-      el.removeEventListener("pointercancel", up);
-      document.documentElement.classList.remove("resizing");
-    };
-    el.addEventListener("pointermove", move);
-    el.addEventListener("pointerup", up);
-    el.addEventListener("pointercancel", up);
-  };
-  const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const w = aside.current?.getBoundingClientRect().width ?? 340;
-    widen(w + (e.key === "ArrowRight" ? 24 : -24), true);
-  };
   return (
     <aside ref={aside} className={cls("beside", !open && "folded")} aria-label={name}>
-      {open && (
-        <div
-          className="beside-resize"
-          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a splitter you drag and move with ←/→; an <hr> takes no focus or children
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize the list"
-          title="Drag to resize the list; double-click for its usual width"
-          tabIndex={0}
-          onPointerDown={onDown}
-          onKeyDown={onKey}
-          onDoubleClick={() => {
-            widen(null, true);
-          }}
-        />
-      )}
+      {open && <Splitter width={LIST} edge="right" column={() => aside.current} label="the list" className="beside-resize" />}
       {open && (
         <div className="beside-head">
           <h2 className="beside-name">
@@ -120,14 +73,4 @@ export function Beside({
   );
 }
 
-const WIDTH = "desk.beside.width";
-const MIN = 260;
-
-// The list's width as a CSS variable the app's grid reads, between MIN and most of the window; null is the stylesheet's.
-function widen(px: number | null, keep = false) {
-  const root = document.documentElement.style;
-  const w = px === null ? null : Math.round(Math.min(Math.max(px, MIN), Math.max(MIN, innerWidth * 0.5)));
-  if (w === null) root.removeProperty("--list-w-user");
-  else root.setProperty("--list-w-user", `${w}px`);
-  if (keep) setStored(WIDTH, w === null ? null : String(w));
-}
+const LIST: Width = { key: "desk.beside.width", cssVar: "--list-w-user", min: 260, max: 0.5 };

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { useRef, useState } from "react";
+import { Splitter, type Width } from "./Splitter.tsx";
 import type { AskLines, AsksView, CoordinatorView, Inquiry } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed, useKeyedLayout } from "../keyed.ts";
@@ -56,6 +57,7 @@ export function Chat({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const log = useRef<HTMLOListElement>(null);
+  const aside = useRef<HTMLElement>(null);
 
   useKeyed(loads, (signal) => {
     runUi(
@@ -123,7 +125,8 @@ export function Chat({
   });
 
   return (
-    <aside className="chat" aria-label="Your chat with your agent">
+    <aside ref={aside} className="chat" aria-label="Your chat with your agent">
+      <Splitter width={CHAT} edge="left" column={() => aside.current} label="the chat" />
       <div className="chat-head">
         <h2 className="chat-title">Your agent</h2>
         <p className="chat-about" title={about.item ?? undefined}>
@@ -336,3 +339,5 @@ function Waiting({ ask, live }: { ask: string; live?: CoordinatorView | undefine
     </p>
   );
 }
+
+const CHAT: Width = { key: "desk.chat.width", cssVar: "--chat-w-user", min: 300, max: 0.5 };

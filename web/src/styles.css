@@ -641,7 +641,7 @@ p {
 
 /* The sidebar is the only global chrome; each page has its own head. */
 .app {
-  --chat-w: clamp(320px, 25vw, 420px);
+  --chat-w: var(--chat-w-user, clamp(320px, 25vw, 420px));
   --side-w: 200px;
   --list-w: 0px; /* the list beside a review, when it's there */
 
@@ -1964,10 +1964,9 @@ p {
    of both heads (the window's drag handles) and of Back. */
 
 /* Its right edge, to drag: a hairline in the accent under the pointer and while dragging. */
-.beside-resize {
+.splitter {
   position: absolute;
   top: 0;
-  right: -3px;
   bottom: 0;
   z-index: 5;
   width: 6px;
@@ -1975,9 +1974,17 @@ p {
   -webkit-app-region: no-drag;
 }
 
-.beside-resize:hover,
-.beside-resize:focus-visible,
-.resizing .beside-resize {
+.splitter-right {
+  right: -3px;
+}
+
+.splitter-left {
+  left: -3px;
+}
+
+.splitter:hover,
+.splitter:focus-visible,
+.resizing .splitter:active {
   outline: none;
   background: linear-gradient(var(--accent), var(--accent)) center / 2px 100% no-repeat;
 }
@@ -3598,6 +3605,7 @@ p {
 
 /* Your chat with the coordinator: the window's right column, full height; at 1100px and below, over the page's right edge. */
 .chat {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -3636,7 +3644,7 @@ p {
 /* Narrower, it lies over the page's right edge, under the page's head. */
 @media (width <= 1100px) {
   .app {
-    --chat-w: min(360px, calc(100vw - 24px));
+    --chat-w: min(var(--chat-w-user, 360px), calc(100vw - 24px));
   }
 
   .chat {
@@ -4826,19 +4834,19 @@ fieldset.au-field > legend {
    beside the review, the chat. */
 @container pane (width >= 700px) {
   .review.side-open {
-    grid-template-columns: minmax(0, 1fr) 240px;
+    grid-template-columns: minmax(0, 1fr) var(--rv-side-w-user, 240px);
   }
 }
 
 @container pane (width >= 880px) {
   .review.side-open {
-    grid-template-columns: minmax(0, 1fr) 260px;
+    grid-template-columns: minmax(0, 1fr) var(--rv-side-w-user, 260px);
   }
 }
 
 @container pane (width >= 1000px) {
   .review.side-open {
-    grid-template-columns: minmax(0, 1fr) 280px;
+    grid-template-columns: minmax(0, 1fr) var(--rv-side-w-user, 280px);
   }
 }
 
@@ -4861,6 +4869,19 @@ fieldset.au-field > legend {
 /* Under the toggle while it's over the diff, a file's sticky name keeps its size clear of it. */
 .review:not(.side-open) .rv-fhead {
   padding-right: 38px;
+}
+
+/* The sidebar's left edge, to drag: in the gap before it, as tall as the sidebar. */
+.rv-side-resize {
+  position: sticky;
+  top: 60px;
+  grid-row: 1;
+  grid-column: 2;
+  bottom: auto;
+  left: auto;
+  justify-self: start;
+  height: calc(100vh - 80px);
+  margin-left: -23px;
 }
 
 .rv-side {
