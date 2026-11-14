@@ -819,7 +819,8 @@ export function oldFromNew(text: string, patch: string): string | null {
 
 // The whole file before and after, as a review's section can show more lines of it: cut at the first hunk of the file past the
 // section's last, so the lines after the section are the same on both sides (Pierre's diff takes the ones it's given as all
-// there are). null when the section's hunks aren't the file's, or the cut doesn't line up.
+// there are). null when the section's hunks aren't the file's, the file has a hunk above the section's last that it doesn't
+// show (Pierre would draw the lines before from both sides as one, and fail), or the cut doesn't line up.
 export function wholeFor(w: { old: string; new: string }, patch: string, sectionHunks: string[]): { old: string; new: string } | null {
   const heads = (p: string) =>
     [...p.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)].map((m) => ({
@@ -835,6 +836,9 @@ export function wholeFor(w: { old: string; new: string }, patch: string, section
   if (!last) return null;
   const at = all.findIndex((h) => h.key === last.key);
   if (at < 0) return null;
+  // A hunk of the file above the section's last that isn't in it leaves the lines before different on each side.
+  const keys = new Set(mine.map((h) => h.key));
+  if (all.slice(0, at).some((h) => !keys.has(h.key))) return null;
   const end = (start: number, n: number) => (n === 0 ? start : start + n - 1); // the hunk's last line on that side
   const oldLines = w.old.split("\n");
   const newLines = w.new.split("\n");

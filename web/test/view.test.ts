@@ -1318,7 +1318,7 @@ test("oldFromNew runs a PR's patch backwards over the file after it, and gives u
   assert.equal(oldFromNew("x\n", "@@ -0,0 +1 @@\n+x"), "", "an added file was empty");
 });
 
-test("wholeFor cuts a section's files at the file's next hunk, so what's after it matches; the last section keeps them whole", () => {
+test("wholeFor cuts a section's files at the file's next hunk, so what's after it matches; none past a hunk it doesn't show", () => {
   const after = Array.from({ length: 30 }, (_, i) => `n${i + 1}`);
   // Two hunks: +2 lines at 5, and 1 line replaced at 20 (new numbering).
   const h1 = "@@ -4,2 +4,4 @@\n n4\n+n5\n+n6\n n7";
@@ -1333,8 +1333,8 @@ test("wholeFor cuts a section's files at the file's next hunk, so what's after i
     [19, 17],
     "cut before the second hunk: 19 new lines, 17 old",
   );
-  const second = wholeFor(w, patch, [h2]);
-  assert.deepEqual(second, w, "the last hunk: both files whole");
+  assert.deepEqual(wholeFor(w, patch, [h1, h2]), w, "the last hunk with the one above it: both files whole");
+  assert.equal(wholeFor(w, patch, [h2]), null, "the last hunk alone: the lines above it differ, so no whole file");
   assert.equal(wholeFor(w, patch, ["@@ -1,1 +1,1 @@\n-x\n+y"]), null, "not this file's hunk");
 });
 
