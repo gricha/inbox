@@ -3746,6 +3746,22 @@ p {
   font-size: 13px;
 }
 
+/* What it's doing, as its transcript says: its latest step, each new one rising in over the last. */
+.chat-step {
+  flex-wrap: nowrap;
+  align-items: baseline;
+}
+
+.chat-step .busy {
+  align-self: center;
+}
+
+.chat-step-text {
+  min-width: 0;
+  color: var(--ink-2);
+  animation: rise-in 0.2s ease-out;
+}
+
 .chat-wait .act {
   height: 26px;
   padding: 0 8px;

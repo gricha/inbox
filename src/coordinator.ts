@@ -337,7 +337,11 @@ export class Coordinator {
   checked = 0;
   status: CoordinatorView["status"] = null;
   watching: NodeJS.Timeout | null = null;
+  following: NodeJS.Timeout | null = null;
   watchEvery = 10_000; // while an ask of yours waits on its answer
+  activityEvery = 2_000; // and how often its transcript is read for what it's doing, while it works
+  activity: string[] = [];
+  session: { sessionId: string; cwd: string } | null = null; // its row's, from the last look
   failure: unknown = null; // the last run's, already reported: the routes' "didn't start" carries it
   turn: ChildProcess | null = null; // on Codex or OpenCode: the wake in flight
   turnOf: TurnKind | null = null; // and whose it is
@@ -405,6 +409,7 @@ export class Coordinator {
       error: this.on ? this.error() : null,
       status: this.on ? (this.own ? own : this.status) : null,
       queued: this.asks().flatMap((l) => askOf(l) ?? []),
+      activity: this.on && !this.own && (this.status === "busy" || this.status === "shell") ? this.activity : [],
     };
   }
 
@@ -459,6 +464,25 @@ export class Coordinator {
       if (!this.flushing && !this.own) this.desk.runner.fork("coordinator", Effect.ignore(this.find()));
     }, this.watchEvery);
     this.watching.unref();
+    this.follow();
+  }
+
+  // While it works, its transcript's latest steps, read every few seconds, for the chat to show in place of "On it".
+  follow(): void {
+    if (this.following || this.desk.stopped) return;
+    this.following = setInterval(() => {
+      if (!this.watching) {
+        clearInterval(this.following!);
+        this.following = null;
+        return;
+      }
+      const busy = this.status === "busy" || this.status === "shell";
+      const lines = busy && this.session && !this.own ? activityOf(readTail(transcriptPath(this.session))) : [];
+      if (lines.join("\n") === this.activity.join("\n")) return;
+      this.activity = lines;
+      this.desk.changed();
+    }, this.activityEvery);
+    this.following.unref();
   }
 
   // Answered while it waited to go again (the desk asked again while your agent was on it): it never goes.
@@ -723,6 +747,7 @@ export class Coordinator {
         this.desk.store.set(KEY, a && { id: a.id, mode: "unknown" });
         this.desk.changed();
       }
+      this.session = a && { sessionId: a.sessionId, cwd: a.cwd };
       const status = a?.pid ? oneOf(STATUSES, a.status) : undefined;
       if (a?.pid && !status) this.desk.log(`coordinator: ${a.id} says "${String(a.status)}", which the desk doesn't know: shown as idle`);
       this.saw(a ? (a.pid ? (status ?? "idle") : "stopped") : null);
@@ -936,3 +961,116 @@ export function carryTrust(from: string, to: string, file = claudeConfig()): boo
 }
 
 const claudeConfig = () => path.join(process.env.CLAUDE_CONFIG_DIR?.trim() ? process.env.CLAUDE_CONFIG_DIR : os.homedir(), ".claude.json");
+
+// ---------------------------------------------------------------------------- what it's doing
+
+const TAIL = 256 * 1024; // of its transcript, read for its latest steps
+const STEPS = 5;
+const STEP_LEN = 140;
+
+// Where Claude Code keeps a session's transcript: its projects folder, by its folder with every other character a dash.
+export function transcriptPath(s: { sessionId: string; cwd: string }): string {
+  const home = process.env.CLAUDE_CONFIG_DIR?.trim() ? process.env.CLAUDE_CONFIG_DIR : path.join(os.homedir(), ".claude");
+  return path.join(home, "projects", s.cwd.replaceAll(/[^A-Za-z0-9]/g, "-"), `${s.sessionId}.jsonl`);
+}
+
+// The file's last TAIL bytes from its first whole line; "" when it isn't there (yet).
+function readTail(file: string): string {
+  return Result.getOrElse(
+    Result.try({
+      try: () => {
+        const fd = fs.openSync(file, "r");
+        try {
+          const size = fs.fstatSync(fd).size;
+          const at = Math.max(0, size - TAIL);
+          const buf = Buffer.alloc(size - at);
+          fs.readSync(fd, buf, 0, buf.length, at);
+          const text = buf.toString("utf8");
+          return at === 0 ? text : text.slice(text.indexOf("\n") + 1);
+        } finally {
+          fs.closeSync(fd);
+        }
+      },
+      catch: () => "",
+    }),
+    () => "",
+  );
+}
+
+// Its steps since the latest prompt it was given, as Claude Code lists them: each tool it used, said plainly, and what it
+// said along the way; the last STEPS.
+export function activityOf(jsonl: string): string[] {
+  let steps: string[] = [];
+  for (const line of jsonl.split("\n")) {
+    if (!line.trim()) continue;
+    const entry = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null }));
+    const type = field(entry, "type");
+    const content = field(field(entry, "message"), "content");
+    if (type === "user") {
+      // A prompt, not a tool's result coming back: a new turn starts.
+      const prompt = typeof content === "string" || (Array.isArray(content) && content.some((b) => field(b, "type") !== "tool_result"));
+      if (prompt && field(entry, "isMeta") !== true) steps = [];
+      continue;
+    }
+    if (type !== "assistant" || !Array.isArray(content)) continue;
+    for (const b of content) {
+      const kind = field(b, "type");
+      const said =
+        kind === "tool_use" ? step(str(field(b, "name")) ?? "", field(b, "input")) : kind === "text" ? str(field(b, "text")) : undefined;
+      const one = said?.replaceAll(/\s+/g, " ").trim();
+      if (one) steps.push(one.length > STEP_LEN ? `${one.slice(0, STEP_LEN - 1)}…` : one);
+    }
+  }
+  return steps.slice(-STEPS);
+}
+
+const base = (p: string | undefined) => (p ? path.basename(p) : "");
+
+// One tool use, said plainly.
+function step(name: string, input: unknown): string {
+  const s = (k: string) => str(field(input, k)) ?? "";
+  switch (name) {
+    case "Bash":
+      return s("description") || `Ran ${s("command")}`;
+    case "Read":
+      return `Read ${base(s("file_path"))}`;
+    case "Edit":
+    case "MultiEdit":
+      return `Edited ${base(s("file_path"))}`;
+    case "Write":
+      return `Wrote ${base(s("file_path"))}`;
+    case "Grep":
+      return `Searched for ${s("pattern")}`;
+    case "Glob":
+      return `Looked for ${s("pattern")}`;
+    case "WebFetch":
+      return `Fetched ${s("url")}`;
+    case "WebSearch":
+      return `Searched the web for ${s("query")}`;
+    case "Agent":
+    case "Task":
+      return `Started an agent: ${s("description")}`;
+    case "TodoWrite":
+      return "Updated its plan";
+    case "ToolSearch":
+      return "Loaded its tools";
+  }
+  const desk = /^mcp__\w+__desk_(\w+)$/.exec(name)?.[1];
+  if (desk) {
+    const what = s("ref") || s("item") || s("ask_id");
+    const done = DESK_STEPS[desk];
+    return done ? `${done}${what && desk !== "answer" ? ` ${what}` : ""}` : `desk_${desk}${what ? ` ${what}` : ""}`;
+  }
+  return name.replace(/^mcp__\w+?__/, "");
+}
+
+const DESK_STEPS: Record<string, string> = {
+  brief: "Read the AI review of",
+  item: "Looked at",
+  ask: "Read your ask",
+  answer: "Wrote its answer",
+  merging: "Looked at Merging",
+  note: "Noted on",
+  events: "Read what changed",
+  list: "Read your Inbox",
+};

@@ -305,6 +305,18 @@ function Waiting({ ask, live }: { ask: string; live?: CoordinatorView | undefine
         Queued: it gets this when it's done with what it's on {watch}
       </p>
     );
+  // Its latest step in place of "On it", each new one swapping in for the last, as Claude Code's spinner line does.
+  const now = live.activity.at(-1);
+  if ((live.status === "busy" || live.status === "shell") && now)
+    return (
+      <p className="chat-wait chat-step" aria-live="polite">
+        <span className="busy" aria-hidden="true" />
+        <span key={now} className="chat-step-text">
+          {now}
+        </span>{" "}
+        {watch}
+      </p>
+    );
   if (live.status === "busy" || live.status === "shell")
     return (
       <p className="chat-wait">

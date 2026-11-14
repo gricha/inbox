@@ -220,7 +220,15 @@ const inflightView: InflightView = {
     },
   ],
   stacks: {},
-  coordinator: { on: true, id: "c0ffee01", url: "https://claude.ai/code/session_01Fake", error: null, status: "idle", queued: [] },
+  coordinator: {
+    on: true,
+    id: "c0ffee01",
+    url: "https://claude.ai/code/session_01Fake",
+    error: null,
+    status: "idle",
+    queued: [],
+    activity: [],
+  },
   work: [],
 };
 

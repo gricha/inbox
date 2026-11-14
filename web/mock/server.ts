@@ -2371,6 +2371,13 @@ const coordinator: CoordinatorView = {
   error: null,
   status: "busy",
   queued: [],
+  activity: [
+    "Read the AI review of acme/api#4127",
+    "Show the commit's change to app.py",
+    "Read app.py",
+    "The retry wraps the whole handler, so a second webhook can double-charge. Checking the idempotency key next.",
+    "Searched for idempotency_key",
+  ],
 };
 
 // Agent sessions' questions for you: one with options, one without. Answering one takes it off the main page. Then two

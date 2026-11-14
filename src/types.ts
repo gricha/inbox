@@ -1156,6 +1156,9 @@ export interface CoordinatorView {
   // stopped (no process), or null (none yet). Looked at every 10 s while one of your asks waits on its answer.
   status: "busy" | "shell" | "waiting" | "idle" | "stopped" | null;
   queued: string[]; // your asks not handed over yet: it gets them once it's done with what it's on
+  // While it works on Claude Code: its latest steps from its session's transcript, oldest first ("Read app.py", what it
+  // said along the way). Its thinking isn't there: Claude Code keeps it empty. Every string is the session's, so text.
+  activity: string[];
 }
 
 // Your words to the coordinator from the desk's window (Ask your agent), about what you were on, and its answer (desk_answer).

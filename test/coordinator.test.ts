@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { askLine, carryTrust, denyDir, DENY, NO_REVIEW, wakeFor } from "../src/coordinator.ts";
+import { activityOf, askLine, carryTrust, denyDir, DENY, NO_REVIEW, transcriptPath, wakeFor } from "../src/coordinator.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { Ask, AskLines, AskPlace, AsksView } from "../src/types.ts";
@@ -257,7 +257,15 @@ test(
   posix,
   async (c) => {
     const t = await coordinated(c);
-    assert.deepEqual(runSync(t.desk.inflight()).coordinator, { on: true, id: null, url: null, error: null, status: null, queued: [] });
+    assert.deepEqual(runSync(t.desk.inflight()).coordinator, {
+      on: true,
+      id: null,
+      url: null,
+      error: null,
+      status: null,
+      queued: [],
+      activity: [],
+    });
     t.desk.start();
     await until(() => t.fake.calls().length === 1);
     await settle();
@@ -292,6 +300,7 @@ test(
       error: null,
       status: "busy",
       queued: [],
+      activity: [],
     });
   },
 );
@@ -1579,4 +1588,45 @@ test("the coordinator's folder inherits the trust you gave its folder before the
   assert.equal(read().projects["/new/coordinator"], undefined);
   assert.equal(carryTrust("/old/coordinator", "/new/coordinator", path.join(dir, "missing.json")), false, "no file: nothing written");
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("what it's doing: its steps since the latest prompt from its transcript, said plainly, the last five", () => {
+  const j = (x: object) => JSON.stringify(x);
+  const said = (...content: object[]) => j({ type: "assistant", message: { content } });
+  const tool = (name: string, input: object) => ({ type: "tool_use", name, input });
+  const lines = [
+    j({ type: "user", message: { content: "an earlier wake" } }),
+    said(tool("Read", { file_path: "/x/old.py" })),
+    j({ type: "user", message: { content: "<desk-ask id=82ae57f6>" } }),
+    j({ type: "mode" }),
+    said({ type: "thinking", thinking: "" }, tool("mcp__inbox__desk_brief", { ref: "getsentry/seer#9517" })),
+    j({ type: "user", message: { content: [{ type: "tool_result", content: "…" }] } }),
+    said(tool("Bash", { command: "git show abc:src/app.py", description: "Show the commit's app.py" })),
+    said(tool("Bash", { command: "git log\n  --oneline" })),
+    said(tool("Read", { file_path: "/Users/me/code/seer/src/app.py" })),
+    "{not json",
+    said({ type: "text", text: "The retry wraps\n the handler." }, tool("Grep", { pattern: "idempotency_key" })),
+    said(tool("mcp__inbox__desk_answer", { ask_id: "82ae57f6", text: "…" })),
+  ].join("\n");
+  assert.deepEqual(activityOf(lines), [
+    "Ran git log --oneline",
+    "Read app.py",
+    "The retry wraps the handler.",
+    "Searched for idempotency_key",
+    "Wrote its answer",
+  ]);
+  assert.deepEqual(activityOf(lines.split("\n").slice(0, 6).join("\n")), ["Read the AI review of getsentry/seer#9517"]);
+  assert.equal(activityOf(said({ type: "text", text: "x".repeat(300) })).at(0)?.length, 140);
+  assert.deepEqual(activityOf(""), []);
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = "/c";
+  try {
+    assert.equal(
+      transcriptPath({ sessionId: "s1", cwd: "/Users/me/.inbox/coordinator" }),
+      "/c/projects/-Users-me--inbox-coordinator/s1.jsonl",
+    );
+  } finally {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+  }
 });

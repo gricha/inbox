@@ -284,7 +284,7 @@ test(
     t.fake.file("hold", "");
     runSync(t.desk.act("web#3", "inflight"));
     await until(() => t.view().id === "th-1");
-    assert.deepEqual(t.view(), { on: true, id: "th-1", url: null, error: null, status: "busy", queued: [] });
+    assert.deepEqual(t.view(), { on: true, id: "th-1", url: null, error: null, status: "busy", queued: [], activity: [] });
     const [start] = t.turns();
     assert.equal(fs.realpathSync(start!.cwd), fs.realpathSync(t.dir));
     assert.deepEqual(start!.args, [
@@ -331,7 +331,7 @@ test(
       merging(4),
     ]);
     assert.equal(fs.realpathSync(t.turns()[1]!.cwd), fs.realpathSync(t.dir));
-    assert.deepEqual(t.view(), { on: true, id: "th-1", url: null, error: null, status: "idle", queued: [] });
+    assert.deepEqual(t.view(), { on: true, id: "th-1", url: null, error: null, status: "idle", queued: [], activity: [] });
   },
 );
 
@@ -365,7 +365,7 @@ test("Codex logged out is your agent's error in Codex's words, and what it was t
   t.fake.file("fail", "Error: Not logged in. Run `codex login`.\n");
   runSync(t.desk.act("web#3", "inflight"));
   await until(() => t.view().error !== null);
-  assert.deepEqual(t.view(), { on: true, id: null, url: null, error: CODEX_NOT_LOGGED_IN, status: null, queued: [] });
+  assert.deepEqual(t.view(), { on: true, id: null, url: null, error: CODEX_NOT_LOGGED_IN, status: null, queued: [], activity: [] });
   assert.deepEqual(t.desk.coordinator.news(), [["acme/web#3", "handed off"]]);
   t.fake.file("fail", null);
   t.fake.file("turnfail", "You've hit your usage limit.");

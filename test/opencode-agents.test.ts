@@ -314,7 +314,7 @@ test(
     f.file("hold", "");
     runSync(t.desk.act("web#3", "inflight"));
     await until(() => view().id === "ses-1");
-    assert.deepEqual(view(), { on: true, id: "ses-1", url: null, error: null, status: "busy", queued: [] });
+    assert.deepEqual(view(), { on: true, id: "ses-1", url: null, error: null, status: "busy", queued: [], activity: [] });
     const [start] = f.runs();
     const dir = path.join(t.home, "coordinator");
     assert.equal(fs.realpathSync(start!.cwd), fs.realpathSync(dir));
@@ -334,7 +334,7 @@ test(
     f.file("hold", null);
     await until(() => f.runs().length === 2 && view().status === "idle");
     assert.deepEqual(f.runs()[1]!.args, [...RUN, "--session", "ses-1", merging(4)]);
-    assert.deepEqual(view(), { on: true, id: "ses-1", url: null, error: null, status: "idle", queued: [] });
+    assert.deepEqual(view(), { on: true, id: "ses-1", url: null, error: null, status: "idle", queued: [], activity: [] });
 
     // Let your agent run without asking: what your config asks about is approved.
     runSync(t.desk.putSettings({ set: { "agent.coordinator_bypass": true } }));
