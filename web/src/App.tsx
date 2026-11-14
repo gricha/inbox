@@ -900,8 +900,8 @@ export function App() {
     write: Effect.Effect<{ text: string; error?: boolean; undo?: boolean; stays?: boolean }, ApiError>,
   ): Effect.Effect<boolean> {
     return Effect.suspend((): Effect.Effect<boolean> => {
-      // Sent already from this review.
-      if (actedRef.current[c.id] && routeRef.current.name === "review") return Effect.succeed(false);
+      // Still sending from this review: a second press waits for it. Once it's done, the next write (Hand off after Approve) goes.
+      if (actedRef.current[c.id]?.sending && routeRef.current.name === "review") return Effect.succeed(false);
       const mark = (to: Acted | null) => {
         actedRef.current = { ...actedRef.current, [c.id]: to ?? undefined };
         setActed(actedRef.current);
