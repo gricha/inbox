@@ -767,6 +767,9 @@ export function App() {
           Effect.sync(() => {
             undoSeq.current = res.undo_seq || null;
             undoWrite.current = null;
+            // Off the list before it's unhidden, so it doesn't flash back until the refresh lands.
+            const status = action === "done" ? "done" : action === "snooze" ? "snoozed" : "muted";
+            setView((v) => v && { ...v, sessions: v.sessions.map((x) => (x.id === s.id ? { ...x, status } : x)) });
             const snoozed = SNOOZE.find((o) => o.until === until)?.toast.replace(/ \(or .*\)$/, "") ?? until;
             flash(`${action === "snooze" ? `Snoozed ${snoozed}` : VERB[action]}: ${s.name}`, false, true);
           }),
@@ -890,6 +893,12 @@ export function App() {
     });
   }
 
+  // What you did on it from its review, shown there in place of the button you pressed; null once that's undone.
+  function markActed(id: string, to: Acted | null) {
+    actedRef.current = { ...actedRef.current, [id]: to ?? undefined };
+    setActed(actedRef.current);
+  }
+
   // A write that finishes your part takes it off the list at once, with a spinner in the toast until GitHub has it; a
   // refusal brings it back. A review stays open, saying what you did and where it went (`did`). `error` on what the write
   // returns: done, but with something to say. True once GitHub has it.
@@ -898,13 +907,17 @@ export function App() {
     sending: string,
     did: Acted,
     write: Effect.Effect<{ text: string; error?: boolean; undo?: boolean; stays?: boolean }, ApiError>,
+    shown = true, // false: the review says it only while sending (a comment), so what you'd do next is still there
   ): Effect.Effect<boolean> {
     return Effect.suspend((): Effect.Effect<boolean> => {
       // Still sending from this review: a second press waits for it. Once it's done, the next write (Hand off after Approve) goes.
-      if (actedRef.current[c.id]?.sending && routeRef.current.name === "review") return Effect.succeed(false);
+      if (actedRef.current[c.id]?.sending && routeRef.current.name === "review") {
+        flash(`Still sending ${actedRef.current[c.id]?.what ?? "that"}: try again in a moment`, true);
+        return Effect.succeed(false);
+      }
+      const before = actedRef.current[c.id] ?? null; // what it says again if this one isn't shown or is refused
       const mark = (to: Acted | null) => {
-        actedRef.current = { ...actedRef.current, [c.id]: to ?? undefined };
-        setActed(actedRef.current);
+        markActed(c.id, to);
       };
       mark({ ...did, sending: true });
       hide(c);
@@ -913,13 +926,13 @@ export function App() {
         Effect.match({
           onSuccess: (r) => {
             // Still on your desk (ready with nobody asked to review it): it went nowhere, and its next step shows in place.
-            mark(r.stays ? null : { ...did, sending: false });
+            mark(r.stays || !shown ? before : { ...did, sending: false });
             if (!r.stays) setView((v) => v && removeCard(v, c.id));
             flash(r.text, r.error, r.undo);
             return true;
           },
           onFailure: (e) => {
-            mark(null);
+            mark(before);
             flash(e.message, true);
             return false;
           },
@@ -947,6 +960,7 @@ export function App() {
         return revert.pipe(
           Effect.match({
             onSuccess: () => {
+              markActed(w.id, null);
               flash(`Undid it on GitHub: ${shortId(w.id)} is ${w.to === "ready" ? "ready for review" : "open"} again`);
             },
             onFailure: (e) => {
@@ -965,6 +979,7 @@ export function App() {
         Effect.match({
           onSuccess: (r) => {
             undoSeq.current = null;
+            markActed(r.id, null);
             pending.current = { id: r.id, until: Date.now() + 2000 };
             setSelected(r.id);
             // If the item comes back into a closed group, let the selection move on once the wait is over.
@@ -1059,6 +1074,7 @@ export function App() {
           onSuccess: () => {
             undoSeq.current = null;
             undoWrite.current = null;
+            markActed(c.id, null);
             flash(`Back on your desk: ${shortRef(c)}`);
           },
           onFailure: (e) => {
@@ -1119,7 +1135,7 @@ export function App() {
   // refusal keeps your words in it.
   function comment(c: Card, body: string): Effect.Effect<boolean> {
     const write = api.comment(c.id, body).pipe(Effect.as({ text: `Commented on ${shortRef(c)} on GitHub` }));
-    return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, write);
+    return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, write, false);
   }
 
   // Approve in a review: approved on GitHub, pinned to the commit the review showed.
@@ -1843,11 +1859,7 @@ export function App() {
         <CommentBar
           key={commenting.id}
           card={commenting}
-          onSend={(body) => {
-            // Each send is new: one earlier on this page doesn't stop it, and the bar can't send twice at once.
-            actedRef.current = { ...actedRef.current, [commenting.id]: undefined };
-            return comment(commenting, body);
-          }}
+          onSend={(body) => comment(commenting, body)}
           onClose={() => {
             const id = commenting.id;
             setCommenting((cur) => (cur?.id === id ? null : cur));
