@@ -6236,14 +6236,15 @@ p.rv-next {
   overflow-wrap: anywhere;
 }
 
-/* What Claude made of it, before the name: a look in ink, a skim a step quieter, unread in pencil. */
+/* What Claude made of it, before the name: a look in amber, a skim in the accent and a step lighter, unread in pencil. */
 .rv-level {
   flex: none;
+  color: var(--amber);
   font-weight: 650;
 }
 
 .l-skim {
-  color: var(--ink-2);
+  color: var(--accent-ink);
   font-weight: 550;
 }
 
