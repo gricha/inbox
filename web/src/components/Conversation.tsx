@@ -39,7 +39,7 @@ export function Conversation({
   onAsk: (s: Spot) => void;
 }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({}); // what you typed, over Claude's suggestion
-  const [sent, setSent] = useState<Record<string, string>>({}); // until the sync shows your reply: its url
+  const [sent, setSent] = useState<Record<string, string>>({}); // replied to: its latest comment then, so anything newer (yours or theirs) shows it again
   const [busy, setBusy] = useState<string | null>(null);
   const [more, setMore] = useState(false);
   const [at, setAt] = useState<string | null>(null); // the conversation whose reply box you were last in
@@ -56,7 +56,7 @@ export function Conversation({
     box.focus();
   }, [view]);
 
-  const waiting = view.conversation.filter((c) => c.waiting_on_you && !(c.id in sent));
+  const waiting = view.conversation.filter((c) => c.waiting_on_you && sent[c.id] !== c.comments.at(-1)?.id);
   const on = (c: Convo) => {
     setAt(c.id);
     onSpot(threadOf(view.card.id, c));
@@ -75,8 +75,8 @@ export function Conversation({
     runUi(
       api.reply(view.card.id, c.id, text).pipe(
         Effect.match({
-          onSuccess: ({ url }) => {
-            setSent((s) => ({ ...s, [c.id]: url }));
+          onSuccess: () => {
+            setSent((s) => ({ ...s, [c.id]: c.comments.at(-1)?.id ?? "" }));
             flash(`Sent your reply to ${to}`);
           },
           onFailure: (e) => {
