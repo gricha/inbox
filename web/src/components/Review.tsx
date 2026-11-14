@@ -242,7 +242,7 @@ export function Review({
   const [focusAsk, setFocusAsk] = useState(0); // bumped to put the cursor in the box; a box drawn again after a fold doesn't take it
   const focusDone = useRef(0);
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set()); // resolved threads you opened, by id
-  // The commit this review opened at: approve, merge and request changes stay pinned to it, so a push you haven't reopened for is refused.
+  // The commit the review last drew: approve, merge and request changes are pinned to it, so a push it hasn't drawn yet is refused.
   const [read, setRead] = useState("");
   const seq = useRef(0);
   const jumped = useRef(0); // when a click last scrolled the page to a file
@@ -297,7 +297,7 @@ export function Review({
           onSuccess: (r) => {
             if (n !== seq.current) return;
             setView(r);
-            setRead((h) => h || r.item.head_oid);
+            setRead(r.item.head_oid);
           },
           // Keep what's on screen if a refresh fails.
           onFailure: (e) => {
