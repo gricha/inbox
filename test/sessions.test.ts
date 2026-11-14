@@ -187,7 +187,7 @@ test("blocked and stalled are read from what the session shows, and anything els
   assert.equal(says(seen({ tail: tailOf(l.apiError("unknown", 400)) })), null, "a request it got wrong isn't stalled");
   assert.equal(says(seen({ tail: bash })), "stalled: stopped mid-turn", "a turn left open, no process");
   assert.equal(says(seen({ kind: "background", tail: bash, row: background("stopped") })), null, "you stopped it");
-  assert.equal(says(seen({ row: live({ status: "busy" }), tail: bash })), null, "busy and writing");
+  assert.equal(says(seen({ row: live({ status: "busy" }), tail: bash })), null, "busy and writing: you allowed it");
   const quiet = NOW.getTime() - 30 * MIN;
   assert.equal(says(seen({ row: live({ status: "busy" }), tail: bash, written: quiet })), "stalled: no progress");
   const fifteen = seen({ row: live({ status: "busy" }), tail: bash, written: NOW.getTime() - 15 * MIN });
@@ -231,6 +231,10 @@ test("the desktop app's own read of a turn and its error mark, and Codex's open 
     postTurnSummary: { status_category: "blocked", status_detail: "Needs a token", needs_action: "x", summarizes_uuid: "u" },
   });
   assert.equal(says(seen({ kind: "desktop", desktop: blocked })), "blocked: needs you");
+  // You answered it: its next turn runs, so it leaves your Inbox at the next look, its old summary or not.
+  const l = lines("dddd-1", "/w");
+  const working = tailOf(l.prompt("use the staging token"), l.tool("t1", "Bash", { command: "make deploy" }));
+  assert.equal(says(seen({ kind: "desktop", desktop: blocked, row: live({ status: "busy" }), tail: working })), null);
   assert.equal(says(seen({ kind: "desktop", desktop: rec({ postTurnSummary: { status_category: "completed" } }) })), null);
   const mark = rec({ priorErrorMark: { source: "x", category: "process_interrupted", at: 20, hadPendingTurn: true } });
   assert.equal(says(seen({ kind: "desktop", desktop: mark })), "stalled: stopped mid-turn");

@@ -15,6 +15,7 @@ import { isCoordinator, SESSION_PREFIX, type SessionAction, type SessionCard, ty
 
 export const TAIL = 64 * 1024; // bytes of a transcript or rollout read, from its end
 const POLL = 30_000;
+const SHOWN = 5_000; // while a session is on your Inbox: answered in it, it leaves within this
 const RECENT = 3 * 24 * 3_600_000; // a session idle longer than this is let go
 const CLI_RECENT = 24 * 3_600_000; // a terminal's session no longer running, by its transcript
 const ASK_MAX = 2000; // characters of a turn's last message the model reads
@@ -529,6 +530,7 @@ export class Sessions {
   found = new Map<string, Found>();
   timer: NodeJS.Timeout | null = null;
   polling = false;
+  polled = 0; // when the last pass started
   asked = new Map<string, Asked>(); // the model's read, by session, for its last event
   askFailed = 0; // when a model call last failed: none again for a while
 
@@ -543,9 +545,10 @@ export class Sessions {
 
   start(): void {
     if (this.timer || this.desk.stopped || !this.on()) return;
+    // Every POLL, or every SHOWN while one is on your Inbox, so it leaves soon after you answer it.
     this.timer = setInterval(() => {
-      this.desk.runner.fork("sessions", this.poll());
-    }, POLL);
+      if (Date.now() - this.polled >= POLL || this.active().length) this.desk.runner.fork("sessions", this.poll());
+    }, SHOWN);
     this.timer.unref();
     this.desk.runner.fork("sessions", this.poll());
   }
@@ -658,6 +661,7 @@ export class Sessions {
     return Effect.gen({ self: this }, function* () {
       if (this.polling || !this.on()) return;
       this.polling = true;
+      this.polled = Date.now();
       // Without the list, no process can be told alive: nothing changes this pass.
       const rows = yield* claude(["agents", "--json", "--all"]).pipe(
         Effect.map(parseAgents),
