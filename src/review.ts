@@ -32,6 +32,7 @@ import type { DriverId } from "./agents.ts";
 import { BUDGETS, skillText, type OwnSkill } from "./connectors/github-review.ts";
 import { parseDiagram } from "./diagram.ts";
 import { GH_MISSING } from "./github/client.ts";
+import type { PrContext } from "./github/index.ts";
 import { field, isRecord, num, str } from "./narrow.ts";
 import type {
   AiReview,
@@ -53,6 +54,8 @@ const STATUSES = ["added", "removed", "modified", "renamed", "copied", "changed"
 const MAX_DIFF = 80_000;
 const MAX_FILE = 20_000;
 const MAX_BODY = 4_000;
+const MAX_SAID = 8_000; // what reviewers said, in the prompt
+const MAX_COMMENT = 600; // one comment of it
 const MAX_NOTES = 12;
 const MAX_CONCERNS = 6;
 const MAX_CHUNKS = 20;
@@ -302,6 +305,64 @@ export interface PrText {
   stack?: string[]; // its stack, bottom first, when it's in one
   own?: OwnSkill | null; // the owner's review.md, read
   skill?: string; // the hash of the instructions in effect, kept on the review
+  said?: PrSaid; // what people (not bots) said on it so far, for the review to weigh
+}
+
+// Review threads on the diff and reviews' own words, by people. Every string is GitHub's.
+export interface PrSaid {
+  threads: {
+    path: string;
+    line: number | null;
+    side: "new" | "old";
+    state: "open" | "resolved" | "outdated";
+    comments: { author: string; body: string }[];
+  }[];
+  reviews: { author: string; state: string; body: string }[];
+}
+
+export function saidOf(ctx: PrContext): PrSaid {
+  const people = <T extends { bot: boolean; body: string }>(cs: T[]) => cs.filter((c) => !c.bot && c.body.trim());
+  return {
+    threads: ctx.threads
+      .map((t) => ({
+        path: t.path,
+        line: t.line,
+        side: t.side,
+        state: t.resolved ? ("resolved" as const) : t.outdated ? ("outdated" as const) : ("open" as const),
+        comments: people(t.comments).map((c) => ({ author: c.author, body: c.body.trim() })),
+      }))
+      .filter((t) => t.comments.length > 0),
+    reviews: people(ctx.reviews).map((r) => ({ author: r.author, state: r.state.replace("_", " "), body: r.body.trim() })),
+  };
+}
+
+// The threads and reviews as the prompt shows them, within MAX_SAID.
+function saidText(said: PrSaid): string[] {
+  const cut = (t: string) => (t.length > MAX_COMMENT ? `${t.slice(0, MAX_COMMENT)} […]` : t).replaceAll(/\s*\n\s*/g, " ");
+  const out: string[] = [];
+  let left = MAX_SAID;
+  const add = (lines: string[]) => {
+    const n = lines.join("\n").length;
+    if (n > left) return false;
+    left -= n;
+    out.push(...lines);
+    return true;
+  };
+  if (said.threads.length) out.push(``, `review threads on the diff so far:`);
+  for (const t of said.threads) {
+    const at = t.line === null ? t.path : `${t.path} ${t.side === "old" ? "o" : "n"}${t.line}`;
+    if (!add([`- ${at} (${t.state})`, ...t.comments.map((c) => `  ${c.author}: ${cut(c.body)}`)])) {
+      out.push(`[more threads left out]`);
+      return out;
+    }
+  }
+  if (said.reviews.length) out.push(``, `reviews so far:`);
+  for (const r of said.reviews)
+    if (!add([`- ${r.author}, ${r.state}: ${cut(r.body)}`])) {
+      out.push(`[more reviews left out]`);
+      break;
+    }
+  return out;
 }
 
 export type FetchPrError = RunError | CommandBadOutput | PrChangedDuringFetch;
@@ -521,6 +582,7 @@ export function buildPrompt(item: Item, s: Signals, why: string, pr: PrText, tag
           promptDiff(pr.since.files, false).text,
         ]
       : []),
+    ...(pr.said ? saidText(pr.said) : []),
     `</pr-${tag}>`,
   ].join("\n");
 }

@@ -3,7 +3,7 @@
 // checker live in src/review.ts; this is only what the reviewer is asked to write.
 
 // Bumped when the default instructions change, so a review says which it was written with.
-export const REVIEW_SKILL_VERSION = "3";
+export const REVIEW_SKILL_VERSION = "4";
 
 export interface SkillContext {
   me: string; // the owner's login
@@ -136,6 +136,11 @@ const SECTIONS: readonly { id: string; text: (c: SkillContext) => string }[] = [
       ` Put every hunk in chunks in exactly one step. Describe; anything you'd assert about a bug belongs in concerns.`,
   },
   {
+    id: "threads",
+    text: (c) =>
+      `- What reviewers already said (the review threads and reviews below the diff, when there are any) is part of the change ${c.me} reads: where a thread bears on a step, say so in that step's body or check: who raised what, and whether this diff settles it (resolved or outdated is settled unless the code still shows it). A concern or note of yours a reviewer already raised says so ("as alice asked"). Never copy a thread into concerns or notes as your own.`,
+  },
+  {
     id: "diagrams",
     text: () =>
       [
@@ -143,6 +148,7 @@ const SECTIONS: readonly { id: string; text: (c: SkillContext) => string }[] = [
         `    flowchart LR or TB; nodes id["label"], id[("label")] (a store), id{"label"} (a decision), id(["label"]) (an end); edges -->, -.-> or ---, labelled -->|"label"|; subgraph id ["label"] … end; :::new, :::changed, :::removed.`,
         `    stateDiagram-v2 with [*] --> A and A --> B : event.`,
         `    sequenceDiagram with participant X as Label, A->>B: text, A-->>B: text (a reply), Note over A: text.`,
+        `  It's drawn in a column about 700px wide and never shrunk below readable: flowchart LR only for a row of at most 5 nodes; a longer path goes TB, or keeps only the nodes this PR changes. Labels are names (a function, a table), not sentences; edge labels a word or two.`,
         `  Quote every label. At most 12 nodes and 16 edges, or 6 participants and 14 messages; labels at most 40 characters. Nothing else (no style, classDef, click or init): anything outside the subset drops the diagram.`,
       ].join("\n"),
   },

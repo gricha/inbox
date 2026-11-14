@@ -28,6 +28,7 @@ import {
   askAgent,
   askClaude,
   buildPrompt,
+  saidOf,
   forgetCodexServers,
   strictSchema,
   tomlKey,
@@ -693,6 +694,37 @@ test("a re-review gets the diff since your review and answers with a since line"
   assert.match(buildPrompt(item, s, "", { body: "", files: [FILE] }, "TAG"), /- since: an empty string\./);
   assert.equal(parseReview({ summary: "x", since: " Drops the shim. " }, []).since, "Drops the shim.");
   assert.ok(!("since" in parseReview({ summary: "x", since: "" }, [])));
+});
+
+test("what people said on the PR goes in the prompt, fenced: open, resolved and outdated threads and reviews, no bots", () => {
+  const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
+  const item = makeItem({});
+  const s = analyze(item, makeContext(), cfg, NOW).signals;
+  const c = (author: string, body: string, bot = false) => ({ id: author, author, bot, body, at: NOW.toISOString(), url: "" });
+  const t = { id: "t", resolved: false, outdated: false, path: "src/planner/plan.ts", line: 3, side: "new" as const, hunk: "", commit: "" };
+  const said = saidOf({
+    threads: [
+      { ...t, comments: [c("sehr", "Why default to SEER_AGENT\nhere?"), c("bugbot", "bot noise", true)] },
+      { ...t, resolved: true, line: 7, comments: [c("azulus", "Fixed, thanks")] },
+      { ...t, outdated: true, side: "old", line: 2, comments: [c("sehr", "Drop this")] },
+      { ...t, comments: [c("bugbot", "only a bot", true)] },
+    ],
+    reviews: [
+      { ...c("sehr", "A few questions inline."), state: "changes_requested" },
+      { ...c("sehr", ""), state: "commented" },
+    ],
+    comments: [],
+    commits: [],
+  });
+  const p = buildPrompt(item, s, "", { body: "", files: [FILE], said }, "TAG");
+  assert.match(p, /- src\/planner\/plan\.ts n3 \(open\)\n  sehr: Why default to SEER_AGENT here\?\n/);
+  assert.match(p, /n7 \(resolved\)\n  azulus: Fixed, thanks/);
+  assert.match(p, /o2 \(outdated\)\n  sehr: Drop this/);
+  assert.match(p, /reviews so far:\n- sehr, changes requested: A few questions inline\.\n/);
+  assert.doesNotMatch(p, /bot noise|only a bot/);
+  assert.ok(p.indexOf("review threads on the diff so far:") < p.lastIndexOf("</pr-TAG>"), "fenced like the rest");
+  assert.match(p, /where a thread bears on a step, say so in that step/);
+  assert.doesNotMatch(buildPrompt(item, s, "", { body: "", files: [FILE] }, "TAG"), /review threads on the diff so far/);
 });
 
 // ---------------------------------------------------------------- the ranking

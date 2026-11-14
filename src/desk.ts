@@ -145,6 +145,7 @@ import {
   notLoggedIn,
   pausedWords,
   reviewOrder,
+  saidOf,
   type FetchPrError,
   type PrText,
 } from "./review.ts";
@@ -2567,7 +2568,15 @@ export class Desk {
       const review = Effect.gen({ self: this }, function* () {
         if (!this.review) return yield* new Conflict({ message: "AI review isn't available in this desk" });
         const own = yield* this.reviewSkill();
-        const pr = { ...(yield* this.prText(id)), stack: this.stackLines(snap, id), own: own.own, skill: own.hash };
+        // What reviewers said so far; a failed fetch just leaves it out.
+        const ctx = yield* this.convos.context(id).pipe(Effect.orElseSucceed(() => null));
+        const pr = {
+          ...(yield* this.prText(id)),
+          stack: this.stackLines(snap, id),
+          own: own.own,
+          skill: own.hash,
+          ...(ctx && { said: saidOf(ctx) }),
+        };
         const written = yield* this.review.generate(
           e.item,
           e.analysis.signals,
