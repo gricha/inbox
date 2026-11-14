@@ -24,9 +24,10 @@ The owner's direction: a small core, with every source (GitHub first) as a plugi
 - `Head` (`id`, `url`, `created_at`, `updated_at`) in `src/types.ts`; `Item extends Head`. An id's prefix is its source (`notes:1`); a bare id is GitHub's.
 - Per-source prune: `store.pruneItems(source, before, keep)`. `KEEP_RESOLVED` (3 days) is the core's, in `connector.ts`.
 - config.toml: a board's `source` defaults to `"github"`; an unknown one is a config error (`must be one of github`). The search-query check applies only to GitHub's boards. `builtin` names a rule set the source ships.
-- Settings: `SETTINGS_PARTS` (`web/src/view.ts`) lists the core's parts, then one per plugin: GitHub, and Sessions.
+- Settings: `SETTINGS_PARTS` (`web/src/view.ts`) lists the core's parts, then one per plugin: GitHub, Sessions and Gmail.
 - `test/plugin.test.ts`: an in-memory `notes` source guarding the prune, refs, boards and init, so the core stops assuming GitHub.
 - Sessions (`src/connectors/sessions.ts`): a second source, not a `Connector` yet ([Sessions](#sessions-srcconnectorssessionsts-built)).
+- Gmail (`src/connectors/gmail.ts`): a third, built as Sessions is (its cards in memory, `QueueView.mail`, the core's triage on `mail:<id>`), off by default. [api.md → Gmail](api.md#gmail).
 
 **Still GitHub-shaped in the core** (what the plan removes):
 

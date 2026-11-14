@@ -204,12 +204,13 @@ export function beside(o: {
   return o.folded || (o.chat && o.crowded && !o.peek) ? "rail" : "open";
 }
 
-// What the Inbox counts: everything on it, an agent's question and a session that needs you included (each waits on you
+// What the Inbox counts: everything on it, an agent's question, a session that needs you and urgent email included (each waits on you
 // too); a row on its way off (you acted on it) or a question you answered no longer counts.
 export const inboxCount = (v: QueueView, leaving: ReadonlySet<string> = new Set(), answered: ReadonlySet<string> = new Set()) =>
   [...v.inbox.urgent, ...v.inbox.standard].filter((c) => !leaving.has(c.id)).length +
   v.inquiries.filter((q) => !answered.has(q.id)).length +
-  v.sessions.filter((s) => s.status === "active" && !leaving.has(s.id)).length;
+  v.sessions.filter((s) => s.status === "active" && !leaving.has(s.id)).length +
+  v.mail.filter((m) => m.status === "active" && !leaving.has(m.id)).length;
 
 export function routeHash(r: Route): string {
   if (r.name === "settings") return `#/settings/${r.section}`;

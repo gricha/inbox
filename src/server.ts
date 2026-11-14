@@ -189,6 +189,9 @@ else
     .catch(() => say("The desk didn't answer. Try the link again."));
 </script>`;
 
+const OAUTH_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Inbox</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;margin:4em auto;max-width:32em;padding:0 1em;color-scheme:light dark}</style>`;
+
 // docs/effect.md Boundaries → HTTP: the value or its Response, a refusal's status, 499 for a client gone, else a logged 500 Sentry sees.
 function reply<A, E>(c: Context, exit: Exit.Exit<A, E>, log: (m: string) => void): Response {
   if (Exit.isSuccess(exit)) return exit.value instanceof Response ? exit.value : c.json(exit.value);
@@ -740,6 +743,38 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       return { ok: true, ...(yield* desk.openSession(c.req.param("id"))) };
     });
     return respond(c, open, { log });
+  });
+  // Urgent email (src/connectors/gmail.ts): anyone may read one; only the desk's window connects or disconnects Gmail.
+  app.get("/api/mail/:id", (c) => respond(c, desk.mail(c.req.param("id")), { log, read: true }));
+  app.post("/api/gmail/connect", (c) => {
+    const connect = Effect.gen(function* () {
+      if (!fromDesk(c) || REMOTE.has(c.req.raw))
+        return yield* new Forbidden({ message: "connect Gmail in the desk's window on its computer" });
+      return { ok: true, ...(yield* desk.gmailConnect(`http://127.0.0.1:${port}/oauth/gmail`)) };
+    });
+    return respond(c, connect, { log });
+  });
+  app.post("/api/gmail/disconnect", (c) => {
+    const off = Effect.gen(function* () {
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "disconnect Gmail in the desk's window" });
+      yield* desk.gmail.disconnect();
+      return { ok: true };
+    });
+    return respond(c, off, { log });
+  });
+  // Google sends your browser back here after Connect; only a state the desk started, on this computer, is taken.
+  app.get("/oauth/gmail", async (c) => {
+    const page = (text: string, status: 200 | 400 = 200) =>
+      c.html(`${OAUTH_PAGE}<p>${text.replaceAll("&", "&amp;").replaceAll("<", "&lt;")}</p>`, status);
+    if (REMOTE.has(c.req.raw)) return page("Connect Gmail on the desk's own computer.", 400);
+    const state = c.req.query("state") ?? "";
+    const code = c.req.query("code") ?? "";
+    const denied = c.req.query("error");
+    if (denied) return page(`Gmail wasn't connected: Google said ${denied}. Press Connect in Settings → Gmail to try again.`, 400);
+    const exit = await Effect.runPromiseExit(desk.gmail.callback(state, code));
+    if (Exit.isSuccess(exit)) return page(`Connected Gmail as ${exit.value.email}. You can close this tab.`);
+    const failed = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
+    return page(`Gmail wasn't connected: ${failed?.message ?? "something went wrong"}.`, 400);
   });
   // Automations (src/automations.ts): any local client may list, write and run them, on as soon as saved; only you delete one. A
   // plugin's is listed too, and only switched, only from the window.

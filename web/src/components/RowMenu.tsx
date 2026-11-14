@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Action, Card, GitHubAction, InboxSection, Inquiry, SessionAction, SessionCard } from "../../../src/types.ts";
+import type { Action, Card, GitHubAction, InboxSection, Inquiry, MailCard, SessionAction, SessionCard } from "../../../src/types.ts";
 import { cls, fromName, SNOOZE, snoozeOptions } from "../format.ts";
 import { useKeyedLayout } from "../keyed.ts";
 import { MORE, rowActions } from "./More.tsx";
 import { isKeyOf } from "../../../src/narrow.ts";
+import { openMail } from "./Mail.tsx";
 import { SESSION_ACTION } from "./Session.tsx";
 
 // Where a row on the Inbox can move: one section up or down.
@@ -138,6 +139,46 @@ export function SessionMenu({
         if ("snooze" in d) act(s, "snooze", d.snooze);
         else if ("act" in d) act(s, "done");
         else if ("key" in d && isKeyOf(SESSION_ACTION, d.key)) start(s, d.key);
+      }}
+      reopen={reopen}
+      onClose={onClose}
+    />
+  );
+}
+
+// An urgent email's menu: Done (until a new message), Open in Gmail, Mute, and Snooze to a time.
+export function MailMenu({
+  m,
+  x,
+  y,
+  act,
+  reopen,
+  onClose,
+}: {
+  m: MailCard;
+  x: number;
+  y: number;
+  act: (m: MailCard, action: "done" | "snooze" | "mute", until?: string) => void;
+  reopen: (x: number, y: number) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Menu
+      label={`Email ${m.subject}`}
+      groups={[
+        [{ label: "Done", do: { act: "done" } }],
+        [
+          { label: "Open in Gmail", do: { key: "open" } },
+          { label: "Mute", do: { act: "mute" } },
+        ],
+      ]}
+      snoozes={SNOOZE.filter((o) => o.until !== "activity")}
+      x={x}
+      y={y}
+      pick={(d) => {
+        if ("snooze" in d) act(m, "snooze", d.snooze);
+        else if ("act" in d) act(m, d.act === "mute" ? "mute" : "done");
+        else if ("key" in d && d.key === "open") openMail(m);
       }}
       reopen={reopen}
       onClose={onClose}

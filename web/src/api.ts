@@ -235,6 +235,9 @@ export const api = {
   // A session that needs you: Kick or Resume starts it again where it left off, Open follows its own link.
   kickSession: (id: string) => call<{ ok: true; args: string[] }>("POST", `/api/sessions/${encodeURIComponent(id)}/kick`),
   openSession: (id: string) => call<{ ok: true; url: string }>("POST", `/api/sessions/${encodeURIComponent(id)}/open`),
+  // Settings → Gmail: Connect opens Google's consent page on the desk's computer; Disconnect forgets the access.
+  gmailConnect: () => call<{ ok: true; url: string }>("POST", "/api/gmail/connect"),
+  gmailDisconnect: () => call<{ ok: true }>("POST", "/api/gmail/disconnect"),
   automations: () => call<AutomationView[]>("GET", "/api/automations"),
   criteria: () => call<CriteriaView>("GET", "/api/criteria"),
   setCriterion: (id: string, b: CriterionBody) =>

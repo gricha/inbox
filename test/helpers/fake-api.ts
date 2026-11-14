@@ -109,14 +109,14 @@ const overview: Overview = {
   config_errors: [],
   connectors: [{ id: "github", name: "GitHub", status: "ok", synced_at: ago(0.05), error: null }],
   spaces: [{ id: "work", name: "Work", boards: [summary] }],
-  focus: { now: 1, today: 1, new: 1, asks: 0, sessions: 0 },
+  focus: { now: 1, today: 1, new: 1, asks: 0, sessions: 0, mail: 0 },
   inflight: { total: 0 },
   agent: true,
   ai_agent: "Claude",
   rate_limit: { remaining: 4800, reset_at: ago(-1) },
 };
 
-const focus: FocusView = { sessions: [], sections: { now: [CARDS.now], today: [CARDS.today] }, reviewing: 2, paused: null };
+const focus: FocusView = { sessions: [], mail: [], sections: { now: [CARDS.now], today: [CARDS.today] }, reviewing: 2, paused: null };
 
 // One automation that's on and may snooze, with a run that added one item and snoozed another; its summary carries text a
 // fence must hold.
@@ -181,6 +181,7 @@ const queueView: QueueView = {
   inquiries: [],
   notes: { due: [], open: [], later: [] },
   sessions: [],
+  mail: [],
   sections: { now: [CARDS.now], today: [CARDS.today], blocked: [], later: [CARDS.later], fyi: [CARDS.fyi] },
   reviewing: 0,
   hidden: [CARDS.hidden],
@@ -323,6 +324,7 @@ function settingsView(overrides: Record<string, SettingValue>): SettingsView {
     overridden: Object.keys(overrides),
     errors: [],
     github: { login: "you", auth: "gh CLI", error: null, synced_at: ago(0.05), rate_limit: null, teams: [], orgs: [], catch_all: null },
+    gmail: { configured: false, email: null, error: null, read_at: null, urgent: 0 },
     paused: { ai: null },
     judge: {
       state: "idle",

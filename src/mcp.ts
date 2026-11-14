@@ -17,6 +17,7 @@ import { permalink, placeOf } from "./links.ts";
 import { renderText } from "./render.ts";
 import {
   ACTIVITY_KINDS,
+  isMailRef,
   isSessionRef,
   outcomeText,
   SESSION_KIND,
@@ -39,6 +40,7 @@ import {
   type Overview,
   type Placement,
   type PreviewResult,
+  type MailCard,
   type SessionCard,
   type Stack,
 } from "./types.ts";
@@ -214,6 +216,7 @@ const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | u
   let pools: [ListBucket, Card[]][];
   let reviewing = 0;
   let sessions: SessionCard[] = [];
+  let mail: MailCard[] = [];
   if (!board || board === "focus") {
     if (!buckets.some((b) => b === "now" || b === "today"))
       return yield* new ToolInputError({
@@ -222,6 +225,7 @@ const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | u
     const f = yield* api.focus();
     reviewing = f.reviewing;
     sessions = f.sessions;
+    mail = f.mail;
     pools = [
       ["now", f.sections.now],
       ["today", f.sections.today],
@@ -243,9 +247,37 @@ const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | u
   let head = `${board && board !== "focus" ? `board ${board}` : "focus"} · buckets ${buckets.join(",")} · ${cards.length} of ${all.length} shown`;
   if (reviewing) head += ` · ${reviewing} more once Claude has reviewed them`;
   if (sessions.length) head += ` · ${sessions.length} session${sessions.length === 1 ? "" : "s"} first`;
-  if (!cards.length && !sessions.length) return head;
-  return head + "\n" + untrusted([...sessions.map(sessionLine), ...cards.map(cardLine), json([...sessions, ...cards.map(compact)])]);
+  if (mail.length) head += ` · ${mail.length} urgent email${mail.length === 1 ? "" : "s"}`;
+  if (!cards.length && !sessions.length && !mail.length) return head;
+  return (
+    head +
+    "\n" +
+    untrusted([
+      ...sessions.map(sessionLine),
+      ...mail.map(mailLine),
+      ...cards.map(cardLine),
+      json([...sessions, ...mail, ...cards.map(compact)]),
+    ])
+  );
 });
+
+// An urgent email: the sender's words and your agent's read of them, so untrusted.
+const mailLine = (m: MailCard) => `urgent   ${m.id}  ${oneLine(m.subject)}  [${oneLine(m.why)}] from ${oneLine(m.from)}`;
+
+function mailText(m: MailCard): string {
+  const triage = m.status === "active" ? "" : ` · ${m.status}${m.snooze_until ? ` until ${m.snooze_until}` : ""}`;
+  return (
+    `${m.id} · urgent email, ${m.messages} message${m.messages === 1 ? "" : "s"}, latest ${m.since}${triage}\n` +
+    untrusted([
+      `from: ${oneLine(m.from)} <${m.from_email}>`,
+      `subject: ${oneLine(m.subject)}`,
+      `why it's urgent: ${oneLine(m.why)}`,
+      `latest: ${oneLine(m.snippet)}`,
+      "desk_act's done, snooze and mute work on it; it leaves once it's read or archived in Gmail. The desk never changes the user's mail.",
+      json(m),
+    ])
+  );
+}
 
 // A Claude Code or Codex session that needs the user: its name and its reason are what it said or was named, so untrusted.
 const sessionLine = (s: SessionCard) =>
@@ -451,7 +483,14 @@ export function createMcpServer(
       inputSchema: { ref: z.string().describe(REF) },
       annotations: readOnly,
     },
-    ({ ref }) => run(isSessionRef(ref) ? Effect.map(api.session(ref), sessionText) : Effect.map(api.item(ref), itemText)),
+    ({ ref }) =>
+      run(
+        isSessionRef(ref)
+          ? Effect.map(api.session(ref), sessionText)
+          : isMailRef(ref)
+            ? Effect.map(api.mail(ref), mailText)
+            : Effect.map(api.item(ref), itemText),
+      ),
   );
 
   server.registerTool(

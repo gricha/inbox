@@ -58,7 +58,7 @@ The window's only global chrome. There's no top bar.
 
 - **Brand row**: the mark and "Inbox". In the macOS app it holds the traffic lights and is the window's drag handle.
 - **Pages**: Inbox (with its count), Blocked, then under a hairline Merging and Archive.
-  - Inbox counts Urgent, Standard, agents' questions and sessions that need you.
+  - Inbox counts Urgent, Standard, agents' questions, sessions that need you and urgent email.
   - Blocked, Merging and Archive have no count. Merging's tooltip says how many are merging.
   - A review is marked under the page it was opened from; a question under the Inbox.
   - Clicking Inbox while on it scrolls to the top.
@@ -198,6 +198,15 @@ Your own Claude Code and Codex sessions on this computer that are blocked on you
 - It leaves on its own once the session moves on. Done hides it until then.
 - The desk refuses Kick, in words, while the process runs or before a rate limit resets.
 - No session rows in the list beside a review.
+
+### Urgent email
+
+Off until you set it up (Settings → Gmail). Your agent reads your important unread mail and only what it calls truly urgent, by your own words, becomes a row after the sessions, with a notification ([api.md → Gmail](api.md#gmail)).
+
+- **Row**: labeled **Email**, its subject, quietly your agent's why, **Open** (the thread in Gmail), the sender where "by" goes, how many messages (or "unread") where the stage goes, and its age.
+- **Opened in place**: the why, the latest message's start, the sender and time. Then **Open in Gmail**, **Done** (until a new message), **Snooze** (until tomorrow), **Mute**, **Close**. Its menu: **Done**, **Open in Gmail**, **Mute**, **Snooze**.
+- It leaves on its own once you read or archive it in Gmail. The desk never changes your mail.
+- No email rows in the list beside a review.
 
 ## An agent's question
 
@@ -462,7 +471,7 @@ Code: `src/links.ts`; the protocol in `electron/main.ts`.
 No tabs. In Settings the sidebar lists its parts in place of the pages, under **‹ Inbox** (⌘1–⌘4 still open the pages):
 
 - The core's: Inbox and notifications, Local Agent Integration, Automation Rules, Appearance, This device, Tailscale.
-- Under a hairline, one per plugin: GitHub, Sessions.
+- Under a hairline, one per plugin: GitHub, Sessions, Gmail.
 
 `SETTINGS_PARTS` in `web/src/view.ts`. The sidebar's Settings and `#/settings` open the first part.
 
@@ -603,6 +612,16 @@ The Sessions plugin's part ([api.md → Sessions](api.md#sessions)):
 - **Show sessions that need you** (`sessions.enabled`).
 - **Ask your agent whether a question waits on you** (`sessions.ask`).
 - **More Sessions settings**: **Stalled after** (`sessions.quiet_minutes`).
+
+### Gmail
+
+The Gmail plugin's part ([api.md → Gmail](api.md#gmail) says how to make the OAuth client):
+
+- Its account line: **Needs an OAuth client**, **Not connected** with **Connect Gmail**, or **Connected as** you with when it last looked and **Disconnect**; a failure in words.
+- **Raise urgent email** (`gmail.enabled`, off).
+- **OAuth client ID** and **OAuth client secret** (`gmail.client_id`, `gmail.client_secret`).
+- **What counts as urgent** (`gmail.urgent`): your words, which your agent reads every thread against.
+- **More Gmail settings**: **Which mail it reads** (`gmail.query`), **Look every** (`gmail.poll_minutes`).
 
 ## The first run
 

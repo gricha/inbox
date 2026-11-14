@@ -240,6 +240,10 @@ After you answer, the question leaves the main page and is owed to whoever asked
 | GET    | `/api/sessions/:id`        | `SessionCard` of a session that needs you now; 404 once it doesn't ([Sessions](#sessions))                                                                                                            |              |
 | POST   | `/api/sessions/:id/kick`   | `{ ok, args, note }`: Kick or Resume in background. Own page only. 409 while its process runs, before its rate limit resets, or for a kind it isn't for                                               | ✓            |
 | POST   | `/api/sessions/:id/open`   | `{ ok, url }`: opens its `claude://` or `codex://` link on the desk's computer. Own page only; 409 with no link                                                                                       | ✓            |
+| GET    | `/api/mail/:id`            | `MailCard` of an urgent email on your Inbox now; 404 once it isn't ([Gmail](#gmail))                                                                                                                  |              |
+| POST   | `/api/gmail/connect`       | `{ ok, url }`: opens Google's consent page on the desk's computer. Own page, on this computer, only; 409 without a client ID and secret                                                               |              |
+| POST   | `/api/gmail/disconnect`    | `{ ok }`: revokes the access at Google (best effort) and deletes `gmail.json`. Own page only                                                                                                          |              |
+| GET    | `/oauth/gmail`             | Where Google sends your browser back after Connect: takes `code` for a `state` the desk started in the last 10 minutes, once. Not over Tailscale                                                      |              |
 | GET    | `/api/automations`         | `AutomationView[]` ([Automations](#automations))                                                                                                                                                      |              |
 | PUT    | `/api/automations/:id`     | `AutomationBody` → `{ ok, automation }`: creates or replaces one of yours. From the own page `on` is as sent; from anything else a new or changed automation is off. 400 for a plugin's or a bad body | ✓ (`on`)     |
 | PUT    | `/api/automations/:id/on`  | `{ on }` → `{ ok, automation }`: switches a plugin's (`github.<id>`). Own page only; 404 for one of yours (its switch is its PUT)                                                                     | ✓            |
@@ -1364,6 +1368,25 @@ Any shape it doesn't know gives no item. Nothing it reads is kept but a one-line
 | terminal, running      | none                                      |
 
 Kick reads `claude agents --json --all` again, runs the coordinator's `halt()`, then `claude --resume <id> --bg "Continue where you left off."` in the session's folder, and logs it. Done hides a session until it moves on (a later event); snooze takes a time; mute and undo work as on any item, all through `POST /api/act`.
+
+### Gmail
+
+A third source (`src/connectors/gmail.ts`), off by default: your important unread mail, read by your own agent, and only what's truly urgent becomes a row on the Inbox's Urgent, after the sessions, with a notification. It never changes your mail: the only scope it asks for is `gmail.readonly`.
+
+**Setting it up** (once, about five minutes):
+
+1. In [Google Cloud Console](https://console.cloud.google.com/), pick or create a project and turn on the **Gmail API** (APIs & Services → Library).
+2. APIs & Services → OAuth consent screen: for a Google Workspace account pick **Internal**; for a personal Gmail pick **External**, add yourself as a test user, then **Publish app** (in Testing, Google expires the access every 7 days; published but unverified, it only warns you on the consent page). Add the scope `.../auth/gmail.readonly`.
+3. APIs & Services → Credentials → Create credentials → OAuth client ID → **Desktop app**. Copy its client ID and secret.
+4. Settings → Gmail: paste them, press **Connect Gmail**, say yes in your browser (it comes back to `http://127.0.0.1:<port>/oauth/gmail`), then turn on **Raise urgent email**.
+
+**Settings → Gmail:** `gmail.enabled` (off), `gmail.client_id`, `gmail.client_secret` (in `secrets.json`), `gmail.urgent` (what counts as urgent, in your words; your agent reads every thread against it), and under More `gmail.query` (`in:inbox is:unread is:important newer_than:2d`) and `gmail.poll_minutes` (5). The part's first row says who it's connected as, when it last looked, or what went wrong. It comes with no automations.
+
+**What it keeps:** Connect's refresh token and the account's address in `~/.inbox/gmail.json` (0600; Disconnect deletes it and revokes the token); kv `gmail`: your agent's verdict and one line of why per thread, and which threads it already notified about. Mail text is read each pass and kept only in memory: the latest message's snippet for the row.
+
+**A pass:** every `gmail.poll_minutes`, `threads.list` with `gmail.query` (25 threads), then `threads.get` only for a thread whose `historyId` changed since your agent read it. Those go to your agent (`askAgent()`, tool-less), up to 10 a call, each fenced as someone else's text with the latest message's first 1,500 characters and the earlier messages' snippets. It answers per thread `{ id, urgent, why }`; when unsure, not urgent. A failed call waits 10 minutes before the next.
+
+**On the Inbox:** a row says Email, the subject, your agent's why, the sender, how many messages and its age, with **Open** (the thread in Gmail, in its account). It stays while the thread still matches the search: read or archive it in Gmail and it leaves on the next pass. Done hides it until a new message; snooze takes a time; mute keeps that thread off for good; all through `POST /api/act` on `mail:<thread id>`. `desk_list` and `desk_item` show them to agents, fenced.
 
 ### Automations
 

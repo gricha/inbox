@@ -313,6 +313,15 @@ export interface GitHubStatus {
   catch_all: string | null; // the space that takes every org no other names (Personal), if one does
 }
 
+// Settings → Gmail's account line: who it reads as, whether it can, and when it last looked.
+export interface GmailStatus {
+  configured: boolean; // a client ID and secret are set, so Connect can run
+  email: string | null; // the account it's connected to
+  error: string | null; // the last connect, token or read failure, in words
+  read_at: string | null; // the last pass that read the inbox
+  urgent: number; // threads on your Inbox now
+}
+
 export interface SettingsView {
   path: string;
   sections: SettingsSection[];
@@ -321,6 +330,7 @@ export interface SettingsView {
   overridden: string[]; // keys set in settings.json
   errors: ConfigError[]; // settings.json problems; bad entries fall back to defaults
   github: GitHubStatus;
+  gmail: GmailStatus;
   // Paused after failures in a row (an expired login): why, and when it tries again. Shown once in Settings, not per PR.
   paused: { ai: { why: string; until: string } | null };
   judge: JudgeStatus;
@@ -665,8 +675,8 @@ export interface Overview {
   config_errors: ConfigError[];
   connectors: ConnectorStatus[];
   spaces: { id: string; name: string; boards: BoardSummary[] }[];
-  // asks: agents' questions waiting on your answer; sessions: sessions that need you
-  focus: { now: number; today: number; new: number; asks: number; sessions: number };
+  // asks: agents' questions waiting on your answer; sessions: sessions that need you; mail: urgent email (Gmail)
+  focus: { now: number; today: number; new: number; asks: number; sessions: number; mail: number };
   inflight: { total: number }; // your open PRs in Merging
   agent: boolean; // your agent is on (Settings, Agents): the window draws its Ask your agent entries
   ai_agent: AgentName; // who sorts and reviews (agent.harness), as the window names it
@@ -705,6 +715,7 @@ export interface BoardView {
 
 export interface FocusView {
   sessions: SessionCard[]; // sessions that need you, after agents' questions: blocked, then stalled
+  mail: MailCard[]; // urgent email, after the sessions
   sections: { now: Card[]; today: Card[] }; // one list on screen: now first, then today
   reviewing: number; // PRs that reach it once Claude's first review of them is written
   paused: Paused | null; // said once above the queue instead of on every card
@@ -721,6 +732,7 @@ export interface QueueView {
   inquiries: Inquiry[]; // agents' questions waiting on your answer, oldest first: the main page's first rows
   notes: NotesView;
   sessions: SessionCard[]; // every session that needs you, with your triage on it; the active ones follow the questions
+  mail: MailCard[]; // urgent email (Gmail), with your triage on it; the active ones follow the sessions
   // blocked: what your rules put in Blocked, and your PRs in Merging that another PR blocks; a chain's rows together, longest wait first
   sections: Record<Exclude<Bucket, "hide">, Card[]>;
   reviewing: number; // as in FocusView
@@ -1244,6 +1256,25 @@ export interface InquiryOption {
 export interface InquiryLink {
   label: string;
   url: string; // http(s), or claude: for a Claude session
+}
+
+// An email thread your agent read as truly urgent (the Gmail source), while it's unread in your inbox. Read only: the desk
+// never changes your mail; reading or archiving it in Gmail takes it off.
+export const MAIL_PREFIX = "mail:";
+export const isMailRef = (ref: string): boolean => ref.startsWith(MAIL_PREFIX);
+export interface MailCard {
+  id: string; // "mail:<thread id>": its ref on the desk
+  thread_id: string;
+  from: string; // the latest sender's name, else their address
+  from_email: string;
+  subject: string; // untrusted, as every text here
+  snippet: string; // one line of the latest message
+  why: string; // your agent's one line: what makes it urgent
+  since: string; // the latest message's time
+  messages: number;
+  url: string; // the thread in Gmail, in its account
+  status: "active" | "done" | "snoozed" | "muted";
+  snooze_until: string | null;
 }
 
 // A Claude Code or Codex session on this machine that needs you (the Sessions source): blocked on you, or stalled.

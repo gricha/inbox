@@ -1,10 +1,11 @@
 import { useState } from "react";
-import type { Card, Inquiry, Note, Overview, QueueView, SessionCard } from "../../../src/types.ts";
+import type { Card, Inquiry, MailCard, Note, Overview, QueueView, SessionCard } from "../../../src/types.ts";
 import { cls, aiName } from "../format.ts";
 import { PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { NoteRow, type NoteCtx } from "./Note.tsx";
+import { MailRow, type MailCtx } from "./Mail.tsx";
 import { SessionRow, type SessionCtx } from "./Session.tsx";
 import { SkRows } from "./Skeleton.tsx";
 
@@ -21,6 +22,8 @@ export function Queue({
   inq,
   sessions,
   ses,
+  mail,
+  mailCtx,
   note,
   filter,
   toggle,
@@ -33,6 +36,8 @@ export function Queue({
   inq: InquiryCtx;
   sessions?: SessionCard[]; // none beside a review: two lines a row has no room for one's detail
   ses?: SessionCtx;
+  mail?: MailCard[]; // urgent email, after the sessions; none beside a review, as sessions
+  mailCtx?: MailCtx;
   note: NoteCtx; // your notes: due reminders lead Urgent, the rest lead Standard
   filter: string;
   toggle: (k: GroupKey) => void;
@@ -60,6 +65,7 @@ export function Queue({
     );
   }
   const shown = ses ? (sessions ?? []) : [];
+  const mails = mailCtx ? (mail ?? []) : [];
   const words = filter.trim().toLowerCase();
   const mine = (ns: Note[]) => (words ? ns.filter((n) => n.text.toLowerCase().includes(words)) : ns);
   const due = mine(view.notes.due);
@@ -68,7 +74,7 @@ export function Queue({
     .filter((g) => PAGE_GROUPS.queue.includes(g.key))
     .map((g) => ({
       g,
-      lead: g.key === "urgent" ? inquiries.length + shown.length + due.length : g.key === "standard" ? open.length : 0,
+      lead: g.key === "urgent" ? inquiries.length + shown.length + mails.length + due.length : g.key === "standard" ? open.length : 0,
     }))
     .filter(({ g, lead }) => lead > 0 || g.cards.length > 0);
   // A row you acted on is on its way off: it fades out where it is, and the last one to go leaves the empty line.
@@ -109,6 +115,7 @@ export function Queue({
                 <div className="lines">
                   {g.key === "urgent" && inquiries.map((q) => <InquiryRow key={q.id} q={q} ctx={inq} />)}
                   {g.key === "urgent" && ses && shown.map((s) => <SessionRow key={s.id} s={s} ctx={ses} />)}
+                  {g.key === "urgent" && mailCtx && mails.map((m) => <MailRow key={m.id} m={m} ctx={mailCtx} />)}
                   {g.key === "urgent" && due.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
                   {g.key === "standard" && open.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
                   {cards.map((c) => (

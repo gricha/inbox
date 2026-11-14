@@ -23,6 +23,13 @@ Read it with \`gh issue view {item.number} --repo {item.repo} --comments\`.
 Tell me what's being asked of me, if anything, and draft a reply here in chat.
 Do not post or comment on GitHub.`;
 
+const DEFAULT_URGENT = `Truly urgent means it needs me today and waiting costs something:
+- a production incident, outage or security problem
+- a deadline today or tomorrow I'd otherwise miss
+- someone blocked on my answer: my manager, leadership, a teammate or a customer escalation
+- account access, payments, travel or legal matters with a time limit
+Not urgent: newsletters, notifications and automated reports, marketing, FYIs, calendar invites without a conflict, and anything that can wait until I next read my mail.`;
+
 const ACCELERATOR =
   "^((Command|Cmd|Control|Ctrl|CommandOrControl|CmdOrCtrl|Alt|Option|AltGr|Shift|Super|Meta)\\+)+" +
   "([A-Za-z0-9]|F([1-9]|1[0-9]|2[0-4])|Space|Tab|Backspace|Delete|Insert|Return|Enter|Up|Down|Left|Right|Home|End|PageUp|PageDown|Escape|Esc|Plus|[-=\\[\\];',./`\\\\])$";
@@ -31,6 +38,7 @@ const ACCELERATOR =
 export const SECTIONS: SettingsSection[] = [
   { id: "github", title: "GitHub" },
   { id: "sessions", title: "Sessions" },
+  { id: "gmail", title: "Gmail" },
   { id: "agent", title: "Local Agent Integration" },
   { id: "queue", title: "Inbox and notifications" },
   { id: "app", title: "This device" },
@@ -183,6 +191,65 @@ export const SETTINGS = [
     unit: "minutes",
     more: true,
     help: "A busy session that writes nothing this long, not retrying or running a subagent.",
+  },
+  {
+    key: "gmail.enabled",
+    section: "gmail",
+    label: "Raise urgent email",
+    type: "boolean",
+    default: false,
+    help: "Your agent reads your important unread mail; only the truly urgent reaches your Inbox. Nothing in Gmail changes.",
+  },
+  {
+    key: "gmail.client_id",
+    section: "gmail",
+    label: "OAuth client ID",
+    type: "string",
+    default: "",
+    placeholder: "….apps.googleusercontent.com",
+    pattern: "^[\\w.-]+\\.apps\\.googleusercontent\\.com$",
+    pattern_hint: "a Google OAuth client ID, ending in .apps.googleusercontent.com",
+    help: "A Desktop app client from your Google Cloud project, with the Gmail API on. docs/api.md → Gmail says how.",
+  },
+  {
+    key: "gmail.client_secret",
+    section: "gmail",
+    label: "OAuth client secret",
+    type: "secret",
+    default: "",
+    placeholder: "GOCSPX-…",
+    help: "That client's secret. Kept in secrets.json beside settings.json.",
+  },
+  {
+    key: "gmail.urgent",
+    section: "gmail",
+    label: "What counts as urgent",
+    type: "text",
+    default: DEFAULT_URGENT,
+    required: true,
+    help: "Your agent reads each new thread against this. Anything else stays in Gmail.",
+  },
+  {
+    key: "gmail.query",
+    section: "gmail",
+    more: true,
+    label: "Which mail it reads",
+    type: "string",
+    default: "in:inbox is:unread is:important newer_than:2d",
+    required: true,
+    help: "A Gmail search. A thread leaves your Inbox once it stops matching: you read or archived it.",
+  },
+  {
+    key: "gmail.poll_minutes",
+    section: "gmail",
+    more: true,
+    label: "Look every",
+    type: "number",
+    default: 5,
+    min: 1,
+    max: 60,
+    unit: "minutes",
+    help: "Your agent reads only threads with a new message since it last looked.",
   },
   {
     key: "agent.harness",

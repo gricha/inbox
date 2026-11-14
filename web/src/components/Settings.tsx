@@ -16,6 +16,7 @@ import type {
   AgentStatus,
   DesktopBridge,
   GitHubStatus,
+  GmailStatus,
   JudgeStatus,
   RemoteView,
   SettingDef,
@@ -628,6 +629,66 @@ function GitHubStatusRow({ gh }: { gh: GitHubStatus }) {
   );
 }
 
+// Gmail's account: Connect opens Google's consent page in your browser (read only), Disconnect forgets the access.
+function GmailStatusRow({ gm, now, flash }: { gm: GmailStatus; now: number; flash: (text: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const press = (connect: boolean) => {
+    setBusy(true);
+    setError(null);
+    runUi(
+      (connect ? api.gmailConnect() : api.gmailDisconnect()).pipe(
+        Effect.match({
+          onSuccess: () => {
+            flash(connect ? "Opened Google in your browser: say yes there, then come back" : "Disconnected Gmail");
+          },
+          onFailure: (e) => {
+            setError(e.message);
+          },
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            setBusy(false);
+          }),
+        ),
+      ),
+    );
+  };
+  const said = error ?? gm.error;
+  const label = gm.email ? `Connected as ${gm.email}` : gm.configured ? "Not connected" : "Needs an OAuth client";
+  const help = said
+    ? said.replace(/\.?$/, ".")
+    : gm.email
+      ? gm.read_at
+        ? `Read only. Last looked ${ago(gm.read_at, now)}; ${gm.urgent ? `${gm.urgent} urgent on your Inbox` : "nothing urgent"}.`
+        : "Read only. Turn on Raise urgent email to start."
+      : gm.configured
+        ? "Connect signs in with Google in your browser and asks to read your mail, nothing more."
+        : "Set the client ID and secret below, then Connect. docs/api.md → Gmail says how to make them.";
+  return (
+    <div className="setting s-status">
+      <div className="s-label-col">
+        <p className="s-label">{label}</p>
+        <p className={cls("s-help", said && "t-bad")}>{help}</p>
+      </div>
+      {gm.configured && (
+        <div className="s-control">
+          <button
+            type="button"
+            className={cls("act", !gm.email && "primary")}
+            disabled={busy}
+            onClick={() => {
+              press(!gm.email);
+            }}
+          >
+            {busy ? (gm.email ? "Disconnecting…" : "Opening Google…") : gm.email ? "Disconnect" : "Connect Gmail"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // In the words of the agent you chose: its tools and skill are what Connect sets up.
 const needs = (agent: string) => ({
   connect: {
@@ -929,6 +990,7 @@ interface PartProps {
 
 // Rows a part's sheet starts with, before its settings', by the part's id: a plugin's part adds one entry.
 const LEAD: Record<string, (p: PartProps) => ReactNode> = {
+  gmail: (p) => <GmailStatusRow gm={p.view.gmail} now={p.now} flash={p.flash} />,
   github: (p) => (
     <>
       <GitHubStatusRow gh={p.view.github} />

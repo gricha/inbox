@@ -81,6 +81,7 @@ import type {
   Note,
   NotesView,
   SessionCard,
+  MailCard,
   ReviewNote,
   Reviewer,
   ReviewView,
@@ -2036,6 +2037,7 @@ function focus(): FocusView {
   oneLinePerStack(sections, ["now", "today"], stacks());
   return {
     sessions: activeSessions(),
+    mail: activeMail(),
     sections,
     reviewing: 0,
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
@@ -2096,6 +2098,7 @@ function queue(): QueueView {
     inquiries: INQUIRIES.filter((q) => !q.answer),
     notes: notesView(),
     sessions: sessionCards(),
+    mail: mailCards(),
     sections,
     reviewing: 0,
     hidden,
@@ -2426,6 +2429,41 @@ const SESSIONS: SessionCard[] = [
 const sessionTriage = new Map<string, SessionCard["status"]>();
 const sessionCards = () => SESSIONS.map((x) => ({ ...x, status: sessionTriage.get(x.id) ?? "active" }));
 const activeSessions = () => sessionCards().filter((x) => x.status === "active");
+
+// Urgent email your agent raised from Gmail: an incident, and a deadline.
+const MAIL: MailCard[] = [
+  {
+    id: "mail:18f2a9c0d1e2f3a4",
+    thread_id: "18f2a9c0d1e2f3a4",
+    from: "Dana Reyes",
+    from_email: "dana@acme.dev",
+    subject: "Checkout errors since the 14:10 deploy",
+    snippet: "Error rate on /checkout went from 0.2% to 9% right after the deploy. Can you approve the rollback PR so we can ship it?",
+    why: "Checkout is failing in prod; Dana needs your approval on the rollback",
+    since: new Date(Date.now() - 12 * 60_000).toISOString(),
+    messages: 3,
+    url: "https://mail.google.com/mail/u/?authuser=you%40acme.dev#all/18f2a9c0d1e2f3a4",
+    status: "active",
+    snooze_until: null,
+  },
+  {
+    id: "mail:18f29b7e6a5d4c3b",
+    thread_id: "18f29b7e6a5d4c3b",
+    from: "Priya Natarajan",
+    from_email: "priya@acme.dev",
+    subject: "SOC 2 evidence due tomorrow",
+    snippet: "Auditors need the access review export by tomorrow noon; you're the only one with the admin role for it.",
+    why: "Only you can export the access review; due tomorrow noon",
+    since: new Date(Date.now() - 95 * 60_000).toISOString(),
+    messages: 1,
+    url: "https://mail.google.com/mail/u/?authuser=you%40acme.dev#all/18f29b7e6a5d4c3b",
+    status: "active",
+    snooze_until: null,
+  },
+];
+const mailTriage = new Map<string, MailCard["status"]>();
+const mailCards = () => MAIL.map((x) => ({ ...x, status: mailTriage.get(x.id) ?? "active" }));
+const activeMail = () => mailCards().filter((x) => x.status === "active");
 
 // Notes to yourself: one reminder that came due, one without a time, one for tomorrow.
 const NOTES: Note[] = [
@@ -2859,6 +2897,7 @@ function overview(): Overview {
       new: all.filter((c) => c.new).length,
       asks: INQUIRIES.filter((q) => !q.answer).length,
       sessions: activeSessions().length,
+      mail: activeMail().length,
     },
     inflight: { total: recs.filter(inFlight).length },
     agent: setting("agent.coordinator"),
@@ -3850,6 +3889,13 @@ const settingsView = (): SettingsView => ({
   overridden: Object.keys(overrides),
   errors: [],
   github: github(),
+  gmail: {
+    configured: !!setting("gmail.client_id"),
+    email: setting("gmail.enabled") ? "you@acme.dev" : null,
+    error: null,
+    read_at: new Date(Date.now() - 2 * 60_000).toISOString(),
+    urgent: activeMail().length,
+  },
   paused: {
     ai: autoAiOn() && aiPaused ? { why: aiPaused, until: new Date(Date.now() + 30 * 60_000).toISOString() } : null,
   },
@@ -4025,6 +4071,9 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return boardView(b);
   }
   if (route === "GET /api/item") return detail(resolve(url.searchParams.get("id") ?? ""));
+  // Gmail's Connect opens nothing here: the mock says it's connected once its client is set.
+  if (route === "POST /api/gmail/connect") return { ok: true, url: "https://accounts.google.com/o/oauth2/v2/auth?mock=1" };
+  if (route === "POST /api/gmail/disconnect") return { ok: true };
   if (route === "POST /api/act") {
     const body = await readBody(req);
     const session = SESSIONS.find((x) => x.id === body.id);
@@ -4036,6 +4085,16 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       sessionTriage.set(session.id, to);
       bump();
       return { ok: true, state: { id: session.id, muted: to === "muted" }, undo_seq: 0 };
+    }
+    const mail = MAIL.find((x) => x.id === body.id);
+    if (mail) {
+      const done = { done: "done", snooze: "snoozed", mute: "muted", unmute: "active", restore: "active" } as const;
+      const to: MailCard["status"] | undefined =
+        typeof body.action === "string" && isKeyOf(done, body.action) ? done[body.action] : undefined;
+      if (!to) throw new HttpError(409, `an email takes done, snooze, mute, unmute and restore; not ${String(body.action)}`);
+      mailTriage.set(mail.id, to);
+      bump();
+      return { ok: true, state: { id: mail.id, muted: to === "muted" }, undo_seq: 0 };
     }
     if (typeof body.action !== "string" || !isKeyOf(ACTIONS, body.action))
       throw new HttpError(400, `unknown action ${String(body.action)}`);

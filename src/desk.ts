@@ -33,6 +33,7 @@ import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter, InlineThread } from "./github/write.ts";
 import { KEEP_RESOLVED, type Connector, type NewEvent } from "./connectors/connector.ts";
 import { GitHubConnector } from "./connectors/github.ts";
+import { Gmail, type Fetch } from "./connectors/gmail.ts";
 import { openLink, Sessions, type Roots } from "./connectors/sessions.ts";
 import { docOf, docsDir, loadDoc, saveDoc } from "./doc.ts";
 import { linkRef, permalink } from "./links.ts";
@@ -82,6 +83,7 @@ import type {
   ItemDetail,
   ItemState,
   SessionCard,
+  MailCard,
   Job,
   Criterion,
   JudgeSignal,
@@ -103,7 +105,7 @@ import type {
   UpdateView,
   Work,
 } from "./types.ts";
-import { BUCKETS, byPart, isCoordinator, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
+import { BUCKETS, byPart, isCoordinator, isMailRef, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
 import { decodeEach, isKeyOf, keysOf, oneOf, schemaOf, strings } from "./narrow.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
@@ -193,6 +195,9 @@ const ISSUE_AGAIN_MS = 6 * 3_600_000; // an issue that moved on is pre-reviewed 
 const ISSUE_RETRY_MS = 3_600_000; // a failed try on a version of an issue waits this long
 const AI_PAUSE_AFTER = 2; // failures in a row (an expired login fails every PR) that pause AI reviews nobody asked for, for AI_RETRY
 const agentKey = (s: Settings) => JSON.stringify([s["review.auto_ai"], agents.driverOf(s["agent.harness"])]);
+// What the Gmail source reads with: a change starts it again.
+const gmailKey = (s: Settings) =>
+  JSON.stringify([s["gmail.enabled"], s["gmail.client_id"], s["gmail.client_secret"], s["gmail.query"], s["gmail.poll_minutes"]]);
 const searchKey = (s: Settings) => JSON.stringify([s["github.bots"], s["github.close_collaborator_min"]]); // {close_authors}
 const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays there this long
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
@@ -316,6 +321,7 @@ export interface DeskOptions {
   decisions?: string; // the Decisions API's URL, in place of OpenRouter's: tests point it at a local server
   mcpUrl?: string; // its /mcp, which a Codex run is given as the desk's own MCP server
   sessions?: Roots; // where the Sessions source reads; tests point it at fixtures
+  gmail?: Fetch; // how the Gmail source reaches Google; tests answer it
   open?: (url: string) => Effect.Effect<void, CommandError>; // opens a session's link on this computer; tests record it
   app?: AppUpdater; // the packaged app running this desk: what a newer release is checked against, and its install
 }
@@ -652,6 +658,7 @@ export class Desk {
   convos: Conversations;
   coordinator: Coordinator;
   sessions: Sessions;
+  gmail: Gmail;
   opener: (url: string) => Effect.Effect<void, CommandError>;
   automations: Automations;
   urgency: Urgency; // the Inbox's sections and order: criteria and scores
@@ -725,6 +732,7 @@ export class Desk {
     this.convos = new Conversations(this);
     this.coordinator = new Coordinator(this);
     this.sessions = new Sessions(this, opts.sessions);
+    this.gmail = new Gmail(this, opts.gmail);
     this.opener = opts.open ?? openLink;
     this.automations = new Automations(this);
     this.urgency = new Urgency(this);
@@ -836,6 +844,7 @@ export class Desk {
     for (const c of this.connectors) c.start();
     this.coordinator.start();
     this.sessions.start();
+    this.gmail.start();
     this.jobs.start();
     this.updates.start();
     // A reminder due while the desk was off notifies once now; then every half minute.
@@ -861,6 +870,7 @@ export class Desk {
     this.convos.stop();
     this.coordinator.close();
     this.sessions.stop();
+    this.gmail.stop();
     this.automations.stop();
     this.urgency.stop();
     this.jobs.stop();
@@ -1027,8 +1037,10 @@ export class Desk {
       const bypass = this.settings["agent.coordinator_bypass"];
       const decider = this.settings["agent.decision_key"] + this.settings["agent.decision_model"];
       const sessions = this.settings["sessions.enabled"];
+      const gmail = gmailKey(this.settings);
       this.settings = this.readSettings(file);
       if (this.settings["sessions.enabled"] !== sessions && !this.stopped) this.sessions.reschedule();
+      if (gmailKey(this.settings) !== gmail && !this.stopped) this.gmail.reschedule();
       // A question waiting on its model asks again at once with another key or model.
       if (this.settings["agent.decision_key"] + this.settings["agent.decision_model"] !== decider) {
         this.automations.held.clear();
@@ -1211,6 +1223,7 @@ export class Desk {
           .map(([org, items]) => ({ org, items, space: spaceOf(org, spaces) })),
         catch_all: catchAllOf(spaces),
       },
+      gmail: this.gmail.status(),
       paused: {
         ai: this.aiPausedNow() ? { why: this.aiPaused!.why, until: new Date(this.aiPaused!.until).toISOString() } : null,
       },
@@ -2010,6 +2023,7 @@ export class Desk {
           new: [...focus.sections.now, ...focus.sections.today].filter((c) => c.new).length,
           asks: this.inquiries().filter((q) => !q.answer).length,
           sessions: this.sessions.active().length,
+          mail: this.gmail.active().length,
         },
         inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length },
         agent: this.settings["agent.coordinator"],
@@ -2112,6 +2126,7 @@ export class Desk {
       oneLinePerStack(sections, ["now", "today"], snap.stacks);
       return {
         sessions: this.sessions.active(),
+        mail: this.gmail.active(),
         sections,
         reviewing: this.reviewing(snap),
         paused: this.paused(),
@@ -2231,6 +2246,7 @@ export class Desk {
         inquiries: this.inquiries().filter((q) => !q.answer),
         notes: this.notesView(),
         sessions: this.sessions.cards(),
+        mail: this.gmail.cards(),
         sections,
         reviewing,
         hidden: kept,
@@ -3169,6 +3185,7 @@ export class Desk {
     agent?: string,
   ): Effect.Effect<{ state: ItemState; undo_seq: number }, RefError | Forbidden | Conflict | BadRequest> {
     if (isSessionRef(ref)) return this.sessionAct(ref, action, until, agent);
+    if (isMailRef(ref)) return this.mailAct(ref, action, until, agent);
     return Effect.gen({ self: this }, function* () {
       const id = yield* this.resolve(ref);
       if (action === "undo") {
@@ -3301,8 +3318,36 @@ export class Desk {
     until?: string,
     agent?: string,
   ): Effect.Effect<{ state: ItemState; undo_seq: number }, NotFound | Conflict | BadRequest> {
+    return this.triage(this.sessions.get(ref), "a session", "it moves on", action, until, agent);
+  }
+
+  // An urgent email's triage, as a session's: done until a new message in the thread, snoozed until a time, muted.
+  mailAct(
+    ref: string,
+    action: Action,
+    until?: string,
+    agent?: string,
+  ): Effect.Effect<{ state: ItemState; undo_seq: number }, NotFound | Conflict | BadRequest> {
+    return this.triage(
+      Effect.map(this.gmail.mail(ref), (c) => ({ id: c.id, name: `${c.from}'s email` })),
+      "an email",
+      "a new message comes",
+      action,
+      until,
+      agent,
+    );
+  }
+
+  private triage(
+    found: Effect.Effect<{ id: string; name: string }, NotFound>,
+    what: string,
+    back: string,
+    action: Action,
+    until?: string,
+    agent?: string,
+  ): Effect.Effect<{ state: ItemState; undo_seq: number }, NotFound | Conflict | BadRequest> {
     return Effect.gen({ self: this }, function* () {
-      const c = yield* this.sessions.get(ref);
+      const c = yield* found;
       if (action === "undo") {
         const ev = this.store.lastActionFor(c.id);
         if (!ev) return yield* new NotFound({ message: `nothing to undo for ${c.name}` });
@@ -3318,7 +3363,7 @@ export class Desk {
         case "snooze": {
           const u = until ?? "tomorrow";
           if (u === "activity" || Object.hasOwn(UNTIL, u))
-            return yield* new Conflict({ message: `a session snoozes until a time; done brings it back when it moves on` });
+            return yield* new Conflict({ message: `${what} snoozes until a time; done brings it back when ${back}` });
           Object.assign(s, ACTIVE, {
             snooze_until: (yield* parseUntil(u, now)).toISOString(),
             snoozed_at: now.toISOString(),
@@ -3344,7 +3389,7 @@ export class Desk {
         case "urgent":
         case "standard":
         case "fyi":
-          return yield* new Conflict({ message: `a session takes done, snooze, mute, unmute and restore; not ${action}` });
+          return yield* new Conflict({ message: `${what} takes done, snooze, mute, unmute and restore; not ${action}` });
         default:
           return yield* new BadRequest({ message: `unknown action "${action as string}"` });
       }
@@ -3353,6 +3398,20 @@ export class Desk {
       const seq = this.store.logAction(c.id, action, before, now.toISOString(), auto);
       this.changed();
       return { state: stateOf(s), undo_seq: seq };
+    });
+  }
+
+  // GET /api/mail/:id (desk_item for an urgent email).
+  mail(ref: string): Effect.Effect<MailCard, NotFound> {
+    return this.gmail.mail(ref);
+  }
+
+  // Settings → Gmail's Connect, from the desk's window only: Google's consent page, opened on this computer.
+  gmailConnect(redirect: string): Effect.Effect<{ url: string }, Conflict | CommandError> {
+    return Effect.gen({ self: this }, function* () {
+      const { url } = yield* this.gmail.connect(redirect);
+      yield* this.opener(url);
+      return { url };
     });
   }
 

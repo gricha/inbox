@@ -10,6 +10,7 @@ import type {
   Note,
   SessionAction,
   SessionCard,
+  MailCard,
   ItemDetail,
   Overview,
   QueueView,
@@ -59,7 +60,8 @@ import { Beside } from "./components/Beside.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
-import { QuestionMenu, RowMenu, SessionMenu } from "./components/RowMenu.tsx";
+import { MailMenu, QuestionMenu, RowMenu, SessionMenu } from "./components/RowMenu.tsx";
+import type { MailCtx } from "./components/Mail.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import type { SessionCtx } from "./components/Session.tsx";
 import { Review } from "./components/Review.tsx";
@@ -525,6 +527,14 @@ export function App() {
       (s) => s.status === "active" && !leaving.has(s.id) && (!f || [s.name, s.reason, s.cwd].some((x) => x.toLowerCase().includes(f))),
     );
   }, [view, leaving, filter, listPage]);
+  // Then urgent email, which the filter reads too.
+  const mail = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    if (listPage !== "queue") return [];
+    return (view?.mail ?? []).filter(
+      (m) => m.status === "active" && !leaving.has(m.id) && (!f || [m.subject, m.from, m.why].some((x) => x.toLowerCase().includes(f))),
+    );
+  }, [view, leaving, filter, listPage]);
   const cursor = useMemo(() => [...inquiries.map((q) => inquiryOf(q.id)), ...stops(page, leaving)], [inquiries, page, leaving]);
   const current = flat.find((c) => c.id === selected) ?? null;
   // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
@@ -573,7 +583,15 @@ export function App() {
   // the one you left it with.
   function rowMenu(x: number, y: number, target: Element | null): boolean {
     const id = target?.closest<HTMLElement>(".line[data-id]")?.dataset.id;
-    if (!id || !(onScreen.some((c) => c.id === id) || inquiries.some((q) => inquiryOf(q.id) === id) || sessions.some((s) => s.id === id))) {
+    if (
+      !id ||
+      !(
+        onScreen.some((c) => c.id === id) ||
+        inquiries.some((q) => inquiryOf(q.id) === id) ||
+        sessions.some((s) => s.id === id) ||
+        mail.some((m) => m.id === id)
+      )
+    ) {
       stay.current = null;
       setMenuAt(null);
       return false;
@@ -607,14 +625,15 @@ export function App() {
   const menuCard = menuAt ? onScreen.find((c) => c.id === menuAt.id) : undefined;
   const menuQuestion = menuAt ? inquiries.find((q) => inquiryOf(q.id) === menuAt.id) : undefined;
   const menuSession = menuAt ? sessions.find((x) => x.id === menuAt.id) : undefined;
+  const menuMail = menuAt ? mail.find((x) => x.id === menuAt.id) : undefined;
   const closeMenu = useCallback(() => {
     stay.current = null;
     setMenuAt(null);
   }, []);
   // Its row left the page (sorted away, resolved, acted on elsewhere): the menu goes with it, for good.
   useEffect(() => {
-    if (menuAt && !menuCard && !menuQuestion && !menuSession) closeMenu();
-  }, [menuAt, menuCard, menuQuestion, menuSession, closeMenu]);
+    if (menuAt && !menuCard && !menuQuestion && !menuSession && !menuMail) closeMenu();
+  }, [menuAt, menuCard, menuQuestion, menuSession, menuMail, closeMenu]);
 
   // The PR row you rest on, by Tab or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
   const onRow =
@@ -758,6 +777,15 @@ export function App() {
 
   // A session's triage: it fades off the list at once, and comes back if the desk refuses.
   function sessionAct(s: SessionCard, action: "done" | "snooze" | "mute", until = "tomorrow") {
+    triage({ id: s.id, name: s.name, list: "sessions" }, action, until);
+  }
+
+  // An urgent email's, the same.
+  function mailAct(m: MailCard, action: "done" | "snooze" | "mute", until = "tomorrow") {
+    triage({ id: m.id, name: `${m.from}'s email`, list: "mail" }, action, until);
+  }
+
+  function triage(s: { id: string; name: string; list: "sessions" | "mail" }, action: "done" | "snooze" | "mute", until: string) {
     if (selected === s.id) setSelected(null);
     if (expanded === s.id) setExpanded(null);
     setLeaving((x) => new Set(x).add(s.id));
@@ -769,7 +797,8 @@ export function App() {
             undoWrite.current = null;
             // Off the list before it's unhidden, so it doesn't flash back until the refresh lands.
             const status = action === "done" ? "done" : action === "snooze" ? "snoozed" : "muted";
-            setView((v) => v && { ...v, sessions: v.sessions.map((x) => (x.id === s.id ? { ...x, status } : x)) });
+            const mark = <T extends { id: string; status: string }>(xs: T[]) => xs.map((x) => (x.id === s.id ? { ...x, status } : x));
+            setView((v) => v && (s.list === "sessions" ? { ...v, sessions: mark(v.sessions) } : { ...v, mail: mark(v.mail) }));
             const snoozed = SNOOZE.find((o) => o.until === until)?.toast.replace(/ \(or .*\)$/, "") ?? until;
             flash(`${action === "snooze" ? `Snoozed ${snoozed}` : VERB[action]}: ${s.name}`, false, true);
           }),
@@ -1359,7 +1388,12 @@ export function App() {
       if (to) go({ name: "review", id: to.card.id });
       return;
     }
-    const order = [...inquiries.map((q) => inquiryOf(q.id)), ...sessions.map((x) => x.id), ...flat.map((c) => c.id)];
+    const order = [
+      ...inquiries.map((q) => inquiryOf(q.id)),
+      ...sessions.map((x) => x.id),
+      ...mail.map((x) => x.id),
+      ...flat.map((c) => c.id),
+    ];
     // An issue it opened in place beside a review is where it is, not the review still drawn.
     const last = stepAt.current;
     const here = last !== null && (last === expanded || last === shown) ? last : (shown ?? expanded ?? selected);
@@ -1368,13 +1402,13 @@ export function App() {
     if (id === undefined) return;
     stepAt.current = id;
     const q = inquiries.find((x) => inquiryOf(x.id) === id);
-    const s = sessions.find((x) => x.id === id);
+    const s = sessions.find((x) => x.id === id) ?? mail.find((x) => x.id === id);
     const c = flat.find((x) => x.id === id);
     if (q) {
       setExpanded(null);
       openInquiry(q);
     } else if (s) {
-      // A session opens in place on the Inbox, as an issue does.
+      // A session or an email opens in place on the Inbox, as an issue does.
       if (route.name === "review" || route.name === "inquiry") go({ name: "queue" });
       setSelected(s.id);
       setExpanded(s.id);
@@ -1564,6 +1598,20 @@ export function App() {
     act: sessionAct,
     start: sessionStart,
   };
+  const mailCtx: MailCtx = {
+    now,
+    selected,
+    expanded,
+    leaving,
+    select: (m) => {
+      setSelected(m.id);
+    },
+    toggle: (m) => {
+      setSelected(m.id);
+      setExpanded(expanded === m.id ? null : m.id);
+    },
+    act: mailAct,
+  };
   const inq = {
     now,
     selected,
@@ -1694,6 +1742,8 @@ export function App() {
               inq={inq}
               sessions={sessions}
               ses={ses}
+              mail={mail}
+              mailCtx={mailCtx}
               note={note}
               filter={filter}
               toggle={toggleGroup}
@@ -1912,6 +1962,17 @@ export function App() {
           y={menuAt.y}
           act={sessionAct}
           start={sessionStart}
+          reopen={reopenMenu}
+          onClose={closeMenu}
+        />
+      )}
+      {menuAt && menuMail && (
+        <MailMenu
+          key={`${menuAt.id} ${menuAt.x} ${menuAt.y}`}
+          m={menuMail}
+          x={menuAt.x}
+          y={menuAt.y}
+          act={mailAct}
           reopen={reopenMenu}
           onClose={closeMenu}
         />
