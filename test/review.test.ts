@@ -650,8 +650,9 @@ test("a PR's diff comes from read-only gh calls; one fetched across a push, or t
   assert.ok(bad.cause instanceof SyntaxError);
   assert.equal(bad.message, bad.cause.message);
 
+  // Only the empty dir: a CI runner has gh in /usr/bin.
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), "desk-no-gh-"));
-  onPath(empty);
+  process.env.PATH = empty;
   const none = await failure(fetchPr(item));
   assert.deepEqual([none._tag, none.message], ["CommandNotFound", GH_MISSING]);
   for (const x of [ok, forced, pushed, garbled]) fs.rmSync(x.dir, { recursive: true });
