@@ -48,6 +48,7 @@ import {
   type ListPage,
   stops,
   type GroupKey,
+  matches,
   type Route,
   whereIs,
 } from "./view.ts";
@@ -62,6 +63,7 @@ import { InquiryPage } from "./components/Inquiry.tsx";
 import { NoteMenu, QuestionMenu, RowMenu, SessionMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import type { SessionCtx } from "./components/Session.tsx";
+import { PeopleFilter } from "./components/PeopleFilter.tsx";
 import { Review } from "./components/Review.tsx";
 import { Settings } from "./components/Settings.tsx";
 import { Setup } from "./components/Setup.tsx";
@@ -117,6 +119,8 @@ function dismissedAtStart(): Dismissed {
   return parsed && Result.isSuccess(parsed) ? parsed.success : {};
 }
 const LIST_PAGES = new Set<Route["name"]>(["queue", "blocked", "archive"]);
+// Where the search has a list to read: the list pages and Merging, and a review or question with its list beside.
+const SEARCHED = new Set<Route["name"]>([...LIST_PAGES, "inflight", "review", "inquiry"]);
 // The sidebar's pages, top to bottom: ⌘1 to ⌘4 (Ctrl elsewhere) open them, as tabs' numbers do in a browser.
 const SIDE_PAGES = ["queue", "blocked", "inflight", "archive"] as const;
 // What Blocked and the Archive say with nothing on them.
@@ -365,7 +369,9 @@ export function App() {
 
   const settingsSection = route.name === "settings" ? route.section : null;
   useEffect(() => {
-    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    // A new page drops focus, but not from the search: typing there may be what brought you here.
+    const el = document.activeElement;
+    if (el instanceof HTMLElement && !el.closest(".side-search")) el.blur();
     setExpanded(null);
     // Settings scrolls itself, to the part or view the link names, once its parts have loaded.
     if (settingsSection !== null) {
@@ -498,7 +504,13 @@ export function App() {
       ),
     [view, me],
   );
-  const search = <Filter filter={filter} setFilter={setFilter} people={people} me={me} />;
+  // One search for every page: a page with no list (Settings) takes you to the Inbox to search it.
+  const searchFor = (s: string) => {
+    setFilter(s);
+    if (s.trim() && !SEARCHED.has(route.name)) go({ name: "queue" });
+  };
+  const search = <Filter filter={filter} setFilter={searchFor} />;
+  const peopleFilter = <PeopleFilter filter={filter} setFilter={setFilter} people={people} me={me} />;
   // The selection goes through the page on screen: the queue, or Later's groups; in a review, the page it came from.
   const list = route.name === "review" ? reviewFrom : route.name;
   const page = useMemo(() => {
@@ -531,15 +543,20 @@ export function App() {
   const current = flat.find((c) => c.id === selected) ?? null;
   // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
   const questionOf = (id: string) => view?.inquiries.find((q) => q.id === id) ?? (pageQuestion?.id === id ? pageQuestion : undefined);
-  const laneRows = useMemo(() => lane?.rows ?? [], [lane]);
+  // Merging as the search leaves it.
+  const laneShown = useMemo(() => {
+    const q = filter.trim();
+    return lane && q ? { ...lane, rows: lane.rows.filter((r) => matches(r.card, q, me)) } : lane;
+  }, [lane, filter, me]);
+  const laneRows = useMemo(() => laneShown?.rows ?? [], [laneShown]);
   const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? null;
   // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
   const known = useMemo(() => {
     const m = new Map<string, Card>();
     if (view) for (const c of [...Object.values(view.sections).flat(), ...view.hidden, ...view.cleared, ...view.resolved]) m.set(c.id, c);
-    for (const r of laneRows) m.set(r.card.id, r.card);
+    for (const r of lane?.rows ?? []) m.set(r.card.id, r.card);
     return m;
-  }, [view, laneRows]);
+  }, [view, lane]);
   const knownRef = useRef(known);
   knownRef.current = known;
 
@@ -1425,7 +1442,7 @@ export function App() {
     }
     if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
     if (route.name === "review" || route.name === "inquiry") return; // they read their own Esc
-    const onList = LIST_PAGES.has(route.name); // where the filter is drawn
+    const onList = LIST_PAGES.has(route.name) || route.name === "inflight"; // where the search reads a list
     const part = route.name === "settings" ? settingsBack(route.section) : null;
     if (onList && expanded) setExpanded(null);
     else if (onList && filter) setFilter("");
@@ -1470,9 +1487,9 @@ export function App() {
       return;
     }
     const typing = e.target instanceof HTMLElement && !!e.target.closest("input, textarea, select, [contenteditable='true']");
-    // "/" puts you in the filter of the page's head, as on GitHub, wherever you're not typing.
+    // "/" puts you in the sidebar's search, as on GitHub, wherever you're not typing.
     if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey && !e.isComposing) {
-      const find = document.querySelector<HTMLInputElement>(".page-head .search-box input, .beside-head .search-box input");
+      const find = document.querySelector<HTMLInputElement>(".side-search .search-box input");
       if (find) {
         find.focus();
         e.preventDefault();
@@ -1629,7 +1646,8 @@ export function App() {
       />
     ) : listPage === "inflight" ? (
       <Inflight
-        view={lane}
+        view={laneShown}
+        filter={filter}
         now={now}
         selected={listSel}
         select={ignore}
@@ -1679,6 +1697,7 @@ export function App() {
         onAsk={() => {
           openAsk();
         }}
+        search={search}
       />
       {/* A sibling of the page's column, never around it: the review keeps its place in the tree as this comes and goes. */}
       {side && listPage && (
@@ -1686,7 +1705,7 @@ export function App() {
           name={PAGE_NAME[listPage]}
           count={listPage === "queue" ? inbox : null}
           open={side === "open"}
-          search={laneList ? null : search}
+          search={null}
           selected={openSel}
           onFold={foldList}
         >
@@ -1698,7 +1717,7 @@ export function App() {
           route={route}
           from={reviewFrom}
           question={route.name === "review" ? reviewQuestion : null}
-          search={search}
+          people={peopleFilter}
           onNote={() => {
             setCommenting(null);
             setNoting("new");
@@ -1808,7 +1827,8 @@ export function App() {
           )}
           {route.name === "inflight" && !broken && (
             <Inflight
-              view={lane}
+              view={laneShown}
+              filter={filter}
               now={now}
               selected={laneCur?.card.id ?? null}
               select={setLaneSel}

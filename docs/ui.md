@@ -36,13 +36,13 @@ The pages:
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────────┐
-│ ▬ Inbox      │ [ Filter ]                                                     │  the page's own head
-│              ├────────────────────────────────────────────────────────────────┤
-│ Inbox     21 │ Urgent  3                                                      │  a section's heading and its count
-│ Blocked      │ Question  Compact tombstones in #12, or ship…?    Answer   24m │  an agent's question leads Urgent
-│ ──────────── │ PR  Rotate staging KMS keys  infra#540  Auth and keys      28h │  its reason, quietly after its ref
-│ Merging      │ Standard  9                                                    │
-│ Archive      │ PR  Retry dead-lettered jobs  worker#882  carol waits…     26h │  the row you came back from: a neutral fill
+│ Inbox        │ Inbox                                               New note │  the page's own head
+│ [ Search ]   ├────────────────────────────────────────────────────────────────┤
+│ ▣ Inbox   21 │ Urgent  3                                                      │  a section's heading and its count
+│ ◷ Blocked    │ Question  Compact tombstones in #12, or ship…?    Answer   24m │  an agent's question leads Urgent
+│ ⑂ Merging    │ PR  Rotate staging KMS keys  infra#540  Auth and keys      28h │  its reason, quietly after its ref
+│ ⊠ Archive    │ Standard  9                                                    │
+│              │ PR  Retry dead-lettered jobs  worker#882  carol waits…     26h │  the row you came back from: a neutral fill
 │              │ 3 more                                                         │
 │              │ FYI  14                                                        │
 │ Ask your ag… │                                                                │
@@ -70,7 +70,7 @@ The window's only global chrome. There's no top bar.
 
 Sticky, and the desktop app's drag handle. It holds only the page's own controls:
 
-- Inbox, Blocked, Archive: the filter. Words match a row's title, repo or author. **author:dana** keeps who opened it (a bot's PR counts as the person it was opened for; author:you, yours) and **involves:dana** anyone on it: its author, assignees, who was asked, who reviewed, commented or answered a thread. Clicking in the box offers both; typing a name offers who it matches as Author and as Involves, with their pictures. A pick becomes a pill and the list closes; typing, ↓ or a click in the box opens it again. × or Backspace at the start takes a pill off. In the filter, ↑↓ and Enter pick a suggestion (Enter in an empty box takes Author, then its first person), Esc clears it all; Enter or ↓ with nothing offered leaves it.
+- Inbox, Blocked, Archive: the page's name, the filter by person and New note; Merging: its name and the filter by person. The search is at the top of the sidebar, on every page: its words match a row's title, repo or author, and one query searches the Inbox, Blocked, Merging and the Archive, and the list beside a review; typed in Settings, it takes you to the Inbox. Esc in it clears its words. The filter by person is an icon button; a count on it says how many people it picks. It opens a popover with a box to find someone, then **Author** (who opened it; a bot's PR counts as the person it was opened for) and **Involves** (anyone on it: its author, assignees, who was asked, who reviewed, commented or answered a thread), you first in each. A click picks or unpicks a person (a tick marks who's picked); **Clear** unpicks them all. Esc or a click outside closes it. The picks and the search's words apply together.
 - Merging and a Settings part: the page's name.
 - A review, a question, a Settings view: the way back ("‹ Inbox", "‹ Blocked", "‹ Merging", "‹ Archive", "‹ GitHub", "‹ Local Agent Integration", "‹ Automation Rules"). Its tooltip names Esc, and for a review or question, ⌘[ and ⌘].
 
@@ -714,7 +714,7 @@ The window names no key; a button's tooltip names its own. Only platform keys wo
 | Tab                             | Moves focus. A row is a button: focusing selects it, Enter or Space opens it. In the rules editor Tab indents.                                                                                                                                                                                            |
 | ↓ / ↑                           | On a list page and Merging: focuses (selects) the row after / before the focused or selected one, from the first or last; Enter opens it. The page scrolls only to keep it in view.                                                                                                                       |
 | Arrows, Enter, Space, Backspace | In menus, the reviewers box, settings fields and the shortcut recorder.                                                                                                                                                                                                                                   |
-| /                               | Puts you in the filter of the page's head (Inbox, Blocked, Archive), or the list's beside a review, when you're not typing. The filter waits narrow and grows while you're in it or it holds a filter.                                                                                                    |
+| /                               | Puts you in the search at the top of the sidebar, on any page, when you're not typing.                                                                                                                                                                                                                    |
 | ⌘1–⌘4                           | Inbox, Blocked, Merging, Archive (Ctrl elsewhere). Each page's tooltip names its key.                                                                                                                                                                                                                     |
 | ⌘] / ⌘[                         | The item after / before the open one in its list (else the selected one; with neither, the first or last), opened as a click would. On Merging, its PRs. Stops at the list's ends and at a fold. Works from a box; does nothing in Settings.                                                              |
 | ⌘,                              | Settings (desktop app).                                                                                                                                                                                                                                                                                   |

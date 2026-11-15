@@ -16,7 +16,12 @@ export interface DecisionCall {
 
 export async function fakeDecisions(answer: (call: DecisionCall) => { status?: number; json?: unknown; text?: string }) {
   const calls: DecisionCall[] = [];
+  let open = 0; // requests it's reading or answering
   const srv = createServer((req, res) => {
+    open++;
+    res.on("close", () => {
+      open--;
+    });
     let raw = "";
     req.on("data", (c: Buffer) => {
       raw += c.toString();
@@ -42,6 +47,18 @@ export async function fakeDecisions(answer: (call: DecisionCall) => { status?: n
   return {
     url: `http://127.0.0.1:${port}/api/alpha/decisions`,
     calls,
+    // Until nothing's open and nothing new came in for a while: a run that stopped at a refusal leaves its other requests
+    // in flight, and one landing late would count against what the test does next.
+    quiet: async (ms = 150) => {
+      const busy = (seen: number) => open > 0 || seen !== calls.length;
+      let seen = -1;
+      while (busy(seen)) {
+        seen = calls.length;
+        await new Promise<void>((r) => {
+          setTimeout(r, ms);
+        });
+      }
+    },
     close: () =>
       new Promise<void>((r) => {
         srv.close(() => {

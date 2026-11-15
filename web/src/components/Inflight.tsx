@@ -16,6 +16,7 @@ export function Inflight({
   open,
   onWork,
   compact = false,
+  filter = "",
 }: {
   view: InflightView | null;
   now: number;
@@ -25,6 +26,7 @@ export function Inflight({
   open: (row: InflightRow) => void; // its review
   onWork: (w: Work, k: "open" | "retry") => void; // a row of Claude's work: what it's about, Try again
   compact?: boolean;
+  filter?: string; // the search, already applied to view.rows
 }) {
   if (!view)
     return (
@@ -68,7 +70,9 @@ export function Inflight({
       {live.length ? (
         rows(live)
       ) : (
-        <p className="queue-empty">Nothing in Merging yet: hand off one of your PRs for merge when you're done with it.</p>
+        <p className="queue-empty">
+          {filter.trim() ? "No matches." : "Nothing in Merging yet: hand off one of your PRs for merge when you're done with it."}
+        </p>
       )}
       {!compact && view.work.length > 0 && <ClaudesWork work={view.work} now={now} onWork={onWork} />}
       {landed.length > 0 && (

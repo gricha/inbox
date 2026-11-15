@@ -800,7 +800,8 @@ const SHOTS: Shot[] = [
       const on = await sideOn(page);
       if (on !== "Inbox") failures.push(`queue: the sidebar marks ${JSON.stringify(on)}`);
       const head = await headSays(page);
-      if (head !== "Filter") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the filter`);
+      if (head !== "InboxNew note") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the page's name`);
+      if (!(await page.locator(".side-search .search input").count())) failures.push("queue: no filter at the top of the sidebar");
       if (await page.locator(".bubble").count()) failures.push("queue: a bubble while nothing's wrong");
       // Its sections under their headings, Urgent led by an agent's question, a row like the rest; a hand-back saying so on
       // its own row at every width; each row saying why it's there; every row shown, no "n more".
@@ -3402,6 +3403,25 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
+    // As ask-f, at a width where the chat leaves the column room for the sidebar and closing it takes that room away.
+    name: "ask-f-narrow",
+    sizes: ["wide"],
+    go: async (page) => {
+      await page.setViewportSize({ width: 1250, height: 820 });
+      await review("acme/api#4154")(page);
+      await page.locator(".side-ask").click();
+      await page.locator(".chat-input").waitFor();
+      await page.locator(".rv-side-show").click();
+      await page.locator(".chat").waitFor({ state: "detached" });
+      await page.locator(".rv-side").waitFor({ timeout: 3000 });
+    },
+    after: async (page) => {
+      const wide = SIZES.find((s) => s.name === "wide")!;
+      await page.setViewportSize({ width: wide.width, height: wide.height });
+      await fresh(page);
+    },
+  },
+  {
     // Your agent off: no Ask your agent anywhere.
     name: "ask-off",
     go: async (page) => {
@@ -5044,40 +5064,36 @@ const SHOTS: Shot[] = [
     after: fresh, // its toast gone, so the next shot doesn't show it
   },
   {
-    // The filter's people: a name typed offers who it is as author and as anyone involved, each with their picture.
-    name: "filter-suggest",
+    // The filter by person: its button on the head opens Author and Involves, you first; typing in it finds a person.
+    name: "filter-people",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".page-head .search input").click();
-      const starters = await page.locator(".search-pop .search-pop-key").allTextContents();
-      if (starters.join(" ") !== "Author Involves") failures.push(`filter-suggest: an empty filter offers ${JSON.stringify(starters)}`);
+      await page.locator(".page-head .head-filter").click();
+      const groups = await page.locator(".people-pop .pop-title").allTextContents();
+      if (groups.join(" ") !== "Author Involves") failures.push(`filter-people: the popover's groups are ${JSON.stringify(groups)}`);
       await page.keyboard.type("da");
-      await page.locator(".search-pop .pop-item").first().waitFor();
-      const offered = await page.locator(".search-pop .pop-item").allTextContents();
-      if (!offered.includes("Authordana") || !offered.includes("Involvesdana"))
-        failures.push(`filter-suggest: "da" offers ${JSON.stringify(offered)}`);
+      const offered = await page.locator(".people-pop .people-who").allTextContents();
+      if (offered.join(" ") !== "dana dana") failures.push(`filter-people: "da" finds ${JSON.stringify(offered)}`);
       await page.waitForTimeout(300);
     },
     after: fresh,
   },
   {
-    // Picked with the keyboard, a pill: Enter takes Author, then the first person it offers; only dana's rows.
-    name: "filter-pill",
+    // A person picked under Author: only dana's rows, the button counts one, and the sidebar's search keeps its words.
+    name: "filter-pick",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".page-head .search input").click();
-      await page.keyboard.press("Enter");
-      const typed = await page.locator(".page-head .search input").inputValue();
-      if (typed !== "author:") failures.push(`filter-pill: Enter on Author leaves ${JSON.stringify(typed)}`);
-      await page.keyboard.type("da");
-      await page.locator(".search-pop .pop-item").first().waitFor();
-      await page.keyboard.press("Enter");
-      if (await page.locator(".search-pop").count()) failures.push("filter-pill: the list stays open after a person is picked");
-      const pill = await page.locator(".page-head .search-pill").textContent();
-      if (pill !== "Authordana×") failures.push(`filter-pill: the pill reads ${JSON.stringify(pill)}`);
+      await page.locator(".page-head .head-filter").click();
+      await page.keyboard.type("dana");
+      await page.locator(".people-pop .people-group").first().locator(".pop-item").first().click();
+      const count = await page.locator(".page-head .head-filter .pill-count").textContent();
+      if (count !== "1") failures.push(`filter-pick: the button counts ${JSON.stringify(count)}`);
       const by = await page.locator(".queue .line:not(.inq) .line-by").allTextContents();
-      if (!by.length || by.some((b) => b.trim() !== "by dana")) failures.push(`filter-pill: rows by ${JSON.stringify(by)}`);
-      await page.locator(".page-head .search input").blur();
+      if (!by.length || by.some((b) => b.trim() !== "by dana")) failures.push(`filter-pick: rows by ${JSON.stringify(by)}`);
+      const words = await page.locator(".side-search .search input").inputValue();
+      if (words !== "") failures.push(`filter-pick: the search box reads ${JSON.stringify(words)}`);
+      await page.keyboard.press("Escape");
+      if (await page.locator(".people-pop").count()) failures.push("filter-pick: Esc leaves the popover open");
       await page.waitForTimeout(300);
     },
     after: fresh,

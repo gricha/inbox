@@ -388,7 +388,7 @@ export function filterOf(terms: { key: FilterKey; who: string }[], rest: string)
 
 const isYou = (who: string) => who === "you" || who === "me";
 
-function matches(c: Card, q: string, me: string): boolean {
+export function matches(c: Card, q: string, me: string): boolean {
   if (!q.trim()) return true;
   const { terms, text } = parseFilter(q);
   const has = (login: string, who: string) => login.toLowerCase().includes(who);

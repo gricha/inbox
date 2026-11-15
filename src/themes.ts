@@ -12,7 +12,7 @@ export interface Theme {
 
 export const THEMES = [
   { id: "light", label: "Light", scheme: "light", paper: "#eeecf3", pencil: "#5c5570", diff: "pierre-light-desk" },
-  { id: "dark", label: "Dark", scheme: "dark", paper: "#100d17", pencil: "#aca4bd", diff: "pierre-dark-desk" },
+  { id: "dark", label: "Dark", scheme: "dark", paper: "#0b0911", pencil: "#aca4bd", diff: "pierre-dark-desk" },
   { id: "sand", label: "Sand", scheme: "light", paper: "#f3eee5", pencil: "#73685a", diff: "pierre-light-desk" },
   { id: "slate", label: "Slate", scheme: "dark", paper: "#1b2028", pencil: "#8e98a5", diff: "pierre-dark-desk" },
   { id: "solarized", label: "Solarized", scheme: "light", paper: "#f6efdc", pencil: "#4f646b", diff: "solarized-light-desk" },

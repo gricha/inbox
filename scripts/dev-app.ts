@@ -1,6 +1,6 @@
 // npm run app:dev: the desktop app running from this checkout (DESK_SOURCE, as Settings → This device → Run from a checkout):
 // src/ restarts the desk, web/ hot-reloads, and a change under electron/ restarts the app.
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
@@ -14,6 +14,19 @@ const port = Number(envVar("DESK_PORT") ?? 47823);
 if ((await Effect.runPromise(probeHealth(`http://127.0.0.1:${port}`))).kind === "desk") {
   console.warn(`A desk is already running on :${port}; the app attaches to it, so src/ and web/ changes won't reach it.`);
   console.warn(`For a separate dev desk: DESK_PORT=47900 DESK_HOME=/tmp/desk-dev npm run app:dev`);
+}
+
+// macOS names the menu bar after the running bundle, and npm's Electron.app calls itself Electron: name it Inbox, as the
+// packaged app is. app.setName can't change that title.
+if (process.platform === "darwin") {
+  const plist = path.join(path.dirname(path.dirname(electron)), "Info.plist");
+  for (const key of ["CFBundleName", "CFBundleDisplayName"]) {
+    const r = spawnSync("plutil", ["-replace", key, "-string", "Inbox", plist]);
+    if (r.status !== 0) console.warn(`Couldn't name the dev app Inbox (${key}): ${String(r.stderr).trim()}`);
+  }
+  // Launch Services keeps a bundle's old name until it's registered again.
+  const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+  spawnSync(lsregister, ["-f", path.dirname(path.dirname(path.dirname(electron)))]);
 }
 
 let child: ChildProcess | null = null;

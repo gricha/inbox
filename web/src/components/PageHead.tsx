@@ -10,21 +10,21 @@ export const PAGE_NAME: Record<ListPage, string> = {
   archive: "Archive",
 };
 
-// The page's own head, at the top of its column: a list's filter, a review's, a question's or a Settings view's way back,
+// The page's own head, at the top of its column: a list's name (its filter is in the sidebar), a review's, a question's or a Settings view's way back,
 // or the page's name (Merging's, a Settings part's: the sidebar lists Settings' parts).
 // In the desktop app it's the window's drag handle, its controls excepted.
 export function PageHead({
   route,
   from,
   question,
-  search,
   onNote,
+  people,
 }: {
   route: Route;
   from: ListPage; // where a review goes back to
   question: string | null; // a review opened from an agent's question goes back to it
-  search: ReactNode; // the list's Filter
   onNote: () => void;
+  people: ReactNode; // the filter by person, on a list's head and Merging's
 }) {
   const inSettings = route.name === "settings";
   const part = inSettings ? settingsBack(route.section) : null;
@@ -41,7 +41,10 @@ export function PageHead({
       ) : inSettings ? (
         <h1 className="head-name">{partName(route.section)}</h1>
       ) : route.name === "inflight" ? (
-        <h1 className="head-name">Merging</h1>
+        <>
+          <h1 className="head-name">Merging</h1>
+          {people}
+        </>
       ) : route.name === "review" || route.name === "inquiry" || route.name === "doc" ? (
         <a
           className="back"
@@ -55,7 +58,10 @@ export function PageHead({
         </a>
       ) : (
         <>
-          {search}
+          {route.name === "queue" || route.name === "blocked" || route.name === "archive" ? (
+            <h1 className="head-name">{PAGE_NAME[route.name]}</h1>
+          ) : null}
+          {people}
           <button
             type="button"
             className="act head-note"

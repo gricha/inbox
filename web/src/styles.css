@@ -66,26 +66,27 @@ html {
   --chrome-wash: color-mix(in oklab, var(--chrome-ink) 13%, var(--chrome));
   --chrome-hover: color-mix(in oklab, var(--chrome-ink) 9%, var(--chrome));
   --chrome-on: color-mix(in oklab, var(--chrome-ink) 16%, var(--chrome));
-  --chrome-accent: color-mix(in oklab, var(--accent-ink) 55%, #fff);
+  --chrome-accent: oklch(from var(--accent) 74% 0.15 h);
+  --chrome-pill: oklch(from var(--accent) 55% 0.2 h); /* deep enough for white words on it */
 }
 
 /* System: dark when the computer is, unless a theme was picked. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --paper: #100d17;
-    --sheet: #181421;
-    --wash: #231e30;
+    --paper: #0b0911;
+    --sheet: #120f1a;
+    --wash: #1c1827;
     --ink: #eeebf4;
     --ink-2: #cdc7da;
     --pencil: #aca4bd;
     --faint: #6f6782;
-    --rule: #322b41;
-    --rule-strong: #413952;
+    --rule: #2a2437;
+    --rule-strong: #383048;
     --control: #706886;
-    --sel: #1f1a2b;
-    --side: #0c0a12;
-    --side-on: #272135;
-    --side-hover: #1b1626;
+    --sel: #1b1726;
+    --side: #07060b;
+    --side-on: #211c2d;
+    --side-hover: #14111d;
     --red: #ffb4ab;
     --red-wash: #3b2421;
     --amber: #ebc076;
@@ -95,7 +96,7 @@ html {
     --on-go: #0e2419;
     --accent: #c4a7f5;
     --accent-ink: #bfa2f2;
-    --accent-wash: #2d2344;
+    --accent-wash: #261d3a;
     --on-accent: #1f1336;
     --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
 
@@ -104,20 +105,20 @@ html {
 }
 
 :root[data-theme="dark"] {
-  --paper: #100d17;
-  --sheet: #181421;
-  --wash: #231e30;
+  --paper: #0b0911;
+  --sheet: #120f1a;
+  --wash: #1c1827;
   --ink: #eeebf4;
   --ink-2: #cdc7da;
   --pencil: #aca4bd;
   --faint: #6f6782;
-  --rule: #322b41;
-  --rule-strong: #413952;
+  --rule: #2a2437;
+  --rule-strong: #383048;
   --control: #706886;
-  --sel: #1f1a2b;
-  --side: #0c0a12;
-  --side-on: #272135;
-  --side-hover: #1b1626;
+  --sel: #1b1726;
+  --side: #07060b;
+  --side-on: #211c2d;
+  --side-hover: #14111d;
   --red: #ffb4ab;
   --red-wash: #3b2421;
   --amber: #ebc076;
@@ -127,7 +128,7 @@ html {
   --on-go: #0e2419;
   --accent: #c4a7f5;
   --accent-ink: #bfa2f2;
-  --accent-wash: #2d2344;
+  --accent-wash: #261d3a;
   --on-accent: #1f1336;
   --shadow: 0 1px 2px rgb(0 0 0 / 35%), 0 12px 32px rgb(0 0 0 / 50%);
 
@@ -775,24 +776,149 @@ p {
   white-space: nowrap;
 }
 
-/* The pill means one thing: where you are. */
+/* The pill means one thing: where you are. The word keeps its weight, so nothing shifts. */
 .side-item.on {
   background: var(--side-on);
   color: var(--ink);
-  font-weight: 600;
 }
 
-.side-count {
+/* How many need you, or how many people a filter picks: white in a pill of the brand's purple; nothing when none. */
+.side-count,
+.pill-count {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--chrome-pill);
+  color: #fff;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 18px;
+  text-align: center;
+}
+
+.side-count:empty {
+  display: none;
+}
+
+/* The filter by person on a page's head: an icon button before New note (on Merging's, at the head's end), its count of
+   picks on it; its popover lists the people under Author and Involves. */
+.people-filter {
+  position: relative;
+  margin-left: auto;
+}
+
+.people-filter + .head-note {
+  margin-left: -8px;
+}
+
+.head-filter {
+  padding: 0 9px;
+}
+
+.head-filter.on {
+  border-color: var(--chrome-pill);
+}
+
+.people-pop {
+  right: 0;
+  width: 220px;
+  padding: 4px;
+  max-height: min(480px, calc(100vh - 80px));
+  overflow-y: auto;
+}
+
+.people-find {
+  width: 100%;
+  height: 26px;
+  margin-bottom: 2px;
+  padding: 0 7px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 7px;
+  outline: none;
+  background: var(--wash);
+  color: var(--ink);
+  font: 12.5px var(--sans);
+}
+
+.people-find:focus {
+  border-color: var(--accent-ink);
+}
+
+.people-pop .avatar {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+/* Tighter than other menus: a row a person, many of them. */
+.people-pop .pop-item {
+  gap: 7px;
+  height: 26px;
+  padding: 0 7px;
+  font-size: 12.5px;
+}
+
+.people-pop .pop-title {
+  padding: 6px 7px 2px;
+  font-size: 11.5px;
+}
+
+.people-who {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.people-tick {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--accent-ink);
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.people-none {
+  margin: 0;
+  padding: 2px 7px 4px;
   color: var(--pencil);
   font-size: 12.5px;
-  font-weight: 450;
-  font-variant-numeric: tabular-nums;
 }
 
-/* A page's word and its count on one baseline, so they move together whatever the scroll rounds to. */
+.people-clear {
+  margin-top: 2px;
+  color: var(--accent-ink);
+}
+
+/* A page's icon, its word, then its count at the end of the row. */
 .side-nav .side-item {
-  align-items: baseline;
+  justify-content: flex-start;
   line-height: 30px;
+}
+
+.side-nav .side-name {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The sidebar's icons are white, whatever the theme: the chrome is always dark. */
+.si {
+  flex: none;
+  width: 15px;
+  height: 15px;
+}
+
+.side .si,
+.side .i {
+  color: #fff;
 }
 
 /* In Settings, the way back to the Inbox above its parts: quieter than they are, its chevron by its word. */
@@ -941,21 +1067,57 @@ p {
   min-width: 120px;
 }
 
-/* In a page's head it waits narrow, and grows to its width when you're in it or it holds a filter. */
-.page-head .search-box {
-  flex-basis: 200px;
-  transition: flex-basis 180ms ease;
+/* A list page's filter, at the top of the sidebar: a row like the pages under it, a field only while you're in it or it
+   holds a filter. */
+.side-search {
+  flex: none;
+  padding: 6px 10px 1px;
 }
 
-.page-head .search-box:focus-within,
-.page-head .search-box:has(.search-pill, input:not(:placeholder-shown)) {
-  flex-basis: 380px;
+/* The pages follow the search a row's gap apart, as they follow each other. */
+.side-search + .side-nav {
+  padding-top: 0;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .page-head .search-box {
-    transition: none;
-  }
+.side-search .search-box {
+  min-width: 0;
+}
+
+.side-search .search {
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-2);
+}
+
+.side-search .search:hover {
+  background: var(--side-hover);
+}
+
+.side-search .search:focus-within,
+.side-search .search:has(input:not(:placeholder-shown)) {
+  background: var(--wash);
+}
+
+.side-search .search svg {
+  width: 15px;
+  height: 15px;
+}
+
+.side-search .search input {
+  padding: 0;
+}
+
+.side-search .search input,
+.side-search .search input::placeholder {
+  color: var(--ink-2);
+  font-size: 13.5px;
+}
+
+.side-search .search:focus-within input::placeholder {
+  color: var(--pencil);
 }
 
 .search {
@@ -980,8 +1142,8 @@ p {
 
 .search svg {
   flex: none;
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentcolor;
   stroke-width: 1.6;
@@ -1004,107 +1166,6 @@ p {
 
 .search input::-webkit-search-cancel-button {
   display: none;
-}
-
-/* A picked person: who the rows are by, or involve; × takes it off. */
-.search-pill {
-  display: inline-flex;
-  flex: 0 1 auto;
-  align-items: center;
-  min-width: 0;
-  gap: 5px;
-  height: 22px;
-  padding: 0 2px 0 7px;
-  border-radius: 6px;
-  background: var(--rule);
-  color: var(--ink);
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-
-.search:focus-within .search-pill {
-  background: var(--wash);
-}
-
-.search-pill-key {
-  color: var(--pencil);
-}
-
-.search-pill .avatar {
-  width: 16px;
-  height: 16px;
-  margin: 0;
-}
-
-.search-pill-who {
-  overflow: hidden;
-  font-weight: 500;
-  text-overflow: ellipsis;
-}
-
-.search-pill-x {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  color: var(--pencil);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.search-pill-x:hover {
-  background: var(--rule-strong);
-  color: var(--ink);
-}
-
-.search-pop {
-  left: 0;
-  width: max(100%, 300px);
-}
-
-.search-pop .pop-head {
-  margin: 0;
-  padding: 6px 8px 4px;
-  color: var(--pencil);
-  font-size: 12px;
-}
-
-.search-pop .pop-item {
-  gap: 8px;
-}
-
-.search-pop .pop-item.hi {
-  background: var(--wash);
-}
-
-.search-pop .avatar {
-  width: 20px;
-  height: 20px;
-  margin: 0;
-}
-
-.search-pop-key {
-  flex: none;
-  width: 4.6em;
-  color: var(--pencil);
-}
-
-.search-pop-who {
-  color: var(--ink);
-  font-weight: 500;
-}
-
-.search-pop-help {
-  overflow: hidden;
-  color: var(--pencil);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .i {
@@ -1280,8 +1341,13 @@ p {
   top: 52px;
   z-index: 5;
   margin: 0;
-  padding: 14px var(--pad);
+  padding: 8px var(--pad);
+  font-size: 13px;
   background: var(--paper);
+}
+
+.queue .group-head .count {
+  font-size: 12px;
 }
 
 .beside .queue .group-head {
@@ -4872,10 +4938,10 @@ fieldset.au-field > legend {
 
 /* Review ------------------------------------------------------------------- */
 
-/* A PR's review takes the queue's place, the window's width: a header, the AI's read, then the diff in reading order with
-   its notes; beside it, unless folded, the sidebar with the stack, the files and recent activity. */
+/* A PR's review takes the queue's place, up to 1280px however wide the window, centred: a header, the AI's read, then the
+   diff in reading order with its notes; beside it, unless folded, the sidebar with the stack, the files and recent activity. */
 .col:has(.review) {
-  --col-w: 100%;
+  --col-w: 1280px;
 
   container: pane / inline-size;
 }

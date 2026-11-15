@@ -53,24 +53,24 @@ Tokens live in `web/src/styles.css`:
 
 | Token                                 | Role                                                                                                  | Light                           | Dark                            |
 | ------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------- |
-| `--paper`                             | the canvas: the page and its head                                                                     | `#eeecf3`                       | `#100d17`                       |
-| `--sheet`                             | a panel: a list page under its head, the list beside a review, menus, bubbles                         | `#faf9fc`                       | `#181421`                       |
-| `--wash`                              | a quiet fill: the filter, loading bars, your words in the chat, an off switch's track, a greyed field | `#e6e3ee`                       | `#231e30`                       |
+| `--paper`                             | the canvas: the page and its head                                                                     | `#eeecf3`                       | `#0b0911`                       |
+| `--sheet`                             | a panel: a list page under its head, the list beside a review, menus, bubbles                         | `#faf9fc`                       | `#120f1a`                       |
+| `--wash`                              | a quiet fill: the filter, loading bars, your words in the chat, an off switch's track, a greyed field | `#e6e3ee`                       | `#1c1827`                       |
 | `--ink`                               | text                                                                                                  | `#221f2b`                       | `#eeebf4`                       |
 | `--ink-2`                             | strong secondary text: the sidebar's pages; an on switch's fill                                       | `#3f3a4c`                       | `#cdc7da`                       |
 | `--pencil`                            | secondary text: a row's facts and its label, the sidebar's footer                                     | `#5c5570`                       | `#aca4bd`                       |
 | `--faint`                             | the quietest: separators; never text                                                                  | `#9a94aa`                       | `#6f6782`                       |
-| `--rule`, `--rule-strong`             | a hairline, a firmer one                                                                              | `#dcd8e5`, `#c8c3d4`            | `#322b41`, `#413952`            |
+| `--rule`, `--rule-strong`             | a hairline, a firmer one                                                                              | `#dcd8e5`, `#c8c3d4`            | `#2a2437`, `#383048`            |
 | `--control`                           | a control's necessary edge (a field, a switch, the fold button's ring)                                | `#7e7791`                       | `#706886`                       |
-| `--sel`                               | a selected thing's fill outside the tables (the PR on screen in a stack, the file you're in)          | `#ebe8f2`                       | `#1f1a2b`                       |
-| `--side`, `--side-hover`, `--side-on` | the sidebar before the chrome took it over (see `--chrome` below); still each theme's                 | `#e9e6f0`, `#e3dfeb`, `#dcd7e6` | `#0c0a12`, `#1b1626`, `#272135` |
+| `--sel`                               | a selected thing's fill outside the tables (the PR on screen in a stack, the file you're in)          | `#ebe8f2`                       | `#1b1726`                       |
+| `--side`, `--side-hover`, `--side-on` | the sidebar before the chrome took it over (see `--chrome` below); still each theme's                 | `#e9e6f0`, `#e3dfeb`, `#dcd7e6` | `#07060b`, `#14111d`, `#211c2d` |
 | `--red`, `--red-wash`                 | failing: CI failing, a high risk, sync failed, desk offline, your agent can't run, Connect failed     | `#b42318`, `#fcebe9`            | `#ffb4ab`, `#3b2421`            |
 | `--amber`, `--amber-wash`             | caution: changes requested, a merge conflict, a medium risk                                           | `#8a4b08`, `#faefdf`            | `#ebc076`, `#33291b`            |
 | `--green`                             | done or fine: a low risk, what you did in a review ("✓ Approved")                                     | `#176847`                       | `#8dceaf`                       |
 | `--go`, `--on-go`                     | Approve and Hand off for merge, filled                                                                | `#176847`, `#fff`               | `#8dceaf`, `#0e2419`            |
 | `--accent`, `--on-accent`             | the one call to action to press, filled                                                               | `#6a3dbd`, `#fff`               | `#c4a7f5`, `#1f1336`            |
 | `--accent-ink`                        | links, the focus ring, a row's tinted call to action, the Agent label on a question's page, the mark  | `#6236b3`                       | `#bfa2f2`                       |
-| `--accent-wash`                       | a row's tinted call to action                                                                         | `#e7defa`                       | `#2d2344`                       |
+| `--accent-wash`                       | a row's tinted call to action                                                                         | `#e7defa`                       | `#261d3a`                       |
 | `--shadow`                            | only what lies over the page: menus, toasts, bubbles, the chat over a narrow page                     | ink at 6 % and 12 %             | black at 35 % and 50 %          |
 
 - **Colour carries information.** Red fails, amber cautions, green is done or fine, always with words ("CI failing",
@@ -141,14 +141,15 @@ theme's paper mixed into black, with light text from the `--chrome-*` tokens, wh
 | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | The sidebar (`Sidebar.tsx`)                       | 230px, or as wide as you drag its edge (160px to 30% of the window, kept per device); 148px at 641–1000px; one row across the top at 640px and below                                | inside itself; sideways in its row |
 | The list beside a review (`Beside.tsx`)           | 320–360px (28vw), or as wide as you drag its edge (260px to half the window, kept per device); folded, nothing but its button; only for a review or a question, at 1160px and wider | inside itself                      |
-| The page's column (`.col`, `PageHead.tsx` on top) | the rest: a list edge to edge, a review with the page's padding, Settings 760px, Searches and rules 1180px, a question 880px                                                        | the window                         |
+| The page's column (`.col`, `PageHead.tsx` on top) | the rest: a list edge to edge, a review up to 1280px with its sidebar and the page's padding, centred, Settings 760px, Searches and rules 1180px, a question 880px                  | the window                         |
 | The chat (`Chat.tsx`)                             | 320–420px (25vw): a third column above 1100px, over the page's right edge at 1100px and below                                                                                       | inside itself                      |
 | A review's sidebar (`.rv-side`)                   | 280px beside the diff while the page's column is 1000px or wider (container query `pane`), else over the diff's edge; its toggle is pinned                                          | inside itself                      |
 
 ### The sidebar
 
 - The brand row: 52px, the desktop app's drag handle, 86px of left padding for the macOS traffic lights.
-- The pages: Inbox with its count, Blocked, Merging, the Archive (⌘1 to ⌘4), no hairline between them. FYI is a section of the Inbox,
+- The search leads on every page, the sidebar's full width: a row like the pages until you're in it or it holds a search.
+- The pages, each with its icon (`SideIcons.tsx`, white on the chrome in every theme): Inbox with its count, Blocked, Merging, the Archive (⌘1 to ⌘4), no hairline between them. Settings has its icon too. FYI is a section of the Inbox,
   not a page. The pill marks only where you are.
 - The footer, bottom up: Settings, the update line (only when a newer Inbox exists), Ask your agent ("Ask" at
   641–1000px).
@@ -159,7 +160,7 @@ theme's paper mixed into black, with light text from the `--chrome-*` tokens, wh
 
 - Sticky, 52px (as tall as the brand row and the list's head), on `--chrome`, a hairline under it. It's a drag handle,
   its controls excepted.
-- It holds only the page's own: a list's filter (on the rows' text edge), Merging's or a Settings part's name (on the
+- It holds only the page's own: a list's name and New note (its search is in the sidebar), Merging's or a Settings part's name (on the
   rows' text), or Back for a review, a question or a Settings view ("‹ Inbox", "‹ Question", "‹ GitHub",
   "‹ Your automations").
 

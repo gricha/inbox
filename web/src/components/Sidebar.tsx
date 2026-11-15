@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Overview } from "../../../src/types.ts";
 import { cls, MOD } from "../format.ts";
 import { SETTINGS_PARTS } from "../settings-parts.ts";
 import { pageOf, routeHash, settingsPart, type ListPage, type Route } from "../view.ts";
+import { ArchiveIcon, BlockedIcon, InboxIcon, MergingIcon, SettingsIcon } from "./SideIcons.tsx";
 import { Splitter, type Width } from "./Splitter.tsx";
 
-// The window's only global chrome, as wide as you drag it. The pages, in the owner's order: Inbox, Blocked, Merging and
+// The window's only global chrome, as wide as you drag it. The search leads, on every page; then the pages, in the owner's order: Inbox, Blocked, Merging and
 // the Archive; in Settings, its parts instead, under the way back to the Inbox: the core's, then the plugins'. In the footer, bottom up, Settings, a newer Inbox (only when there's one) and Ask your agent; what's wrong with
 // the sync is a bubble (Bubbles.tsx).
 export function Sidebar({
@@ -17,6 +18,7 @@ export function Sidebar({
   ask,
   waiting,
   onAsk,
+  search,
 }: {
   route: Route;
   from: ListPage; // where a review was opened from: it stays that page's
@@ -26,6 +28,7 @@ export function Sidebar({
   ask: boolean; // Ask your agent: not with the chat open, your agent off, or on its own question's page
   waiting: boolean; // the open review's latest ask is unanswered
   onAsk: () => void;
+  search: ReactNode | null; // the search, at the top on every page
 }) {
   const page = pageOf(route, from);
   const onQueue = page === "queue";
@@ -59,6 +62,7 @@ export function Sidebar({
       <div className="wordmark side-brand">
         <span>Inbox</span>
       </div>
+      {search && <div className="side-search">{search}</div>}
       {onSettings ? (
         <nav className="side-nav side-parts" aria-label="Settings">
           <a href="#/" className="side-item side-back" title={`Back to the Inbox (${MOD}1)`}>
@@ -96,6 +100,7 @@ export function Sidebar({
               }
             }}
           >
+            <InboxIcon />
             <span className="side-name">Inbox</span>
             <span className="side-count">{count !== null && count > 0 ? count : ""}</span>
           </a>
@@ -106,6 +111,7 @@ export function Sidebar({
             aria-current={onBlocked ? "page" : undefined}
             title={`Your PRs that can't move yet: another PR to merge first, or their reviewers (${MOD}2)`}
           >
+            <BlockedIcon />
             <span className="side-name">Blocked</span>
           </a>
           {/* No count: nothing there needs you, the coordinator has it. */}
@@ -115,6 +121,7 @@ export function Sidebar({
             aria-current={onLane ? "page" : undefined}
             title={`${flight?.total ? `${flight.total} merging` : "Your agent and what it merged"} (${MOD}3)`}
           >
+            <MergingIcon />
             <span className="side-name">Merging</span>
           </a>
           {/* What you finished, and what was dealt with: no count, nothing there needs you. */}
@@ -124,6 +131,7 @@ export function Sidebar({
             aria-current={onArchive ? "page" : undefined}
             title={`What's done, snoozed or muted: what you acted on and what resolved (${MOD}4)`}
           >
+            <ArchiveIcon />
             <span className="side-name">Archive</span>
           </a>
         </nav>
@@ -177,11 +185,7 @@ export function Sidebar({
           </a>
         )}
         <a href="#/settings" className={cls("side-item", onSettings && "on")}>
-          <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6" />
-            <circle cx="10" cy="4.5" r="1.5" />
-            <circle cx="6" cy="11.5" r="1.5" />
-          </svg>
+          <SettingsIcon />
           <span className="side-name">Settings</span>
         </a>
       </div>
