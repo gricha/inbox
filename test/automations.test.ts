@@ -14,7 +14,7 @@ import { judgeText } from "../src/judge.ts";
 import { createApp } from "../src/server.ts";
 import type { Automation } from "../src/types.ts";
 import { fakeDecisions } from "./helpers/decisions.ts";
-import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
+import { idle, myPr, reviewAsk, setup, teamPing, UNSCORED } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run as runFx, runSync } from "./helpers/run.ts";
 
@@ -1838,6 +1838,9 @@ test("a desk started on an empty home runs what GitHub comes with that's on: no 
     t.desk.automations.all().map((a) => `${a.id} ${a.on ? "on" : "off"}`),
     GITHUB_AUTOMATIONS.map((a) => `github.${a.id} ${a.on ? "on" : "off"}`),
   );
+  // The judge, the score, sessions and your agent call claude in the background, racing this check; off, a call is a built-in's.
+  await runFx(t.desk.saveSettings({ ...UNSCORED, "policy.judge": false, "sessions.enabled": false, "agent.coordinator": false }));
+  await runFx(t.desk.reloadSettings());
   t.desk.start();
   await idle(t.desk);
   t.desk.automations.tick(); // the minute's tick after the first sync
