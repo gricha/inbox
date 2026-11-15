@@ -56,8 +56,9 @@ async function setup(settings?: Record<string, unknown>) {
     app,
     req,
     json,
-    cleanup: () => {
-      desk.stop();
+    // Back once its agents have exited and its store is closed: Windows can't remove a dir a process or open file holds.
+    cleanup: async () => {
+      await run(desk.close());
       fs.rmSync(home, { recursive: true });
     },
   };
@@ -100,7 +101,7 @@ test("rejects foreign Host and Origin", async () => {
     403,
     { error: "forbidden cross-site request", tag: "Forbidden" },
   ]);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a desk no packaged app runs says no update, and Update is a Conflict", async () => {
@@ -108,7 +109,7 @@ test("a desk no packaged app runs says no update, and Update is a Conflict", asy
   assert.equal((await t.json("/api/overview")).update, null);
   const res = await t.req("/api/update", { method: "POST" });
   assert.deepEqual([res.status, await res.json()], [409, { error: "Inbox is up to date", tag: "Conflict" }]);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("an /api path the desk doesn't route is a NotFound, and a window-only delete a Forbidden, both through respond", async () => {
@@ -120,7 +121,7 @@ test("an /api path the desk doesn't route is a NotFound, and a window-only delet
     [del.status, await del.json()],
     [403, { error: "delete it in the desk's window: Settings → Automation Rules", tag: "Forbidden" }],
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 // A spawn of a gh that isn't there forks a child that holds the desk's socket until it exits: how a connection ends once nothing answers, or after 2 s.
@@ -232,7 +233,7 @@ test("a bug in a tool at /mcp is its error and is logged in the desk's log", asy
   c.after(async () => {
     await client.close();
     srv.close();
-    t.cleanup();
+    await t.cleanup();
   });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(srv.address() as AddressInfo).port}/mcp`)));
   const r = await client.callTool({ name: "desk_item", arguments: { ref: "api#7" } });
@@ -316,7 +317,7 @@ test("MCP over Streamable HTTP at /mcp: the stdio tools, served in-process", asy
   } finally {
     await client.close();
     srv.close();
-    t.cleanup();
+    await t.cleanup();
   }
 });
 
@@ -331,7 +332,7 @@ test("desk_inquiry by a question's link gives the question too: who asks, the qu
   c.after(async () => {
     await client.close();
     srv.close();
-    t.cleanup();
+    await t.cleanup();
   });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${(srv.address() as AddressInfo).port}/mcp`)));
   const call = async (name: string, args: Record<string, unknown> = {}) => {
@@ -405,7 +406,7 @@ test("API round trip: overview, board, item, act, undo, status", async () => {
   const undo = await t.json("/api/undo", { method: "POST" });
   assert.deepEqual(undo, { ok: true, id: "acme/api#7", action: "done" });
   assert.equal((await t.json("/api/status")).text, "desk 1");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("activity: the log over HTTP, a long-poll that answers when an event lands, and bad params", async () => {
@@ -424,7 +425,7 @@ test("activity: the log over HTTP, a long-poll that answers when an event lands,
   assert.equal((await t.req("/api/activity?after=-1")).status, 400);
   assert.equal((await t.req("/api/activity?wait=soon")).status, 400);
   assert.equal((await t.req("/api/activity?item=api%2399")).status, 404);
-  t.cleanup();
+  await t.cleanup();
 });
 
 // This desk has no diff reader, agent or write client, so every review route answers without touching GitHub or an agent.
@@ -456,7 +457,7 @@ test("review routes take the PR's id encoded in one segment or with its slash", 
   assert.equal((await post("/api/review/acme%2Fapi%237/approve", {})).status, 400, "the commit you reviewed is required");
   assert.equal((await post("/api/review/acme%2Fapi%237/approve", { head_oid: "h7", body: 5 })).status, 400);
   assert.equal((await t.req("/api/review/acme%2Fapi%2399")).status, 404);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("DESK_DEV lets the Vite dev server's page in, on its usual ports or DESK_DEV_PORT", async (c) => {
@@ -481,7 +482,7 @@ test("DESK_DEV lets the Vite dev server's page in, on its usual ports or DESK_DE
   );
   delete process.env.DESK_DEV;
   assert.equal(await from(createApp(t.desk, 47823), "http://localhost:48531"), 403, "only in dev");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("DESK_UI_ORIGIN lets in exactly the desktop app's Vite page, approve included", async (c) => {
@@ -506,7 +507,7 @@ test("DESK_UI_ORIGIN lets in exactly the desktop app's Vite page, approve includ
     [await approve("http://127.0.0.1:48555"), await approve("http://localhost:48555"), await approve("http://localhost:5173")],
     [409, 403, 403],
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 // A stand-in for the app's Vite server: it answers with the path it was asked and the request's Accept, and echoes upgraded sockets.
@@ -697,7 +698,7 @@ test("an app attached with /api/events?notify=1 gets the desk's notifications", 
   assert.match(text, /event: notify\ndata: {"title":"Inbox","body":"acme\/api#7 · asks you"}\n/);
   assert.deepEqual(own, ["with only the UI's stream"], "the desk notifies itself only while no app listens");
   await Promise.all([ui.cancel(), app.cancel()]);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("on Omarchy the desk answers its theme and tells the window when it switches", async (c) => {
@@ -728,7 +729,7 @@ test("on Omarchy the desk answers its theme and tells the window when it switche
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   fs.rmSync(home, { recursive: true });
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("errors: unknown board/item, bad action", async () => {
@@ -742,7 +743,7 @@ test("errors: unknown board/item, bad action", async () => {
   });
   assert.equal(bad.status, 400);
   assert.equal((await t.req("/api/nope")).status, 404);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("config preview and save", async () => {
@@ -779,7 +780,7 @@ test("config preview and save", async () => {
     });
   assert.equal((await put2(cfg.hash)).status, 200, "the hash from GET works as base");
   assert.equal((await put2("0123456789abcdef")).status, 409);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("opening a URL and notifying per platform, all as argv", () => {
@@ -835,7 +836,7 @@ test("agents: Claude Code's status, and connect", async () => {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
-    t.cleanup();
+    await t.cleanup();
   }
 });
 
@@ -1284,7 +1285,7 @@ test(
         if (v === undefined) delete process.env[k];
         else process.env[k] = v;
       }
-      t.cleanup();
+      await t.cleanup();
     }
   },
 );
