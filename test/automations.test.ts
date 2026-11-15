@@ -1776,7 +1776,12 @@ const TIDY = {
 test("a plugin's automation runs as yours do, its effects in its name and undone alike; switched off it stays off, and only from the window", async (c) => {
   fakeClaude(c);
   const t = await setup([reviewAsk(1), teamPing(4), teamPing(5)], { settings: { "policy.judge": false, "notify.quiet": "" } });
-  c.after(t.cleanup);
+  // The desk started again below closes first: Windows can't remove a home whose store is open.
+  let next: Desk | undefined;
+  c.after(async () => {
+    next?.stop();
+    await t.cleanup();
+  });
   t.desk.gh.automations = [TIDY];
   t.desk.automations.start(); // a fresh desk: the first sync is its news
   await runFx(t.desk.sync());
@@ -1821,10 +1826,7 @@ test("a plugin's automation runs as yours do, its effects in its name and undone
   await runFx(t.desk.sync());
   assert.equal(card(6).status, "active");
   t.desk.stop();
-  const next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
-  c.after(() => {
-    next.stop();
-  });
+  next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
   next.gh.automations = [TIDY];
   assert.equal(runSync(next.automations.get("github.tidy-pings")).on, false, "off across a restart");
   // A release that changes its definition just takes effect; one it drops is gone.
@@ -1851,7 +1853,12 @@ test("a desk started on an empty home runs what GitHub comes with that's on: no 
     ],
     { builtIns: true },
   );
-  c.after(t.cleanup);
+  // The desk started again below closes first: Windows can't remove a home whose store is open.
+  let next: Desk | undefined;
+  c.after(async () => {
+    next?.stop();
+    await t.cleanup();
+  });
   assert.equal(fs.existsSync(path.join(t.home, "settings.json")), false, "no settings");
   assert.deepEqual(t.desk.automations.own(), [], "no automations of yours");
   assert.deepEqual(
@@ -1891,10 +1898,7 @@ test("a desk started on an empty home runs what GitHub comes with that's on: no 
   assert.equal((await req("PUT", "/api/automations/github.wide-ping/on", { on: false }, DESK)).status, 200);
   assert.equal(at("acme/api#5"), "active fyi: asked of @ml-team");
   t.desk.stop();
-  const next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
-  c.after(() => {
-    next.stop();
-  });
+  next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
   assert.deepEqual(
     next.automations
       .all()
