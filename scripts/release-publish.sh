@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # npm run release:publish v0.2.4: builds a tag for macOS, Windows and Linux on this Mac and publishes its GitHub Release.
-# Stopgap while GitHub Actions is blocked by billing; --build-only builds and stops.
+# --build-only builds and stops.
 set -euo pipefail
 
 tag=${1:?usage: npm run release:publish vX.Y.Z [-- --build-only]}

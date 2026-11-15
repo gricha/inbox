@@ -5,7 +5,7 @@ import { Conflict, type GitHubReadError, type Upstream } from "./errors.ts";
 import type { Runner } from "./runner.ts";
 import type { UpdateView } from "./types.ts";
 
-// Where `npm run release` tags and .github/workflows/release.yml publishes; build.publish in package.json says the same.
+// Where `npm run release` tags and `npm run release:publish` publishes; build.publish in package.json says the same.
 export const RELEASES = { owner: "gricha", repo: "inbox" } as const;
 
 const CHECK_EVERY = 6 * 60 * 60_000;
