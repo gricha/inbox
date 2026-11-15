@@ -304,9 +304,9 @@ test(
         desk: { mcpUrl: MCP },
       },
     );
-    c.after(() => {
+    c.after(async () => {
       t.desk.stop();
-      t.cleanup();
+      await t.cleanup();
     });
     t.desk.coordinator.batch = 30;
     await run(t.desk.sync());

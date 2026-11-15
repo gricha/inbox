@@ -315,7 +315,7 @@ async function forAgent(agent: agents.DriverId): Promise<void> {
     await new Promise((r) => {
       server.close(r);
     });
-    t.cleanup();
+    await t.cleanup();
   }
 }
 

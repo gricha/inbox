@@ -67,9 +67,9 @@ async function reviewing(c: TestContext) {
   const f = fakeReview();
   const t = await setup([reviewAsk(1)], { settings: SETTINGS, desk: { review: f.deps } });
   const desks = [t.desk];
-  c.after(() => {
+  c.after(async () => {
     for (const d of desks) d.stop();
-    t.cleanup();
+    await t.cleanup();
   });
   // The next desk on the same home, as after a restart.
   const restart = async () => {

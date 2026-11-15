@@ -18,7 +18,7 @@ test("first run writes a config with a space for the busiest org", async () => {
   assert.match(text, /scope = "org:acme"/);
   assert.match(text, /scope = "-org:acme"/);
   assert.deepEqual(t.desk.configErrors, []);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("sync fills boards, focus and status", async () => {
@@ -50,7 +50,7 @@ test("sync fills boards, focus and status", async () => {
   assert.equal(ov.me, "me");
   assert.equal(ov.focus.now, 1);
   assert.equal(ov.spaces[0]?.boards[0]?.counts.now, 1);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("details are only refetched when an item changed or went stale", async () => {
@@ -62,7 +62,7 @@ test("details are only refetched when an item changed or went stale", async () =
   t.gh.items.set("acme/api#1", { ...item, updated_at: hoursAgo(0) });
   await run(t.desk.sync());
   assert.equal(t.gh.detailCalls.filter((c) => c.length).length, 2);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("done hides until someone else acts; undo restores", async () => {
@@ -93,7 +93,7 @@ test("done hides until someone else acts; undo restores", async () => {
   board = runSync(t.desk.board("acme-review"));
   assert.equal(board.sections.now[0]?.id, "acme/api#1");
   assert.equal(board.sections.now[0].new, true);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("snooze until a time, wakes on time or on activity; mute and pin", async () => {
@@ -110,7 +110,7 @@ test("snooze until a time, wakes on time or on activity; mute and pin", async ()
   runSync(t.desk.act("api#2", "unmute"));
   runSync(t.desk.act("api#2", "pin"));
   assert.equal(runSync(t.desk.board("acme-review")).sections.now[0]?.id, "acme/api#2");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("refs resolve by full id, short id, number or URL; ambiguity is a 409", async () => {
@@ -130,7 +130,7 @@ test("refs resolve by full id, short id, number or URL; ambiguity is a 409", asy
   assert.equal(detail.signals.me.requested_direct, true);
   assert.ok(detail.handoff_prompt.includes("gh pr diff 1 --repo acme/api"));
   assert.ok(!detail.handoff_prompt.includes(detail.item.title));
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("Searches and rules lists the final rules with the hard ones, in board order, their whys in plain words", async (c) => {
@@ -166,7 +166,7 @@ test("preview shows moves without saving; putConfig saves valid text only", asyn
   assert.equal(runSync(t.desk.putConfig("[[boards]]\nid = 1")).ok, false);
   assert.equal(runSync(t.desk.putConfig(text)).ok, true);
   assert.equal(runSync(t.desk.board("acme-review")).sections.today[0]?.id, "acme/api#2");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("notifies for a new item on the queue after the first sync", async () => {
@@ -182,7 +182,7 @@ test("notifies for a new item on the queue after the first sync", async () => {
   assert.match(t.notes[0] ?? "", /api#5/);
   await run(t.desk.sync());
   assert.equal(t.notes.length, 1);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a new queue item notifies once Claude or a hard rule placed it, never while Claude hasn't sorted it or for your own pin", async () => {
@@ -203,7 +203,7 @@ test("a new queue item notifies once Claude or a hard rule placed it, never whil
   assert.ok(runSync(t.desk.focus()).sections.today.some((x) => x.id === "acme/api#2" && x.placed_by === "pin"));
   t.desk.notifyNew();
   assert.equal(t.notes.length, 1, "your pin put it there");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("your own new drafts never notify, and the queue lists a stack of them once", async () => {
@@ -229,7 +229,7 @@ test("your own new drafts never notify, and the queue lists a stack of them once
   t.gh.items.set("acme/api#31", reviewAsk(31));
   await run(t.desk.sync());
   assert.deepEqual(t.notes, ["api#31 · carol asked you directly"]);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a desktop app attached to the desk takes its notifications over while it's connected", async () => {
@@ -242,7 +242,7 @@ test("a desktop app attached to the desk takes its notifications over while it's
   off();
   t.desk.notify("Inbox", "two");
   assert.deepEqual([app, t.notes], [["one"], ["two"]]);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("close_authors expands within GitHub's 256-char query limit", async () => {
@@ -257,7 +257,7 @@ test("close_authors expands within GitHub's 256-char query limit", async () => {
   assert.match(q, /author:collaborator-0 author:collaborator-1/);
   t.desk.ctx!.affinity = {};
   assert.equal(t.desk.gh.expandQuery("is:pr {close_authors}", "", t.desk.loaded!), null);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("your areas: fetched on the first sync, then daily; a failure keeps them and retries in about an hour", async () => {
@@ -285,7 +285,7 @@ test("your areas: fetched on the first sync, then daily; a failure keeps them an
   await run(t.desk.sync());
   assert.equal(t.gh.areaCalls, 3);
   assert.deepEqual((t.desk.store.get("context") as Context).areas, { "acme/api": { "src/auth/": 9 } });
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("parseUntil", () => {
@@ -315,7 +315,7 @@ test("done remembers the activity you saw: activity synced after the click still
   t.gh.items.set("acme/api#1", reviewAsk(1, { updated_at: commentAt, comments: [{ author: "carol", author_bot: false, at: commentAt }] }));
   await run(t.desk.sync());
   assert.equal(runSync(t.desk.board("acme-review")).sections.now[0]?.id, "acme/api#1");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("refs fail with tagged errors: an ambiguous one has its candidates, one the desk no longer holds still names its events", async (c) => {
@@ -437,7 +437,7 @@ test("undo by seq refuses to overwrite a later action on the same item", async (
   runSync(t.desk.undo());
   runSync(t.desk.undo(first));
   assert.equal(runSync(t.desk.item("api#1")).state.pinned, false);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("bare numbers resolve as numbers, not repo + digit", async () => {
@@ -445,7 +445,7 @@ test("bare numbers resolve as numbers, not repo + digit", async () => {
   await run(t.desk.sync());
   assert.equal(runSync(t.desk.resolve("123")), "acme/api#123");
   assert.equal(runSync(t.desk.resolve("#123")), "acme/api#123");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a date-only snooze means 09:00 local that day", () => {
@@ -468,7 +468,7 @@ test("hand-off prompt depends on kind: review, your PR, issue", async () => {
   await run(t.desk.sync());
   assert.match(runSync(t.desk.item("api#1")).handoff_prompt, /gh pr diff 1 --repo acme\/api/);
   assert.match(runSync(t.desk.item("web#2")).handoff_prompt, /gh pr checks 2 --repo acme\/web/);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("the main page's parts: a hand-back, what waits on your review, the rest that's someone else's, your PRs; Now and Today each in that order", async (c) => {
@@ -512,7 +512,7 @@ test("saving config refuses when the file changed since it was loaded", async ()
     () => runSync(t.desk.putConfig(base, base + "\n# stale")),
     (e: { status: number }) => e.status === 409,
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("when every search fails, the last sync time stays and the error is shown", async () => {
@@ -525,7 +525,7 @@ test("when every search fails, the last sync time stays and the error is shown",
   await run(t.desk.sync());
   assert.equal(t.desk.syncedAt, before);
   assert.match(t.desk.syncError!, /gh auth login/);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("settings: saving changes the live config; bad values write nothing", async () => {
@@ -544,7 +544,7 @@ test("settings: saving changes the live config; bad values write nothing", async
   runSync(t.desk.putSettings({ set: { "github.poll_seconds": 90 }, reset: ["handoff.prompt"] }));
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(t.home, "settings.json"), "utf8")), UNSCORED);
   assert.equal(t.desk.getSettings().github.login, "me");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a removed setting is ignored: no settings problem, and a save keeps it for an older desk", async () => {
@@ -558,7 +558,7 @@ test("a removed setting is ignored: no settings problem, and a save keeps it for
     ...old,
     "github.poll_seconds": 120,
   });
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("settings move out of an old config.toml on start", async () => {
@@ -594,7 +594,7 @@ test("queue: every item once at its best placement, plus hidden and cleared", as
   );
   const all = [...Object.values(q.sections).flat(), ...q.hidden, ...q.cleared].map((c) => c.id);
   assert.equal(new Set(all).size, all.length);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("Resolved lists the last day's items that were in Now or Today or asked of you; a team ping resolves silently", async () => {
@@ -611,7 +611,7 @@ test("Resolved lists the last day's items that were in Now or Today or asked of 
   t.setNow(new Date(NOW.getTime() + 30 * 3_600_000));
   await run(t.desk.sync());
   assert.deepEqual(runSync(t.desk.queue()).resolved, [], "a day on, it's gone");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a review asked only of your team says so", async () => {
@@ -620,7 +620,7 @@ test("a review asked only of your team says so", async () => {
   const q = runSync(t.desk.queue());
   const all = [...q.sections.now, ...q.sections.today, ...q.sections.later, ...q.sections.fyi];
   assert.equal(all.find((c) => c.id === "acme/api#4")?.team_ask, "CODEOWNERS ping to @ml-team");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("quiet items drop out of Now and Today: your old failing PRs go to Later; a PR in Merging stays there", async () => {
@@ -660,7 +660,7 @@ test("quiet items drop out of Now and Today: your old failing PRs go to Later; a
       .sort(),
     ["acme/web#20631", "acme/web#548", "acme/web#7"],
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("synced_at is when the sync finished; hits keep its start time", async () => {
@@ -676,7 +676,7 @@ test("synced_at is when the sync finished; hits keep its start time", async () =
   assert.equal(t.desk.syncedAt, done.toISOString());
   assert.equal(t.desk.store.get("synced_at"), done.toISOString());
   assert.ok([...t.desk.store.queries().values()].every((x) => x.fetched_at === NOW.toISOString()));
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a settings.json that can't be read doesn't stop the desk: the Settings page shows it, and a save won't write over it", async (c) => {
@@ -715,7 +715,7 @@ test("saving settings keeps entries in settings.json it can't use", async () => 
   );
   assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), { "github.poll_seconds": 5, "notify.enabled": false, "x.typo": true });
   await idle(t.desk);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a desk started on the oldest config migrates its rules once, with one backup, and leaves today's config alone", async () => {
@@ -855,7 +855,7 @@ test("settings that change the searches sync right away", async () => {
   runSync(t.desk.putSettings({ set: { "policy.judge": false, "notify.quiet": "", "github.my_repos": ["acme/web"] } }));
   await idle(t.desk);
   assert.equal(t.gh.searches.length, before);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a new sync interval re-arms the pending poll", async (ctx) => {
@@ -869,7 +869,7 @@ test("a new sync interval re-arms the pending poll", async (ctx) => {
   ctx.mock.timers.tick(30_000);
   await idle(t.desk);
   assert.ok(t.gh.searches.length > before, "polled after 30s, not the old 90s");
-  t.cleanup();
+  await t.cleanup();
 });
 
 // ---------------------------------------------------------------- Blocked

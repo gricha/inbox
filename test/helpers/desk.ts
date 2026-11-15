@@ -72,10 +72,10 @@ export async function setup(
     setNow: (d: Date) => {
       now = d;
     },
-    cleanup: () => {
-      desk.stop();
-      // Windows holds a dir that a just-killed agent ran in for a moment: EBUSY until it's gone.
-      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10 });
+    // Back once its agents have exited and its store is closed: Windows can't remove a dir a process or open file holds.
+    cleanup: async () => {
+      await run(desk.close());
+      fs.rmSync(home, { recursive: true, force: true });
     },
   };
 }

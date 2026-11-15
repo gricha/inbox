@@ -228,9 +228,9 @@ async function coordinated(c: TestContext, settings: Record<string, unknown> = {
     settings: { "policy.judge": false, "review.auto_ai": false, "agent.coordinator_bypass": false, "sessions.enabled": false, ...settings },
   });
   const desks = [t.desk];
-  c.after(() => {
+  c.after(async () => {
     for (const d of desks) d.stop();
-    t.cleanup();
+    await t.cleanup();
     fake.done();
   });
   t.desk.coordinator.batch = 30;
@@ -933,8 +933,8 @@ test("a claude agents --json that isn't a list is bad output in words of its own
   const was = process.env.DESK_CLAUDE;
   process.env.DESK_CLAUDE = bin;
   const t = await setup([myPr(3)], { settings: { "policy.judge": false, "review.auto_ai": false, "agent.coordinator": true } });
-  c.after(() => {
-    t.cleanup();
+  c.after(async () => {
+    await t.cleanup();
     process.env.DESK_CLAUDE = was;
     fs.rmSync(dir, { recursive: true, force: true });
   });

@@ -82,7 +82,7 @@ test("a release's change to a built-in rule reaches a desk whose config.toml nam
     runSync(t.desk.board("acme-review")).sections.now.map((c) => [c.id, c.why]),
     [["acme/api#1", "carol asks you"]],
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("switching a built-in rule off writes the board's off, and on again takes it out", async () => {
@@ -103,7 +103,7 @@ test("switching a built-in rule off writes the board's off, and on again takes i
   assert.equal(view.rules.filter((x) => !x.on).length, 1);
   runSync(t.desk.switchRule("acme-review", "asked-directly", true));
   assert.equal(fs.readFileSync(file, "utf8"), before);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("switchBuiltIn edits only the board's off line", () => {
@@ -362,5 +362,5 @@ test("a desk started on a config.toml with GitHub's rules copied names them once
   fs.writeFileSync(file, copied);
   await run(t.desk.migrateRules());
   assert.equal(fs.readFileSync(file, "utf8"), copied, "once");
-  t.cleanup();
+  await t.cleanup();
 });

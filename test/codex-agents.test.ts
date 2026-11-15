@@ -258,9 +258,9 @@ async function coordinating(c: TestContext, settings: Record<string, unknown> = 
     settings: { "agent.harness": "codex", "policy.judge": false, "review.auto_ai": false, "agent.coordinator_bypass": false, ...settings },
     desk: { mcpUrl: MCP },
   });
-  c.after(() => {
+  c.after(async () => {
     t.desk.stop();
-    t.cleanup();
+    await t.cleanup();
   });
   t.desk.coordinator.batch = 30;
   await run(t.desk.sync());

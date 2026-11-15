@@ -24,7 +24,7 @@ test("the first sync logs each item as new; an unchanged sync logs nothing", asy
     runSync(t.desk.overview()).connectors.map((c) => [c.id, c.name, c.status]),
     [["github", "GitHub", "ok"]],
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a snapshot older than the stored one (the feed and the full pass raced) is dropped, not diffed backwards", async () => {
@@ -36,7 +36,7 @@ test("a snapshot older than the stored one (the feed and the full pass raced) is
   t.desk.ingest(t.desk.gh, [old]);
   assert.deepEqual(kinds(t.desk), ["new acme/api#1", "pushed acme/api#1"]);
   assert.equal(t.desk.store.itemsById(["acme/api#1"]).get("acme/api#1")?.head_oid, "def");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("someone else approves: reviewed and resolved; it leaves Now for Resolved, keeping your triage state", async () => {
@@ -81,7 +81,7 @@ test("someone else approves: reviewed and resolved; it leaves Now for Resolved, 
     d.activity.map((e) => e.kind),
     ["resolved", "reviewed", "new"],
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("asked again after the approval: unresolved, and back in Now", async () => {
@@ -109,7 +109,7 @@ test("asked again after the approval: unresolved, and back in Now", async () => 
     runSync(t.desk.queue()).sections.now.map((c) => c.id),
     ["acme/api#1"],
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("an item that leaves every search gets one refresh: merged, resolved, and shown under Resolved for a while", async () => {
@@ -138,7 +138,7 @@ test("an item that leaves every search gets one refresh: merged, resolved, and s
   t.setNow(later(80));
   await run(t.desk.sync());
   assert.deepEqual(runSync(t.desk.queue()).resolved, []);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("you approved: still in the reviewed-by search, it passes the board's filter to show under Resolved for 3 days", async () => {
@@ -165,7 +165,7 @@ test("you approved: still in the reviewed-by search, it passes the board's filte
   t.setNow(later(80));
   await run(t.desk.sync());
   assert.deepEqual(runSync(t.desk.queue()).resolved, [], "three days on, the filter drops it again");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("a resolution with no time (no longer requested) doesn't pass a board's filter, however recently a bot touched the PR", async () => {
@@ -182,7 +182,7 @@ test("a resolution with no time (no longer requested) doesn't pass a board's fil
   await run(t.desk.sync());
   assert.equal(runSync(t.desk.item("api#1")).card.resolved, "no longer requested");
   assert.deepEqual(runSync(t.desk.queue()).resolved, [], "quiet for 20 days: the Mentions filter drops it, as before it resolved");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("unrequested without a review: request removed, resolved as no longer requested", async () => {
@@ -196,7 +196,7 @@ test("unrequested without a review: request removed, resolved as no longer reque
     runSync(t.desk.queue()).resolved.map((c) => c.why),
     ["no longer requested"],
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("settings: never resolving on others' approvals puts it back", async () => {
@@ -207,7 +207,7 @@ test("settings: never resolving on others' approvals puts it back", async () => 
   await idle(t.desk);
   assert.equal(runSync(t.desk.queue()).resolved.length, 0);
   assert.equal(runSync(t.desk.queue()).sections.now[0]?.id, "acme/api#1");
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("notifications: a tracked item is refreshed and diffed right away; the poll honours X-Poll-Interval", async () => {
@@ -234,7 +234,7 @@ test("notifications: a tracked item is refreshed and diffed right away; the poll
   t.gh.detailCalls = [];
   await run(t.desk.gh.poll());
   assert.deepEqual(t.gh.detailCalls, []);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("notifications: something new asking for you starts an early reconcile; other noise doesn't", async () => {
@@ -255,7 +255,7 @@ test("notifications: something new asking for you starts an early reconcile; oth
   await idle(t.desk);
   assert.ok(t.gh.searches.length > before);
   assert.deepEqual(kinds(t.desk), ["new acme/api#7"]);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("notifications: a mention on a tracked item is logged once; not on the first poll", async () => {
@@ -273,7 +273,7 @@ test("notifications: a mention on a tracked item is logged once; not on the firs
     mentions.map((e) => e.data),
     [{ reason: "team_mention" }],
   );
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("notifications: a refresh the rate limit stops leaves the cursor, so the poll after the pause handles the same threads", async () => {
@@ -303,7 +303,7 @@ test("notifications: a refresh the rate limit stops leaves the cursor, so the po
   assert.equal(t.gh.feedCalls.at(-1)?.since, since);
   assert.deepEqual(kinds(t.desk).slice(1), ["commented acme/api#1", "mentioned acme/api#1"]);
   assert.notEqual(t.desk.gh.feed.since, since);
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("notifications: a poll GitHub fails keeps its words as feedError and leaves the cursor; the next one clears it", async (c) => {
@@ -335,7 +335,7 @@ test("notifications: a rate-limit pause skips polls", async () => {
   t.desk.gh.pausedUntil = 0;
   await run(t.desk.gh.poll());
   assert.equal(t.desk.gh.pausedUntil, Date.parse(iso(1)));
-  t.cleanup();
+  await t.cleanup();
 });
 
 test("activity: after, item and limit; a long-poll answers when an event lands, or when the wait is up", async () => {
@@ -380,7 +380,7 @@ test("activity: after, item and limit; a long-poll answers when an event lands, 
 
   // The desk stopping answers a wait at once, with nothing.
   const stopping = run(t.desk.activity({ after: 3, wait: 30 }));
-  t.cleanup();
+  await t.cleanup();
   assert.deepEqual(await stopping, { events: [], last_seq: 3 });
 });
 
@@ -396,5 +396,5 @@ test("done on a resolved item stays done when it comes back", async () => {
     runSync(t.desk.queue()).cleared.map((c) => [c.id, c.status]),
     [["acme/api#1", "done"]],
   );
-  t.cleanup();
+  await t.cleanup();
 });
