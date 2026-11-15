@@ -3402,6 +3402,25 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
+    // As ask-f, at a width where the chat leaves the column room for the sidebar and closing it takes that room away.
+    name: "ask-f-narrow",
+    sizes: ["wide"],
+    go: async (page) => {
+      await page.setViewportSize({ width: 1250, height: 820 });
+      await review("acme/api#4154")(page);
+      await page.locator(".side-ask").click();
+      await page.locator(".chat-input").waitFor();
+      await page.locator(".rv-side-show").click();
+      await page.locator(".chat").waitFor({ state: "detached" });
+      await page.locator(".rv-side").waitFor({ timeout: 3000 });
+    },
+    after: async (page) => {
+      const wide = SIZES.find((s) => s.name === "wide")!;
+      await page.setViewportSize({ width: wide.width, height: wide.height });
+      await fresh(page);
+    },
+  },
+  {
     // Your agent off: no Ask your agent anywhere.
     name: "ask-off",
     go: async (page) => {

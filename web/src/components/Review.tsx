@@ -567,14 +567,18 @@ export function Review({
   }
 
   function toggleSide() {
-    // With the chat open, Files puts the sidebar back in its place.
-    const show = chat || !(room ? side : over);
-    if (chat) onCloseChat();
-    if (!room) {
-      setOver(show);
+    // With the chat open, Files puts the sidebar back in its place; closing the chat can give or take the column's room.
+    if (chat) {
+      onCloseChat();
+      setSide(true);
+      setOver(true);
       return;
     }
-    setSide(show);
+    if (!room) {
+      setOver(!over);
+      return;
+    }
+    setSide(!side);
   }
 
   function askAi() {
