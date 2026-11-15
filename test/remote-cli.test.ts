@@ -126,7 +126,8 @@ test("desk connect <address> --code on another machine trades the code, installs
   assert.ok(!r.out.includes(token), "Claude Code keeps it; it isn't printed");
   const skill = fs.readFileSync(path.join(t.scratch, ".claude", "skills", "inbox", "SKILL.md"), "utf8");
   assert.ok(skill.includes(AT) && !skill.includes("localhost:47823"));
-  assert.equal(t.remote.devices()[0]!.name, os.hostname());
+  // A device's name is clipped to 60 characters; a CI runner's hostname is longer.
+  assert.equal(t.remote.devices()[0]!.name, os.hostname().slice(0, 60));
   const again = await cli(["connect", AT, "--code", code]);
   assert.deepEqual([again.code, again.err], [1, "desk: that pairing code isn't valid: run desk pair again for a new one\n"]);
   const bad = await cli(["connect", `http://${NAME}`, "--code", code]);
