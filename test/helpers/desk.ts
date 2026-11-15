@@ -74,7 +74,8 @@ export async function setup(
     },
     cleanup: () => {
       desk.stop();
-      fs.rmSync(home, { recursive: true, force: true });
+      // Windows holds a dir that a just-killed agent ran in for a moment: EBUSY until it's gone.
+      fs.rmSync(home, { recursive: true, force: true, maxRetries: 10 });
     },
   };
 }

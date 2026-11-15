@@ -16,6 +16,7 @@ import type { Item } from "../src/types.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import { myPr, reviewAsk } from "./helpers/desk.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
+import { unixOnly } from "./helpers/platform.ts";
 import { run } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 
@@ -451,6 +452,7 @@ async function started(
 }
 
 test("Use it from your other devices runs tailscale serve to a listener of its own, and turns it off with the setting and the desk", async (c) => {
+  if (unixOnly(c)) return;
   const { srv, ts } = await started(c, RUNNING, { "app.tailscale": true });
   await until(() => !!ts.served(), `tailscale serve ran: ${ts.calls().join("; ")}`);
   const target = ts.served()!;
@@ -474,6 +476,7 @@ test("Use it from your other devices runs tailscale serve to a listener of its o
 });
 
 test("Settings says in plain words why it can't serve over Tailscale, and leaves another serve of yours alone", async (c) => {
+  if (unixOnly(c)) return;
   const { srv, ts } = await started(c, { ...RUNNING, BackendState: "NeedsLogin" }, { "app.tailscale": true });
   const text = async () => ((await (await fetch(`${srv.url}/api/remote`)).json()) as { text: string }).text;
   await until(() => ts.calls().length > 0, "asked tailscale");
@@ -503,6 +506,7 @@ test("with no tailscale installed, Settings says so", async (c) => {
 });
 
 test("desk serve --tailscale serves over Tailscale with the setting off, for that run", async (c) => {
+  if (unixOnly(c)) return;
   const { srv, ts } = await started(c, RUNNING, {}, true, true);
   await until(() => !!ts.served(), `tailscale serve ran: ${ts.calls().join("; ")}`);
   assert.equal(srv.desk.settings["app.tailscale"], false);

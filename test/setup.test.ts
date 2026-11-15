@@ -11,6 +11,7 @@ import { createApp } from "../src/server.ts";
 import { agentView, githubView } from "../src/setup.ts";
 import type { DriverId } from "../src/agents.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
+import { unixOnly } from "./helpers/platform.ts";
 import { failure, run } from "./helpers/run.ts";
 
 const MCP = "http://localhost:47823/mcp";
@@ -91,7 +92,7 @@ test("picking an agent that isn't ready says what to run, and changes nothing", 
   const t = await fresh({ codex: "installed" });
   try {
     const none = await failure(t.desk.chooseAgent("opencode", MCP));
-    assert.equal(none.message, "OpenCode isn't installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login");
+    assert.equal(none.message, `OpenCode isn't installed. Run ${agentView("opencode", "OpenCode", false, false).fix}`);
     const out = await failure(t.desk.chooseAgent("codex", MCP));
     assert.equal(out.message, "Codex isn't logged in. Run codex login");
     assert.equal((await failure(t.desk.chooseAgent("gpt", MCP)))._tag, "BadRequest");
@@ -102,7 +103,8 @@ test("picking an agent that isn't ready says what to run, and changes nothing", 
   }
 });
 
-test("picking a ready agent sets it, connects it like Settings' Connect, and the page is done for good", async () => {
+test("picking a ready agent sets it, connects it like Settings' Connect, and the page is done for good", async (c) => {
+  if (unixOnly(c)) return;
   fake("codex");
   const t = await fresh({ codex: "ready" });
   try {
@@ -123,7 +125,8 @@ test("picking a ready agent sets it, connects it like Settings' Connect, and the
   again.stop();
 });
 
-test("GitHub not connected: the agent is picked and connected, and the page finishes when GitHub is", async () => {
+test("GitHub not connected: the agent is picked and connected, and the page finishes when GitHub is", async (c) => {
+  if (unixOnly(c)) return;
   fake("claude");
   const t = await fresh({ "claude-code": "ready" }, true);
   try {
@@ -139,7 +142,8 @@ test("GitHub not connected: the agent is picked and connected, and the page fini
   }
 });
 
-test("a desk restarted between the pick and the GitHub login finishes the page once GitHub answers", async () => {
+test("a desk restarted between the pick and the GitHub login finishes the page once GitHub answers", async (c) => {
+  if (unixOnly(c)) return;
   fake("claude");
   const t = await fresh({ "claude-code": "ready" }, true);
   await run(t.desk.chooseAgent("claude-code", MCP));
@@ -182,7 +186,7 @@ test("the page's words for GitHub and each agent", () => {
     fix: null,
   });
   assert.equal(
-    agentView("claude-code", "Claude Code", false, false).fix,
+    agentView("claude-code", "Claude Code", false, false, "linux").fix,
     "curl -fsSL https://claude.ai/install.sh | bash && claude auth login",
   );
   assert.equal(

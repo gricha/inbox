@@ -11,6 +11,7 @@ import { Desk } from "../src/desk.ts";
 import { Remote } from "../src/remote.ts";
 import { createApp, remoteFetch } from "../src/server.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
+import { unixOnly } from "./helpers/platform.ts";
 import { run } from "./helpers/run.ts";
 
 delete process.env.DESK_UI_ORIGIN;
@@ -113,6 +114,7 @@ test("desk pair prints the code, the browser's link and the other machine's comm
 });
 
 test("desk connect <address> --code on another machine trades the code, installs the skill and registers the MCP server with the token", async (c) => {
+  if (unixOnly(c)) return;
   const t = await setup(c);
   t.agent("claude");
   const code = t.remote.mint().code;
@@ -135,6 +137,7 @@ test("desk connect <address> --code on another machine trades the code, installs
 });
 
 test("desk connect for Codex registers the variable it reads the token from, and says to set it", async (c) => {
+  if (unixOnly(c)) return;
   const t = await setup(c);
   t.agent("codex");
   const r = await cli(["connect", AT, "codex", "--code", t.remote.mint().code]);

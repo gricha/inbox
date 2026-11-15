@@ -9,7 +9,7 @@ import { test } from "node:test";
 const root = path.join(import.meta.dirname, "..");
 function files(dir: string): string[] {
   return fs.readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap((e) => {
-    const f = path.join(dir, e.name);
+    const f = path.posix.join(dir, e.name); // the keys below are posix on Windows too
     return e.isDirectory() ? files(f) : /\.(ts|tsx)$/.test(e.name) ? [f] : [];
   });
 }
