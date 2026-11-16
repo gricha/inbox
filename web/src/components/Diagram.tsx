@@ -1,12 +1,13 @@
 import { Effect } from "effect";
 import type { ELK } from "elkjs/lib/elk-api.js";
 import workerUrl from "elkjs/lib/elk-worker.min.js?url";
-import { createElement, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { createElement, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { diagramText } from "../../../src/diagram.ts";
 import { layout, svg, type Drawn, type Measure } from "../../../src/diagram-layout.ts";
 import type { Kid } from "../../../src/html.ts";
 import type { DiagramGraph } from "../../../src/types.ts";
 import { LayoutFailed, runUi } from "../api.ts";
+import { useKeyed } from "../keyed.ts";
 import { loadSketchFont, Sketch, SKETCH_SHRINK, sketchMeasure } from "./Sketch.tsx";
 
 // Drawn by Excalidraw, hand-drawn, unless this device says otherwise (localStorage desk.sketch = "0").
@@ -29,10 +30,11 @@ export function Diagram({ graph, title = "", caption = "" }: { graph: DiagramGra
   const fig = useRef<HTMLElement>(null);
   const lines = useMemo(() => diagramText(graph), [graph]);
   const descId = useId();
-  useEffect(() => {
+  // Keyed on the graph's content: a refreshed review hands over an equal graph as a new object, and that draws nothing again.
+  const shape = useMemo(() => JSON.stringify(graph), [graph]);
+  useKeyed(`${sketch} ${shape}`, (signal) => {
     setDrawn(null);
     const room = fig.current?.clientWidth ?? 0;
-    const stop = new AbortController();
     runUi(
       laidOut(graph, sketch, room > 0 ? room : 720).pipe(
         Effect.match({
@@ -43,12 +45,9 @@ export function Diagram({ graph, title = "", caption = "" }: { graph: DiagramGra
           onSuccess: setDrawn,
         }),
       ),
-      { signal: stop.signal },
+      { signal },
     );
-    return () => {
-      stop.abort();
-    };
-  }, [graph, sketch]);
+  });
 
   return (
     <figure className="dg" ref={fig}>

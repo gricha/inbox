@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type RefObject } from "react";
 import type { Drawn, Measure } from "../../../src/diagram-layout.ts";
 import type { DiagramMark, DiagramShape } from "../../../src/types.ts";
+import { seeded } from "../drawing.ts";
 
 // A diagram drawn by Excalidraw: our layout (ELK, measured in Excalifont) as Excalidraw elements, exported as a hand-drawn
 // SVG in the theme's own colours. Its font comes from the desk (public/excalidraw), never a CDN.
@@ -263,6 +264,7 @@ export function Sketch({ drawn, label, onFail }: { drawn: Drawn; label: string; 
   const holder = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const ink = useInk(holder);
+  const failed = useEffectEvent(onFail);
   useEffect(() => {
     let live = true;
     const draw = async () => {
@@ -270,7 +272,7 @@ export function Sketch({ drawn, label, onFail }: { drawn: Drawn; label: string; 
       if (!at || !ink) return;
       const { convertToExcalidrawElements, exportToSvg } = await loadExcalidraw();
       const svg = await exportToSvg({
-        elements: convertToExcalidrawElements(skeleton(drawn, ink), { regenerateIds: false }),
+        elements: convertToExcalidrawElements(seeded(skeleton(drawn, ink)), { regenerateIds: false }),
         appState: { exportBackground: false, exportWithDarkMode: false, exportPadding: 4 },
         files: null,
       });
@@ -288,11 +290,11 @@ export function Sketch({ drawn, label, onFail }: { drawn: Drawn; label: string; 
       setReady(true);
     };
     draw().catch((e: unknown) => {
-      if (live) onFail(e);
+      if (live) failed(e);
     });
     return () => {
       live = false;
     };
-  }, [drawn, label, onFail, ink]);
+  }, [drawn, label, ink]);
   return <div ref={holder} className="dg-sketch" aria-busy={!ready} />;
 }
