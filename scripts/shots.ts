@@ -143,6 +143,13 @@ const review =
     // The list beside it from its top, whatever the shot before scrolled: it brings the review's row into view itself.
     await page.evaluate(`document.querySelector(".beside-list")?.scrollTo(0, 0)`);
     await at(`#/review/${encodeURIComponent(id)}`)(page);
+    // One opened to reply starts on its Conversation tab: the shots read its diff, as every other's, unless they ask for the tab.
+    await page.locator(".rv-diff, .rv-talk:not([hidden])").first().waitFor({ timeout: 15_000 });
+    if (!(await page.locator(".rv-diff").count())) {
+      const kept = await page.evaluate<string | null>(`localStorage.getItem("desk.review.view")`);
+      const tabs = page.locator(".rv-views .head-tab");
+      await (kept === "traditional" ? tabs.filter({ hasText: "Traditional" }) : tabs.first()).click();
+    }
     await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
     await page.waitForTimeout(900);
     for (const c of clicks) {
@@ -159,6 +166,8 @@ const rowMenuPick = async (page: Page, row: string, item: string) => {
 // Where each selector's first match starts down the page, or -1 when there's none: read at once, never waited for.
 const tops = (page: Page, sels: string[]) =>
   page.evaluate<number[]>(`${JSON.stringify(sels)}.map((s) => document.querySelector(s)?.getBoundingClientRect().top ?? -1)`);
+// A review's Conversation tab: what reviewers said and your comment's box are under it.
+const talk = (page: Page) => page.locator(".rv-views .head-tab", { hasText: "Conversation" }).click();
 const inOrder = (ys: number[]) => ys.every((y, i) => y >= 0 && (i === 0 || y > ys[i - 1]!));
 // AI reviews paused, as after an expired login: a mock-only switch (web/mock/server.ts).
 const pauseAi = (paused: boolean) => async (page: Page) => {
@@ -816,13 +825,13 @@ const SHOTS: Shot[] = [
       }>(`(() => {
         const text = (el, sel) => el?.querySelector(sel)?.textContent.trim() ?? null;
         const first = document.querySelector(".queue .line");
-        const back = document.querySelector('.queue .line[data-id="oss/tinyhttp#205"] .line-stage');
+        const back = document.querySelector('.queue .line[data-id="oss/tinyhttp#205"] .sig-status .sig-said');
         const cards = [...document.querySelectorAll(".queue .line[data-id]:not(.inq, .session, .memo)")];
         return {
           heads: [...document.querySelectorAll(".queue .group-head span:first-child")].map((h) => h.textContent),
           tables: document.querySelectorAll(".queue .lines").length,
           first: [text(first, ".line-kind"), text(first, ".line-by"), text(first, ".line-cta")],
-          back: back?.getClientRects().length ? back.textContent : null,
+          back: back?.textContent ?? null, // in the signal's popover, hidden until the pointer is on it
           fold: document.querySelectorAll(".queue .fold").length,
           reasons: cards.filter((c) => c.querySelector(".line-note")?.textContent.trim()).length,
           rows: cards.length,
@@ -833,13 +842,13 @@ const SHOTS: Shot[] = [
       if (list.reasons !== list.rows) failures.push(`queue: ${list.rows - list.reasons} of ${list.rows} rows don't say why they're there`);
       if (list.first.join(" · ") !== "Question · by your agent · Answer")
         failures.push(`queue: an agent's question's row reads ${JSON.stringify(list.first)}`);
-      if (list.back !== "handed back") failures.push(`queue: the handed-back PR's stage reads ${JSON.stringify(list.back)}`);
+      if (list.back !== "Handed back") failures.push(`queue: the handed-back PR's stage reads ${JSON.stringify(list.back)}`);
       if (list.fold) failures.push('queue: a section folds behind a "more" line');
     },
   },
   {
     // Notes to yourself: a due reminder in Urgent, one with no time leading Standard; New note on the head and ⌘N open the
-    // note box, its reminder picked from a list or a time you pick.
+    // note tray over the blurred page, its reminder picked from a list or a time you pick.
     name: "queue-notes",
     go: async (page) => {
       await at("#/")(page);
@@ -851,17 +860,29 @@ const SHOTS: Shot[] = [
       if (!(await page.locator(".page-head .head-note", { hasText: "New note" }).count()))
         failures.push("queue-notes: no New note on the head");
       await page.keyboard.press(`${process.platform === "darwin" ? "Meta" : "Control"}+n`);
-      await page.locator(".note-bar textarea").waitFor({ timeout: 3000 });
-      await page.locator(".note-bar textarea").fill("Ping Sam about the holdout set once the reranker eval lands");
-      await page.locator(".note-bar select").selectOption("pick");
+      await page.locator(".note-tray textarea").waitFor({ timeout: 3000 });
+      await page.locator(".note-tray textarea").fill("Ping Sam about the holdout set once the reranker eval lands");
+      // The reminder is the tray's own list, and "Pick a time…" opens its calendar: a month of days and the half hours.
+      await page.locator(".note-tray .nt-pick").first().click();
+      await page.locator(".note-tray .nt-pop .pop-item", { hasText: "Pick a time" }).click();
       await page.waitForTimeout(150);
-      if (!(await page.locator('.note-bar input[type="datetime-local"]').count()))
-        failures.push("queue-notes: Pick a time shows no time field");
+      if (
+        !(await page.locator(".note-tray .nt-cal .nt-cal-day").count()) ||
+        !(await page.locator(".note-tray .nt-cal-times .pop-item").count())
+      )
+        failures.push("queue-notes: Pick a time shows no calendar");
+      const acts = await page.locator(".note-tray .note-acts .act").allTextContents();
+      if (acts.join("|") !== "Save note" || !(await page.locator(".note-tray .note-x").count()))
+        failures.push(`queue-notes: the tray's buttons read ${JSON.stringify(acts)}, or it has no cross`);
     },
     after: async (page) => {
+      // The first Esc closes the calendar open over it, the second the tray.
       await page.keyboard.press("Escape");
-      await page.waitForTimeout(150);
-      if (await page.locator(".note-bar").count()) failures.push("queue-notes: Esc leaves the note box open");
+      await page.waitForTimeout(100);
+      if (await page.locator(".note-tray .nt-cal").count()) failures.push("queue-notes: Esc leaves the calendar open");
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(400); // it slides back up first
+      if (await page.locator(".note-tray").count()) failures.push("queue-notes: Esc leaves the note tray open");
     },
   },
   {
@@ -887,6 +908,41 @@ const SHOTS: Shot[] = [
     after: async (page) => {
       await page.keyboard.press("Escape");
       await at("#/")(page);
+    },
+  },
+  {
+    // A row's facts are one signal icon that opens them in the window's own tooltip, over the icon: status, CI, risk, size.
+    name: "queue-tip",
+    sizes: ["wide", "mac"],
+    go: async (page) => {
+      await at("#/")(page);
+      // The row's button lies over its icons: the pointer goes to the spot, as a hand's does.
+      const box = await page.locator(".line-signal:has(.sig-ci .t-ok):visible").first().boundingBox();
+      if (!box) {
+        failures.push("queue-tip: no signal with passing CI on the Inbox");
+        return;
+      }
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.locator(".tip").waitFor({ timeout: 3000 });
+      const seen = await page.evaluate<{ text: string; rows: number; ci?: string; over: boolean; native: number }>(`(() => {
+        const tip = document.querySelector(".tip").getBoundingClientRect();
+        const icon = document.querySelector(".line-signal:has(.sig-ci .t-ok)").getBoundingClientRect();
+        return {
+          text: document.querySelector(".tip .sig-head")?.textContent ?? "",
+          rows: document.querySelectorAll(".tip .sig-row").length,
+          ci: document.querySelector(".tip .sig-ci .sig-said")?.textContent,
+          over: tip.bottom <= icon.top && tip.left < icon.left && tip.right > icon.right,
+          native: document.querySelectorAll(".line-row:not(.c-row) [title]").length,
+        };
+      })()`);
+      if (seen.text !== "Status" || seen.rows !== 4)
+        failures.push(`queue-tip: the signal opens ${JSON.stringify(seen.text)} over ${seen.rows} rows, not Status over 4`);
+      if (seen.ci !== "CI passing") failures.push(`queue-tip: the signal's CI reads ${JSON.stringify(seen.ci)}`);
+      if (!seen.over) failures.push("queue-tip: the tip isn't over its icon");
+      if (seen.native) failures.push(`queue-tip: ${seen.native} parts of a row still have the system's tooltip`);
+    },
+    after: async (page) => {
+      await page.mouse.move(0, 0);
     },
   },
   {
@@ -1567,20 +1623,22 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await at("#/")(page);
       await review("acme/api#4127")(page);
-      const back = (await page.locator(".page-head .back").textContent())?.trim();
-      if (back !== "Inbox") failures.push(`review: the back link reads ${JSON.stringify(back)}`);
+      // No head of its own: Esc, the list beside it and the sidebar are its ways back.
+      if (await page.locator(".col .page-head").count()) failures.push("review: the review has a page head");
       const on = await sideOn(page);
       if (on !== "Inbox") failures.push(`review: the sidebar marks ${JSON.stringify(on)}`);
       if (!(await page.locator(".rv-ai .rv-fold-body.shut").count())) failures.push("review: the AI review doesn't open folded");
-      if (!inOrder(await tops(page, [".rv-ai", ".rv-convo", ".rv-comment"])))
-        failures.push("review: the AI review isn't above the conversation and your comment");
+      // Its bar leads, stuck at the top: the three views as pills, then what finishes it and More; the title under it.
+      if (!inOrder(await tops(page, [".rv-bar", ".rv-title"])) || !(await page.locator(".rv-bar .rv-views .head-tab").count()))
+        failures.push("review: the bar with its views isn't over the title");
+      if (!(await page.locator(".rv-bar .rv-actions .act").count())) failures.push("review: the bar has no actions");
       // The title, then its metadata with the verdict's tag, then the goal.
       if (!inOrder(await tops(page, [".rv-title", ".rv-ref .rv-tag", ".rv-gist"])))
         failures.push("review: the head isn't title, metadata with the verdict, then the goal");
       await faces(page, "review", ".rv-ref .rv-by:has(.avatar), .cv-author");
     },
   },
-  // The verdict's tag in its level's colour, in every theme: Look closely red, Skim it amber, Skip it green.
+  // The verdict's tag filled with its level's colour, in every theme: Look closely red, Skim it amber, Skip it green.
   {
     name: "review-verdict",
     sizes: ["wide"],
@@ -1606,7 +1664,7 @@ const SHOTS: Shot[] = [
             document.body.append(probe);
             const token = getComputedStyle(probe).color;
             probe.remove();
-            return { color: getComputedStyle(document.querySelector(".rv-ref .rv-tag")).color, token };
+            return { color: getComputedStyle(document.querySelector(".rv-ref .rv-tag")).backgroundColor, token };
           })()`);
           if (tag.color !== tag.token) failures.push(`review-verdict: ${id}'s ${verdict} tag is ${tag.color}, not ${token}`);
           seen[verdict] = tag.color;
@@ -1619,30 +1677,21 @@ const SHOTS: Shot[] = [
       await systemTheme(page);
     },
   },
-  // The top of a review stays short, so the diff starts high: your comment's box is one line on the actions' row, with no
-  // row of its own, until it has words. On the three-line box over its own row of actions the first file started at 486px
-  // in the mac window, 478 and 475 in the narrower ones; a box or a row creeping back would pass 386 again.
+  // The top of a review stays short, so the diff starts high: the actions are the sidebar's and your comment's box the
+  // Conversation tab's, so nothing sits between the AI review and the tabs. A box or a row creeping back would pass 386.
   {
     name: "review-top",
     go: async (page) => {
       await review("acme/api#4127")(page);
-      const seen = await page.evaluate<{ box: number; boxTop: number; act: number; file: number; send: number }>(`(() => {
-        const r = (s) => document.querySelector(s).getBoundingClientRect();
-        return {
-          box: Math.round(r(".rv-comment-input").height),
-          boxTop: Math.round(r(".rv-comment-input").top),
-          act: Math.round(r(".rv-actions .act").top),
-          file: Math.round(r(".rv-views, .rv-file-sec").top), // where the diff starts: its two orders' switch, when it has one
-          send: document.querySelectorAll(".rv-comment .act").length,
-        };
+      const seen = await page.evaluate<{ file: number; box: boolean }>(`(() => {
+        const box = document.querySelector(".rv-comment-input");
+        return { file: Math.round(document.querySelector(".rv-file-sec, .rv-step").getBoundingClientRect().top), box: !!box && box.getBoundingClientRect().height > 0 };
       })()`);
-      if (seen.box > 36) failures.push(`review-top: the empty comment box is ${seen.box}px tall, not one line`);
-      if (Math.abs(seen.boxTop - seen.act) > 2 || seen.send)
-        failures.push(`review-top: the empty comment box isn't alone on the actions' row: ${JSON.stringify(seen)}`);
+      if (seen.box) failures.push("review-top: the comment box shows outside the Conversation tab");
       if (seen.file > 386) failures.push(`review-top: the diff starts ${seen.file}px down the window, past 386`);
     },
   },
-  // Your comment on the PR: the box grows with its words while the buttons stay where they were, Comment beside it; Esc
+  // Your comment on the PR, on the Conversation tab: the box grows with its words, its send button beside it; Esc
   // leaves it with the words kept; they're still in it, at their size, after stepping to the next item and back; and the
   // platform's send key sends it.
   {
@@ -1652,15 +1701,17 @@ const SHOTS: Shot[] = [
       const mod = process.platform === "darwin" ? "Meta" : "Control";
       await page.route("**/comment", () => {}); // GitHub never answers here, so the mock's PR stays as it was
       await review("acme/api#4127")(page);
+      await talk(page);
       const box = page.locator(".rv-comment-input");
       const says = () =>
-        page.evaluate<{ box: number; approve: Edge | null; send: Edge | null; focused: boolean; hash: string }>(`(() => {
+        page.evaluate<{ box: number; top: number; approve: Edge | null; send: Edge | null; focused: boolean; hash: string }>(`(() => {
           const r = (s) => { const b = document.querySelector(s)?.getBoundingClientRect(); return b ? { left: Math.round(b.left), top: Math.round(b.top), bottom: Math.round(b.bottom) } : null; };
           const input = document.querySelector(".rv-comment-input").getBoundingClientRect();
           return {
             box: Math.round(input.height),
+            top: Math.round(input.top),
             approve: r(".rv-actions > .act"),
-            send: r(".rv-comment .act"),
+            send: r(".rv-comment .cv-send"),
             focused: document.activeElement?.matches(".rv-comment-input") ?? false,
             hash: decodeURIComponent(location.hash),
           };
@@ -1680,12 +1731,8 @@ const SHOTS: Shot[] = [
       const typed = await says();
       if (cursor.box !== empty.box) failures.push(`review-comment: the cursor alone resized the box, ${empty.box}px to ${cursor.box}px`);
       if (typed.box < 70) failures.push(`review-comment: with three lines in it the box is ${typed.box}px tall`);
-      if (JSON.stringify(typed.approve) !== JSON.stringify(empty.approve))
-        failures.push(
-          `review-comment: Approve moved as the box grew, ${JSON.stringify(empty.approve)} to ${JSON.stringify(typed.approve)}`,
-        );
-      // Comment is beside the box, inside its height: no row added under the actions.
-      const row = typed.approve?.top ?? 0;
+      // Comment is beside the box, inside its height: no row added under it.
+      const row = typed.top;
       if (!typed.send || typed.send.top < row - 2 || typed.send.bottom > row + typed.box + 2)
         failures.push(`review-comment: Comment isn't beside the box: ${JSON.stringify(typed)}`);
       await page.keyboard.press("Escape");
@@ -1701,6 +1748,7 @@ const SHOTS: Shot[] = [
       await page.keyboard.press(`${mod}+BracketLeft`);
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
       await page.waitForTimeout(400);
+      await talk(page);
       const back = await says();
       const kept = await box.inputValue();
       if (back.hash !== "#/review/acme/api#4127" || kept !== words.join("\n"))
@@ -1739,7 +1787,7 @@ const SHOTS: Shot[] = [
       // The Inbox beside it keeps the page's sections, Urgent first, a question's row leading it.
       const heads = await page.locator(".beside .group-head").count();
       const first = await page.locator(".beside .line .c-meta").first().textContent();
-      if (heads !== 3 || first !== "Questionby your agent")
+      if (heads !== 3 || !first?.startsWith("by your agent"))
         failures.push(`beside-review: the Inbox beside it has ${heads} headings and starts ${JSON.stringify(first)}`);
       // The calls to action sit before the ages, so the ages end in one column.
       const ends = await page.evaluate<number[]>(
@@ -1876,14 +1924,12 @@ const SHOTS: Shot[] = [
       if (after !== "ask:q2bead00") failures.push(`beside-inquiry: with the menu closed, the list marks ${JSON.stringify(after)}`);
     },
     after: async (page) => {
-      // From the question, a review and then another from the list: the way back is the list's page, the Inbox.
+      // From the question, a review and then another from the list.
       for (const id of ["acme/api#4099", "acme/api#4127"]) {
         await page.locator(`.beside .line[data-id="${id}"] .row-main`).click();
         await page.waitForFunction(`decodeURIComponent(location.hash) === ${JSON.stringify(`#/review/${id}`)}`);
         await page.waitForTimeout(200);
       }
-      const back = (await page.locator(".page-head .back").textContent())?.trim();
-      if (back !== "Inbox") failures.push(`beside-inquiry: two reviews on from the question, the back link reads ${JSON.stringify(back)}`);
       await at("#/")(page);
     },
   },
@@ -1924,7 +1970,10 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
       await review("acme/api#4127")(page);
       const words = "A comment that outlives the list folding";
+      await talk(page);
       await page.locator(".rv-comment-input").fill(words);
+      await page.locator(".rv-views .head-tab", { hasText: "Traditional" }).click();
+      await page.locator(".rv-file-sec[id]").first().waitFor({ timeout: 15_000 });
       await page.evaluate(`document.querySelectorAll(".rv-file-sec[id]")[1]?.scrollIntoView({ block: "start" })`);
       await page.waitForTimeout(300);
       const reading = () =>
@@ -1987,7 +2036,6 @@ const SHOTS: Shot[] = [
       if ((await ai.allInnerTexts()).join("").includes("`")) failures.push("review-ai-skim: a backtick shows");
       const h = await page.evaluate<number>(`document.querySelector(".rv-ai")?.getBoundingClientRect().height ?? 0`);
       if (h > 120) failures.push(`review-ai-skim: the folded AI review is ${Math.round(h)}px tall`);
-      if (!inOrder(await tops(page, [".rv-ai", ".rv-comment"]))) failures.push("review-ai-skim: the AI review isn't above your comment");
     },
   },
   {
@@ -2019,11 +2067,11 @@ const SHOTS: Shot[] = [
       if (!(await ai.locator(".rv-gist").innerText()).startsWith("Splits the scheduler into Lease and Dispatch"))
         bad("the goal doesn't lead");
       if ((await page.locator("[data-status=risk] .rv-status-said").innerText()) !== "Medium risk") bad("Status's risk isn't Medium risk");
-      if (!(await ai.innerText()).includes("Not quite what the description says:")) bad("no gap line");
+      if (!(await ai.innerText()).includes("Not quite what the description says")) bad("no gap line");
       await page.locator(".rv-show").click();
       await page.waitForTimeout(200);
       const text = await ai.innerText();
-      for (const want of ["Interfaces", "Lease.renew()", "Could be better", "Also risky:"])
+      for (const want of ["Interfaces", "Lease.renew()", "Could be better", "Also risky"])
         if (!text.includes(want)) bad(`the fold has no ${want}`);
       if (!(await page.locator(".rv-look").count())) bad("no Look here in the diff");
       if (!(await page.locator(".rv-step-note").count())) bad("the first step's note is missing");
@@ -2072,7 +2120,7 @@ const SHOTS: Shot[] = [
         failures.push("review-ai-since: the AI review doesn't open folded");
       if (!(await page.locator(".rv-ref").innerText()).includes("on an earlier commit"))
         failures.push("review-ai-since: the verdict's tag isn't marked on an earlier commit");
-      if (!(await ai.allInnerTexts()).join("").includes("Since your review:")) failures.push("review-ai-since: no since line while folded");
+      if (!(await ai.allInnerTexts()).join("").includes("Since your review")) failures.push("review-ai-since: no since line while folded");
       if ((await ai.locator(".rv-since code, .rv-concerns code").count()) < 2)
         failures.push("review-ai-since: since or a concern shows code raw");
       if ((await ai.allInnerTexts()).join("").includes("`")) failures.push("review-ai-since: a backtick shows");
@@ -2102,8 +2150,6 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
       if (!(await page.locator('.review[aria-busy="true"] .rv-show').count()))
         failures.push("review-loading: the row's AI read isn't folded");
-      if ((await page.locator(".rv-convo.sk-short").count()) && !inOrder(await tops(page, [".rv-ai", ".rv-convo.sk-short"])))
-        failures.push("review-loading: the AI read isn't above the conversation's placeholder");
       // The sidebar's toggle is the loaded review's: the icon button, not words, only where the sidebar can't sit beside the diff.
       const toggle = await page.evaluate<{ tag: string; text: string; icon: boolean; label: string | null } | null>(`(() => {
         const b = document.querySelector('.review[aria-busy="true"] .rv-side-toggle');
@@ -2113,14 +2159,14 @@ const SHOTS: Shot[] = [
       if (roomy ? toggle !== null : toggle?.tag !== "BUTTON" || toggle.text || !toggle.icon || !toggle.label?.endsWith("checks and files"))
         failures.push(`review-loading: ${roomy ? "with room, " : ""}the sidebar's toggle is ${JSON.stringify(toggle)}`);
     },
-    // Then the rest lands: the comment box stays where it was drawn, its conversation's line kept for it.
+    // Then the rest lands: the title stays where it was drawn, under the bar.
     after: async (page) => {
-      const [was] = await tops(page, [".rv-comment"]);
+      const [was] = await tops(page, [".rv-title"]);
       await page.unroute("**/api/review/**");
       for (const r of held.splice(0)) await r.continue().catch(() => {});
       await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
-      const [now] = await tops(page, [".rv-comment"]);
-      if (Math.abs(now! - was!) > 2) failures.push(`review-loading: the comment box moved ${now! - was!}px when the review landed`);
+      const [now] = await tops(page, [".rv-title"]);
+      if (Math.abs(now! - was!) > 2) failures.push(`review-loading: the title moved ${now! - was!}px when the review landed`);
       await fresh(page);
     },
   },
@@ -2426,17 +2472,21 @@ const SHOTS: Shot[] = [
       await fresh(page);
     },
   },
-  // Your PR where reviewers wait on you: Claude's read and a reply box each, the rest one quiet line, opened here.
+  // Your PR where reviewers wait on you: a card each, those waiting first with Claude's read, a reply row in every one.
   {
     name: "review-conversation",
     go: async (page) => {
       await review("me/notes-app#12")(page);
-      await page.locator(".rv-convo .rv-more").click();
-      await page.locator(".cv-said").first().locator("summary").click();
+      await talk(page);
       await page.waitForTimeout(200);
-      // Claude's read, what azulus wrote and the folded lines set code names as code.
+      // Claude's read and what azulus wrote set code names as code.
       const convo = page.locator(".rv-convo");
-      if ((await convo.locator(".cv-take code, .cv-body code, .cv-line code").count()) < 3)
+      const cards = await page.evaluate<{ cards: number; rows: number }>(
+        `({ cards: document.querySelectorAll(".rv-convo article.cv").length, rows: document.querySelectorAll(".rv-convo .cv .cv-compose .cv-reply").length })`,
+      );
+      if (!cards.cards || cards.rows !== cards.cards)
+        failures.push(`review-conversation: not every card has a reply row: ${JSON.stringify(cards)}`);
+      if ((await convo.locator(".cv-take code, .cv-body code").count()) < 2)
         failures.push("review-conversation: a code name in the conversation isn't code");
       if ((await convo.allInnerTexts()).join("").includes("`")) failures.push("review-conversation: a backtick shows");
       // A bot's finding: its <details> a fold, its <sub> small print, its HTML comments gone, no tag showing.
@@ -2454,12 +2504,14 @@ const SHOTS: Shot[] = [
     name: "review-conversation-fold",
     go: async (page) => {
       await review("me/notes-app#12")(page);
-      // The review before it is the same PR, still mounted with its fold open.
-      const fold = page.locator(".rv-convo .rv-more");
-      if ((await fold.getAttribute("aria-expanded")) !== "true") await fold.click();
-      await page.locator(".cv-quiet").last().locator("summary").click();
-      await page.evaluate(`document.querySelector(".rv-convo .rv-more").scrollIntoView({ block: "center" })`);
+      await talk(page);
+      // The conversation's foot: the last cards, then your comment on the PR, your picture by it.
+      await page.evaluate(`document.querySelector(".rv-comment").scrollIntoView({ block: "end" })`);
       await page.waitForTimeout(200);
+      const under = await page.evaluate<boolean>(
+        `[...document.querySelectorAll(".rv-convo .cv")].every((cv) => cv.getBoundingClientRect().bottom <= document.querySelector(".rv-comment").getBoundingClientRect().top)`,
+      );
+      if (!under) failures.push("review-conversation-fold: your comment's box isn't under the cards");
     },
   },
   // The sidebar lists a file at the repo's root and a long folder.
@@ -2583,9 +2635,9 @@ const SHOTS: Shot[] = [
       const id = name === "review-guided-end" ? "acme/worker#879" : "acme/api#4127";
       await review(id)(page);
       const bad = (m: string) => failures.push(`${name}: ${m}`);
-      const tabs = await page.locator(".rv-views .head-tab").allTextContents();
+      const tabs = (await page.locator(".rv-views .head-tab").allTextContents()).map((t) => t.replace(/\d+$/, ""));
       const on = await page.locator(".rv-views .head-tab.on").allTextContents();
-      if (tabs.join("|") !== "Guided Review|Traditional" || on.join() !== "Guided Review")
+      if (tabs.join("|") !== "Guided Review|Traditional|Conversation" || on.join() !== "Guided Review")
         bad(`the switch reads ${JSON.stringify(tabs)}, on ${JSON.stringify(on)}`);
       // What the desk sent, and the sections the page drew, in order.
       const sectionsDrawn = `[...document.querySelectorAll(".rv-diffs > .rv-step, .rv-diffs > .rv-file-sec[id]")].map((el) =>
@@ -2715,11 +2767,13 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A review without steps has no switch: the page is as it was.
+    // A review without steps has no guide: Traditional and Conversation alone.
     name: "review-guided-none",
     go: async (page) => {
       await review("acme/api#4154")(page);
-      if (await page.locator(".rv-views, .rv-step").count()) failures.push("review-guided-none: a review without steps shows the switch");
+      const tabs = (await page.locator(".rv-views .head-tab").allTextContents()).map((t) => t.replace(/\d+$/, ""));
+      if (tabs.join("|") !== "Traditional|Conversation" || (await page.locator(".rv-step").count()))
+        failures.push(`review-guided-none: a review without steps shows ${JSON.stringify(tabs)}`);
     },
   },
   {
@@ -3279,24 +3333,19 @@ const SHOTS: Shot[] = [
         await route.fulfill({ response: res, json: v });
       });
       await review("me/notes-app#12")(page);
+      await talk(page);
       // A box that posts on GitHub names what it does there: Send is only for your agent.
-      const convos = await page.evaluate<
-        { buttons: string[]; filled: string; lead: boolean }[]
-      >(`[...document.querySelectorAll(".cv")].map((cv) => {
-        const words = (b) => b.textContent.trim();
-        const actions = cv.querySelector(".actions");
-        const send = actions.querySelector(".act.primary, .act.s-cta");
-        return { buttons: [...actions.querySelectorAll("button, a")].map(words), filled: send ? words(send) : "", lead: !!send?.matches(".primary") };
-      })`);
+      const convos = await page.evaluate<{ links: string[]; send: string }[]>(`[...document.querySelectorAll("article.cv")].map((cv) => ({
+        links: [...cv.querySelectorAll(".cv-links a, .cv-links button")].map((b) => b.textContent.trim()),
+        send: cv.querySelector(".cv-send")?.getAttribute("title") ?? "",
+      }))`);
       for (const [i, c] of convos.entries()) {
-        if (c.buttons.some((b) => b.includes("Send") || b === "Ask coordinator"))
-          failures.push(`ask-review: conversation ${i + 1}'s actions read ${c.buttons.join(", ")}`);
-        if (c.filled !== "Reply") failures.push(`ask-review: conversation ${i + 1}'s call to action reads "${c.filled}", not Reply`);
+        if (c.links.some((b) => b.includes("Send") || b === "Ask coordinator"))
+          failures.push(`ask-review: conversation ${i + 1}'s links read ${c.links.join(", ")}`);
+        if (!c.send.startsWith("Post this reply on GitHub"))
+          failures.push(`ask-review: conversation ${i + 1}'s send button says "${c.send}"`);
       }
-      // One filled Reply on the page, the first's; the rest tinted.
-      if (convos.filter((c) => c.lead).length !== 1 || !convos[0]?.lead)
-        failures.push(`ask-review: filled Replies ${JSON.stringify(convos.map((c) => c.lead))}, not the first alone`);
-      if (!convos[1]?.buttons.includes("Ask your agent")) failures.push("ask-review: the second conversation has no Ask your agent");
+      if (!convos[1]?.links.includes("Ask your agent")) failures.push("ask-review: the second conversation has no Ask your agent");
       await page.locator(".cv-reply").nth(1).focus();
       await page.keyboard.press("Escape");
       // The cached asks draw at once: the fetch must land before the send, or it would replace the ask sent.
@@ -4812,8 +4861,6 @@ const SHOTS: Shot[] = [
     name: "more-review",
     go: async (page) => {
       await review("acme/worker#875", [MORE])(page);
-      const back = (await page.locator(".page-head .back").textContent())?.trim();
-      if (back !== "Inbox") failures.push(`more-review: the review's way back reads ${JSON.stringify(back)}`);
       const items = await moreItems(page);
       const head = items.indexOf("#On GitHub");
       if (items[0] !== "Done" || items[1] !== "Copy link" || (head >= 0 && (head !== 2 || head === items.length - 1)))

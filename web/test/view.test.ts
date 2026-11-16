@@ -28,6 +28,7 @@ import {
   snoozeOptions,
   tilde,
   when,
+  sizeOf,
 } from "../src/format.ts";
 import {
   weightText,
@@ -1102,6 +1103,10 @@ test("formatting", () => {
   assert.equal(age("2026-10-27T11:20:00Z", now), "40m");
   assert.equal(age("2026-10-27T07:00:00Z", now), "5h");
   assert.equal(age("2026-10-24T12:00:00Z", now), "3d");
+  // Days up to 45, then whole months.
+  assert.equal(age(new Date(now - 45 * 86_400_000).toISOString(), now), "45d");
+  assert.equal(age(new Date(now - 46 * 86_400_000).toISOString(), now), "1mo");
+  assert.equal(age(new Date(now - 794 * 86_400_000).toISOString(), now), "26mo");
   // Rounded before the switch to days: 47.6h and 48.3h both read "2d".
   assert.equal(age(new Date(now - 47.6 * 3_600_000).toISOString(), now), "2d");
   assert.equal(age(new Date(now - 48.3 * 3_600_000).toISOString(), now), "2d");
@@ -1393,4 +1398,11 @@ test("pathTree nests a review's files in their folders, in reading order, a lone
     [false, true],
     "a file named as a folder is still a file",
   );
+});
+
+test("a PR's size is one to four bars, and its tip says the lines", () => {
+  assert.deepEqual(sizeOf({ add: 4, del: 2 }), { bars: 1, label: "Tiny change: +4 \u22122" });
+  assert.equal(sizeOf({ add: 20, del: 10 }).bars, 2);
+  assert.equal(sizeOf({ add: 150, del: 50 }).bars, 3);
+  assert.deepEqual(sizeOf({ add: 900, del: 300 }), { bars: 4, label: "Large change: +900 \u2212300" });
 });

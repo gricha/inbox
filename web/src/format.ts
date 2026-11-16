@@ -27,7 +27,9 @@ export function age(at: string, now: number): string {
   // Rounded before the switch, so 47.6h and 48.3h both read "2d".
   const h = Math.round(m / 60);
   if (h < 48) return `${h}h`;
-  return `${Math.round(m / 1440)}d`;
+  const d = Math.round(m / 1440);
+  // Months past 45 days, as "mo": "m" is minutes.
+  return d <= 45 ? `${d}d` : `${Math.floor(d / 30)}mo`;
 }
 
 // "just now" in the first minute, then as age(): for a single time on its own, where "0m" reads like a glitch.
@@ -173,6 +175,14 @@ export const copyText = (text: string): Effect.Effect<void, ClipboardUnavailable
       }),
     ),
   );
+
+// A PR's size as its row's mark draws it: one to four bars, and the words its tooltip says.
+export function sizeOf(size: { add: number; del: number }): { bars: 1 | 2 | 3 | 4; label: string } {
+  const n = size.add + size.del;
+  const [bars, word] =
+    n < 30 ? ([1, "Tiny"] as const) : n < 200 ? ([2, "Small"] as const) : n < 600 ? ([3, "Medium"] as const) : ([4, "Large"] as const);
+  return { bars, label: `${word} change: +${size.add} \u2212${size.del}` };
+}
 
 export const cls = (...xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(" ");
 

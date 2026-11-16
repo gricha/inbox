@@ -23,7 +23,7 @@ export function Filter({ filter, setFilter }: { filter: string; setFilter: (s: s
 
   return (
     <div className="search-box">
-      <label className="search">
+      <label className="search" data-key="/">
         <SearchIcon />
         <input
           ref={input}

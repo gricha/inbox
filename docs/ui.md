@@ -70,16 +70,17 @@ The window's only global chrome. There's no top bar.
 
 Sticky, and the desktop app's drag handle. It holds only the page's own controls:
 
-- Inbox, Blocked, Archive: the page's name, the filter by person and New note; Merging: its name and the filter by person. The search is at the top of the sidebar, on every page: its words match a row's title, repo or author, and one query searches the Inbox, Blocked, Merging and the Archive, and the list beside a review; typed in Settings, it takes you to the Inbox. Esc in it clears its words. The filter by person is an icon button; a count on it says how many people it picks. It opens a popover with a box to find someone, then **Author** (who opened it; a bot's PR counts as the person it was opened for) and **Involves** (anyone on it: its author, assignees, who was asked, who reviewed, commented or answered a thread), you first in each. A click picks or unpicks a person (a tick marks who's picked); **Clear** unpicks them all. Esc or a click outside closes it. The picks and the search's words apply together.
+- Inbox, Blocked, Archive: the page's name, the filter by person and New note; Merging: its name and the filter by person. The search is at the top of the sidebar, on every page but Settings (it searches the lists, and Settings has none): its words match a row's title, repo or author, and one query searches the Inbox, Blocked, Merging and the Archive, and the list beside a review. Esc in it clears its words. The filter by person is an icon button; a count on it says how many people it picks. It opens a popover with a box to find someone, then **Author** (who opened it; a bot's PR counts as the person it was opened for) and **Involves** (anyone on it: its author, assignees, who was asked, who reviewed, commented or answered a thread), you first in each. A click picks or unpicks a person (a tick marks who's picked); **Clear** unpicks them all. Esc or a click outside closes it. The picks and the search's words apply together.
 - Merging and a Settings part: the page's name.
-- A review, a question, a Settings view: the way back ("‹ Inbox", "‹ Blocked", "‹ Merging", "‹ Archive", "‹ GitHub", "‹ Local Agent Integration", "‹ Automation Rules"). Its tooltip names Esc, and for a review or question, ⌘[ and ⌘].
+- A review has its own bar in the head's place ([The diff](#the-diff)). A question, a Settings view: the way back ("‹ Inbox", "‹ Blocked", "‹ Merging", "‹ Archive", "‹ GitHub", "‹ Local Agent Integration", "‹ Automation Rules"). Its tooltip names Esc, and for a review or question, ⌘[ and ⌘].
 
 ### The list beside a review
 
 In a window 1160px or wider, a review or a question keeps the list it came from beside it.
 
 - Same rows, order, group headings and filter as that page. A question's list is the Inbox.
-- Two lines a row: the title (two lines at most), then one pencil line: PR, Issue or Question, repo#number, a sorted-away row's why, who it's from, the stage, the call to action as accent text, and the age.
+- Two tight lines a row, neither wrapping: its icon, the title (cut short) and the call to action as accent text; under the title, repo#number and its why, then its facts as icons, who it's from as their picture, and the age. The why gives way first. A note or a question says who it's from in words there.
+- Section headings are the page's: small, on the paper's colour, pinned to the list's top.
 - The open item's row is marked.
 - A click or right-click does what it does on the full page. An issue opens in place under its row; Esc closes it first.
 - A review opened from the list goes back to the list's page. One opened beside a question goes back to the question.
@@ -93,6 +94,7 @@ In a window 1160px or wider, a review or a question keeps the list it came from 
 ### Loading, empty, scroll
 
 - While a page waits on the desk, quiet bars stand where its rows or text will be. They show only after about 150 ms, so a quick answer never flashes them.
+- A review on its way has the loaded page's shape, so nothing moves when it lands: the views' pills and the action's in the bar, each file's header (fold mark, path, lines changed) over code with a gutter of line numbers and indented lines, and in the sidebar the checks' row among Status, a reviewer's row under Reviewers, and the files as a tree.
 - An empty page is one pencil line: "Nothing needs you right now.", "Nothing is blocked.", "Nothing in Merging yet: …", "Nothing here yet: …". With a filter: "No matches."
 - A new desk's first minutes are one pencil line in the empty line's place, or above the rows once they come: "Getting your PRs from GitHub… 63 found so far", then "Sorting 120 PRs… 40 done". The desk words it (`QueueView.first_pass`); it's gone once the first sorting is through and never shows again.
 - A list page opens at its top. Back from a review or a question, it returns where you left it.
@@ -110,7 +112,7 @@ Each section is a heading with its count; a click opens or closes it. Within a s
 
 Every row of Urgent and Standard shows, then FYI's first 5: the rest wait behind **Show N more** (one click shows all, until you leave the page). A filter, or a selected row further down, shows all of FYI. Scrolling, the section you're in keeps its heading pinned under the page's head until the next one's pushes it off.
 
-**Notes to yourself.** **New note** on a list page's head, or ⌘N anywhere, opens a box at the window's bottom: your words and **Remind me** (No reminder, In 1 hour, In 3 hours, Tomorrow 9:00, Monday 9:00, or Pick a time…, a date and time). ⌘↵ saves, Esc closes. A note without a reminder leads Standard; one with a reminder waits under **Reminders** at the top of the Archive, then at its time notifies once (even in quiet hours; not when notifications are off) and leads Urgent. Its row: Note, its words, **Done**, and its time ("at Tue 9:00") where a PR's author goes. A click on it opens the box to change it. The filter matches a note's words.
+**Notes to yourself.** **New note** on a list page's head, or ⌘N anywhere, blurs the page and drops a tray from its top, 760px wide at most, in the chrome's colour, a hairline round all but its top, its bottom corners round (it slides back up when it closes): your words, large, and at its foot a small **Remind me** with the tray's own list (No reminder, In 1 hour, In 3 hours, Tomorrow 9:00, Monday 9:00, or Pick a time…, which opens the tray's own calendar: a month to click a day in and the half hours beside it, nothing before now) and **Save note** in the accent, with **Mark as done** (a tick, in grey) before it on a note you opened; a cross at the tray's top right closes it, as Esc does (faded, still filled, until there's something to save). It has no title: the empty box says "Type a note to yourself here (e.g. Remind me to…)". ↵ saves (⇧↵ is a new line), Esc discards (an open list or calendar closes first), as does a click on the blurred page while the words are untouched. A note without a reminder leads Standard; one with a reminder waits under **Reminders** at the top of the Archive, then at its time notifies once (even in quiet hours; not when notifications are off) and leads Urgent. Its row: Note, its words, **Done**, and its time ("at Tue 9:00") where a PR's author goes. A click on it opens the tray to change it. The filter matches a note's words.
 
 The quiet rule: an item nobody has touched for `queue.quiet_days` (14) moves to FYI, unless pinned or a review you were asked for in that time.
 
@@ -118,18 +120,20 @@ The quiet rule: an item nobody has touched for `queue.quiet_days` (14) moves to 
 
 One line, columns lining up row to row:
 
-| Part           | What it shows                                                                                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Label          | PR, Issue, Question or Session. A bolt by "PR" marks someone else's small PR its AI review calls low risk (`Card.quick`).                  |
-| Title          | 15px.                                                                                                                                      |
-| Ref            | repo#number. A long repo name is cut short; the number never is. A stack's place follows ("3/6").                                          |
-| Why            | In pencil, `Card.reason`: a hand-back's words, the urgent criterion's name, an automation and its why, the score's line or the rules' why. |
-| Call to action | At most one ([below](#calls-to-action)).                                                                                                   |
-| By             | Who it's from, with their GitHub picture (none for you or a bot). "by you" a shade darker.                                                 |
-| Stage          | A PR's stage. On your own PR, "changes requested" is amber; "rebasing" while your agent rebases your approved PR off a conflict.           |
-| Age            | How long it's waited.                                                                                                                      |
+| Part           | What it shows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Kind           | An icon: a PR, an issue, a question, a session or a note. Its tip says which.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Title          | 14px.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Ref            | repo#number. A long repo name is cut short; the number never is. A stack's place follows ("3/6").                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Why            | In pencil, `Card.reason`: a hand-back's words, the urgent criterion's name, an automation and its why, the score's line or the rules' why.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Call to action | At most one ([below](#calls-to-action)): a small tinted button, as wide as its words.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Facts          | A PR's, as one signal icon: four filled bars, grey until lit. One is lit for each of its status, CI, the AI review's risk and its size with nothing against it (a draft or a stage that stops it, CI failing or running, medium or high risk, a medium or large change each take one off), and the lit ones share a colour: one red, two orange, three yellow, four green. Under the pointer it opens **Status**: a row each for the four, words on the left and its icon or counts on the right, as a review's Status reads. A bolt before it marks someone else's small PR its AI review calls low risk (`Card.quick`). |
+| By             | Who it's from: their GitHub picture alone (yours on your own, a small robot for a bot or an agent).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Age            | How long it's waited: minutes (40m), hours (5h), days (3d) up to 45, then whole months (2mo).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
-In a narrow table the stage column goes first, then who it's from. On your own row the stage takes the place of "by you". Who placed an item (Claude or a rule) is never on the row; it's in the opened item's facts and rule trace.
+Every icon says itself in the window's own tooltip (`Tips.tsx`, any `data-tip`): "Pull request", "By dana"; the signal's is Status and its four rows ("Approved", "CI passing", "Low risk, skip it", "Small change +120 −30"; `.tip-rich`). A row with no facts keeps the empty slot, so the columns line up.
+
+In a narrow table the bolt goes first, then who it's from; the signal stays. Who placed an item (Claude or a rule) is never on the row; it's in the opened item's facts and rule trace.
 
 A stack of PRs is one row: the lowest open member, in the most urgent place, with its place in the stack ("api#4154 3/6").
 
@@ -186,13 +190,13 @@ On Merging the menu is **Back to the desk**, **Copy link** and **Copy GitHub lin
 
 A Claude Code session asks you in the desk (`desk_inquire`) beside its chat: when you asked it to, or about work going on while you're away. Your agent always asks here.
 
-A question is a row at the top of Urgent: labeled **Question**, the question as its title, **Answer** as its call to action, "by" who asks ("by your agent", or the session's name), and its age. The desk refuses a question without enough context, a link or item, or answers that say what follows.
+A question is a row at the top of Urgent: a question mark as its icon, the question as its title, **Answer** as its call to action, a small robot whose tip says who asks ("Asked by your agent", or the session's name), and its age. The desk refuses a question without enough context, a link or item, or answers that say what follows.
 
 ### Sessions that need you
 
 Your own Claude Code and Codex sessions on this computer that are blocked on you or stalled (`src/connectors/sessions.ts`; Settings → Sessions turns them off). They follow the questions, blocked ones first.
 
-- **Row**: labeled **Session**, its name, its folder, its call to action, its kind where "by" goes (CLI, Background, Desktop, Codex), why it's here where the stage goes ("needs permission: Bash", "asked a question", "rate limited until 14:05", "stopped mid-turn", "login expired", "no progress"), and its age.
+- **Row**: a terminal as its icon, its kind in the tip ("Desktop session"; CLI, Background, Desktop, Codex), its name, its folder, why it's here in pencil after it ("needs permission: Bash", "asked a question", "rate limited until 14:05", "stopped mid-turn", "login expired", "no progress"), its call to action and its age.
 - **Calls to action**: **Kick** (a background session with no process), **Resume in background** (a terminal's whose process is gone), **Open** (the desktop app's or Codex's).
 - **Opened in place**: the reason and when, the last line it said or asked, its kind, folder, branch, and whether its process runs. Then its actions (a running background session offers **Copy attach command**, `claude attach <id>`; a running terminal one has none and says to go back to it), **Done**, **Snooze** (until tomorrow), **Mute**, **Close**.
 - It leaves on its own once the session moves on. Done hides it until then.
@@ -220,32 +224,26 @@ Under your answer: **Not picked up yet**, then **Picked up 2m ago** once the ask
 `#/review/<id>`: a PR read and acted on in the desk, in the Inbox's place. The sidebar stays, and in a wide window so does the list it came from. The diff takes the page's width; a foldable sidebar on the right holds the PR's state and files.
 
 ```
-  Planner: hash join stage                                        Status
-  api#4154  3/6  by priya  (Look closely)                         Stack on main
-  asked you directly · CI passing · changes requested             ○ #4153 Planner: run the table…  ✗
-                                                                  ┃○ #4154 Planner: hash join st… ±┃
-                                                                  ○ #4155 Planner: stream partia…
-                                                                    3 more
-  Adds a streaming scan (streamRows) and uses it in runPlan, ...  CI passing · 14 checks         ›
-                                                                  Changes requested by sam       ›
-  (threads waiting on you)                                        Merge conflict with main
-                                                                  3 files
-  [Approve] [More] [ Comment on api#4154…           ]             src/planner/plan.ts       • Look
-                                                                  src/routes/query.ts       • Look
-                                                                  docs/api/query.md           Skip
-
-  Look  src/planner/plan.ts  budget checked only between batches  +7 −3
-  ┌──────────────────────────────────────────────────────────────┐
+  Planner: hash join stage                                        [    Approve    ] [⋯]
+  api#4154  by priya  [Look closely]
+                                                                  Status
+  Adds a streaming scan (streamRows) and uses it in runPlan, ...  Medium risk               ▂▄
+  Show more                                                       Checks passing         14/14
+                                                                  Small changes         +34 −4
+  Guided Review   Traditional   Conversation 2
+  ──────────────────────────────────────────────────────────────  Stack on main
+  Look  src/planner/plan.ts  budget checked only between batches  ○ #4153 Planner: run the table…  ✗
+  ┌──────────────────────────────────────────────────────────────┐┃○ #4154 Planner: hash join st… ±┃
   │ 17 + export async function runPlan(q, budgetMs = ...)        │
-  │    ┃ The budget is only checked between batches, so ...      │  an AI note, at its line
-  └──────────────────────────────────────────────────────────────┘
+  │    ┃ The budget is only checked between batches, so ...      │  Reviewers
+  └──────────────────────────────────────────────────────────────┘  sam      changes requested
   Skim  src/planner/stream.ts  new batching generator         +24 −0
-  ...
-  Skip  docs/api/query.md                                        +3 −1
-  Not worth reviewing · 1 file
+  ...                                                             3 files
+  Skip  docs/api/query.md                                        +3 −1  ○ src/planner/plan.ts   Look
+  Not worth reviewing · 1 file                                    ○ docs/api/query.md      Skip
 ```
 
-Esc or the back link goes back to the page it was opened from.
+Esc goes back to the page it was opened from. A review has no page head: its own bar is in its place, and the list beside it and the sidebar are the other ways back.
 
 ### Opening
 
@@ -255,7 +253,7 @@ Esc or the back link goes back to the page it was opened from.
 
 ### Header
 
-- The title first; under it its metadata on one line: the ref, a stack's place ("3/6"), the author with their picture ("by you" on yours), then the AI review's verdict as a tag coloured by how much it asks of you, as risk is ("Look closely" red, "Skim it" amber, "Skip it" green and only outlined; the model and time in its tooltip), "on an earlier commit" after it when it is.
+- The title first, 10px of air over it; under it its metadata on one line, 10px of air under that: the ref, the author with their picture ("by you" on yours), then the AI review's verdict as a tag, a rounded rectangle filled with the colour of how much it asks of you, as risk is ("Look closely" red, "Skim it" amber, "Skip it" green, its words in the sheet's colour; the model and time in its tooltip), "on an earlier commit" after it when it is. A stack's place is the sidebar's (Stack), not the header's.
 - How big it is and who reviews it are the sidebar's (Status, Reviewers).
 - Nothing else: why it's on the desk is the row's; CI, the review state, a conflict and what it blocks are the sidebar's.
 - A resolved PR says so under the title: "Resolved: merged by li-wei · 2h".
@@ -268,7 +266,7 @@ Esc or the back link goes back to the page it was opened from.
 Sections, each open: its name, where it stands in one line that reads first (red when a required check fails, amber for changes requested), then its rows.
 
 - **Status** first: a row each, what it says on the left and its measure on the right; a click shows what's behind it.
-  - **Risk**, when there's an AI review: "Low risk", "Medium risk" or "High risk", and three rising bars as a phone shows its signal: one red for high, two yellow for medium, all three green for low. It opens to its reasons.
+  - **Risk**, when there's an AI review: "Low risk", "Medium risk" or "High risk", and the rows' signal, four rising bars as a phone shows it: one red for high, two orange for medium, all four green for low. It opens to its reasons.
   - **Checks**: "Checks passing", "Checks running", "Some checks failing" (an optional one failing or one cancelled) or "Checks failing" (a required one), and on the right how many pass of all of them ("19/22"), the first number in its colour. It opens straight to every check, with no line over them, a row each with a dot: red failing, red hollow failing but not required, yellow running, green passing, grey skipped. Shards of one check (`backend test (0)`, `(1)`, `[2/3]`, `#4`) are one row with a count and their worst dot; a click lists them. What's wrong comes first. `checkGroups()` in `web/src/view.ts`.
   - **Changes**: "Small changes" (up to 100 lines in up to 5 files), "Moderate changes" (up to 600 in up to 20) or "Lots of changes", with its + and − on the right; it opens to bullets: its files, lines added and lines removed.
 
@@ -285,6 +283,7 @@ No heading; right under the header.
 - Its verdict is the header's tag, and its risk the sidebar's (Status).
 - **The rest of the summary**: folded, its first lines show and fade out into **Show more** (in the accent), which opens it; then **Show less** under it folds it again. Every PR opens folded. Folded, the preview takes no clicks or focus (`inert`) and draws no diagram.
 - **Since your review**: on a re-review, under the summary, never folded.
+- A named part (**In the stack**, how it fits its goal, **Also risky**, **Interfaces**, **Could be better**, **Since your review**) is its name on a line of its own, then what it says on the next.
 - **Concerns**: each is also a note in the code. They're listed only when no note can sit there (none, or an earlier commit's review).
 - All of it is drawn as plain prose (`code`, **bold**, lists), never HTML. URLs stay text: the PR's author can steer what Claude writes.
 
@@ -300,14 +299,17 @@ The agent's name in these lines follows Settings → Local Agent Integration (Cl
 
 ### What reviewers said
 
-Under the AI review, only when there's any.
+The **Conversation** tab, in the diff's place (the tabs: [The diff](#the-diff)). Its name carries how many wait on your reply, and a PR opened to reply (its row's Reply) opens on it. It stays drawn while you read the diff, so a reply you're writing is there when you're back.
 
-- "Waiting on your reply" and how many, then each as a margin note: who (with picture), where (file:line, "outdated", or "on the PR"), when.
-- Claude's one-line gist, then its take with the call in semibold ("**Valid concern:** …", "**Only you can answer:** …"), then the original words behind "What azulus wrote".
-- An empty reply box: the desk never writes your answer. **Reply** (or ⌘↵) posts it on GitHub as you.
-- Until Claude has read it, the gist is the comment's first line and "Claude is reading it." A failure says why in ink.
-- What a reviewer wrote is drawn from its markdown, never as HTML (`saidBlocks()` in `src/prose.ts`, `SaidText` in `Prose.tsx`): headings, paragraphs, lists, `code` and ``` blocks; a `<details>` is a fold under its `<summary>`; a paragraph in `<sub>` is small print; `<br>`, `<b>` and `<code>` read as meant; HTML comments (a bot's `<!-- finding -->` markers) are gone; any other tag is text. URLs stay text. The same in the diff's threads.
-- Everything not waiting on you is one line, "3 more conversations not waiting on you", opening to a line each and then their comments.
+- A resolved conversation that isn't waiting on you is one quiet line (who, where, "resolved", how it began) until a click opens it.
+- Each conversation is a card on the sheet, a hairline between one comment and the next: every comment with its author's picture, when, and on the first where (file:line, "outdated"), "resolved", or a review's "Approved" or "Changes requested"; then its words.
+- Those waiting on you come first, under "Waiting on your reply" and how many, edged in the accent, with Claude's take under the words, the call in semibold ("**Valid concern:** …", "**Only you can answer:** …"). Until Claude has read it: "Claude is reading it." A failure says why in ink.
+- Under them, quiet links: **Open on GitHub** and **Ask your agent**.
+- At a card's foot, over a hairline, a row to reply in on an open PR: your GitHub picture, "Reply to azulus…", and a round button that sends it (or ⌘↵), filled with the accent once there are words. The box is one line and grows as you write. The desk never writes your answer; a thread's reply goes to the thread, a comment's or a review's is a comment on the PR. Sent, the card says "Reply sent."
+- What a reviewer wrote is drawn from its markdown and its HTML, parsed into elements and never set as HTML (`saidBlocks()` in `src/prose.ts`, `SaidText` in `Prose.tsx`): headings, paragraphs, lists, `code` and ``` blocks; a link (`[words](url)` or `<a href>`) reads as its words and opens its https URL, the URL in its tooltip; an image (`![alt](url)`, `<img>`, a `<picture>`'s) is drawn when GitHub hosts it (an upload to a comment, `*.githubusercontent.com`) and is a link in its alt otherwise, or when it doesn't load; a linked image is a link in its alt; a `<details>` is a fold under its `<summary>`; a paragraph in `<sub>` is small print; `<br>`, `<b>` and `<code>` read as meant; HTML comments (a bot's `<!-- finding -->` markers) are gone; any other tag is text. The same in the diff's threads.
+- With nothing said yet, a dashed box in the cards' place: "No conversation yet", "Comments and review threads on this PR show here."
+- No attachments: GitHub has no public API to upload one, so the boxes take words only.
+- **Your comment** on the PR is at the tab's foot (see [Actions](#actions)).
 
 ### The diff
 
@@ -320,15 +322,15 @@ The desk's reading order (`ReviewView.order`), which the guide's steps are built
 
 Neighbouring hunks of a file at one level read as one. Without a ranking (none yet, or an earlier commit's) it keeps file order. A PR with no changes says "No files changed."
 
-**Guided Review and Traditional.** Two tabs above the diff, over a hairline barely there, their words and the steps' words on the header's edge, the choice kept per device (`desk.review.view`), Guided Review first. A review without steps (`order.steps`: none yet, or an earlier commit's) shows Traditional alone, with no tabs.
+**Guided Review, Traditional and Conversation.** Three pills (rounded rectangles, regular weight, the one you're on filled a little more and in ink) at the left of the review's bar, which is flush with the window's top, stuck there, as tall as a page's head, and a drag handle. The title, the AI review and the view you picked are under it. The first two are the diff's orders, the choice kept per device (`desk.review.view`), Guided Review first; Conversation is what reviewers said and your comment's box, in the diff's place. A review without steps (`order.steps`: none yet, or an earlier commit's) shows Traditional and Conversation. A click on a step, a file or a line the AI review names goes back to the diff.
 
 - **Guided Review** is only the guide, as Linear's guided reviews: each step is a heading ("1 of 4", its title), a sentence or two, and "**Check:** …" when there's something to verify, then only the hunks it covers. A quiet "Next: <title>" at its foot. In the sidebar the steps are a timeline on a pale line: a pale node each and its title dimmed, the step you're on a flat node in a fluorescent purple (no glow) and its title in ink, each title on one line (the whole of it in its tooltip). The model is asked for titles of at most four words, under 28 characters. The last reads "End of the guide.", and when files changed outside it, "3 more files change outside it: read every file in Traditional", a link to that tab. Nothing the steps leave out is drawn, so the guide holds your attention. A test file in a step is folded until you open it (`isTestPath()` in `src/sections.ts`).
 - **Diagrams** in a step are drawn by Excalidraw (`web/src/components/Sketch.tsx`), hand-drawn in the theme's own colours: new parts green, changed amber, removed dashed, a store in the accent. The desk's layout (ELK, measured in Excalifont) places them; a left-to-right flowchart stays left to right while it fits the column at 85% or more, and redraws when the theme changes. Excalifont comes from the desk (`web/public/excalidraw`), never a CDN. If Excalidraw fails, or `desk.sketch` is `"0"` in localStorage, the plain drawing shows instead; a rendered review page always has the plain one.
 - **Potential bugs**: each of the AI review's concerns is marked **Potential bug** on its line, edged in amber: what goes wrong, when, the fix, then "Evidence:" what in the diff shows it and how to confirm it (a suspicion with no evidence in the diff is only a note saying what to check). In Guided Review a concern's hunk shows even when no step covers it, under "Potential bugs outside the guide" after the steps.
 - **Traditional** is the plain diff: every file in the PR's order, all its hunks in diff order, Claude's notes inline on their lines (`traditional()` in `src/sections.ts`), then the desk's "Not worth reviewing" fold.
-- In the review's sidebar the steps take the files' place. Traditional's files are the same timeline nested in their folders (`pathTree()` in `web/src/view.ts`; a folder holding only a folder reads as one, "web/src"), stuck under the page's head like the steps (the hairline above either fades once it's stuck): the file you're in is the purple node and follows the scroll, its folders are ringed in the same purple, a click folds a folder or opens it, a folded one holding that file is the node in its place, and scrolling into a folded folder's file opens it.
+- In the review's sidebar the steps take the files' place. Traditional's files are the same timeline nested in their folders (`pathTree()` in `web/src/view.ts`; a folder holding only a folder reads as one, "web/src"), stuck under the review's bar like the steps (the hairline above either fades once it's stuck): the file you're in is the purple node and follows the scroll, its folders are ringed in the same purple, a click folds a folder or opens it, a folded one holding that file is the node in its place, and scrolling into a folded folder's file opens it.
 
-**Drawing.** `@pierre/diffs`: unified, word-level changes, wrapped lines, Shiki highlighting in the theme's syntax colours (`diff` in `src/themes.ts`, `web/src/diffThemes.ts`). Unchanged lines fold into a band ("14 unmodified lines"); its arrows open ten more at a time, in either review. A drawn file is read whole ahead (`GET /api/file/:id?path=`: the file at the PR's head; before it is the same run back through its patch, `oldFromNew()` in `web/src/view.ts`), so the first click opens lines. A file GitHub won't give whole (binary, too big) says so in a bubble. Each file's name sticks under the head while you read it.
+**Drawing.** `@pierre/diffs`: unified, word-level changes, wrapped lines, Shiki highlighting in the theme's syntax colours (`diff` in `src/themes.ts`, `web/src/diffThemes.ts`). Unchanged lines fold into a band ("14 unmodified lines"); its arrows open ten more at a time, in either review. A drawn file is read whole ahead (`GET /api/file/:id?path=`: the file at the PR's head; before it is the same run back through its patch, `oldFromNew()` in `web/src/view.ts`), so the first click opens lines. A file GitHub won't give whole (binary, too big) says so in a bubble. Each file's name sticks under the review's bar while you read it.
 
 **Folding files.** A file's header folds its diff and everything on it. Consecutive folded files read as one list. A different PR starts with every file open.
 
@@ -352,19 +354,19 @@ Neighbouring hunks of a file at one level read as one. Without a ranking (none y
 
 ### Actions
 
-The actions' row, under what reviewers said:
+The actions sit at the right of the review's bar, the strip stuck across its top with the three views at its left (see [The diff](#the-diff)): the call to action, 30px tall, then **More**, a narrow button of three dots, one over the other. Their corners are tighter (6px). The call to action is filled with the theme's accent whatever it does, Approve and Hand off for merge too, and its states are mixed from the theme: under the pointer the fill leans to the ink, pressed it leans further, and focus rings it in the accent.
 
-- **Approve** (green): only on someone else's open PR. Sends at once; the PR leaves your desk. Disabled, with the reason in its tooltip, if you already approved this commit. It approves the commit on screen; if the desk has seen a newer push, it refuses.
+- **Approve**: only on someone else's open PR. Sends at once; the PR leaves your desk. Disabled, with the reason in its tooltip, if you already approved this commit. It approves the commit on screen; if the desk has seen a newer push, it refuses.
 - Or the PR's own call to action: **Ready for review** or **Ask reviewers**.
-- **Hand off for merge** (green) on your own PR, only once it's approved or its repo needs no review. Not on a draft or a ready PR nobody's asked to review (unless its repo needs no review). One already in Merging shows **Back to desk** instead, last.
+- **Hand off for merge** on your own PR, only once it's approved or its repo needs no review. Not on a draft or a ready PR nobody's asked to review (unless its repo needs no review). One already in Merging shows **Back to desk** instead, last.
 - **More**: **Done** (or **Back on the desk**), **Copy link**, then under "On GitHub" the writes it allows: **Close**, **Request changes** (opens a box for its body).
-- **Your comment**: a one-line box on the same row ("Comment on api#4127…"). It grows as you write; **Comment** shows once it has words. ⌘↵ sends it and the PR leaves your desk until someone answers. Esc leaves it with your words kept. With words in it, the buttons take you back to the box instead of acting. Unsent words are kept per PR in this window.
+- **Your comment**: a card at the foot of the Conversation tab, as a reply's row is: your GitHub picture, "Comment on api#4127…", and the round send button. It grows as you write. ⌘↵ sends it and the PR leaves your desk until someone answers. Esc leaves it with your words kept. With words in it, the buttons take you to the tab and the box instead of acting. Unsent words are kept per PR in this window.
 
 Every GitHub write is listed in [api.md → Security model](api.md#security-model).
 
 ### Your draft's reviewers
 
-A line above Ready for review on your draft (and above Ask reviewers on your ready PR nobody's asked), under one line saying what the button will send:
+A line under the AI review on your draft (and on your ready PR nobody's asked), under one line saying what Ready for review or Ask reviewers will send:
 
 - Each person shows their GitHub picture; a team shows "@".
 - Those already asked show first and stay.
@@ -376,11 +378,11 @@ On your ready PR nobody's asked to review, the same line opens with the box focu
 
 ### The review's sidebar
 
-Beside the diff it's always there (240px wide in a column under 880px), with no toggle, and it scrolls with the page: its parts go by, and **Guided Review** sticks under the page's head (scrolling in itself when the guide is longer than the window). In a page column under 680px it lies over the diff and starts folded; there one icon button at the review's top right shows and hides it ("Show checks and files", "Hide the stack, checks and files"), and it scrolls in itself. While the chat is open the chat takes its place; the same button brings the sidebar back and closes the chat.
+Beside the diff it's always there (240px wide in a column under 880px), with no toggle, and it scrolls with the page: its parts go by, and **Guided Review** sticks under the review's bar (scrolling in itself when the guide is longer than the window). In a page column under 680px it lies over the diff and starts folded; there one icon button at the review's top right shows and hides it ("Show checks and files", "Hide the stack, checks and files"), and it scrolls in itself. While the chat is open the chat takes its place; the same button brings the sidebar back and closes the chat.
 
 Top to bottom:
 
-- **The stack**, when the PR is in one: "Stack on main", its open PRs bottom first, each with only what's news (✗ CI failing in red, ± changes requested in amber, ✓ approved). The PR on screen is marked. A long stack shows four and "16 more". A click opens that PR.
+- **The stack**, when the PR is in one: "Stack on main", its open PRs bottom first as a timeline like the guide's (a node each on one line), each with only what's news (a red cross for CI failing, "changes" in amber, a green tick for approved). The PR on screen has the accent's node and its title in ink, no fill or ring. A long stack shows four and "16 more". A click opens that PR.
 - **The checks**, when any ran on its head: one line ("CI passing · 14 checks", "2 failing of 14 checks", "3 running of 14 checks"), red while a required check fails. A click opens every check, worst first, each linking to its page. A failing check the base branch doesn't require reads "failing, not required". Fetched when the review opens; "Couldn't load the checks: …" if GitHub won't give them.
 - **The files**, in Traditional, in the PR's order with a dot when they have notes. A click scrolls there. The one you're reading is marked.
 - **The reviewers**, always: one line ("Approved by marco · waiting on sam and @backend", "Changes requested by kofi", "Waiting on you", "Nobody's asked"), amber on changes requested. A click lists each person or team, who holds it first. Bots and the author are left out.
@@ -707,6 +709,8 @@ The desk checks the latest GitHub Release every 6 hours, only in the packaged ap
 
 ## Keys
 
+Holding ⌘ (Ctrl elsewhere) alone for a moment shows each shortcut as a small chip by its button, growing out of nothing: ⌘1 to ⌘4 on the sidebar's pages, / on the search, ⌘N on New note, ⌘↵ over a conversation's send button. Letting go, or pressing another key, puts them away (`data-key` on the button, `[data-key]` in `styles.css`, the hold in `App.tsx`).
+
 The window names no key; a button's tooltip names its own. Only platform keys work, and / for the filter, as on GitHub. Nothing outside a box you're typing in writes to GitHub or changes an item.
 
 | Key                             | Does                                                                                                                                                                                                                                                                                                      |
@@ -718,7 +722,7 @@ The window names no key; a button's tooltip names its own. Only platform keys wo
 | Tab                             | Moves focus. A row is a button: focusing selects it, Enter or Space opens it. In the rules editor Tab indents.                                                                                                                                                                                            |
 | ↓ / ↑                           | On a list page and Merging: focuses (selects) the row after / before the focused or selected one, from the first or last; Enter opens it. The page scrolls only to keep it in view.                                                                                                                       |
 | Arrows, Enter, Space, Backspace | In menus, the reviewers box, settings fields and the shortcut recorder.                                                                                                                                                                                                                                   |
-| /                               | Puts you in the search at the top of the sidebar, on any page, when you're not typing.                                                                                                                                                                                                                    |
+| /                               | Puts you in the search at the top of the sidebar, when you're not typing; not in Settings.                                                                                                                                                                                                                |
 | ⌘1–⌘4                           | Inbox, Blocked, Merging, Archive (Ctrl elsewhere). Each page's tooltip names its key.                                                                                                                                                                                                                     |
 | ⌘] / ⌘[                         | The item after / before the open one in its list (else the selected one; with neither, the first or last), opened as a click would. On Merging, its PRs. Stops at the list's ends and at a fold. Works from a box; does nothing in Settings.                                                              |
 | ⌘,                              | Settings (desktop app).                                                                                                                                                                                                                                                                                   |

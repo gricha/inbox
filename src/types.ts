@@ -562,6 +562,7 @@ export interface Card {
   demoted?: string;
   board: string;
   boards: string[]; // every board the item is on (for Focus)
+  size?: { add: number; del: number }; // a PR's lines added and removed, for its row's size mark
   chips: string[]; // short facts: "issue", "draft", "CI red", "conflict", "changes requested", "approved", "3 unresolved", "+120 −30"
   ci: Ci;
   review: ReviewDecision;

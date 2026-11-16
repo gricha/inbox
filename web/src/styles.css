@@ -42,8 +42,8 @@
   --mono: "SF Mono", ui-monospace, menlo, consolas, monospace;
 
   /* A row's type: compact, so a table of them reads at a glance. */
-  --title-size: 15px;
-  --meta-size: 13px;
+  --title-size: 14px;
+  --meta-size: 12.5px;
 
   color-scheme: light;
 }
@@ -53,9 +53,9 @@ html {
   /* Diagram boxes are sized from Instrument Sans's widths (src/metrics.ts), so their text stays in it. */
   --diagram: "Instrument Sans", var(--sans);
 
-  /* The chrome (the sidebar and the heads across the top): the theme's sidebar colour in a light theme, near black tinted by
-     the accent in a dark one (light-dark() reads the theme's color-scheme); its words are the theme's own. */
-  --chrome: light-dark(var(--side), color-mix(in oklab, #000 88%, var(--accent)));
+  /* The chrome (the sidebar and the heads across the top): the theme's own sidebar colour, light or dark, so a dark theme
+     on grey paper (Nord, Everforest, Slate) keeps its greys rather than a black that isn't its own. */
+  --chrome: var(--side);
   --chrome-pill: oklch(from var(--accent) 55% 0.2 h); /* deep enough for white words on it */
 }
 
@@ -1360,40 +1360,18 @@ html::-webkit-scrollbar-corner,
   font-size: 12px;
 }
 
+/* Beside a review the same small band on the paper's colour, pinned to the list's top. */
 .beside .queue .group-head {
   top: 0;
-  background: var(--sheet);
+  padding: 8px var(--pad);
+  font-size: 13px;
 }
 
-/* A tight table drops the stage column first, then who it's from, before a repo or a why is cut to a few letters; a review
-   still shows both, and so do the two-line rows beside it. On your own row the stage says more than "by you", so there it
-   takes its place, as wide; changes requested and handed back stay to the last. */
+/* A tight table drops the quick bolt, then who it's from, before a repo or a why is cut to a few letters; the signal stays,
+   an icon's width. A review still shows its facts in words beside it. */
 @container (width < 760px) {
-  .line-row:not(.c-row) .line-stage {
+  .line-row:not(.c-row) > .line-facts > .line-quick {
     display: none;
-  }
-
-  .line-row:not(.c-row) .line-by {
-    width: 9em;
-  }
-
-  .line-row:not(.c-row):has(> .line-by.mine + .line-stage:not(:empty)) > .line-by {
-    display: none;
-  }
-
-  .line-row:not(.c-row):has(> .line-by.mine + .line-stage:not(:empty)) > .line-stage {
-    display: block;
-    width: 9em;
-  }
-
-  /* A session's reason is why it's there: it takes its kind's place, to the last. */
-  .line.session .line-row > .line-by {
-    display: none;
-  }
-
-  .line.session .line-row > .line-stage {
-    display: block;
-    width: 11em;
   }
 }
 
@@ -1405,8 +1383,7 @@ html::-webkit-scrollbar-corner,
 }
 
 @container (width < 620px) {
-  .line-row:not(.c-row) .line-by,
-  .line-row:not(.c-row):has(> .line-by.mine + .line-stage:not(:empty)) > .line-stage:not(.t-warn, .handed) {
+  .line-row:not(.c-row) > .line-face {
     display: none;
   }
 }
@@ -1635,10 +1612,10 @@ html::-webkit-scrollbar-corner,
 .line .line-main {
   display: flex;
   align-items: baseline;
-  gap: 14px;
+  gap: 12px;
   width: 100%;
   min-width: 0;
-  padding: 10px var(--pad, 14px);
+  padding: 8px var(--pad, 14px);
   border: 0;
   border-radius: 0;
   background: none;
@@ -1659,7 +1636,7 @@ html::-webkit-scrollbar-corner,
   display: flex;
   flex: 1 1 0;
   align-items: baseline;
-  gap: 14px;
+  gap: 12px;
   min-width: 0;
   overflow: clip;
   padding: 0;
@@ -1696,27 +1673,146 @@ html::-webkit-scrollbar-corner,
   outline-offset: -2px;
 }
 
-/* A PR or an issue: a small label in its own column, so the titles start in one. */
+/* What a row is: an icon in its own column, so the titles start in one. Beside a review it's a word (below). */
 .line-kind {
+  display: inline-flex;
   flex: none;
-  width: 2.9em;
+  align-self: center;
   color: var(--pencil);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
-/* The Inbox's has a third, Question, and a column as wide as that; with no weight, so a row beside a review keeps its own. */
-:where(.queue:not(.later)) .line-kind {
-  width: 4.9em;
+/* A word an icon stands for, kept for a screen reader. */
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-/* It takes what the rest leaves, down to a floor no wider than itself; past that the meta after it gives way. */
+/* A row's facts on its right: an icon each in a slot of its own, empty when there's nothing to say, so they read down the
+   table as columns. Pencil unless it's information: CI failing and high risk red, medium risk amber, passing and low green. */
+.line-facts {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  align-self: center;
+  gap: 8px;
+  color: var(--faint);
+}
+
+.rf {
+  display: inline-flex;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.rf.line-stage {
+  color: var(--pencil);
+}
+
+.rf.t-ok {
+  color: var(--green);
+}
+
+.rf.t-warn {
+  color: var(--amber);
+}
+
+.rf.t-bad {
+  color: var(--red);
+}
+
+/* A PR's size: four bars, as many filled as it's big. */
+.bars rect {
+  fill: currentcolor;
+  stroke: none;
+  opacity: 0.3;
+}
+
+.bars rect.on {
+  fill: var(--pencil);
+  opacity: 1;
+}
+
+/* A signal (a row's, and risk's beside a review): four filled bars with no outline, a light grey until lit; the lit ones
+   all take the colour of how many there are: one red, two orange, three yellow, four green. Its own vivid colours, the
+   same in every theme: the themes' red, amber and green are tuned for text and too pale for a bar 2px wide. */
+.signal rect {
+  fill: color-mix(in oklab, var(--pencil) 55%, transparent);
+  stroke: none;
+}
+
+.signal.n-1 rect.on {
+  fill: #ff3b30;
+}
+
+.signal.n-2 rect.on {
+  fill: #ff8a00;
+}
+
+.signal.n-3 rect.on {
+  fill: #f5c400;
+}
+
+.signal.n-4 rect.on {
+  fill: #1fc45a;
+}
+
+/* The signal opened in the tooltip, as a review's Status reads: its name, then a fact a row, its words on the left and its
+   icon or counts on the right. */
+.sig:not([hidden]) {
+  display: grid;
+  gap: 6px;
+  min-width: 190px;
+  padding: 4px 2px;
+}
+
+.sig-head {
+  margin-bottom: 2px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 550;
+}
+
+.sig-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--ink-2);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.sig-row.quiet {
+  color: var(--pencil);
+}
+
+.sig-i {
+  display: inline-flex;
+  flex: none;
+  color: var(--pencil);
+}
+
+.sig-i.t-ok {
+  color: var(--green);
+}
+
+.sig-i.t-warn {
+  color: var(--amber);
+}
+
+.sig-i.t-bad {
+  color: var(--red);
+}
+
+/* A quick review's bolt leads the facts, outside their columns. */
 .line-quick {
   display: inline-flex;
-  margin-left: 4px;
   color: var(--accent-ink);
-  vertical-align: -2px;
 }
 
 .line-quick .i {
@@ -1724,6 +1820,50 @@ html::-webkit-scrollbar-corner,
   height: 14px;
   fill: currentcolor;
   stroke-width: 1;
+}
+
+/* Who it's from: their picture alone, in a column of its own. */
+.line-face {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  align-self: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--pencil);
+}
+
+.line-face .avatar {
+  --face: 18px;
+
+  margin: 0;
+  vertical-align: 0;
+}
+
+/* The window's tooltip (Tips.tsx): the sheet with a breath of the accent, small words, over what it names. */
+.tip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 60;
+  max-width: 320px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--rule-strong));
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--accent) 8%, var(--sheet));
+  color: var(--ink);
+  font: 500 12px/1.4 var(--sans);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+  animation: tip-in 90ms ease-out;
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    translate: 0 2px;
+  }
 }
 
 .line-title {
@@ -1754,6 +1894,7 @@ html::-webkit-scrollbar-corner,
 /* The title is what you read: a long repo name is cut short, down to its floor before the title gives way at all (its title
    attribute has it whole), the number never. */
 .line-ref {
+  opacity: 0.7;
   flex: 0 1000 auto;
   min-width: calc-size(max-content, min(size, 6ch));
   max-width: 16ch;
@@ -1764,19 +1905,22 @@ html::-webkit-scrollbar-corner,
 /* Right after its repo, as one "repo#number". */
 .line-num {
   flex: none;
-  margin-left: -14px;
+  margin-left: -12px;
+  opacity: 0.7;
 }
 
 .line-stack {
   flex: none;
+  opacity: 0.7;
 }
 
-/* Who and what stage: columns of one width on every row, so they read down the table. */
+/* An Inbox row's why, like its repo and number: quieter than the title by more than its colour. */
+.line-reason {
+  opacity: 0.7;
+}
+
 .line-by {
   flex: none;
-  width: 7.5em;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .line-by.mine {
@@ -1798,20 +1942,6 @@ html::-webkit-scrollbar-corner,
 
 .rv-by .avatar {
   --face: 1.4em;
-}
-
-/* A question has no stage: who asks takes that column's room too; with no weight, so a tight table still narrows it. */
-:where(.inq:not(.c-line)) .line-by {
-  width: calc(17em + 14px);
-}
-
-.line-stage {
-  flex: none;
-  width: 9.5em;
-}
-
-.line-stage.t-warn {
-  color: var(--amber);
 }
 
 .line-note {
@@ -1888,14 +2018,17 @@ html::-webkit-scrollbar-corner,
   text-align: right;
 }
 
-/* A row's call to action; the negative margin keeps every row one height. */
+/* A row's call to action: small, as wide as its words; the negative margin keeps every row one height. */
 .line .line-cta {
   position: relative;
   z-index: 1;
   flex: none;
   align-self: center;
-  height: 32px;
-  margin: -4px 0 -4px auto;
+  height: 22px;
+  margin: -2px 0 -2px auto;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 12px;
 }
 
 .dim .line-title {
@@ -1998,7 +2131,7 @@ html::-webkit-scrollbar-corner,
   grid-template-columns: var(--side-w) var(--list-w) minmax(0, 1fr);
 }
 
-/* Folded, it leaves nothing but its button, at the page's edge. */
+/* Folded, it leaves nothing but its button, on the sidebar's edge. */
 .app:has(> .beside.folded) {
   --list-w: 0px;
 }
@@ -2008,8 +2141,9 @@ html::-webkit-scrollbar-corner,
   background: none;
 }
 
+/* Its button sits on the sidebar's edge, the line through its middle (the line is the sidebar's last pixel). */
 .beside.folded .beside-fold {
-  right: -28px;
+  right: -13.5px;
 }
 
 .app:has(> .beside):has(> .chat) {
@@ -2300,14 +2434,6 @@ html::-webkit-scrollbar-corner,
   content: "·";
 }
 
-.c-meta > .line-kind {
-  margin-right: 8px;
-}
-
-.c-meta > .line-kind + *::before {
-  content: none;
-}
-
 /* A long repo name gives way before the facts after it, down to a few letters; the number never. */
 .c-meta > .c-ref {
   display: contents;
@@ -2352,6 +2478,90 @@ html::-webkit-scrollbar-corner,
 .c-row > .c-cta:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+
+/* A PR's, issue's, note's or question's row beside a review, as tight as the table's: its icon and title on one line, cut
+   short rather than wrapped, its call to action at that line's end; under the title its ref and why, then its facts as
+   icons, who it's from and its age. (A Merging row beside a review keeps the rules above.) */
+.c-line .line-row.c-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 0;
+  align-items: center;
+  padding: 8px 16px;
+}
+
+.c-top {
+  display: flex;
+  grid-area: 1 / 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.c-line .c-row .c-top .line-title {
+  display: block;
+  flex: 1 1 auto;
+  font-size: 13.5px;
+  line-height: 1.4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+
+.line-row.c-row > .c-cta {
+  grid-area: 1 / 2;
+  margin: -4px 0 -4px 10px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.line-row.c-row .c-meta {
+  grid-area: 2 / 1 / 3 / -1;
+  align-items: center;
+  padding: 0 0 0 24px;
+  font-size: 12px;
+}
+
+.line-row.c-row .c-meta > :not(.line-note)::before {
+  content: none;
+}
+
+.c-meta > .c-gap {
+  flex: 1 1 0;
+}
+
+/* The icons and the age always fit: the why gives way to nothing first, then the repo's name to a few letters. */
+.line-row.c-row .c-meta > .line-note {
+  flex-shrink: 100000;
+  min-width: 0;
+}
+
+.line-row.c-row .c-ref .line-ref {
+  min-width: calc-size(max-content, min(size, 3ch));
+}
+
+.line-row.c-row .c-meta > :is(.line-facts, .line-face, .line-age) {
+  flex: none;
+  min-width: 0;
+  margin-left: 8px;
+  overflow: visible;
+}
+
+/* No columns to keep here: an empty slot gives its room to the why. */
+.c-meta .line-facts {
+  gap: 6px;
+}
+
+.c-meta .rf:empty {
+  display: none;
+}
+
+.line-row.c-row .line-by.line-face.mine {
+  display: inline-flex;
+}
+
+.line-row.c-row .c-meta > .line-age {
+  font-size: 12px;
 }
 
 /* Loading ------------------------------------------------------------------ */
@@ -2419,7 +2629,7 @@ html::-webkit-scrollbar-corner,
   display: flex;
   align-items: center;
   gap: 14px;
-  height: calc(21px + 1.5 * var(--title-size));
+  height: calc(17px + 1.5 * var(--title-size));
   padding: 0 var(--pad, 14px);
 }
 
@@ -2981,21 +3191,6 @@ html::-webkit-scrollbar-corner,
   color: var(--faint);
 }
 
-/* One width for the filled call to action, so the row's other actions start in one place whichever it is. */
-.rv-actions .act.primary,
-.line .line-cta:not(.line-reply) {
-  justify-content: center;
-  min-width: 152px;
-}
-
-/* In a tight table, a row's call to action is as wide as its words: the title needs the room. */
-@container (width < 760px) {
-  .line .line-cta:not(.line-reply) {
-    min-width: 0;
-    padding: 0 12px;
-  }
-}
-
 .act.primary {
   border-color: var(--accent);
   background: var(--accent);
@@ -3091,31 +3286,22 @@ html::-webkit-scrollbar-corner,
    are text that fills on hover. A review's few actions are buttons. */
 .card-keys .act:not(.primary),
 .composer .act:not(.primary),
+.note-tray .act:not(.primary),
 .chat .act:not(.primary),
 .rv-inline .act:not(.primary),
-.rv-changes .act:not(.primary),
-.cv .actions .act:not(.primary) {
+.rv-changes .act:not(.primary) {
   border-color: transparent;
   background: none;
 }
 
 .card-keys .act:not(.primary):hover:not(:disabled),
 .composer .act:not(.primary):hover:not(:disabled),
+.note-tray .act:not(.primary):hover:not(:disabled),
 .chat .act:not(.primary):hover:not(:disabled),
 .rv-inline .act:not(.primary):hover:not(:disabled),
-.rv-changes .act:not(.primary):hover:not(:disabled),
-.cv .actions .act:not(.primary):hover:not(:disabled) {
+.rv-changes .act:not(.primary):hover:not(:disabled) {
   border-color: transparent;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
-}
-
-/* A conversation's Reply that isn't the one you're answering: tinted, as a row's call to action. */
-.cv .actions .act.s-cta {
-  background: var(--accent-wash);
-}
-
-.cv .actions .act.s-cta:hover:not(:disabled) {
-  background: var(--accent);
 }
 
 /* A text action that starts its row starts on the column's edge, as the title does; its fill reaches into the gutter. */
@@ -3125,6 +3311,7 @@ html::-webkit-scrollbar-corner,
 
 /* Nothing to send yet: Send is text until there is. */
 .composer .act.primary:disabled,
+.note-tray .act.primary:disabled,
 .chat .act.primary:disabled,
 .inq-write .act.primary:disabled {
   border-color: transparent;
@@ -3680,20 +3867,378 @@ html::-webkit-scrollbar-corner,
   margin-top: 0;
 }
 
-/* The note box's reminder: under its words, quiet until you pick one. */
+/* The note tray: the page (not the sidebar) blurs behind a veil, and the tray drops from its top edge, centred, in the
+   chrome's colour (the head it hangs from), its bottom corners round. Only opacity and transform move, so it stays
+   smooth: the blur is there from the first frame and fades in with the veil. */
+.note-veil {
+  position: fixed;
+  inset: 0 0 0 var(--side-w);
+  z-index: 35;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 0 24px;
+  background: color-mix(in srgb, var(--paper) 45%, transparent);
+  backdrop-filter: blur(6px);
+  animation: veil-in 180ms ease-out both;
+  -webkit-app-region: no-drag; /* over the page head's drag region, so a click reaches it */
+}
+
+.note-veil.leaving {
+  animation: veil-out 180ms ease-in both;
+}
+
+.note-tray {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  width: min(760px, 100%);
+  padding: 20px 22px 14px;
+  border: 1px solid var(--rule);
+  border-top: 0;
+  border-radius: 0 0 16px 16px;
+  background: var(--chrome);
+  box-shadow: var(--shadow);
+  animation: tray-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: transform;
+}
+
+.note-tray.leaving {
+  animation: tray-out 180ms cubic-bezier(0.4, 0, 1, 1) both;
+}
+
+@keyframes veil-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes veil-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes tray-in {
+  from {
+    transform: translateY(-100%);
+  }
+}
+
+@keyframes tray-out {
+  to {
+    transform: translateY(-100%);
+  }
+}
+
+/* A shortcut's chip by its button, only while the platform's modifier is held (App.tsx sets data-keys): it grows out of
+   nothing beside the button's words, so nothing is there the rest of the time. */
+[data-key]::after {
+  content: attr(data-key);
+  display: inline-block;
+  flex: none;
+  max-width: 0;
+  margin-left: 0;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+  color: var(--ink-2);
+  font: 500 11px/16px var(--sans);
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    max-width 160ms ease-out,
+    margin 160ms ease-out,
+    padding 160ms ease-out,
+    opacity 160ms ease-out;
+}
+
+:root[data-keys] [data-key]::after {
+  max-width: 4em;
+  margin-left: 8px;
+  padding: 0 5px;
+  opacity: 1;
+}
+
+/* A round send button has no room beside its arrow: its chip sits over it. */
+.cv-send[data-key]::after {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  margin: 0;
+  background: var(--ink);
+  color: var(--paper);
+}
+
+:root[data-keys] .cv-send[data-key]::after {
+  margin: 0;
+}
+
+/* Its way out: a quiet cross at its top right, clear of the words. */
+.note-x {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--pencil);
+  cursor: pointer;
+}
+
+.note-x:hover {
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+  color: var(--ink);
+}
+
+.note-tray .note-text {
+  margin-right: 24px;
+}
+
+.note-done .i {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.8;
+}
+
+/* Its words: a few lines with no box of their own, growing as you write. */
+.note-text {
+  min-height: 132px;
+  max-height: 50vh;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 15px/1.5 var(--sans);
+  field-sizing: content;
+  resize: none;
+}
+
+.note-text:focus {
+  outline: none;
+}
+
+.note-text::placeholder {
+  color: var(--pencil);
+}
+
+/* Its foot: the reminder, small and quiet at the left, then its two buttons at the far end. */
 .note-when {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 12px;
   align-items: center;
-  color: var(--pencil);
-  font-size: 13px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
 }
 
-.note-when label {
+.note-remind {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  color: var(--pencil);
+  font-size: 12.5px;
+}
+
+/* The reminder's own controls: a small pill saying what's picked, its choices in a popover under it. */
+.nt-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.nt-pick {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  height: 27px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--rule);
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  color: var(--ink-2);
+  font: 500 12.5px var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.nt-pick .i {
+  width: 12px;
+  height: 12px;
+  color: var(--pencil);
+}
+
+.nt-pick:hover,
+.nt-pick[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+
+.nt-pop {
+  left: 0;
+  width: 170px;
+}
+
+.nt-pop .pop-item {
+  height: 28px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+
+.nt-pop .pop-item.on {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.nt-pop .pop-item:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.nt-pop .pop-item:disabled:hover {
+  background: none;
+}
+
+/* The calendar: a month to click a day in, and the half hours beside it in a list that scrolls. */
+.nt-cal {
   display: flex;
   gap: 8px;
+  width: auto;
+  padding: 10px;
+}
+
+.nt-cal-days {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.nt-cal-head {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.nt-cal-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--pencil);
+  cursor: pointer;
+}
+
+.nt-cal-step:hover:not(:disabled) {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+.nt-cal-step:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.nt-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 28px);
+  gap: 2px;
+}
+
+.nt-cal-dow {
+  color: var(--faint);
+  font-size: 10.5px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.nt-cal-day {
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink-2);
+  font: 12px var(--sans);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+.nt-cal-day:hover:not(:disabled) {
+  background: var(--wash);
+}
+
+.nt-cal-day.today {
+  box-shadow: inset 0 0 0 1px var(--rule-strong);
+}
+
+.nt-cal-day.on {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.nt-cal-day:disabled {
+  color: var(--faint);
+  cursor: default;
+}
+
+.nt-cal-times {
+  width: 76px;
+  max-height: 226px;
+  padding-left: 8px;
+  overflow-y: auto;
+  border-left: 1px solid var(--rule);
+}
+
+.nt-cal-times .pop-item {
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Its buttons: Mark as done in grey on a note you opened, then Save note in the accent. */
+.note-acts {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.note-tray .note-acts .act {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 8px;
+}
+
+.note-tray .note-acts .act:not(.primary) {
+  border-color: transparent;
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+  color: var(--ink-2);
+}
+
+.note-tray .note-acts .act:not(.primary):hover:not(:disabled) {
+  background: color-mix(in oklab, var(--ink) 15%, transparent);
+  color: var(--ink);
+}
+
+/* Nothing to save yet: Save note keeps its fill, faded, so it still reads as the button to press. */
+.note-tray .note-acts .act.primary:disabled {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+  opacity: 0.4;
 }
 
 /* New note: at the head's far end, past the filter. */
@@ -5141,13 +5686,31 @@ fieldset.au-field > legend {
   margin-top: 12px;
 }
 
-/* A stack member: its state's glyph, its number, its title, and what's wrong, running or approved. */
+/* The stack as the guide's timeline: a line down the nodes, a member a row with its number, its title and its news. No
+   fill or ring on the PR on screen: its node is the accent's and its title in ink, the others' dimmer. */
+.rv-stack ol {
+  position: relative;
+}
+
+.rv-stack ol::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 12px;
+  width: 1.5px;
+  border-radius: 1px;
+  background: var(--rule);
+}
+
 .rv-member {
+  position: relative;
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 8px;
-  border-radius: 7px;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  padding: 0 8px 0 10px;
+  border-radius: 6px;
   color: var(--ink-2);
   font-size: 13px;
 }
@@ -5157,22 +5720,19 @@ fieldset.au-field > legend {
   text-decoration: none;
 }
 
-/* The PR on screen: the cursor's neutral fill and pencil ring, as the file you're in. */
 .rv-member.on {
-  background: var(--sel);
-  box-shadow: inset 0 0 0 1.5px var(--pencil);
   color: var(--ink);
 }
 
-.rv-member.dim {
-  color: var(--pencil);
+.rv-member.on .rv-step-dot {
+  width: 7px;
+  height: 7px;
+  margin: 0 -1px;
+  background: var(--accent);
 }
 
-.rv-node {
-  flex: none;
-  width: 1em;
-  color: var(--pencil);
-  text-align: center;
+.rv-member:not(.on, :hover) .rv-mtitle {
+  opacity: 0.6;
 }
 
 .rv-mnum {
@@ -5185,6 +5745,7 @@ fieldset.au-field > legend {
   flex: 1;
   min-width: 0;
   overflow: hidden;
+  font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5192,13 +5753,29 @@ fieldset.au-field > legend {
 .rv-marks {
   display: flex;
   flex: none;
+  align-items: center;
   gap: 4px;
   color: var(--pencil);
 }
 
-/* "16 more": in line with the members' numbers. */
+.rv-mark {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.75;
+}
+
+.rv-mark.t-ok {
+  color: var(--green);
+}
+
+.rv-mark.t-bad {
+  color: var(--red);
+}
+
+/* "16 more": in line with the members' numbers, over the line. */
 .rv-stack .rv-more {
-  padding: 4px 8px 4px calc(16px + 1em);
+  position: relative;
+  padding: 4px 8px 4px 25px;
   font-size: 13px;
 }
 
@@ -5593,10 +6170,12 @@ a.rv-part-row:hover {
   gap: 16px;
 }
 
+/* Air over the title and under its metadata. */
 .rv-head {
   display: grid;
   gap: 6px;
   min-width: 0;
+  padding-block: 10px;
 }
 
 .rv-ref {
@@ -5625,36 +6204,36 @@ a.rv-part-row:hover {
   color: var(--pencil);
 }
 
-/* The AI review's verdict at the metadata's end: a soft tag at the line's size, coloured by how much it asks of you as
-   risk is: Look closely red, Skim it amber, Skip it green and only outlined, the quietest. */
+/* The AI review's verdict at the metadata's end: a filled tag, a rounded rectangle at the line's size, in the colour of
+   how much it asks of you as risk is: Look closely red, Skim it amber, Skip it green. Its words are the sheet's colour,
+   which every theme's red, amber and green are drawn to read on. */
 .rv-tag {
   display: inline-flex;
   align-items: center;
   align-self: center;
   height: 22px;
-  padding: 0 9px;
-  border: 1px solid var(--rule-strong);
-  border-radius: 11px;
+  padding: 0 8px;
+  border-radius: 5px;
+  background: var(--wash);
   color: var(--ink-2);
   font-size: 0.92em;
-  font-weight: 550;
+  font-weight: 600;
   white-space: nowrap;
 }
 
 .rv-tag.v-look {
-  border-color: transparent;
-  background: var(--red-wash);
-  color: var(--red);
+  background: var(--red);
+  color: var(--sheet);
 }
 
 .rv-tag.v-skim {
-  border-color: transparent;
-  background: var(--amber-wash);
-  color: var(--amber);
+  background: var(--amber);
+  color: var(--sheet);
 }
 
 .rv-tag.v-skip {
-  color: var(--green);
+  background: var(--green);
+  color: var(--sheet);
 }
 
 /* Its size, + green and − red, at the far end of the ref's line. */
@@ -5830,9 +6409,14 @@ a.rv-part-row:hover {
   line-height: inherit;
 }
 
-.rv-since b {
-  color: var(--ink);
-  font-weight: 600;
+/* A named part: its name on a line of its own, what it says under it. */
+.rv-since {
+  display: grid;
+  gap: 2px;
+}
+
+.rv-since > p {
+  margin: 0;
 }
 
 /* Show more and Show less: a link in the accent under what it opens or closes. */
@@ -5918,44 +6502,10 @@ a.rv-part-row:hover {
   white-space: nowrap;
 }
 
-/* Risk's signal: three rising bars, as a phone shows its signal; one red for high, two yellow for medium, all three green
-   for low, the rest faint. */
+/* Risk's signal, the rows' own (.signal): one red bar for high, two orange for medium, all four green for low. */
 .rv-signal {
   display: inline-flex;
   flex: none;
-  align-items: flex-end;
-  gap: 2px;
-  height: 12px;
-}
-
-.rv-signal span {
-  width: 3px;
-  border-radius: 1px;
-  background: var(--rule-strong);
-}
-
-.rv-signal span:nth-child(1) {
-  height: 5px;
-}
-
-.rv-signal span:nth-child(2) {
-  height: 8px;
-}
-
-.rv-signal span:nth-child(3) {
-  height: 12px;
-}
-
-.rv-signal.s-high span:nth-child(1) {
-  background: var(--red);
-}
-
-.rv-signal.s-medium span:nth-child(-n + 2) {
-  background: var(--amber);
-}
-
-.rv-signal.s-low span {
-  background: var(--green);
 }
 
 .rv-status-more {
@@ -5976,19 +6526,11 @@ ul.rv-status-why {
 }
 
 /* The folded part's lists: one line each, a click to its line. */
-.rv-more-line b,
-.rv-more-head {
-  color: var(--ink);
-  font-weight: 600;
-}
-
-.rv-more-line {
-  margin: 0;
-}
-
 .rv-more-head {
   margin: 4px 0 2px;
+  color: var(--ink);
   font-size: inherit;
+  font-weight: 600;
 }
 
 .rv-more-list ul {
@@ -6035,11 +6577,11 @@ ul.rv-status-why {
   color: var(--ink-2);
 }
 
-/* What reviewers said: each one waiting on you is a margin note with Claude's read and a reply box; the rest fold into one line. */
+/* What reviewers said, a card each on the sheet: every comment with who and when, your agent's read of one waiting on
+   you, its links, then a row to reply in over a hairline. One waiting on you is edged in the accent. */
 .rv-convo {
   display: grid;
-  gap: 14px;
-  justify-items: start;
+  gap: 12px;
   max-width: 780px;
   padding: 0 12px;
   color: var(--ink-2);
@@ -6052,43 +6594,105 @@ ul.rv-status-why {
 
 .cv {
   display: grid;
-  gap: 6px;
-  width: 100%;
-  padding: 1px 0 1px 12px;
-  border-left: 2px solid var(--rule-strong);
+  min-width: 0;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet);
 }
 
-.cv-who,
-.cv-quiet summary {
+.cv-waiting {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--rule));
+}
+
+.cv-who {
   display: flex;
   flex-wrap: wrap;
   gap: 0 6px;
+  margin: 0;
   color: var(--pencil);
   font-size: 12.5px;
 }
 
-.cv-who > span + span::before,
-.cv-quiet summary > span + span::before {
+.cv-who > span + span::before {
   margin-right: 6px;
   color: var(--faint);
   content: "·";
 }
 
 .cv-author {
-  color: var(--ink-2);
+  color: var(--ink);
   font-weight: 550;
 }
 
-.cv-gist {
-  color: var(--ink);
-  font-size: clamp(14.5px, 13px + 0.2vw, 16px);
-  line-height: 1.45;
+.cv-comments {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
-/* Small and pencil, as "What azulus wrote" is. */
-.cv .rv-more {
-  justify-self: start;
+/* A hairline between one comment and the next. */
+.cv-comments > li {
+  padding: 12px 14px;
+}
+
+.cv-comments > li + li {
+  border-top: 1px solid var(--rule);
+}
+
+/* A resolved one, until you open it: one quiet line, who and where, then how it began. */
+.cv-resolved {
+  display: flex;
+  gap: 0 6px;
+  align-items: baseline;
+  padding: 9px 14px;
+  color: var(--pencil);
+  font: inherit;
   font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cv-resolved:hover {
+  border-color: var(--rule-strong);
+}
+
+.cv-resolved > span {
+  flex: none;
+  white-space: nowrap;
+}
+
+.cv-resolved > span + span::before {
+  margin-right: 6px;
+  color: var(--faint);
+  content: "·";
+}
+
+.cv-resolved > .cv-line {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* An image in a comment: no wider than its card. */
+.said-img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 6px 0;
+  border-radius: 6px;
+}
+
+.cv-body {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.cv-take,
+.cv-links {
+  margin: 0;
+  padding: 0 14px 10px;
 }
 
 .cv-take b {
@@ -6096,27 +6700,152 @@ ul.rv-status-why {
   font-weight: 600;
 }
 
-.cv-said summary {
+.cv-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
   color: var(--pencil);
   font-size: 12.5px;
+}
+
+.cv-links a,
+.cv-links .link-btn {
+  color: var(--pencil);
+  font-size: inherit;
+}
+
+.cv-links a:hover,
+.cv-links .link-btn:hover {
+  color: var(--ink);
+}
+
+/* Nothing said yet: two quiet lines in the cards' place. */
+.cv-empty {
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  padding: 28px 12px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: 10px;
+  text-align: center;
+}
+
+.cv-empty p {
+  margin: 0;
+}
+
+.cv-empty-head {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.cv-error {
+  margin: 0;
+}
+
+/* A box you write in, as a row: your picture, the words, and a round button that sends them. One line until it has
+   words, then as tall as they need; the picture and the button keep to its foot. */
+.cv-compose {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  min-width: 0;
+  padding: 7px 8px 7px 12px;
+}
+
+.cv > .cv-compose {
+  border-top: 1px solid var(--rule);
+}
+
+.cv-compose .avatar {
+  --face: 22px;
+
+  flex: none;
+  margin: 0 0 4px;
+  vertical-align: 0;
+}
+
+.cv-compose textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  margin: 0;
+  padding: 5px 2px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: 13.5px/20px var(--sans);
+  resize: none;
+  field-sizing: content;
+}
+
+.cv-compose textarea:focus {
+  outline: none;
+}
+
+.cv-compose textarea::placeholder {
+  color: var(--pencil);
+}
+
+.cv-send {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
   cursor: pointer;
 }
 
-.cv-comments {
-  display: grid;
-  gap: 10px;
-  margin: 6px 0 4px;
-  padding: 0;
-  list-style: none;
+.cv-send:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 86%, var(--ink));
 }
 
-.cv-body {
-  margin-top: 2px;
-  overflow-wrap: anywhere;
+.cv-send:active:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 72%, var(--ink));
 }
 
-.cv-reply,
-.rv-comment-input {
+.cv-send:focus-visible {
+  border-radius: 50%;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cv-send:disabled {
+  background: var(--wash);
+  color: var(--faint);
+  cursor: default;
+}
+
+/* Your comment on the PR, at the conversation's foot: the same row, a card of its own. */
+.rv-comment {
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  background: var(--sheet);
+}
+
+.rv-comment:focus-within,
+.cv > .cv-compose:focus-within {
+  box-shadow: inset 0 0 0 1px var(--pencil);
+}
+
+.cv > .cv-compose:focus-within {
+  border-radius: 0 0 9px 9px;
+}
+
+.rv-comment:focus-within {
+  box-shadow: none;
+  border-color: var(--pencil);
+}
+
+/* A box under a line of the diff. */
+.cv-reply {
   display: block;
   width: 100%;
   margin-top: 4px;
@@ -6133,78 +6862,80 @@ ul.rv-status-why {
   min-height: calc(3lh + 18px);
 }
 
-.cv-reply:focus,
-.rv-comment-input:focus {
+.cv-reply:focus {
   border-color: var(--pencil);
   outline: none;
 }
 
-.cv-reply::placeholder,
-.rv-comment-input::placeholder {
+.cv-reply::placeholder {
   color: var(--pencil);
 }
 
-/* Your comment on the PR, on the actions' row after them: one line, as tall as a button, until it has words, then as tall
-   as they need, with Comment at its foot. The cursor alone doesn't resize it, so nothing under it jumps as it comes and
-   goes, and the buttons keep to the row's top while it grows. */
-.rv-actions {
-  align-items: flex-start;
+/* What finishes it, at the right of the review's bar: its call to action, then More, three dots one over the other. The
+   corners are tighter than a button's elsewhere, and each state is mixed from the theme: under the pointer the fill leans
+   to the ink (darker on a light theme, lighter on a dark one), pressed it leans further, and focus rings it in its own
+   colour. */
+.rv-actions .act {
+  height: 30px;
+  border-radius: 6px;
 }
 
-.rv-comment {
-  display: flex;
-  flex: 1 1 260px;
-  gap: 6px;
-  align-items: flex-end;
-  min-width: 0;
-  max-width: 720px;
+.act-dots {
+  justify-content: center;
+  width: 24px;
+  padding: 0;
 }
 
-.rv-comment-input {
-  flex: 1;
-  min-width: 0;
-  min-height: 34px;
-  margin: 0;
-  padding: 6px 10px;
-  line-height: 20px;
+.act-dots circle {
+  fill: currentcolor;
+  stroke: none;
 }
 
-.rv-comment .act.primary {
-  min-width: 0;
+.rv-actions .act:active:not(:disabled, .primary) {
+  border-color: var(--pencil);
+  background: var(--rule);
 }
 
-/* The comment box's place while the review loads: a quiet bar as tall as the box. */
-.rv-comment-input.sk-box {
-  border-color: transparent;
-  background: var(--wash);
+.rv-actions .act:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid var(--fill, var(--pencil));
+  outline-offset: 2px;
 }
 
-.cv-quiet {
-  width: 100%;
-  min-width: 0;
+/* Its call to action is the theme's accent whatever it does, Approve and Hand off for merge too. */
+.rv-actions .act.primary {
+  --fill: var(--accent);
+
+  justify-content: center;
+  min-width: 152px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: none;
 }
 
-.cv-quiet summary {
-  flex-wrap: nowrap;
-  cursor: pointer;
-  list-style: none;
+.rv-actions .act.primary:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--fill) 86%, var(--ink));
+  background: color-mix(in oklab, var(--fill) 86%, var(--ink));
 }
 
-.cv-quiet summary > * {
-  flex: none;
-  white-space: nowrap;
+.rv-actions .act.primary:active:not(:disabled) {
+  border-color: color-mix(in oklab, var(--fill) 72%, var(--ink));
+  background: color-mix(in oklab, var(--fill) 72%, var(--ink));
+  box-shadow: none;
 }
 
-.cv-quiet summary > .cv-line {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+/* The Conversation tab, in the diff's place: what reviewers said, then your comment on the PR at its foot. */
+.rv-talk {
+  padding-top: 10px;
 }
 
-.cv-quiet .cv-comments {
-  padding-left: 12px;
-  border-left: 2px solid var(--rule);
+/* How many wait on your reply, after the tab's name. */
+.rv-tab-n {
+  margin-left: 6px;
+  color: var(--pencil);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .rv-fname {
@@ -6406,7 +7137,7 @@ ul.rv-status-why {
 /* The two orders' tabs on the header's edge, over a hairline barely there; the tab you're on marks it. */
 .rv-views {
   display: flex;
-  height: 34px;
+  height: 32px;
   margin: 0 0 4px;
   border-bottom: 1px solid color-mix(in oklab, var(--rule) 55%, transparent);
 }
@@ -6418,11 +7149,94 @@ ul.rv-status-why {
   padding: 0 12px;
 }
 
+/* Quieter than a page's name: regular weight, at the metadata's size. */
 .rv-views .head-tab {
   border: 0;
   background: none;
   font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 400;
   cursor: pointer;
+}
+
+/* A review has no page head: its own bar is in its place, flush with the window's top and stuck there, as tall as a head,
+   so what sticks under a head sticks under it. Its three views are pills, rounded rectangles: the one you're on filled a
+   little more and in ink. What finishes the review and More are at its right. It's a drag handle, its controls excepted. */
+.col.headless .main {
+  padding-top: 0;
+}
+
+.rv-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  height: 52px;
+  margin-bottom: 14px;
+  background: var(--paper);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* Only the bar's own empty stretch drags the window. A drag region passes down to everything inside it and swallows its
+   clicks, so the views and the actions opt out whole: More's menu and the clear layer behind it (which a click anywhere
+   closes) are drawn inside the actions and reach over the page. */
+.rv-bar .rv-views,
+.rv-bar .rv-actions {
+  -webkit-app-region: no-drag;
+}
+
+.rv-bar .rv-views {
+  display: flex;
+  flex: none;
+  gap: 6px;
+  min-width: 0;
+  height: auto;
+  margin: 0;
+  border: 0;
+}
+
+.rv-bar .head-tab {
+  height: 30px;
+  padding: 0 11px;
+  border-radius: 7px;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  color: var(--pencil);
+  white-space: nowrap;
+}
+
+.rv-bar .head-tab:hover {
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+}
+
+.rv-bar .head-tab.on {
+  background: color-mix(in oklab, var(--ink) 13%, transparent);
+  color: var(--ink);
+}
+
+.rv-bar .head-tab.on::after {
+  content: none;
+}
+
+.rv-bar .head-tab:focus-visible {
+  border-radius: 7px;
+  outline-offset: 2px;
+}
+
+.rv-bar .rv-actions {
+  flex: none;
+  margin-left: auto; /* the stretch between the two stays the bar's, to drag the window by */
+  flex-wrap: nowrap;
+  align-items: center;
+  padding: 0;
+}
+
+.rv-bar .rv-acted {
+  min-height: 30px;
+  margin: 0;
+  white-space: nowrap;
 }
 
 /* A stop of the walk-through: a heading in the diff's column, its words, then its sections. No colour, no box. */
@@ -6728,8 +7542,10 @@ p.rv-next {
 
   display: block;
   overflow: hidden;
+
+  /* A border, not a ring outside the box: a ring's sides show past the sticky heads that cover the diff as it scrolls. */
+  border: 1px solid var(--rule);
   border-radius: 8px;
-  box-shadow: 0 0 0 1px var(--rule);
 }
 
 /* Where a theme's green or red mixed into its sheet comes out grey, muddy or louder than the other, its changed lines get
@@ -6824,45 +7640,132 @@ p.rv-next {
   max-width: 100%;
 }
 
-/* The call to action's shape, then More's width, so the comment box's bar starts where the box will. */
+/* More's square, and before it the call to action's shape where the review will have one. */
 .sk-key {
-  align-self: center;
-  width: 32px;
-  height: 12px;
-  margin: 0 10px;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
 }
 
-.sk-key:first-child {
-  width: 152px;
-  height: 34px;
-  margin: 0;
-  border-radius: 9px;
+.sk-key-cta {
+  width: 150px;
 }
 
+/* The views' pills, as wide as their words: Guided Review (where there is one), Traditional, Conversation. */
+.rv-views .sk-tab {
+  flex: none;
+  width: 112px;
+  height: 30px;
+  border-radius: 7px;
+}
+
+.rv-views .sk-tab:nth-last-child(2) {
+  width: 92px;
+}
+
+/* A file's header: its fold mark, its path, its lines added and removed at the end. */
 .rv-fhead .sk {
-  width: 16em;
-  max-width: 60%;
+  flex: none;
+  align-self: center;
   margin: 5px 0;
 }
 
+.rv-fhead .sk-chev {
+  width: 8px;
+}
+
+.rv-fhead .sk-file {
+  width: 18em;
+  max-width: 55%;
+}
+
+.rv-fhead .sk-delta {
+  width: 4em;
+  margin-left: auto;
+}
+
+/* Its code: a gutter of line numbers, then lines as long and as indented as code is. */
 .sk-code {
-  padding: 10px 16px;
+  display: grid;
+  padding: 8px 0;
   border-radius: 8px;
   background: var(--sheet);
   box-shadow: 0 0 0 1px var(--rule);
-  font-size: 12px;
-  line-height: 19px;
+  font: 12px/22px var(--mono);
   animation: sk-in 200ms ease-out 150ms both;
 }
 
+.sk-code-row {
+  display: flex;
+  align-items: center;
+  height: 22px;
+}
+
 .sk-code .sk {
-  margin: 5px 0;
+  flex: none;
   background: var(--rule);
 }
 
-.sk-files {
+.sk-code .sk-no {
+  width: 14px;
+  margin: 0 18px 0 22px;
+  opacity: 0.6;
+}
+
+/* The sidebar's rows: a status row's words and its figure, a reviewer's face, name and standing, the files' tree. */
+.rv-status-row .sk-said {
+  width: 8em;
+}
+
+.rv-status-row .sk-count {
+  flex: none;
+  width: 2.6em;
+}
+
+.sk-reviewer {
+  align-items: center;
+}
+
+.sk-reviewer .sk {
+  flex: none;
+}
+
+.sk-reviewer .sk-face {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+.sk-reviewer .sk-name {
+  width: 5em;
+}
+
+.sk-reviewer .sk-state {
+  width: 3em;
+  margin-left: auto;
+}
+
+.sk-tree {
+  display: grid;
   padding: 0 8px;
-  font-size: 13px;
+}
+
+.sk-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 25px;
+}
+
+.sk-tree .sk {
+  flex: none;
+}
+
+.sk-tree .sk-node {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
 }
 
 /* A margin note: the AI's word on the change just above it. */
@@ -7165,6 +8068,11 @@ p.rv-next {
   .composer {
     right: 12px;
     left: 12px;
+  }
+
+  .note-veil {
+    left: 0;
+    padding: 0 12px;
   }
 
   .ref {

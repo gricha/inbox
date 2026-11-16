@@ -18,11 +18,15 @@ export const MORE: Record<GitHubAction, string> = {
 // A row has no room to write in: requesting changes is in the PR's review.
 export const rowActions = (c: Card) => (c.actions ?? []).filter((a) => a !== "request_changes");
 
-// The quiet button that opens it.
+// The quiet button that opens it: three dots, one over the other, at the row's end.
 export function MoreButton({ open, onClick }: { open: boolean; onClick: () => void }) {
   return (
-    <button type="button" className="act" title="More actions" aria-label="More actions" aria-expanded={open} onClick={onClick}>
-      More
+    <button type="button" className="act act-dots" title="More actions" aria-label="More actions" aria-expanded={open} onClick={onClick}>
+      <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="3.5" r="1.2" />
+        <circle cx="8" cy="8" r="1.2" />
+        <circle cx="8" cy="12.5" r="1.2" />
+      </svg>
     </button>
   );
 }

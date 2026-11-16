@@ -63,7 +63,7 @@ Tokens live in `web/src/styles.css`:
 | `--rule`, `--rule-strong`             | a hairline, a firmer one                                                                              | `#dcd8e5`, `#c8c3d4`            | `#2a2437`, `#383048`            |
 | `--control`                           | a control's necessary edge (a field, a switch, the fold button's ring)                                | `#7e7791`                       | `#706886`                       |
 | `--sel`                               | a selected thing's fill outside the tables (the PR on screen in a stack, the file you're in)          | `#ebe8f2`                       | `#1b1726`                       |
-| `--side`, `--side-hover`, `--side-on` | the sidebar before the chrome took it over (see `--chrome` below); still each theme's                 | `#e9e6f0`, `#e3dfeb`, `#dcd7e6` | `#07060b`, `#14111d`, `#211c2d` |
+| `--side`, `--side-hover`, `--side-on` | the sidebar and the heads across the top (`--chrome` is `--side`); each theme's own                   | `#e9e6f0`, `#e3dfeb`, `#dcd7e6` | `#07060b`, `#14111d`, `#211c2d` |
 | `--red`, `--red-wash`                 | failing: CI failing, a high risk, sync failed, desk offline, your agent can't run, Connect failed     | `#b42318`, `#fcebe9`            | `#ffb4ab`, `#3b2421`            |
 | `--amber`, `--amber-wash`             | caution: changes requested, a merge conflict, a medium risk                                           | `#8a4b08`, `#faefdf`            | `#ebc076`, `#33291b`            |
 | `--green`                             | done or fine: a low risk, what you did in a review ("✓ Approved")                                     | `#176847`                       | `#8dceaf`                       |
@@ -74,7 +74,7 @@ Tokens live in `web/src/styles.css`:
 | `--shadow`                            | only what lies over the page: menus, toasts, bubbles, the chat over a narrow page                     | ink at 6 % and 12 %             | black at 35 % and 50 %          |
 
 - **Colour carries information.** Red fails, amber cautions, green is done or fine, always with words ("CI failing",
-  "changes requested"). An AI review's verdict tag takes the colour of how much it asks, as risk does: "Look closely" red,
+  "changes requested"). An AI review's verdict tag is filled with the colour of how much it asks, as risk is: "Look closely" red,
   "Skim it" amber, "Skip it" green. The brand colour never stands in for them. Everything else is ink and pencil,
   including what a Merging row waits on and an AI review's or the judge's failure (it's about the agent, not the PR).
 - **Type.** The system's font for the UI (SF Pro on a Mac, Segoe UI on Windows) and SF Mono for code, as the Claude app
@@ -83,10 +83,10 @@ Tokens live in `web/src/styles.css`:
 
   | Text                                  | Size                     |
   | ------------------------------------- | ------------------------ |
-  | a row's title (`--title-size`)        | 15px                     |
-  | a row's facts (`--meta-size`)         | 13px                     |
+  | a row's title (`--title-size`)        | 14px                     |
+  | a row's facts (`--meta-size`)         | 12.5px                   |
   | the sidebar's items                   | 13.5px                   |
-  | the PR, Issue or Question label       | 11.5px semibold          |
+  | a row's icons, its call to action     | 16px; 22px tall, 12px    |
   | a head's name                         | 15px semibold            |
   | a plugin part's Automations heading   | 15px/650                 |
   | a Settings view's name                | 18px/650                 |
@@ -106,8 +106,8 @@ Tokens live in `web/src/styles.css`:
   load disappears and reserves nothing. It's `avatars.githubusercontent.com/<login>?s=40`; the shots serve these
   themselves (`offline()` in `scripts/shots.ts`), with one login failing.
 - **Space and shape.** The 4px base (8, 12, 16, 24, 32) where you touch spacing; don't restyle what you don't touch.
-  Controls take 7–9px corners. A list has none: it runs edge to edge.
-- **Motion.** A spin while syncing or sending, a slow breath on loading bars; none under reduced motion.
+  Controls take 7–9px corners (a review's actions and its verdict tag, 5–6px). A list has none: it runs edge to edge.
+- **Motion.** A spin while syncing or sending, a slow breath on loading bars, the note tray dropping from the page's top over its blur; none under reduced motion.
 - **A new theme** is a row in `src/themes.ts`, a block in `styles.css` that sets every token, and its id in
   `index.html`'s pre-paint list. `web/test/themes.test.ts` holds the three together and every theme to contrast floors
   (ink 10:1 on the sheet, secondary text and labels about 4.5:1, a hairline seen but quiet). Tune the colour, never the
@@ -117,7 +117,7 @@ Tokens live in `web/src/styles.css`:
 
 No top bar: the sidebar is the window's only global chrome, and each page has its own head.
 
-The chrome (the sidebar, a page's head and the list's head beside it) follows the theme: its sidebar colour (`--side`) in a light theme, near black tinted by the theme's accent in a dark one (`--chrome`, `light-dark()` on the theme's `color-scheme`). Its words and icons are the theme's own ink. The guided review's marker and the files' are the theme's accent (`--orb`).
+The chrome (the sidebar, a page's head and the list's head beside it) follows the theme: its own sidebar colour (`--side`, which `--chrome` is), light or dark. Its words and icons are the theme's own ink. The guided review's marker and the files' are the theme's accent (`--orb`).
 
 ```
 ┌──────────┬──────────────┬────────────────────────────────┬────────────┐
@@ -179,8 +179,8 @@ The Inbox, Blocked, Merging and the Archive.
 - Rows, headings and the lines between them (Your agent, "n more reach you…") start on the head's padding:
   24px (12px at 640px and below; 16px beside a review). So the filter's edge, Merging's name and the rows' text make
   one line.
-- Inside a table: below 760px the stage column goes (on your own row the stage takes the place of "by you"); below 620px
-  who it's from goes (your own row's changes requested and handed back stay). A repo keeps 6 letters' room, a why 10.
+- Inside a table: below 760px a row's risk and size icons go; below 620px its CI and who it's from (the stage stays).
+  A repo keeps 6 letters' room, a why 10.
 
 ### The list beside a review
 
@@ -248,7 +248,7 @@ doesn't have.
 | Navigation, queue and review side by side, always     | the full-width table with nothing open; the list beside a review once one is open, at 1160px up  |
 | The navigation collapses to a 64px rail               | the sidebar compacts to 148px and keeps its words: the window names every action in words        |
 | A separate Focus mode, a theme switcher in a bar      | not built: themes stay in Settings → This device                                                 |
-| 14px titles, 80px rows                                | 15px titles; a table row is one line, a row beside a review two                                  |
+| 14px titles, 80px rows                                | 14px titles; a table row is one line, a row beside a review two                                  |
 | Six brand colours, petrol recommended                 | petrol for the mark, Light and Dark; no brand colour picker                                      |
 
 ## Taking in a design handoff
@@ -338,7 +338,7 @@ running past their edge, "Inbox" wrapping, a control under the traffic lights. B
 | `beside-chat`                                                                             | the chat folds the list without touching the saved choice                                                                                                                     |
 | `review-checks`                                                                           | checks closed to one line, in words and red; each check in words with a link, what's wrong first                                                                              |
 | `review-panel`, `review-loading`                                                          | the sidebar's parts in order, a line each, no activity; its toggle works at the bottom of a long review; drawn while loading                                                  |
-| `review-top`                                                                              | the top stays short; the empty comment box is one line; the first file within 386px of the top                                                                                |
+| `review-top`                                                                              | the top stays short: no comment box outside the Conversation tab; the tabs within 386px of the top                                                                            |
 | `review-comment`                                                                          | the box grows while the buttons stay put; Esc leaves it; its words survive the next item and back                                                                             |
 | `zoom-*`                                                                                  | the sidebar as one row at 640px                                                                                                                                               |
 | `queue`                                                                                   | no bubble while all's fine                                                                                                                                                    |

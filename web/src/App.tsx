@@ -72,6 +72,7 @@ import { PageHead, PAGE_NAME } from "./components/PageHead.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { useSourceDown } from "./components/Source.tsx";
 import { Bubbles } from "./components/Bubbles.tsx";
+import { Tips } from "./components/Tips.tsx";
 import { forget, noticesOf, undismissed, withFailure, type Dismissed, type Fix, type Notice } from "./notices.ts";
 
 interface Toast {
@@ -166,7 +167,41 @@ export function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, ItemDetail | string>>({});
-  const [noting, setNoting] = useState<Note | "new" | null>(null); // the note box: a new note, or one you opened
+  const [noting, setNoting] = useState<Note | "new" | null>(null); // the note tray: a new note, or one you opened
+  const noteClose = useRef<(() => void) | null>(null); // the open tray's way out, for Esc
+  const setNoteClose = useCallback((leave: (() => void) | null) => {
+    noteClose.current = leave;
+  }, []);
+  // Holding the platform's modifier alone for a moment shows each shortcut by its button, until it's let go or used.
+  useEffect(() => {
+    const key = MAC ? "Meta" : "Control";
+    let t = 0;
+    const off = () => {
+      clearTimeout(t);
+      delete document.documentElement.dataset.keys;
+    };
+    const held = (e: KeyboardEvent) => {
+      if (e.key !== key) off();
+      else if (!e.repeat) {
+        clearTimeout(t);
+        t = window.setTimeout(() => {
+          document.documentElement.dataset.keys = "on";
+        }, 300);
+      }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.key === key) off();
+    };
+    window.addEventListener("keydown", held, true);
+    window.addEventListener("keyup", up, true);
+    window.addEventListener("blur", off);
+    return () => {
+      off();
+      window.removeEventListener("keydown", held, true);
+      window.removeEventListener("keyup", up, true);
+      window.removeEventListener("blur", off);
+    };
+  }, []);
   const [commenting, setCommenting] = useState<Card | null>(null); // the issue whose comment bar is open (its Comment, opened in place)
   // A row's menu: at a right-click, or under an issue's Snooze with Snooze open.
   const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number; snooze?: boolean } | null>(null);
@@ -1522,7 +1557,7 @@ export function App() {
     if (((asking && !typing) || commenting || noting) && !menu && e.key === "Escape" && !e.isComposing) {
       setAsking(null);
       setCommenting(null);
-      setNoting(null);
+      noteClose.current?.(); // the tray slides away, then it's gone
       e.preventDefault();
       e.stopImmediatePropagation();
       return;
@@ -1731,17 +1766,19 @@ export function App() {
           {besideRows}
         </Beside>
       )}
-      <div className="col">
-        <PageHead
-          route={route}
-          from={reviewFrom}
-          question={route.name === "review" ? reviewQuestion : null}
-          people={peopleFilter}
-          onNote={() => {
-            setCommenting(null);
-            setNoting("new");
-          }}
-        />
+      {/* A review has no head of its own: Esc, the list beside it and the sidebar are its ways back. */}
+      <div className={cls("col", route.name === "review" && "headless")}>
+        {route.name !== "review" && (
+          <PageHead
+            route={route}
+            from={reviewFrom}
+            people={peopleFilter}
+            onNote={() => {
+              setCommenting(null);
+              setNoting("new");
+            }}
+          />
+        )}
         <main className="main">
           {route.name === "queue" && !broken && (
             <Queue
@@ -1914,6 +1951,7 @@ export function App() {
           onClose={() => {
             setNoting(null);
           }}
+          closer={setNoteClose}
         />
       )}
       {commenting && (
@@ -1928,6 +1966,7 @@ export function App() {
         />
       )}
       <Bubbles notices={[...undismissed(notices, dismissed), ...failures]} fix={fixNotice} dismiss={dismissNotice} />
+      <Tips />
       {toast && (
         // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader announces <output> as a live region; role=status is
         <div key={toast.id} className={cls("toast", toast.error && "error")} role="status">

@@ -25,6 +25,7 @@ import {
 import { andMore } from "../../../src/stage.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed } from "../keyed.ts";
+import { RISK_BARS, Signal } from "./RowIcons.tsx";
 import { age, cls, handoffLabel, MOD, modelName, sinceText, shortRef, when, aiName } from "../format.ts";
 import { blocks, inline, lead, unlinked, urlPlace } from "../../../src/prose.ts";
 import { reviewOf } from "../reviews.ts";
@@ -73,7 +74,7 @@ import { diffTheme, omarchyTheme, onOmarchy } from "../theme.ts";
 import { Avatar } from "./Avatar.tsx";
 import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
 import type { Spot } from "./Chat.tsx";
-import { Conversation, threadOf } from "./Conversation.tsx";
+import { Composer, Conversation, threadOf } from "./Conversation.tsx";
 import { Diagram } from "./Diagram.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { ProseBlocks, SaidText, spans, Words } from "./Prose.tsx";
@@ -211,6 +212,9 @@ export function Review({
   const [secIdx, setSecIdx] = useState(0); // the section you're in; with the rest folded, its line is one past the last shown
   const [restOpen, setRestOpen] = useState(false);
   const [walking, setWalking] = useState(() => !["traditional", "importance"].includes(getStored(VIEW) ?? ""));
+  // The Conversation tab, in the diff's place: a PR opened to reply starts on it.
+  const [talking, setTalking] = useState(known?.cta === "reply");
+  const tabbed = useRef(!!known); // whether the tab it opens on was picked: by its row, or once the review lands
   const [testsOpen, setTestsOpen] = useState<ReadonlySet<string>>(new Set()); // test files you opened in the guided review
   const [side, setSide] = useState(true); // every review opens with it; a fold lasts for this review
   const [room, setRoom] = useState(roomy); // the page's column has room for the sidebar beside the diff
@@ -297,6 +301,8 @@ export function Review({
         Effect.match({
           onSuccess: (r) => {
             if (n !== seq.current) return;
+            if (!tabbed.current && r.card.cta === "reply") setTalking(true);
+            tabbed.current = true;
             setView(r);
             setRead(r.item.head_oid);
           },
@@ -452,6 +458,7 @@ export function Review({
   // To a section, opening the rest when it's there; the scroll waits for the render that shows it.
   function goTo(i: number, el = `#rv-s-${i}`, block: ScrollLogicalPosition = "start") {
     jumped.current = Date.now();
+    setTalking(false); // the diff is the other tabs'
     if (i >= rest) setRestOpen(true);
     setDrawn((d) => Math.max(d, i + 1));
     setSecIdx(i);
@@ -494,6 +501,7 @@ export function Review({
   // To the words you haven't sent, opening their file (or the rest, which goTo opens) if it's folded, with the cursor in them.
   function backToDraft(d: Draft) {
     if (!v) return;
+    setTalking(false);
     const i = drawnAt(d, list, v.conversation, v.diff_head);
     const path = list[i]?.path;
     if (path && shut.has(path)) setShut((cur) => new Set([...cur].filter((p) => p !== path)));
@@ -627,7 +635,10 @@ export function Review({
   function run(k: string) {
     // With your comment unsent, what acts on the PR goes back to it first.
     if (comment.trim() && "admb.".includes(k)) {
-      document.querySelector<HTMLTextAreaElement>(".rv-comment textarea")?.focus();
+      setTalking(true); // its box is the Conversation tab's
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLTextAreaElement>(".rv-comment textarea")?.focus();
+      });
       flash("Your comment isn't sent: Comment sends it, or empty the box");
       return;
     }
@@ -810,432 +821,468 @@ export function Review({
   const open = item.state === "open";
   const aiShown = !isMine || !!view.ai || view.generating || busy === "ai" || !!view.ai_error;
 
-  return (
-    <div className={cls("review", showSide && "side-open")}>
-      {toggle}
-      <div className="rv-main">
-        <div className="rv-top">
-          <Head
-            card={card}
-            me={me}
-            now={now}
-            resolved={resolved?.line ?? null}
-            row={row}
-            ai={aiShown ? view.ai : null}
-            stale={view.ai_stale}
-          />
-          {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
-          {isMine && !view.ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
-          {/* Your own PR gets no AI review unless one was asked for; More still asks. */}
-          {aiShown && (
-            <AiSection
-              ai={view.ai}
-              stale={view.ai_stale}
-              busy={view.generating || busy === "ai"}
-              error={view.ai_error}
-              job={view.ai_job}
-              now={now}
-              open={open}
-              notes={notes.length}
-              onLine={toLine}
-              onAsk={
-                flying
-                  ? undefined
-                  : () => {
-                      askAi();
-                    }
-              }
-            />
-          )}
-          <Conversation view={view} now={now} flash={flash} agent={agent} onSpot={onSpot} onAsk={onAsk} />
-        </div>
-
-        {picking && !acted && (
-          <Reviewers
-            id={card.id}
-            asked={item.review_requests.map((r) => ({ login: r.reviewer, team: r.type === "team" }))}
-            picked={picked}
-            setPicked={setPicked}
-            ready={readying}
-            unasked={card.cta === "reviewers"}
-          />
-        )}
-        {/* What finishes it first (its call to action, or Hand off or Back to desk on yours), then the rest, then your
-            comment's box on the same row; done from here, what you did and where it went, in place of the button you pressed. */}
-        <div className="actions rv-actions">
-          {acted && (
-            <p className="rv-acted">
-              <span className="rv-acted-what">✓ {acted.what}</span>
-              <span className="rv-acted-dot" aria-hidden="true">
-                ·
-              </span>
-              <a href={acted.where === "inflight" ? "#/inflight" : "#/archive"}>
-                {acted.where === "inflight" ? "in Merging" : "in Archive"}
-              </a>
-              {acted.sending && <span className="busy" aria-label="sending" />}
-            </p>
-          )}
-          {readying && !acted && (
-            <ActButton
-              k="a"
-              label="Ready for review"
-              run={run}
-              title={
-                picked.length
-                  ? `Mark it ready for review on GitHub and ask ${picked.map((p) => p.login).join(", ")}`
-                  : "Mark it ready for review on GitHub"
-              }
-              className="primary"
-            />
-          )}
-          {asking && !acted && (
-            <ActButton
-              k="a"
-              label="Ask reviewers"
-              run={run}
-              title={
-                picked.length
-                  ? `Ask ${picked.map((p) => p.login).join(", ")} to review it, on GitHub`
-                  : "Nobody's asked to review it: pick reviewers above, then ask them"
-              }
-              className="primary"
-            />
-          )}
-          {/* Only someone else's open PR is yours to approve. */}
-          {open && !isMine && !acted && (
-            <ActButton
-              k="a"
-              label="Approve"
-              run={run}
-              disabled={!canApprove}
-              title={view.approve.reason ?? "Approve on GitHub"}
-              className={cls("go", !writing && "primary")}
-            />
-          )}
-          {/* While you owe replies, Reply is the one filled button. */}
-          {/* Yours, or anyone's approved PR: your agent gets it merged (someone else's, by merging it alone). */}
-          {(mine || (item.state === "open" && (card.inflight || card.review === "approved"))) &&
-            !(acted?.where === "inflight" && !card.inflight) && (
-              <HandButton card={card} run={run} primary={card.cta !== "reply" && !asking && !acted} />
-            )}
-          <span className="more-wrap">
-            <MoreButton
-              open={more}
-              onClick={() => {
-                run(".");
-              }}
-            />
-            {more && (
-              <MoreMenu
-                card={card}
-                actions={(card.actions ?? []).filter((a) => a !== "draft" && a !== "ready" && a !== "reopen")}
-                links={[
-                  // As the row's menu says it: Done, or Back on the desk once it's done, snoozed or muted.
-                  ...(!card.inflight && !acted
-                    ? [
-                        {
-                          label: card.status === "active" ? "Done" : "Back on the desk",
-                          run: () => {
-                            run("d");
-                          },
-                        },
-                      ]
-                    : []),
-                  ...(yoursOpen && !asking && !acted ? [{ label: "Add reviewers", run: addReviewers }] : []),
-                  {
-                    label: "Copy link",
-                    run: () => {
-                      onCard(card, "link");
-                    },
-                  },
-                ]}
-                pick={(a) => {
-                  if (a === "request_changes") setWriting(true);
-                  else runUi(onGithub(card, a, read));
-                }}
-                onClose={() => {
-                  setMore(false);
-                }}
-              />
-            )}
+  // The diff's two orders; the choice is this device's.
+  const pickOrder = (w: boolean) => {
+    setTalking(false);
+    setWalking(w);
+    setDrawn(0); // the other view's sections draw a screenful first too, not all at once
+    setStored(VIEW, w ? "guided" : "traditional");
+  };
+  const owed = view.conversation.filter((c) => c.waiting_on_you).length; // waiting on your reply: the tab's count
+  const tab = (name: string, on: boolean, pick: () => void, count = 0) => (
+    <button key={name} type="button" className={cls("head-tab", on && "on")} aria-pressed={on} onClick={pick}>
+      {name}
+      {count > 0 && (
+        <span className="rv-tab-n" title={`${count} waiting on your reply`}>
+          {count}
+        </span>
+      )}
+    </button>
+  );
+  // What finishes it (its call to action, or Hand off or Back to desk on yours), then More, at the right of the bar
+  // across the review's top. Done from here, what you did and where it went.
+  const actions = (
+    <div className="actions rv-actions">
+      {acted && (
+        <p className="rv-acted">
+          <span className="rv-acted-what">✓ {acted.what}</span>
+          <span className="rv-acted-dot" aria-hidden="true">
+            ·
           </span>
-          {/* Still there once you've acted, so you can comment on what you did and nothing under it moves. */}
-          {/* While Request changes is open its box is the one you write in, so an empty comment box steps aside. */}
-          {(open || !!comment.trim()) && !(writing && !comment.trim()) && (
-            <CommentBox card={card} body={comment} setBody={writeComment} sending={!!acted?.sending} onComment={onComment} />
-          )}
-        </div>
-        {writing && (
-          <WriteBox
-            label="Request changes"
-            placeholder="What needs to change"
-            onSend={(body) => {
-              runUi(
-                onGithub(card, "request_changes", read, body).pipe(
-                  Effect.tap((done) =>
-                    Effect.sync(() => {
-                      if (done) setWriting(false);
-                    }),
-                  ),
-                ),
-              );
-            }}
-            onClose={() => {
-              setWriting(false);
-            }}
-          />
-        )}
-
-        {draft && (orphanAt < 0 || (folded && orphanAt >= rest)) && (
-          <div className="rv-orphan">
-            <p className="quiet">
-              {draft.thread
-                ? "Your reply: its thread isn't on the diff on screen. It still goes to that thread."
-                : `Your comment on ${lineName(draft.at)}: that line isn't on the diff on screen. It still goes on the line you picked, in the commit you read.`}
-            </p>
-            {composer(draft.thread ? "Reply" : rangeLabel(draft.at))}
-          </div>
-        )}
-        {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
-        {!view.files_error && !files.length && <p className="quiet rv-nofiles">No files changed.</p>}
-        {guided && list.length > 0 && (
-          <nav className="rv-views" aria-label="Diff order">
-            {(
-              [
-                [true, "Guided Review"],
-                [false, "Traditional"],
-              ] as const
-            ).map(([w, name]) => (
-              <button
-                key={name}
-                type="button"
-                className={cls("head-tab", w === walking && "on")}
-                aria-pressed={w === walking}
-                onClick={() => {
-                  setWalking(w);
-                  setDrawn(0); // the other view's sections draw a screenful first too, not all at once
-                  setStored(VIEW, w ? "guided" : "traditional");
-                }}
-              >
-                {name}
-              </button>
-            ))}
-          </nav>
-        )}
-        {list.length > 0 && (
-          <div className="rv-diffs">
-            {visible.slice(0, Math.min(rest, upTo)).map((x, i) => {
-              const k = steps.findIndex((st) => st.at === i);
-              const end = steps.findIndex((_, j) => (steps[j + 1]?.at ?? beyond) === i + 1);
-              const next = steps[end + 1];
-              return (
-                <Fragment key={x.key}>
-                  {k >= 0 && (
-                    <header className="rv-step" id={`rv-step-${k}`}>
-                      <h2 className="rv-step-head">
-                        <span className="rv-step-n">
-                          {k + 1} of {steps.length}
-                        </span>{" "}
-                        {steps[k]!.title}
-                      </h2>
-                      {steps[k]!.body && <p className="rv-step-body">{spans(unlinked(inline(steps[k]!.body)))}</p>}
-                      {steps[k]!.check && (
-                        <p className="rv-step-body">
-                          <b>Check:</b> {spans(unlinked(inline(steps[k]!.check)))}
-                        </p>
-                      )}
-                      {steps[k]!.note && <p className="rv-step-body rv-step-note">{spans(unlinked(inline(steps[k]!.note)))}</p>}
-                      {figure(steps[k]!.diagram)}
-                    </header>
-                  )}
-                  {steps.length > 0 && i === beyond && (
-                    <h2 className="rv-step rv-step-head" id="rv-bugs">
-                      Potential bugs outside the guide
-                    </h2>
-                  )}
-                  {section(x, i)}
-                  {end >= 0 &&
-                    (next ? (
-                      <button
-                        type="button"
-                        className="link-btn rv-next"
-                        onClick={() => {
-                          toStep(end + 1);
-                        }}
-                      >
-                        Next: {next.title}
-                      </button>
-                    ) : (
-                      <p className="quiet rv-next">
-                        End of the guide.
-                        {leftFiles > 0 && (
-                          <>
-                            {" "}
-                            {leftFiles === 1 ? "1 more file changes" : `${leftFiles} more files change`} outside it:{" "}
-                            <button
-                              type="button"
-                              className="link-btn"
-                              onClick={() => {
-                                setWalking(false);
-                                setStored(VIEW, "traditional");
-                                scrollTo({ top: 0 });
-                              }}
-                            >
-                              read every file in Traditional
-                            </button>
-                          </>
-                        )}
-                      </p>
-                    ))}
-                </Fragment>
-              );
-            })}
-            {order?.ranked && rest < list.length && upTo >= rest && (
-              <button
-                type="button"
-                className={cls("fold", "rv-fold", folded && secIdx >= rest && "sel")}
-                aria-expanded={!folded}
-                onClick={() => {
-                  if (folded) goTo(rest);
-                  else {
-                    holdKeys(false);
-                    setRestOpen(false);
-                  }
-                }}
-              >
-                {REST} · {list.length - rest} {list.length - rest === 1 ? "file" : "files"}
-              </button>
-            )}
-            {visible.slice(rest, upTo).map((x, i) => section(x, rest + i))}
-          </div>
-        )}
-      </div>
-      {showSide && room && (
-        <Splitter
-          width={SIDE}
-          edge="left"
-          column={() => document.querySelector<HTMLElement>("#rv-side")}
-          label="the sidebar"
-          className="rv-side-resize"
+          <a href={acted.where === "inflight" ? "#/inflight" : "#/archive"}>{acted.where === "inflight" ? "in Merging" : "in Archive"}</a>
+          {acted.sending && <span className="busy" aria-label="sending" />}
+        </p>
+      )}
+      {readying && !acted && (
+        <ActButton
+          k="a"
+          label="Ready for review"
+          run={run}
+          title={
+            picked.length
+              ? `Mark it ready for review on GitHub and ask ${picked.map((p) => p.login).join(", ")}`
+              : "Mark it ready for review on GitHub"
+          }
+          className="primary"
         />
       )}
-      {showSide && (
-        <aside id="rv-side" className="rv-side" aria-label="Status, stack, reviewers and files">
-          <div className="rv-side-top" aria-hidden="true" />
-          <StatusPart
-            ai={view.ai}
-            checks={view.checks}
-            checksError={view.checks_error}
-            size={size && { ...size, files: item.changed_files }}
-            tone={calm(card)}
+      {asking && !acted && (
+        <ActButton
+          k="a"
+          label="Ask reviewers"
+          run={run}
+          title={
+            picked.length
+              ? `Ask ${picked.map((p) => p.login).join(", ")} to review it, on GitHub`
+              : "Nobody's asked to review it: pick reviewers, then ask them"
+          }
+          className="primary"
+        />
+      )}
+      {/* Only someone else's open PR is yours to approve. */}
+      {open && !isMine && !acted && (
+        <ActButton
+          k="a"
+          label="Approve"
+          run={run}
+          disabled={!canApprove}
+          title={view.approve.reason ?? "Approve on GitHub"}
+          className={cls(!writing && "primary")}
+        />
+      )}
+      {/* While you owe replies, Reply is the one filled button. */}
+      {/* Yours, or anyone's approved PR: your agent gets it merged (someone else's, by merging it alone). */}
+      {(mine || (item.state === "open" && (card.inflight || card.review === "approved"))) &&
+        !(acted?.where === "inflight" && !card.inflight) && (
+          <HandButton card={card} run={run} primary={card.cta !== "reply" && !asking && !acted} />
+        )}
+      <span className="more-wrap">
+        <MoreButton
+          open={more}
+          onClick={() => {
+            run(".");
+          }}
+        />
+        {more && (
+          <MoreMenu
+            card={card}
+            actions={(card.actions ?? []).filter((a) => a !== "draft" && a !== "ready" && a !== "reopen")}
+            links={[
+              // As the row's menu says it: Done, or Back on the desk once it's done, snoozed or muted.
+              ...(!card.inflight && !acted
+                ? [
+                    {
+                      label: card.status === "active" ? "Done" : "Back on the desk",
+                      run: () => {
+                        run("d");
+                      },
+                    },
+                  ]
+                : []),
+              ...(yoursOpen && !asking && !acted ? [{ label: "Add reviewers", run: addReviewers }] : []),
+              {
+                label: "Copy link",
+                run: () => {
+                  onCard(card, "link");
+                },
+              },
+            ]}
+            pick={(a) => {
+              if (a === "request_changes") setWriting(true);
+              else runUi(onGithub(card, a, read));
+            }}
+            onClose={() => {
+              setMore(false);
+            }}
           />
-          {/* Only while it's stacked: another open PR in its stack (the list shows the open ones and this one). */}
-          {view.stack && [...view.stack.line, ...view.stack.forks].some((m) => m.state === "open" && !m.current) && (
-            <StackList stack={view.stack} />
+        )}
+      </span>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Across the review's top, stuck there: its three views as pills, then what finishes it and More. */}
+      <div className="rv-bar">
+        <nav className="rv-views" aria-label="Guided review, every file, or the conversation">
+          {guided &&
+            tab("Guided Review", !talking && walking, () => {
+              pickOrder(true);
+            })}
+          {tab("Traditional", !talking && !guiding, () => {
+            pickOrder(false);
+          })}
+          {tab(
+            "Conversation",
+            talking,
+            () => {
+              setTalking(true);
+            },
+            owed,
           )}
-          <SidePart
-            id="reviewers"
-            name="Reviewers"
-            line={view.reviewers.list.length ? "" : view.reviewers.line}
-            bad={view.reviewers.changes ? "t-warn" : ""}
-            tone={calm(card)}
-            rows={view.reviewers.list.map((r) => {
-              const person = r.who !== "you" && !r.who.startsWith("@"); // a team's ask is the team's
-              const yours = card.by === "you" && item.state === "open" && !acted;
-              const remove = yours && person && r.state === "asked";
-              const again = yours && person && !item.draft && r.state !== "asked";
-              return {
-                name: r.who,
-                ...(r.who === "you" ? me && { login: me } : person && { login: r.who }),
-                state: r.state,
-                bad: r.state === "changes requested" ? "t-warn" : "",
-                ...((remove || again) && {
-                  tools: (
+        </nav>
+        {actions}
+      </div>
+      <div className={cls("review", showSide && "side-open")}>
+        {toggle}
+        <div className="rv-main">
+          <div className="rv-top">
+            <Head
+              card={card}
+              me={me}
+              now={now}
+              resolved={resolved?.line ?? null}
+              row={row}
+              ai={aiShown ? view.ai : null}
+              stale={view.ai_stale}
+            />
+            {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
+            {isMine && !view.ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
+            {/* Your own PR gets no AI review unless one was asked for; More still asks. */}
+            {aiShown && (
+              <AiSection
+                ai={view.ai}
+                stale={view.ai_stale}
+                busy={view.generating || busy === "ai"}
+                error={view.ai_error}
+                job={view.ai_job}
+                now={now}
+                open={open}
+                notes={notes.length}
+                onLine={toLine}
+                onAsk={
+                  flying
+                    ? undefined
+                    : () => {
+                        askAi();
+                      }
+                }
+              />
+            )}
+          </div>
+
+          {picking && !acted && (
+            <Reviewers
+              id={card.id}
+              asked={item.review_requests.map((r) => ({ login: r.reviewer, team: r.type === "team" }))}
+              picked={picked}
+              setPicked={setPicked}
+              ready={readying}
+              unasked={card.cta === "reviewers"}
+            />
+          )}
+          {writing && (
+            <WriteBox
+              label="Request changes"
+              placeholder="What needs to change"
+              onSend={(body) => {
+                runUi(
+                  onGithub(card, "request_changes", read, body).pipe(
+                    Effect.tap((done) =>
+                      Effect.sync(() => {
+                        if (done) setWriting(false);
+                      }),
+                    ),
+                  ),
+                );
+              }}
+              onClose={() => {
+                setWriting(false);
+              }}
+            />
+          )}
+
+          {/* Kept while you read the diff, so a reply you're writing is there when you're back. */}
+          <div className="rv-talk" hidden={!talking}>
+            <Conversation
+              view={view}
+              me={me}
+              now={now}
+              flash={flash}
+              agent={agent}
+              onSpot={onSpot}
+              onAsk={onAsk}
+              foot={
+                // Still there once you've acted, so you can comment on what you did; while Request changes is open its box
+                // is the one you write in, so an empty comment box steps aside.
+                (open || !!comment.trim()) &&
+                !(writing && !comment.trim()) && (
+                  <CommentBox card={card} me={me} body={comment} setBody={writeComment} sending={!!acted?.sending} onComment={onComment} />
+                )
+              }
+            />
+          </div>
+          {!talking && (
+            <>
+              {draft && (orphanAt < 0 || (folded && orphanAt >= rest)) && (
+                <div className="rv-orphan">
+                  <p className="quiet">
+                    {draft.thread
+                      ? "Your reply: its thread isn't on the diff on screen. It still goes to that thread."
+                      : `Your comment on ${lineName(draft.at)}: that line isn't on the diff on screen. It still goes on the line you picked, in the commit you read.`}
+                  </p>
+                  {composer(draft.thread ? "Reply" : rangeLabel(draft.at))}
+                </div>
+              )}
+              {view.files_error && <p className="t-bad rv-files-err">Couldn't load the diff: {view.files_error}</p>}
+              {!view.files_error && !files.length && <p className="quiet rv-nofiles">No files changed.</p>}
+              {list.length > 0 && (
+                <div className="rv-diffs">
+                  {visible.slice(0, Math.min(rest, upTo)).map((x, i) => {
+                    const k = steps.findIndex((st) => st.at === i);
+                    const end = steps.findIndex((_, j) => (steps[j + 1]?.at ?? beyond) === i + 1);
+                    const next = steps[end + 1];
+                    return (
+                      <Fragment key={x.key}>
+                        {k >= 0 && (
+                          <header className="rv-step" id={`rv-step-${k}`}>
+                            <h2 className="rv-step-head">
+                              <span className="rv-step-n">
+                                {k + 1} of {steps.length}
+                              </span>{" "}
+                              {steps[k]!.title}
+                            </h2>
+                            {steps[k]!.body && <p className="rv-step-body">{spans(unlinked(inline(steps[k]!.body)))}</p>}
+                            {steps[k]!.check && (
+                              <p className="rv-step-body">
+                                <b>Check:</b> {spans(unlinked(inline(steps[k]!.check)))}
+                              </p>
+                            )}
+                            {steps[k]!.note && <p className="rv-step-body rv-step-note">{spans(unlinked(inline(steps[k]!.note)))}</p>}
+                            {figure(steps[k]!.diagram)}
+                          </header>
+                        )}
+                        {steps.length > 0 && i === beyond && (
+                          <h2 className="rv-step rv-step-head" id="rv-bugs">
+                            Potential bugs outside the guide
+                          </h2>
+                        )}
+                        {section(x, i)}
+                        {end >= 0 &&
+                          (next ? (
+                            <button
+                              type="button"
+                              className="link-btn rv-next"
+                              onClick={() => {
+                                toStep(end + 1);
+                              }}
+                            >
+                              Next: {next.title}
+                            </button>
+                          ) : (
+                            <p className="quiet rv-next">
+                              End of the guide.
+                              {leftFiles > 0 && (
+                                <>
+                                  {" "}
+                                  {leftFiles === 1 ? "1 more file changes" : `${leftFiles} more files change`} outside it:{" "}
+                                  <button
+                                    type="button"
+                                    className="link-btn"
+                                    onClick={() => {
+                                      setWalking(false);
+                                      setStored(VIEW, "traditional");
+                                      scrollTo({ top: 0 });
+                                    }}
+                                  >
+                                    read every file in Traditional
+                                  </button>
+                                </>
+                              )}
+                            </p>
+                          ))}
+                      </Fragment>
+                    );
+                  })}
+                  {order?.ranked && rest < list.length && upTo >= rest && (
                     <button
                       type="button"
-                      className="rv-rev-tool"
-                      title={remove ? `Remove ${r.who} as a reviewer` : `Ask ${r.who} to review again`}
-                      aria-label={remove ? `Remove ${r.who} as a reviewer` : `Ask ${r.who} to review again`}
+                      className={cls("fold", "rv-fold", folded && secIdx >= rest && "sel")}
+                      aria-expanded={!folded}
                       onClick={() => {
-                        onReviewer(card, r.who, remove ? "remove" : "rerequest");
+                        if (folded) goTo(rest);
+                        else {
+                          holdKeys(false);
+                          setRestOpen(false);
+                        }
                       }}
                     >
-                      <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
-                        {remove ? <path d="m4.5 4.5 7 7m0-7-7 7" /> : <path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10" />}
-                      </svg>
+                      {REST} · {list.length - rest} {list.length - rest === 1 ? "file" : "files"}
                     </button>
-                  ),
-                }),
-              };
-            })}
-            add={yoursOpen && !asking && !acted && !sideAdding ? addReviewers : undefined}
-          >
-            {sideAdding && !acted && (
-              <div className="rv-side-add">
-                {/* A pick is the ask: GitHub asks them at once, and the box stays for more. */}
-                <Reviewers
-                  id={card.id}
-                  asked={item.review_requests.map((r) => ({ login: r.reviewer, team: r.type === "team" }))}
-                  picked={picked}
-                  setPicked={setPicked}
-                  ready={false}
-                  unasked={false}
-                  compact
-                  onPick={(r) => {
-                    runUi(
-                      onAddReviewer(card, r).pipe(
-                        Effect.tap((ok) =>
-                          Effect.sync(() => {
-                            if (!ok) setPicked((ps) => ps.filter((p) => p.id !== r.id));
-                          }),
-                        ),
-                      ),
-                    );
-                  }}
-                />
-                <div className="actions">
-                  <button
-                    type="button"
-                    className="act"
-                    onClick={() => {
-                      setAdding("");
-                      setPicked([]);
-                    }}
-                  >
-                    Done
-                  </button>
+                  )}
+                  {visible.slice(rest, upTo).map((x, i) => section(x, rest + i))}
                 </div>
-              </div>
+              )}
+            </>
+          )}
+        </div>
+        {showSide && room && (
+          <Splitter
+            width={SIDE}
+            edge="left"
+            column={() => document.querySelector<HTMLElement>("#rv-side")}
+            label="the sidebar"
+            className="rv-side-resize"
+          />
+        )}
+        {showSide && (
+          <aside id="rv-side" className="rv-side" aria-label="Status, stack, reviewers and files">
+            <div className="rv-side-top" aria-hidden="true" />
+            <StatusPart
+              ai={view.ai}
+              checks={view.checks}
+              checksError={view.checks_error}
+              size={size && { ...size, files: item.changed_files }}
+              tone={calm(card)}
+            />
+            {/* Only while it's stacked: another open PR in its stack (the list shows the open ones and this one). */}
+            {view.stack && [...view.stack.line, ...view.stack.forks].some((m) => m.state === "open" && !m.current) && (
+              <StackList stack={view.stack} />
             )}
-          </SidePart>
-          {view.merge && <SidePart id="merge" name="Merge" line={view.merge} bad="t-warn" tone={calm(card)} />}
-          {!view.stack && deps.length > 0 && (
-            <SidePart id="deps" name="Depends" line={deps.map((d) => d.text).join(" · ")} bad="" tone={calm(card)} />
-          )}
-          {steps.length > 0 && <StepList stops={stops} on={secIdx} onGo={goTo} />}
-          {list.length > 0 && !steps.length && (
-            <nav className="rv-files rv-steps rv-tree" aria-label="Files">
-              <h2 className="rv-side-head">
-                <span>
-                  {files.length} {files.length === 1 ? "file" : "files"}
-                </span>
-              </h2>
-              {/* The guide's timeline, nested: a folder's files hang under it, the file you're in marked as you scroll. */}
-              <FileTree
-                nodes={pathTree(list.map((x) => x.path))}
-                list={list}
-                on={onPath}
-                shut={shutDirs}
-                onFold={(d) => {
-                  setShutDirs((ds) => new Set(ds.has(d) ? [...ds].filter((x) => x !== d) : [...ds, d]));
-                }}
-                onGo={goTo}
-              />
-            </nav>
-          )}
-        </aside>
-      )}
-    </div>
+            <SidePart
+              id="reviewers"
+              name="Reviewers"
+              line={view.reviewers.list.length ? "" : view.reviewers.line}
+              bad={view.reviewers.changes ? "t-warn" : ""}
+              tone={calm(card)}
+              rows={view.reviewers.list.map((r) => {
+                const person = r.who !== "you" && !r.who.startsWith("@"); // a team's ask is the team's
+                const yours = card.by === "you" && item.state === "open" && !acted;
+                const remove = yours && person && r.state === "asked";
+                const again = yours && person && !item.draft && r.state !== "asked";
+                return {
+                  name: r.who,
+                  ...(r.who === "you" ? me && { login: me } : person && { login: r.who }),
+                  state: r.state,
+                  bad: r.state === "changes requested" ? "t-warn" : "",
+                  ...((remove || again) && {
+                    tools: (
+                      <button
+                        type="button"
+                        className="rv-rev-tool"
+                        title={remove ? `Remove ${r.who} as a reviewer` : `Ask ${r.who} to review again`}
+                        aria-label={remove ? `Remove ${r.who} as a reviewer` : `Ask ${r.who} to review again`}
+                        onClick={() => {
+                          onReviewer(card, r.who, remove ? "remove" : "rerequest");
+                        }}
+                      >
+                        <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+                          {remove ? <path d="m4.5 4.5 7 7m0-7-7 7" /> : <path d="M12.5 8a4.5 4.5 0 1 1-1.3-3.2M12.5 3v2.5H10" />}
+                        </svg>
+                      </button>
+                    ),
+                  }),
+                };
+              })}
+              add={yoursOpen && !asking && !acted && !sideAdding ? addReviewers : undefined}
+            >
+              {sideAdding && !acted && (
+                <div className="rv-side-add">
+                  {/* A pick is the ask: GitHub asks them at once, and the box stays for more. */}
+                  <Reviewers
+                    id={card.id}
+                    asked={item.review_requests.map((r) => ({ login: r.reviewer, team: r.type === "team" }))}
+                    picked={picked}
+                    setPicked={setPicked}
+                    ready={false}
+                    unasked={false}
+                    compact
+                    onPick={(r) => {
+                      runUi(
+                        onAddReviewer(card, r).pipe(
+                          Effect.tap((ok) =>
+                            Effect.sync(() => {
+                              if (!ok) setPicked((ps) => ps.filter((p) => p.id !== r.id));
+                            }),
+                          ),
+                        ),
+                      );
+                    }}
+                  />
+                  <div className="actions">
+                    <button
+                      type="button"
+                      className="act"
+                      onClick={() => {
+                        setAdding("");
+                        setPicked([]);
+                      }}
+                    >
+                      Done
+                    </button>
+                  </div>
+                </div>
+              )}
+            </SidePart>
+            {view.merge && <SidePart id="merge" name="Merge" line={view.merge} bad="t-warn" tone={calm(card)} />}
+            {!view.stack && deps.length > 0 && (
+              <SidePart id="deps" name="Depends" line={deps.map((d) => d.text).join(" · ")} bad="" tone={calm(card)} />
+            )}
+            {steps.length > 0 && <StepList stops={stops} on={secIdx} onGo={goTo} />}
+            {list.length > 0 && !steps.length && (
+              <nav className="rv-files rv-steps rv-tree" aria-label="Files">
+                <h2 className="rv-side-head">
+                  <span>
+                    {files.length} {files.length === 1 ? "file" : "files"}
+                  </span>
+                </h2>
+                {/* The guide's timeline, nested: a folder's files hang under it, the file you're in marked as you scroll. */}
+                <FileTree
+                  nodes={pathTree(list.map((x) => x.path))}
+                  list={list}
+                  on={onPath}
+                  shut={shutDirs}
+                  onFold={(d) => {
+                    setShutDirs((ds) => new Set(ds.has(d) ? [...ds].filter((x) => x !== d) : [...ds, d]));
+                  }}
+                  onGo={goTo}
+                />
+              </nav>
+            )}
+          </aside>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -1379,18 +1426,13 @@ function Head({
   return (
     <header className={cls("rv-head", calm(card))}>
       <h1 className="rv-title">{card.title}</h1>
-      {/* Its metadata, under the title: the ref, its place in a stack, who it's by, and the AI review's verdict as a tag. */}
+      {/* Its metadata, under the title: the ref, who it's by, and the AI review's verdict as a tag. */}
       <p className="rv-ref">
         <a className="ref" href={card.url} target="_blank" rel="noreferrer" title={`${card.repo}#${card.number} on GitHub`}>
           <span className="ref-ink">
             <span className="ref-repo">{card.repo.split("/")[1]}</span>#{card.number}
           </span>
         </a>
-        {card.stack && (
-          <span className="rv-by" title={`${card.stack.pos} of ${card.stack.size} open PRs in its stack`}>
-            {card.stack.pos}/{card.stack.size}
-          </span>
-        )}
         <span className="rv-by">
           by {isMine ? me && <Avatar login={me} /> : !card.author_bot && <Avatar login={card.author} />}
           {isMine ? "you" : card.author}
@@ -1449,6 +1491,31 @@ function rowSize(c: Card): { add: number; del: number } | null {
   return m ? { add: Number(m[1]), del: Number(m[2]) } : null;
 }
 
+// A placeholder file's lines, as [indent, width %]: none where a blank line would be.
+const SK_CODE: readonly (readonly [number, number])[] = [
+  [0, 42],
+  [0, 30],
+  [0, 0],
+  [0, 48],
+  [1, 26],
+  [1, 34],
+  [0, 4],
+  [0, 0],
+  [0, 58],
+  [1, 44],
+  [2, 36],
+  [1, 4],
+];
+// A placeholder file tree, as [depth, width %]: a folder, its files, another folder.
+const SK_TREE: readonly (readonly [number, number])[] = [
+  [0, 18],
+  [1, 34],
+  [2, 46],
+  [2, 38],
+  [0, 30],
+  [1, 52],
+];
+
 // The review before it lands: what its row knows, and quiet placeholders where the rest will be, so nothing moves.
 function Shell({
   card,
@@ -1482,92 +1549,138 @@ function Shell({
   // Opening it starts the review unless AI reviews are off or paused.
   const writing = pf?.state === "running" || pf?.state === "queued" || pf?.state === "stale";
   const none = !ai && (pf?.state === "off" || pf?.state === "paused" || pf?.state === "failed");
-  return (
-    <div className={cls("review", side && "side-open")} aria-busy="true">
-      {toggle}
-      <div className="rv-main">
-        <div className="rv-top">
-          {card ? (
-            <Head
-              card={card}
-              me={me}
-              now={now}
-              resolved={card.resolved ? resolvedHead([], card.resolved, me).line : null}
-              row={row}
-              ai={ai}
-              stale={pf?.state !== "ready"}
-            />
-          ) : (
-            <header className="rv-head" aria-hidden="true">
-              <h1 className="rv-title">
-                <span className="sk sk-title" />
-              </h1>
-              <p className="rv-ref">
-                <span className="sk sk-ref" />
-              </p>
-              <p className="rv-meta">
-                <span className="sk sk-meta" />
-              </p>
-            </header>
-          )}
-          {ai || writing || none ? (
-            <AiSection
-              ai={ai}
-              stale={pf?.state !== "ready"}
-              busy={writing}
-              error={null}
-              job={null}
-              now={now}
-              open
-              notes={pf?.notes ?? 0}
-              onAsk={undefined}
-            />
-          ) : (
-            (!isMine || !!card?.verdict) && (
-              <section className="rv-ai" aria-label="AI review">
-                <SkLines count={1} className="rv-gist" />
-                <SkLines count={1} className="sk-verdict" />
-              </section>
-            )
-          )}
-          {(card?.talk === true || card?.cta === "reply" || card?.chips.some((c) => c.endsWith("unresolved"))) && (
-            <SkLines count={1} className="rv-convo sk-short" />
-          )}
-        </div>
-        {/* Its call to action and More, then an open PR's comment box, empty, at its height. */}
-        <div className="actions rv-actions" aria-hidden="true">
-          <span className="sk sk-key" />
-          <span className="sk sk-key" />
-          {card && !card.resolved && (
-            <div className="rv-comment">
-              <div className="rv-comment-input sk-box" />
-            </div>
-          )}
-        </div>
-        <div className="rv-diffs" aria-hidden="true">
-          {[0, 1].map((i) => (
-            <section key={i} className="rv-file-sec">
-              <h3 className="rv-fhead">
-                <span className="sk sk-file" />
-              </h3>
-              <SkLines count={9} className="sk-code" />
-            </section>
-          ))}
-        </div>
-      </div>
-      {side && (
-        <aside id="rv-side" className="rv-side" aria-hidden="true">
-          <div className="rv-side-top" />
-          <StatusPart ai={ai} checks={null} checksError={null} size={shellSize} tone={card ? calm(card) : ""} />
-          {/* Its checks, where any ran, and its reviewers: a line each. */}
-          <SkLines count={card && card.ci !== "none" ? 2 : 1} className="sk-files" />
-          <nav className="rv-files">
-            <h2 className="rv-side-head">Files</h2>
-            <SkLines count={5} className="sk-files" />
-          </nav>
-        </aside>
-      )}
+  // Its call to action and More, where the loaded review draws them.
+  const keys = (
+    <div className="actions rv-actions" aria-hidden="true">
+      {(!isMine || !!card?.cta) && <span className="sk sk-key sk-key-cta" />}
+      <span className="sk sk-key" />
     </div>
+  );
+  return (
+    <>
+      <div className="rv-bar" aria-hidden="true">
+        {/* Its views' pills: Guided Review only where there's an AI review to guide by. */}
+        <div className="rv-views">
+          {ai && <span className="sk sk-tab" />}
+          <span className="sk sk-tab" />
+          <span className="sk sk-tab" />
+        </div>
+        {keys}
+      </div>
+      <div className={cls("review", side && "side-open")} aria-busy="true">
+        {toggle}
+        <div className="rv-main">
+          <div className="rv-top">
+            {card ? (
+              <Head
+                card={card}
+                me={me}
+                now={now}
+                resolved={card.resolved ? resolvedHead([], card.resolved, me).line : null}
+                row={row}
+                ai={ai}
+                stale={pf?.state !== "ready"}
+              />
+            ) : (
+              <header className="rv-head" aria-hidden="true">
+                <h1 className="rv-title">
+                  <span className="sk sk-title" />
+                </h1>
+                <p className="rv-ref">
+                  <span className="sk sk-ref" />
+                </p>
+                <p className="rv-meta">
+                  <span className="sk sk-meta" />
+                </p>
+              </header>
+            )}
+            {ai || writing || none ? (
+              <AiSection
+                ai={ai}
+                stale={pf?.state !== "ready"}
+                busy={writing}
+                error={null}
+                job={null}
+                now={now}
+                open
+                notes={pf?.notes ?? 0}
+                onAsk={undefined}
+              />
+            ) : (
+              (!isMine || !!card?.verdict) && (
+                <section className="rv-ai" aria-label="AI review">
+                  <SkLines count={1} className="rv-gist" />
+                  <SkLines count={1} className="sk-verdict" />
+                </section>
+              )
+            )}
+          </div>
+          <div className="rv-diffs" aria-hidden="true">
+            {[0, 1].map((i) => (
+              <section key={i} className="rv-file-sec">
+                <h3 className="rv-fhead">
+                  <span className="sk sk-chev" />
+                  <span className="sk sk-file" />
+                  <span className="sk sk-delta" />
+                </h3>
+                {/* Code, not prose: a gutter of line numbers, then lines of a file's lengths and indents. */}
+                <div className="sk-code">
+                  {SK_CODE.map((_, n) => {
+                    const [indent, width] = SK_CODE[(n + i * 5) % SK_CODE.length]!;
+                    return (
+                      // oxlint-disable-next-line react/no-array-index-key -- a placeholder line is its place
+                      <span key={n} className="sk-code-row">
+                        <span className="sk sk-no" />
+                        {width > 0 && <span className="sk" style={{ marginLeft: `${indent * 2}ch`, width: `${width}%` }} />}
+                      </span>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        </div>
+        {side && (
+          <aside id="rv-side" className="rv-side" aria-hidden="true">
+            <div className="rv-side-top" />
+            <StatusPart
+              ai={ai}
+              checks={null}
+              checksError={null}
+              size={shellSize}
+              tone={card ? calm(card) : ""}
+              pending={!card || (card.kind === "pr" && card.ci !== "none")}
+            />
+            {/* A PR's reviewers: a face, a name, where they stand. */}
+            {card?.kind !== "issue" && (
+              <section className="rv-part">
+                <h2 className="rv-side-head">
+                  <span>Reviewers</span>
+                </h2>
+                <span className="rv-part-row sk-reviewer">
+                  <span className="sk sk-face" />
+                  <span className="sk sk-name" />
+                  <span className="sk sk-state" />
+                </span>
+              </section>
+            )}
+            {/* The files as the tree they'll be: folders, and the files hanging under them. */}
+            <nav className="rv-files">
+              <h2 className="rv-side-head">Files</h2>
+              <div className="sk-tree">
+                {SK_TREE.map(([depth, width], n) => (
+                  // oxlint-disable-next-line react/no-array-index-key -- a placeholder line is its place
+                  <span key={n} className="sk-tree-row" style={{ paddingLeft: depth * 14 }}>
+                    <span className="sk sk-node" />
+                    <span className="sk" style={{ width: `${width}%` }} />
+                  </span>
+                ))}
+              </div>
+            </nav>
+          </aside>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -1634,18 +1747,20 @@ function StatusPart({
   checksError,
   size,
   tone,
+  pending,
 }: {
   ai: AiShown | null;
   checks: Checks | null;
   checksError: string | null;
   size: { add: number; del: number; files: number | null } | null;
   tone: string;
+  pending?: boolean; // the checks are on their way: their row's shape, where it'll be
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (id: string) => (on: boolean) => {
     setOpen((o) => ({ ...o, [id]: on }));
   };
-  if (!ai && !checks && !checksError && !size) return null;
+  if (!ai && !checks && !checksError && !size && !pending) return null;
   const reasons = ai?.risk_reasons ?? [];
   const cs = checks && checksState(checks);
   const passing = checks?.list.filter((c) => c.state === "passing").length ?? 0;
@@ -1660,11 +1775,9 @@ function StatusPart({
             id="risk"
             said={`${ai.risk[0]!.toUpperCase()}${ai.risk.slice(1)} risk`}
             end={
-              // Like a phone's signal: one red bar for high, two yellow for medium, all three green for low.
-              <span className={cls("rv-signal", `s-${ai.risk}`)} title={`${ai.risk} risk`} aria-hidden="true">
-                <span />
-                <span />
-                <span />
+              // The rows' signal, for risk alone: one red bar for high, two orange for medium, all four green for low.
+              <span className="rv-signal" title={`${ai.risk} risk`}>
+                <Signal lit={RISK_BARS[ai.risk]} />
               </span>
             }
             open={!!open.risk}
@@ -1695,6 +1808,16 @@ function StatusPart({
           >
             <CheckRows checks={checks} />
           </StatusRow>
+        )}
+        {!checks && !checksError && pending && (
+          <li className="rv-status" aria-hidden="true">
+            <span className="rv-status-row">
+              <span className="rv-status-said">
+                <span className="sk sk-said" />
+              </span>
+              <span className="sk sk-count" />
+            </span>
+          </li>
         )}
         {!checks && checksError && (
           <StatusRow id="checks" said="Checks couldn't load" end={null} open={!!open.checks} setOpen={toggle("checks")}>
@@ -1854,10 +1977,16 @@ function CheckRows({ checks }: { checks: Checks }) {
   );
 }
 
-const NODE: Record<StackMember["state"], string> = { open: "○", merged: "●", closed: "×" };
+// A stack member's news as a mark: CI failing a red cross, approved a green tick.
+const Mark = ({ d, tone }: { d: string; tone: string }) => (
+  <svg className={cls("i rv-mark", tone)} viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+    <path d={d} />
+  </svg>
+);
 
-// The stack's open PRs bottom first, the PR on screen marked; each member's state as calm glyphs, words in its tooltip. A
-// long one shows the PRs around this one, and the rest behind one line.
+// The stack's open PRs bottom first, as the guide's timeline: a node each on one line, the PR on screen's in the accent and
+// its title in ink; each member's news as a mark, words in its tooltip. A long one shows the PRs around this one, and the
+// rest behind one line.
 function StackList({ stack }: { stack: Stack }) {
   const [all, setAll] = useState(false);
   const live = (ms: StackMember[]) => ms.filter((m) => m.state === "open" || m.current);
@@ -1878,17 +2007,15 @@ function StackList({ stack }: { stack: Stack }) {
           aria-current={m.current ? "page" : undefined}
           title={`${words}\n${m.title}`}
         >
-          <span className="rv-node" aria-hidden="true">
-            {NODE[m.state]}
-          </span>
+          <span className="rv-step-dot" aria-hidden="true" />
           <span className="rv-mnum">#{m.number}</span>
           <span className="rv-mtitle">{m.title}</span>
-          {/* Passing, running and waiting on a review are no news; what's wrong or approved is, red and amber in words. */}
+          {/* Passing, running and waiting on a review are no news; what's wrong or approved is: a red cross, amber, a green tick. */}
           {m.state === "open" && (
             <span className="rv-marks" aria-label={words}>
-              {m.ci === "red" && <span className="t-bad">failing</span>}
+              {m.ci === "red" && <Mark d="M4.5 4.5l7 7M11.5 4.5l-7 7" tone="t-bad" />}
               {m.review === "changes_requested" && <span className="t-warn">changes</span>}
-              {m.review === "approved" && <span>✓</span>}
+              {m.review === "approved" && <Mark d="M3.5 8.5l3 3 6-7" tone="t-ok" />}
             </span>
           )}
         </a>
@@ -2029,25 +2156,15 @@ function AiSection({
       {ai && (
         <>
           {first.length > 0 && <p className="rv-gist">{spans(unlinked(first))}</p>}
-          {ai.intent?.stack && (
-            <p className="rv-since">
-              <b>In the stack:</b> {spans(unlinked(inline(ai.intent.stack)))}
-            </p>
-          )}
+          {ai.intent?.stack && <Named name="In the stack">{spans(unlinked(inline(ai.intent.stack)))}</Named>}
           {ai.intent && FIT[ai.intent.fit] && ai.intent.gap && (
-            <p className="rv-since">
-              <b>{FIT[ai.intent.fit]}:</b> {spans(unlinked(inline(ai.intent.gap)))}
-            </p>
+            <Named name={FIT[ai.intent.fit] ?? ""}>{spans(unlinked(inline(ai.intent.gap)))}</Named>
           )}
           {/* Folded, its first lines show, fading out into Show more; inert until it's opened. */}
           {(rest.length > 0 || later.length > 0 || ifaces.length > 0 || better.length > 0 || !!loose) && (
             <div className={cls("rv-fold-body", folds && !more && "shut")} inert={folds && !more}>
               {rest.length > 0 && <ProseBlocks bs={rest} links={false} />}
-              {later.length > 0 && (
-                <p className="rv-more-line">
-                  <b>Also risky:</b> {later.map((r) => r.why).join("; ")}
-                </p>
-              )}
+              {later.length > 0 && <Named name="Also risky">{later.map((r) => r.why).join("; ")}</Named>}
               {ifaces.length > 0 && (
                 <div className="rv-more-list">
                   <h3 className="rv-more-head">Interfaces</h3>
@@ -2096,11 +2213,7 @@ function AiSection({
             </div>
           )}
           {folds && toggle(more ? "Show less" : "Show more")}
-          {ai.since && (
-            <p className="rv-since">
-              <b>Since your review:</b> {spans(unlinked(inline(ai.since)))}
-            </p>
-          )}
+          {ai.since && <Named name="Since your review">{spans(unlinked(inline(ai.since)))}</Named>}
           {/* Each concern is also a note in the code; listed here only when the notes can't sit there. */}
           {(stale || notes === 0) &&
             (ai.concerns.length > 0 ? (
@@ -2115,6 +2228,16 @@ function AiSection({
         </>
       )}
     </section>
+  );
+}
+
+// A named part of the AI review: its name on a line of its own, then what it says under it.
+function Named({ name, children }: { name: string; children: ReactNode }) {
+  return (
+    <div className="rv-since">
+      <h3 className="rv-more-head">{name}</h3>
+      <p>{children}</p>
+    </div>
   );
 }
 
@@ -2133,17 +2256,19 @@ function Dir({ path }: { path: string }) {
   );
 }
 
-// Your comment on the PR, on the actions' row, while it's open (or while it has words): one line until it has words, then
-// as tall as they need, with Comment at its foot. Comment (or Cmd+Enter) sends it, Esc leaves it. The words are the
+// Your comment on the PR, at the Conversation tab's foot, while it's open (or while it has words): as tall as its words
+// need, with Comment at its foot. Comment (or Cmd+Enter) sends it, Esc leaves it. The words are the
 // review's, so GitHub refusing them leaves them here.
 function CommentBox({
   card,
+  me,
   body,
   setBody,
   sending,
   onComment,
 }: {
   card: Card;
+  me: string;
   body: string;
   setBody: (t: string) => void;
   sending: boolean;
@@ -2163,37 +2288,16 @@ function CommentBox({
   }
   return (
     <div className="rv-comment">
-      <textarea
-        className="rv-comment-input"
-        aria-label={`Your comment on ${shortRef(card)}`}
-        placeholder={`Comment on ${shortRef(card)}\u2026`}
-        rows={1}
+      <Composer
+        me={me}
+        kind="rv-comment-input"
+        label={`Comment on ${shortRef(card)}\u2026`}
         value={body}
-        onChange={(e) => {
-          setBody(e.target.value);
-        }}
-        onKeyDown={(e) => {
-          if (e.repeat) return;
-          if (e.key === "Escape") e.currentTarget.blur();
-          else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault();
-            send();
-          }
-        }}
+        busy={sending}
+        title={`Comment on GitHub, as you (${MOD}\u21b5)`}
+        onChange={setBody}
+        onSend={send}
       />
-      {body.trim() && (
-        <button
-          type="button"
-          className="act primary"
-          title={`Comment on GitHub, as you (${MOD}\u21b5)`}
-          disabled={sending}
-          onClick={() => {
-            send();
-          }}
-        >
-          {sending ? "Commenting\u2026" : "Comment"}
-        </button>
-      )}
     </div>
   );
 }

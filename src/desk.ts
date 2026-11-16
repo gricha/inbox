@@ -1907,6 +1907,7 @@ export class Desk {
       board: p?.board ?? "",
       boards,
       chips,
+      ...(it.kind === "pr" && { size: { add: it.additions, del: it.deletions } }),
       ci: it.ci,
       review: it.review_decision,
       draft: it.draft,

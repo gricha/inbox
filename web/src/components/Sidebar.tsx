@@ -6,7 +6,7 @@ import { pageOf, routeHash, settingsPart, type ListPage, type Route } from "../v
 import { ArchiveIcon, BlockedIcon, InboxIcon, MergingIcon, SettingsIcon } from "./SideIcons.tsx";
 import { Splitter, type Width } from "./Splitter.tsx";
 
-// The window's only global chrome, as wide as you drag it. The search leads, on every page; then the pages, in the owner's order: Inbox, Blocked, Merging and
+// The window's only global chrome, as wide as you drag it. The search leads, on every page but Settings; then the pages, in the owner's order: Inbox, Blocked, Merging and
 // the Archive; in Settings, its parts instead, under the way back to the Inbox: the core's, then the plugins'. In the footer, bottom up, Settings, a newer Inbox (only when there's one) and Ask your agent; what's wrong with
 // the sync is a bubble (Bubbles.tsx).
 export function Sidebar({
@@ -28,7 +28,7 @@ export function Sidebar({
   ask: boolean; // Ask your agent: not with the chat open, your agent off, or on its own question's page
   waiting: boolean; // the open review's latest ask is unanswered
   onAsk: () => void;
-  search: ReactNode | null; // the search, at the top on every page
+  search: ReactNode | null; // the search, at the top on every page but Settings
 }) {
   const page = pageOf(route, from);
   const onQueue = page === "queue";
@@ -62,7 +62,8 @@ export function Sidebar({
       <div className="wordmark side-brand">
         <span>Inbox</span>
       </div>
-      {search && <div className="side-search">{search}</div>}
+      {/* Not in Settings: it searches the lists, and there's none of them here. */}
+      {search && !onSettings && <div className="side-search">{search}</div>}
       {onSettings ? (
         <nav className="side-nav side-parts" aria-label="Settings">
           <a href="#/" className="side-item side-back" title={`Back to the Inbox (${MOD}1)`}>
@@ -89,6 +90,7 @@ export function Sidebar({
         <nav className="side-nav" aria-label="Pages">
           <a
             href="#/"
+            data-key={`${MOD}1`}
             className={cls("side-item", onQueue && "on")}
             aria-current={onQueue ? "page" : undefined}
             title={count === null ? `${MOD}1` : `${count} need you (${MOD}1)`}
@@ -107,6 +109,7 @@ export function Sidebar({
           {/* What can't move yet: no count, nothing there can move. */}
           <a
             href="#/blocked"
+            data-key={`${MOD}2`}
             className={cls("side-item", onBlocked && "on")}
             aria-current={onBlocked ? "page" : undefined}
             title={`Your PRs that can't move yet: another PR to merge first, or their reviewers (${MOD}2)`}
@@ -117,6 +120,7 @@ export function Sidebar({
           {/* No count: nothing there needs you, the coordinator has it. */}
           <a
             href="#/inflight"
+            data-key={`${MOD}3`}
             className={cls("side-item", onLane && "on")}
             aria-current={onLane ? "page" : undefined}
             title={`${flight?.total ? `${flight.total} merging` : "Your agent and what it merged"} (${MOD}3)`}
@@ -127,6 +131,7 @@ export function Sidebar({
           {/* What you finished, and what was dealt with: no count, nothing there needs you. */}
           <a
             href="#/archive"
+            data-key={`${MOD}4`}
             className={cls("side-item", onArchive && "on")}
             aria-current={onArchive ? "page" : undefined}
             title={`What's done, snoozed or muted: what you acted on and what resolved (${MOD}4)`}

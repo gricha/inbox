@@ -1909,6 +1909,7 @@ function cardOf(r: Rec, p: Placement): Card {
     board: p.board,
     boards: config.boards.filter((b) => place(r, b)).map((b) => b.id),
     chips: chips(r),
+    ...(sig.item.kind === "pr" && { size: { add: sig.pr.additions, del: sig.pr.deletions } }),
     ci: sig.pr.ci,
     review: sig.pr.review,
     draft: !!s.draft,

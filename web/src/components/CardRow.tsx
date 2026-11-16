@@ -3,6 +3,7 @@ import { age, clearedText, cls } from "../format.ts";
 import type { Guide, Variant } from "../view.ts";
 import { Avatar } from "./Avatar.tsx";
 import { Detail } from "./Detail.tsx";
+import { AgentIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 
 // Everything a row needs from the app; `run` takes an action id (enter close o e d m b p why comment a t).
 export interface RowCtx {
@@ -39,8 +40,9 @@ function noteOf(card: Card, variant: Variant): string {
   return card.demoted ?? card.why;
 }
 
-// One line: whether it's a PR or an issue, the title, quietly its repo#number, its one call to action, then who it's from,
-// a PR's stage and its age in columns on the right. Beside a review (compact), two: the title, then all the rest on one line.
+// One line: an icon for a PR or an issue, the title, quietly its repo#number, its one call to action, then its facts as
+// icons (risk, size, CI, stage), who it's from as their picture, and its age, in columns on the right. Each icon says
+// itself in a tip. Beside a review (compact), the same on two lines: icon, title and call to action, then the rest.
 // A click opens an issue in place under it. On Blocked, `tree` indents it under the PR it needs, with a quiet guide.
 export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean; tree?: Guide[] }) {
   const open = ctx.expanded === card.id;
@@ -49,63 +51,40 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
   const note = why ? noteOf(card, variant) : reason.charAt(0).toUpperCase() + reason.slice(1);
   // A resolved item isn't waiting any more: its time is when it resolved.
   const since = variant === "blocked" ? card.waiting_since : (card.resolved_at ?? card.done_at ?? card.waiting_since);
-  // A bolt by the label: someone else's PR that's quick to review, a cheap unblock. Titles stay in line.
-  const kind = (
-    <span className="line-kind">
-      {card.kind === "pr" ? "PR" : "Issue"}
-      {card.quick && (
-        <span className="line-quick" title={card.quick} aria-label={card.quick}>
-          <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
-            <path d="M9 1.5 3.5 9h4.5l-1 5.5 5.5-7.5H8z" />
-          </svg>
-        </span>
-      )}
-    </span>
-  );
+  const kindIcon = <KindIcon kind={card.kind} tip={card.kind === "pr" ? "Pull request" : "Issue"} />;
   const title = <span className="line-title">{card.title}</span>;
   // A long repo name gives way before the title; the number never does.
   const ref = (
     <>
-      <span className="line-ref" title={`${card.repo}#${card.number}`}>
+      <span className="line-ref" data-tip={`${card.repo}#${card.number}`}>
         {card.repo.split("/")[1]}
       </span>
       <span className="line-num">#{card.number}</span>
       {/* One line stands for its stack: where it sits in what's still to land. */}
       {card.stack && (
-        <span className="line-stack" title={`${card.stack.pos} of ${card.stack.size} open PRs in its stack`}>
+        <span className="line-stack" data-tip={`${card.stack.pos} of ${card.stack.size} open PRs in its stack`}>
           {card.stack.pos}/{card.stack.size}
         </span>
       )}
     </>
   );
   const noteEl = note && (
-    <span className={cls("line-note", !why && "line-reason")} title={note}>
+    <span className={cls("line-note", !why && "line-reason")} data-tip={note}>
       {note}
     </span>
   );
   const person = card.by !== "you" && !(card.author_bot && card.by === card.author);
-  const by = (
-    <span className={cls("line-by", card.by === "you" && "mine")}>
-      by {card.by === "you" && ctx.me ? <Avatar login={ctx.me} /> : person && <Avatar login={card.by} />}
-      {card.by}
-    </span>
-  );
-  // Amber only on yours, where it's work for you; a hand-back stays in a tight table, as nothing else on its row says so.
-  const stage = (
-    <span
-      className={cls(
-        "line-stage",
-        card.stage === "changes requested" && card.by === "you" && "t-warn",
-        card.stage === "handed back" && "handed",
-      )}
-    >
-      {card.stage}
+  // Who it's from is their picture alone: yours for "you", a mark for a bot.
+  const face = (
+    <span className={cls("line-by line-face", card.by === "you" && "mine")} data-tip={`By ${card.by}`}>
+      {card.by === "you" ? ctx.me && <Avatar login={ctx.me} /> : person ? <Avatar login={card.by} /> : <AgentIcon />}
+      <span className="sr">by {card.by}</span>
     </span>
   );
   const ageEl = (
     <span
       className="line-age"
-      title={`${variant === "blocked" ? "blocked since" : card.resolved_at ? "resolved" : card.done_at ? "done" : "waiting since"} ${new Date(since).toLocaleString()}`}
+      data-tip={`${variant === "blocked" ? "blocked since" : card.resolved_at ? "resolved" : card.done_at ? "done" : "waiting since"} ${new Date(since).toLocaleString()}`}
     >
       {age(since, ctx.now)}
     </span>
@@ -115,7 +94,7 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
     <button
       type="button"
       className={ctx.compact ? "c-cta" : cls("act line-cta", card.cta === "reply" && "line-reply")}
-      title={CTA[card.cta].title}
+      data-tip={CTA[card.cta].title}
       onClick={() => {
         if (card.cta === "reply") ctx.click(card);
         else ctx.run(card, "a");
@@ -167,19 +146,22 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
         >
           {ctx.compact ? (
             <>
-              {title}
+              <span className="c-top">
+                {kindIcon}
+                {title}
+              </span>
               <span className="c-meta">
-                {kind}
                 <span className="c-ref">{ref}</span>
                 {noteEl}
-                {by}
-                {!why && card.stage && stage}
+                <span className="c-gap" />
+                <RowFacts card={card} stage={!why} />
+                {face}
+                {ageEl}
               </span>
-              {ageEl}
             </>
           ) : (
             <>
-              {kind}
+              {kindIcon}
               {title}
               {ref}
               {noteEl}
@@ -190,8 +172,8 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
         {/* Columns on the right, so who and what stage line up from row to row. */}
         {!ctx.compact && (
           <>
-            {by}
-            {!why && stage}
+            <RowFacts card={card} stage={!why} />
+            {face}
             {ageEl}
           </>
         )}

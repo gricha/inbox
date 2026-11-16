@@ -22,7 +22,8 @@ export function ProseBlocks({ bs, links = true }: { bs: Block[]; links?: boolean
   );
 }
 
-// What a reviewer wrote on GitHub: its markdown as blocks, <details> a fold, <sub> small print; its URLs text, never HTML.
+// What a reviewer wrote on GitHub: its markdown as blocks, <details> a fold, <sub> small print, its links in their words
+// and its images drawn (GitHub's own hosts only); parsed into elements, never set as HTML.
 export function SaidText({ text }: { text: string }) {
   const bs = useMemo(() => saidBlocks(text), [text]);
   return <div className="prose said">{bs.map(saidBlock)}</div>;
@@ -32,17 +33,17 @@ function saidBlock(b: Said, i: number): ReactNode {
   if (b.t === "details")
     return (
       <details key={i} className="said-more">
-        <summary>{spans(unlinked(b.summary))}</summary>
+        <summary>{spans(b.summary)}</summary>
         <div className="prose">{b.blocks.map(saidBlock)}</div>
       </details>
     );
   if (b.t === "small")
     return (
       <p key={i} className="said-small">
-        {spans(unlinked(b.spans))}
+        {spans(b.spans)}
       </p>
     );
-  return <Fragment key={i}>{block(b, false)}</Fragment>;
+  return <Fragment key={i}>{block(b, true)}</Fragment>;
 }
 
 // What a reviewer wrote, or Claude's read of it: code as code, a URL as text, never HTML; the box's pre-wrap keeps lines and indents.
@@ -100,6 +101,35 @@ function Pre({ text, info }: { text: string; info: string }) {
   );
 }
 
+// An image is drawn only from GitHub's own hosts (an upload to a comment, a file in a repo): one anywhere else would tell
+// its host you opened the comment, so it stays a link in its alt.
+const HOSTED = /^https:\/\/(?:github\.com\/user-attachments\/|(?:[\w-]+\.)?githubusercontent\.com\/)/;
+
+// A comment's image; one that doesn't load (a private repo's upload needs GitHub's own session) is a link in its alt.
+function SaidImg({ url, alt }: { url: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed)
+    return (
+      <a href={url} target="_blank" rel="noreferrer" title={url}>
+        {alt || "image"}
+      </a>
+    );
+  return (
+    <a href={url} target="_blank" rel="noreferrer" title={alt}>
+      <img
+        className="said-img"
+        src={url}
+        alt={alt}
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => {
+          setFailed(true);
+        }}
+      />
+    </a>
+  );
+}
+
 export function spans(ss: Span[]): ReactNode {
   return ss.map((s, i) => {
     const el =
@@ -107,9 +137,11 @@ export function spans(ss: Span[]): ReactNode {
         s.text
       ) : s.t === "code" ? (
         <code>{s.text}</code>
+      ) : s.img && HOSTED.test(s.url) ? (
+        <SaidImg url={s.url} alt={s.label ?? ""} />
       ) : (
-        <a href={s.url} target="_blank" rel="noreferrer">
-          {s.url}
+        <a href={s.url} target="_blank" rel="noreferrer" title={s.label ? s.url : undefined}>
+          {s.label ?? s.url}
         </a>
       );
     // oxlint-disable-next-line react/no-array-index-key -- a fixed parse never reorders

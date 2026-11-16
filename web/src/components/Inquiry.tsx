@@ -6,6 +6,7 @@ import { useKeyed } from "../keyed.ts";
 import { age, ago, cls, fromName, issueUrl, MOD } from "../format.ts";
 import { shownUrl, urlPlace } from "../../../src/prose.ts";
 import { inquiryOf, routeHash } from "../view.ts";
+import { AgentIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 
 const URL_IN_TEXT = /(https:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/;
 
@@ -23,15 +24,21 @@ export interface InquiryCtx {
 export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
   const id = inquiryOf(q.id);
   const sel = ctx.selected === id;
-  const kind = <span className="line-kind">Question</span>;
+  const kindIcon = <KindIcon kind="question" tip="A question from an agent" />;
   const title = <span className="line-title">{q.question}</span>;
   const by = (
     <span className="line-by" title={q.from}>
       by {fromName(q.from, false)}
     </span>
   );
+  const face = (
+    <span className="line-by line-face" data-tip={`Asked by ${fromName(q.from, false)}`}>
+      <AgentIcon />
+      <span className="sr">by {fromName(q.from, false)}</span>
+    </span>
+  );
   const ageEl = (
-    <span className="line-age" title={`asked ${new Date(q.at).toLocaleString()}`}>
+    <span className="line-age" data-tip={`asked ${new Date(q.at).toLocaleString()}`}>
       {age(q.at, ctx.now)}
     </span>
   );
@@ -53,16 +60,19 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
         >
           {ctx.compact ? (
             <>
-              {title}
-              <span className="c-meta">
-                {kind}
-                {by}
+              <span className="c-top">
+                {kindIcon}
+                {title}
               </span>
-              {ageEl}
+              <span className="c-meta">
+                {by}
+                <span className="c-gap" />
+                {ageEl}
+              </span>
             </>
           ) : (
             <>
-              {kind}
+              {kindIcon}
               {title}
             </>
           )}
@@ -78,7 +88,8 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
         </button>
         {!ctx.compact && (
           <>
-            {by}
+            <RowFacts />
+            {face}
             {ageEl}
           </>
         )}

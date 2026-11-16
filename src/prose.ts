@@ -4,7 +4,10 @@
 import { Result } from "effect";
 
 export type Span =
-  { t: "text"; text: string; bold: boolean } | { t: "code"; text: string; bold: boolean } | { t: "link"; url: string; bold: boolean };
+  | { t: "text"; text: string; bold: boolean }
+  | { t: "code"; text: string; bold: boolean }
+  // label and img: only in what a reviewer wrote (saidBlocks), where a link reads as its words and an image is one.
+  | { t: "link"; url: string; bold: boolean; label?: string; img?: true };
 export type Block =
   | { t: "p"; spans: Span[] }
   | { t: "ul"; items: Span[][] }
@@ -31,7 +34,7 @@ export function fencedCopy(text: string, info: string): string {
   return `${f}${info}\n${text}\n${f}`;
 }
 
-export function blocks(text: string): Block[] {
+export function blocks(text: string, labels = false): Block[] {
   const raw: Raw[] = [];
   let fence: string[] | null = null;
   let info = "";
@@ -97,14 +100,14 @@ export function blocks(text: string): Block[] {
   if (fence) pre(fence);
   return raw.flatMap((r): Block[] => {
     if (r.t === "pre") return [r];
-    if (r.t === "ul") return [{ t: "ul", items: r.items.map((ls) => inline(ls.join("\n"))) }];
-    if (r.t === "ol") return [{ t: "ol", start: r.start, items: r.items.map((ls) => inline(ls.join("\n"))) }];
-    const spans = inline(r.lines.join("\n"), r.heading);
+    if (r.t === "ul") return [{ t: "ul", items: r.items.map((ls) => inline(ls.join("\n"), false, labels)) }];
+    if (r.t === "ol") return [{ t: "ol", start: r.start, items: r.items.map((ls) => inline(ls.join("\n"), false, labels)) }];
+    const spans = inline(r.lines.join("\n"), r.heading, labels);
     return spans.length ? [{ t: "p", spans }] : [];
   });
 }
 
-export function inline(text: string, heading = false): Span[] {
+export function inline(text: string, heading = false, labels = false): Span[] {
   const parts = text.split("`");
   // An odd backtick count leaves the last one unpaired: it's text.
   if (parts.length % 2 === 0) parts.splice(-2, 2, parts.slice(-2).join("`"));
@@ -114,7 +117,7 @@ export function inline(text: string, heading = false): Span[] {
   let bold = false;
   let run = "";
   const flush = () => {
-    words(out, run, bold);
+    words(out, run, bold, labels);
     run = "";
   };
   for (const [i, part] of parts.entries()) {
@@ -137,14 +140,20 @@ export function inline(text: string, heading = false): Span[] {
 }
 
 // Markdown links read as `label (` + the link + `)`, so a label never hides where it goes; any other match stays text.
-function words(out: Span[], text: string, bold: boolean): void {
+// With labels (a reviewer's own words, as GitHub shows them), a link is its label and `![alt](url)` an image.
+function words(out: Span[], text: string, bold: boolean, labels = false): void {
   let rest = "";
   let at = 0;
   for (const m of text.matchAll(MD_LINK)) {
     const url = link(m[2] ?? "");
     rest += text.slice(at, m.index);
     at = m.index + m[0].length;
-    if (url) {
+    if (url && labels) {
+      const img = rest.endsWith("!");
+      urls(out, img ? rest.slice(0, -1) : rest, bold);
+      out.push({ t: "link", url, bold, label: m[1] ?? "", ...(img && { img: true as const }) });
+      rest = "";
+    } else if (url) {
       urls(out, `${rest}${m[1]} (`, bold);
       out.push({ t: "link", url, bold });
       rest = ")";
@@ -216,7 +225,7 @@ export function lead(bs: Block[]): { first: Span[]; rest: Block[] } {
 
 // Text the PR's author can steer (an AI review of their PR) opens no link: a URL in it is drawn as its text.
 export function unlinked(ss: Span[]): Span[] {
-  return ss.map((s): Span => (s.t === "link" ? { t: "text", text: s.url, bold: s.bold } : s));
+  return ss.map((s): Span => (s.t === "link" ? { t: "text", text: s.label ? `${s.label} (${s.url})` : s.url, bold: s.bold } : s));
 }
 
 // A reviewer's words line by line as GitHub has them: `code` as code, but a ``` fence and the lines inside it left as typed.
@@ -230,12 +239,21 @@ export function textLines(text: string): Span[][] {
 }
 
 // What a reviewer wrote on GitHub, as blocks to draw, never as HTML: its <!-- --> comments gone, a <details> a fold with its
-// <summary>, a line in <sub> quiet small print, <br> a line break, <b>/<strong> bold, <code> code; any other tag stays text.
+// <summary>, a line in <sub> quiet small print, <br> a line break, <b>/<strong> bold, <code> code, an <a href> a link in its
+// words, an <img> (or a <picture>'s) an image, a linked image a link in its alt; any other tag stays text.
 export type Said = Block | { t: "details"; summary: Span[]; blocks: Said[] } | { t: "small"; spans: Span[] };
 
 const COMMENT = /<!--[\s\S]*?(?:-->|$)/g;
 const DETAILS = /<details[^>]*>\s*(?:<summary[^>]*>([\s\S]*?)<\/summary>)?([\s\S]*?)<\/details>/i;
 const SUB = /^\s*<sub>([\s\S]*?)<\/sub>\s*$/i;
+
+const attr = (tag: string, name: string) => new RegExp(`\\s${name}="([^"]*)"`, "i").exec(tag)?.[1] ?? "";
+// A label can't hold what would end it early.
+const label = (s: string) =>
+  s
+    .replaceAll(/[[\]\n]/g, " ")
+    .trim()
+    .slice(0, 200);
 
 // Outside ``` blocks only: a tag in code is code.
 function tags(s: string): string {
@@ -249,7 +267,17 @@ function tags(s: string): string {
         .replaceAll(/<br\s*\/?>/gi, "\n")
         .replaceAll(/<\/?(?:b|strong)>/gi, "**")
         .replaceAll(/<\/?code>/gi, "`")
-        .replaceAll(/<\/?(?:p|div|span|em|i|sup)>/gi, "");
+        .replaceAll(/<\/?(?:picture|source)(?:\s[^>]*)?>/gi, "")
+        .replaceAll("![](", "![image](")
+        .replaceAll(/<img\s[^>]*>/gi, (t) =>
+          attr(t, "src").startsWith("https://") ? `![${label(attr(t, "alt")) || "image"}](${attr(t, "src")})` : t,
+        )
+        .replaceAll(/<a\s[^>]*>([\s\S]*?)<\/a>/gi, (t, inner: string) => {
+          const href = attr(t.slice(0, t.indexOf(">") + 1), "href");
+          const said = label(inner.replaceAll(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replaceAll(/<[^>]*>/g, ""));
+          return href.startsWith("https://") && said ? `[${said}](${href})` : t;
+        })
+        .replaceAll(/<\/?(?:p|div|span|em|i|sup)(?:\s[^>]*)?>/gi, "");
     })
     .join("\n");
 }
@@ -262,7 +290,7 @@ export function saidBlocks(text: string): Said[] {
     const after = plain.slice(m.index + m[0].length);
     return [
       ...saidBlocks(before),
-      { t: "details", summary: inline(tags(m[1] ?? "Details").trim()), blocks: saidBlocks(m[2] ?? "") },
+      { t: "details", summary: inline(tags(m[1] ?? "Details").trim(), false, true), blocks: saidBlocks(m[2] ?? "") },
       ...saidBlocks(after),
     ];
   }
@@ -279,20 +307,20 @@ export function saidBlocks(text: string): Said[] {
   for (const para of plain.split(/\n\s*\n/)) {
     const sub = SUB.exec(para);
     if (sub && !fenced()) {
-      out.push(...blocks(tags(md.join("\n\n"))));
+      out.push(...blocks(tags(md.join("\n\n")), true));
       md = [];
-      const spans = inline(tags(sub[1]!).trim());
+      const spans = inline(tags(sub[1]!).trim(), false, true);
       if (spans.length) out.push({ t: "small", spans });
     } else md.push(para);
   }
-  out.push(...blocks(tags(md.join("\n\n"))));
+  out.push(...blocks(tags(md.join("\n\n")), true));
   return out;
 }
 
 // A reviewer's first line, to say what they said in one: its first block's words, comments and tags gone.
 export function saidLine(text: string): string {
   const b = saidBlocks(text)[0];
-  const plain = (ss: Span[]) => ss.map((s) => (s.t === "link" ? s.url : s.text)).join("");
+  const plain = (ss: Span[]) => ss.map((s) => (s.t === "link" ? (s.label ?? s.url) : s.text)).join("");
   if (!b) return "";
   if (b.t === "p" || b.t === "small") return plain(b.spans);
   if (b.t === "details") return plain(b.summary);

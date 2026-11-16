@@ -10,19 +10,17 @@ export const PAGE_NAME: Record<ListPage, string> = {
   archive: "Archive",
 };
 
-// The page's own head, at the top of its column: a list's name (its filter is in the sidebar), a review's, a question's or a Settings view's way back,
+// The page's own head, at the top of its column: a list's name (its filter is in the sidebar), a question's or a Settings view's way back (a review has no head),
 // or the page's name (Merging's, a Settings part's: the sidebar lists Settings' parts).
 // In the desktop app it's the window's drag handle, its controls excepted.
 export function PageHead({
   route,
   from,
-  question,
   onNote,
   people,
 }: {
   route: Route;
-  from: ListPage; // where a review goes back to
-  question: string | null; // a review opened from an agent's question goes back to it
+  from: ListPage; // where a question or a review document goes back to
   onNote: () => void;
   people: ReactNode; // the filter by person, on a list's head and Merging's
 }) {
@@ -45,16 +43,16 @@ export function PageHead({
           <h1 className="head-name">Merging</h1>
           {people}
         </>
-      ) : route.name === "review" || route.name === "inquiry" || route.name === "doc" ? (
+      ) : route.name === "inquiry" || route.name === "doc" ? (
         <a
           className="back"
-          href={routeHash(question ? { name: "inquiry", id: question } : { name: from })}
-          title={`Back to ${question ? "the question" : BACK[from]} (Esc); ${MOD}[ and ${MOD}] open the item before and after this one`}
+          href={routeHash({ name: from })}
+          title={`Back to ${BACK[from]} (Esc); ${MOD}[ and ${MOD}] open the item before and after this one`}
         >
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M10 3.5 5.5 8l4.5 4.5" />
           </svg>
-          <span>{question ? "Question" : PAGE_NAME[from]}</span>
+          <span>{PAGE_NAME[from]}</span>
         </a>
       ) : (
         <>
@@ -65,6 +63,7 @@ export function PageHead({
           <button
             type="button"
             className="act head-note"
+            data-key={`${MOD}N`}
             title={`A note to yourself, with a reminder if you like (${MOD}N)`}
             onClick={onNote}
           >

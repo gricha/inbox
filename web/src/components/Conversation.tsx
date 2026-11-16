@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Conversation as Convo, ReviewView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { age, cls, MOD, aiName } from "../format.ts";
@@ -17,38 +17,104 @@ export const threadOf = (item: string, c: Convo): Thread => ({
   url: c.url,
   label: `${c.comments[0]?.author ?? "their"}'s ${c.kind}${c.path ? ` on ${where(c)}` : ""}`,
 });
-const firstLine = (s: string) => {
-  const line = saidLine(s);
-  return line.length > 160 ? `${line.slice(0, 159)}…` : line;
+const STATE: Partial<Record<NonNullable<Convo["state"]>, { said: string; tone: string }>> = {
+  approved: { said: "Approved", tone: "t-good" },
+  changes_requested: { said: "Changes requested", tone: "t-warn" },
 };
 
-// What reviewers said: each one waiting on you with Claude's read first and a reply box; the rest fold into one line.
+// A box you write in, as a row: your picture, words that grow the box as you write, and a round button that sends them
+// (or Cmd+Enter). Esc leaves it with the words kept.
+export function Composer({
+  me,
+  kind,
+  label,
+  value,
+  onChange,
+  onSend,
+  busy,
+  title,
+  onFocus,
+}: {
+  me: string; // your login, for your picture
+  kind: "cv-reply" | "rv-comment-input"; // a reply to a conversation, or your comment on the PR
+  label: string; // its placeholder and name
+  value: string;
+  onChange: (text: string) => void;
+  onSend: () => void;
+  busy: boolean;
+  title: string; // the send button's
+  onFocus?: () => void;
+}) {
+  return (
+    <div className="cv-compose">
+      {me && <Avatar login={me} />}
+      <textarea
+        className={kind}
+        aria-label={label}
+        placeholder={label}
+        rows={1}
+        value={value}
+        onFocus={onFocus}
+        onChange={(e) => {
+          onChange(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.repeat) return; // a held Cmd+Enter would send it again
+          if (e.key === "Escape") e.currentTarget.blur();
+          else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            onSend();
+          }
+        }}
+      />
+      <button
+        type="button"
+        className={cls("cv-send", busy && "sending")}
+        data-key={`${MOD}\u21b5`}
+        title={title}
+        aria-label={title}
+        disabled={!value.trim() || busy}
+        onClick={onSend}
+      >
+        <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M8 12.5v-9M4.5 7 8 3.5 11.5 7" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+// What reviewers said, a card each: who, where and their words, your agent's read of one waiting on you, and a row to reply
+// in. Those waiting on you come first. With nothing said yet, it says so; `foot` (your comment on the PR) closes it.
 export function Conversation({
   view,
+  me,
   now,
   flash,
   agent,
   onSpot,
   onAsk,
+  foot,
 }: {
   view: ReviewView;
+  me: string; // your login: your picture by each box
   now: number;
   flash: (text: string, error?: boolean) => void;
-  agent: boolean; // your agent is on: each reply box offers Ask your agent
+  agent: boolean; // your agent is on: each card offers Ask your agent
   onSpot: (s: Spot) => void; // the conversation you're on, for what Ask your agent asks about
   onAsk: (s: Spot) => void;
+  foot: ReactNode;
 }) {
-  const [drafts, setDrafts] = useState<Record<string, string>>({}); // what you typed, over Claude's suggestion
+  const [drafts, setDrafts] = useState<Record<string, string>>({}); // what you typed
   const [sent, setSent] = useState<Record<string, string>>({}); // replied to: its latest comment then, so anything newer (yours or theirs) shows it again
   const [busy, setBusy] = useState<string | null>(null);
-  const [more, setMore] = useState(false);
-  const [at, setAt] = useState<string | null>(null); // the conversation whose reply box you were last in
+  const [shown, setShown] = useState<ReadonlySet<string>>(new Set()); // resolved ones you opened: each starts as one line
   const replied = useRef(""); // the PR whose reply box was focused for its Reply row
 
-  // Opened from a Reply row: the first reply box is ready to type in (⌘↩ sends it, Esc leaves it).
+  // Opened from a Reply row: the first reply box is ready to type in (Cmd+Enter sends it, Esc leaves it).
   useEffect(() => {
     if (view.card.cta !== "reply" || replied.current === view.card.id) return;
-    const box = document.querySelector<HTMLTextAreaElement>(".cv-reply");
+    const box = document.querySelector<HTMLTextAreaElement>(".rv-convo .cv-reply");
     if (!box) return;
     replied.current = view.card.id;
     // Ask your agent opened while the review loaded has your typing: it never moves into a box that posts on GitHub.
@@ -56,18 +122,13 @@ export function Conversation({
     box.focus();
   }, [view]);
 
-  const waiting = view.conversation.filter((c) => c.waiting_on_you && sent[c.id] !== c.comments.at(-1)?.id);
-  const on = (c: Convo) => {
-    setAt(c.id);
-    onSpot(threadOf(view.card.id, c));
-  };
-  // One filled Reply on the page: the one you're answering (the first, until you're in another's box); the rest tinted.
-  const lead = waiting.find((c) => c.id === at)?.id ?? waiting[0]?.id;
-  const rest = view.conversation.filter((c) => !c.waiting_on_you);
-  if (view.conversation_error) return <p className="rv-convo">Couldn't load what reviewers said: {view.conversation_error}</p>;
-  if (!view.conversation.length) return null;
+  const answered = (c: Convo) => sent[c.id] === c.comments.at(-1)?.id;
+  const waits = (c: Convo) => c.waiting_on_you && !answered(c);
+  const waiting = view.conversation.filter(waits);
+  const list = [...waiting, ...view.conversation.filter((c) => !waits(c))];
+  const open = view.item.state === "open"; // GitHub takes a reply only on an open PR
 
-  // Posting is yours: Reply (or Cmd+Enter).
+  // Posting is yours: the send button (or Cmd+Enter).
   function send(c: Convo, text: string) {
     const to = c.comments.at(-1)?.author ?? "them";
     if (!text.trim() || busy) return;
@@ -77,6 +138,7 @@ export function Conversation({
         Effect.match({
           onSuccess: () => {
             setSent((s) => ({ ...s, [c.id]: c.comments.at(-1)?.id ?? "" }));
+            setDrafts((d) => ({ ...d, [c.id]: "" }));
             flash(`Sent your reply to ${to}`);
           },
           onFailure: (e) => {
@@ -94,29 +156,69 @@ export function Conversation({
 
   return (
     <section className="rv-convo" aria-label="Conversation">
+      {view.conversation_error && <p className="cv-error">Couldn't load what reviewers said: {view.conversation_error}</p>}
+      {!view.conversation_error && !list.length && (
+        <div className="cv-empty">
+          <p className="cv-empty-head">No conversation yet</p>
+          <p className="quiet">Comments and review threads on this PR show here.</p>
+        </div>
+      )}
       {waiting.length > 0 && (
         <h2 className="d-head">
           Waiting on your reply <span className="quiet">{waiting.length}</span>
         </h2>
       )}
-      {waiting.map((c) => {
+      {list.map((c) => {
         const last = c.comments.at(-1)!;
         const text = drafts[c.id] ?? "";
         const [call = "", why] = (c.take?.take ?? "").split(/: (.*)/s);
-        return (
-          <article key={c.id} className="cv">
-            <p className="cv-who">
+        const state = c.state ? STATE[c.state] : undefined;
+        const first = c.comments[0]!;
+        // A resolved one is one line until you open it: who, where, and how it began.
+        if (c.resolved && !waits(c) && !shown.has(c.id))
+          return (
+            <button
+              key={c.id}
+              type="button"
+              className="cv cv-resolved"
+              aria-expanded="false"
+              title="Show this resolved conversation"
+              onClick={() => {
+                setShown((cur) => new Set([...cur, c.id]));
+              }}
+            >
               <span className="cv-author">
-                {!last.bot && <Avatar login={last.author} />}
-                {last.author}
+                {!first.bot && <Avatar login={first.author} />}
+                {first.author}
               </span>
-              <span>{where(c)}</span>
-              <span>{age(last.at, now)}</span>
-            </p>
-            <p className="cv-gist">
-              <Words text={c.take?.gist ?? firstLine(last.body)} />
-            </p>
-            {c.take && (
+              {c.path && <span>{where(c)}</span>}
+              <span>resolved</span>
+              <span className="cv-line">{saidLine(first.body)}</span>
+            </button>
+          );
+        return (
+          <article key={c.id} className={cls("cv", waits(c) && "cv-waiting")}>
+            <ol className="cv-comments">
+              {c.comments.map((x, i) => (
+                <li key={x.id}>
+                  <p className="cv-who">
+                    <span className="cv-author">
+                      {!x.bot && <Avatar login={x.author} />}
+                      {x.author}
+                    </span>
+                    <span>{age(x.at, now)}</span>
+                    {i === 0 && c.path && <span>{where(c)}</span>}
+                    {i === 0 && c.resolved && <span>resolved</span>}
+                    {i === 0 && state && <span className={state.tone}>{state.said}</span>}
+                  </p>
+                  <div className="cv-body">
+                    <SaidText text={x.body} />
+                  </div>
+                </li>
+              ))}
+            </ol>
+            {/* Your agent's read of one waiting on you: its call in semibold, then why. */}
+            {waits(c) && c.take && (
               <p className="cv-take">
                 {why === undefined ? (
                   <Words text={call} />
@@ -127,52 +229,21 @@ export function Conversation({
                 )}
               </p>
             )}
-            {!c.take && view.reading && <p className="quiet">{aiName()} is reading it.</p>}
-            {!c.take && view.reading_error && (
+            {waits(c) && !c.take && view.reading && <p className="cv-take quiet">{aiName()} is reading it.</p>}
+            {waits(c) && !c.take && view.reading_error && (
               <p className="cv-take">
                 {aiName()} couldn't read it: {view.reading_error}
               </p>
             )}
-            <Said c={c} label={`What ${c.comments.length > 1 ? "was said" : `${last.author} wrote`}`} now={now} />
-            <textarea
-              className="cv-reply"
-              aria-label={`Reply to ${last.author}`}
-              placeholder={`Reply to ${last.author}`}
-              value={text}
-              onFocus={() => {
-                on(c);
-              }}
-              onChange={(e) => {
-                setDrafts((d) => ({ ...d, [c.id]: e.target.value }));
-              }}
-              onKeyDown={(e) => {
-                if (e.repeat) return; // a held ⌘↩ would send it again
-                if (e.key === "Escape") e.currentTarget.blur();
-                else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  send(c, text);
-                }
-              }}
-            />
-            <div className="actions">
-              <button
-                type="button"
-                className={cls("act", c.id === lead ? "primary" : "s-cta")}
-                title={`Post this reply on GitHub, as you (${MOD}\u21b5)`}
-                disabled={!text.trim() || busy === c.id}
-                onClick={() => {
-                  send(c, text);
-                }}
-              >
-                {busy === c.id ? "Replying\u2026" : "Reply"}
-              </button>
-              <a className="act" href={c.url} target="_blank" rel="noreferrer">
+            <p className="cv-links">
+              {answered(c) && <span className="quiet">Reply sent.</span>}
+              <a href={c.url} target="_blank" rel="noreferrer">
                 Open on GitHub
               </a>
               {agent && (
                 <button
                   type="button"
-                  className="act"
+                  className="link-btn"
                   title="Your chat with your agent about this conversation; your reply here stays here, unsent"
                   onClick={() => {
                     onAsk(threadOf(view.card.id, c));
@@ -181,83 +252,30 @@ export function Conversation({
                   Ask your agent
                 </button>
               )}
-            </div>
+            </p>
+            {open && (
+              <Composer
+                me={me}
+                kind="cv-reply"
+                label={`Reply to ${last.author}\u2026`}
+                value={text}
+                busy={busy === c.id}
+                title={`Post this reply on GitHub, as you (${MOD}\u21b5)`}
+                onFocus={() => {
+                  onSpot(threadOf(view.card.id, c));
+                }}
+                onChange={(t) => {
+                  setDrafts((d) => ({ ...d, [c.id]: t }));
+                }}
+                onSend={() => {
+                  send(c, text);
+                }}
+              />
+            )}
           </article>
         );
       })}
-      {Object.entries(sent).map(([id, url]) => (
-        <p key={id} className="quiet">
-          Sent your reply. <a href={url || view.card.url}>View it on GitHub</a>
-        </p>
-      ))}
-      {rest.length > 0 && (
-        <button
-          type="button"
-          className="rv-more"
-          aria-expanded={more}
-          onClick={() => {
-            setMore(!more);
-          }}
-        >
-          {rest.length} {waiting.length ? "more " : ""}
-          {rest.length === 1 ? "conversation" : "conversations"} not waiting on you
-        </button>
-      )}
-      {more &&
-        rest.map((c) => {
-          const [first, last] = [c.comments[0]!, c.comments.at(-1)!];
-          return (
-            <details
-              key={c.id}
-              className="cv-quiet"
-              onToggle={(e) => {
-                if (e.currentTarget.open) on(c);
-              }}
-            >
-              <summary>
-                <span className="cv-author">
-                  {!first.bot && <Avatar login={first.author} />}
-                  {first.author}
-                </span>
-                <span>{where(c)}</span>
-                {c.resolved && <span>resolved</span>}
-                <span className="cv-line">
-                  <Words text={firstLine(last.body)} />
-                </span>
-              </summary>
-              <Said c={c} now={now} />
-            </details>
-          );
-        })}
+      {foot}
     </section>
-  );
-}
-
-// The original words as GitHub has them, code as code.
-function Said({ c, label, now }: { c: Convo; label?: string; now: number }) {
-  const body = (
-    <ol className="cv-comments">
-      {c.comments.map((x) => (
-        <li key={x.id}>
-          <p className="cv-who">
-            <span className="cv-author">
-              {!x.bot && <Avatar login={x.author} />}
-              {x.author}
-            </span>
-            <span>{age(x.at, now)}</span>
-          </p>
-          <div className="cv-body">
-            <SaidText text={x.body} />
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
-  if (!label) return body;
-  return (
-    <details className="cv-said">
-      <summary>{label}</summary>
-      {body}
-    </details>
   );
 }

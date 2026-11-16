@@ -54,3 +54,33 @@ test("tags in code stay code, a <br> breaks a line, <b> is bold, and an unknown 
     ],
   );
 });
+
+test("a reviewer's link reads as its words, an image is one, a linked image is a link in its alt; only https", () => {
+  const html =
+    'See <a href="https://cursor.com/open?link=abc" target="_blank"><picture><source media="(prefers-color-scheme: dark)" srcset="https://cursor.com/a.png"><img alt="Fix All in Cursor" width="115" src="https://cursor.com/b.png"></picture></a> or [the docs](https://example.com/docs).';
+  const [p] = saidBlocks(html);
+  assert.ok(p?.t === "p");
+  assert.deepEqual(
+    p.spans.map((s) => (s.t === "link" ? [s.label, s.url, s.img ?? false] : s.text)),
+    [
+      "See ",
+      ["Fix All in Cursor", "https://cursor.com/open?link=abc", false],
+      " or ",
+      ["the docs", "https://example.com/docs", false],
+      ".",
+    ],
+  );
+  const [img] = saidBlocks(
+    '<img alt="shot" src="https://github.com/user-attachments/assets/1"> ![](https://github.com/user-attachments/assets/2)',
+  );
+  assert.ok(img?.t === "p");
+  assert.deepEqual(
+    img.spans.filter((s) => s.t === "link").map((s) => [s.label, s.img]),
+    [
+      ["shot", true],
+      ["image", true],
+    ],
+  );
+  const [bad] = saidBlocks('<a href="javascript:alert(1)">x</a>');
+  assert.ok(bad?.t === "p" && bad.spans.every((s) => s.t === "text"));
+});

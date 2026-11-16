@@ -1,5 +1,6 @@
 import { SESSION_KIND, type SessionAction, type SessionCard } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
+import { KindIcon, RowFacts } from "./RowIcons.tsx";
 
 export interface SessionCtx {
   now: number;
@@ -22,8 +23,8 @@ export const SESSION_ACTION: Record<SessionAction, { label: string; title: strin
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-// A Claude Code or Codex session that needs you, a row like a PR's: Session, its name, quietly its folder, its call to
-// action, its kind where who it's from goes, why it's here where a PR's stage goes, its age. A click opens it in place.
+// A Claude Code or Codex session that needs you, a row like a PR's: its icon (its kind in the tip), its name, quietly its
+// folder, why it's here where a PR's why goes, its call to action, its age. A click opens it in place.
 export function SessionRow({ s, ctx }: { s: SessionCard; ctx: SessionCtx }) {
   const open = ctx.expanded === s.id;
   const folder = s.cwd.split(/[\\/]/).findLast(Boolean) ?? s.cwd;
@@ -45,17 +46,21 @@ export function SessionRow({ s, ctx }: { s: SessionCard; ctx: SessionCtx }) {
             ctx.select(s);
           }}
         >
-          <span className="line-kind">Session</span>
+          <KindIcon kind="session" tip={`${SESSION_KIND[s.kind]} session`} />
           <span className="line-title">{s.name}</span>
-          <span className="line-ref" title={s.cwd}>
+          <span className="line-ref" data-tip={s.cwd}>
             {folder}
+          </span>
+          {/* Why it's here, where a PR's why goes. */}
+          <span className="line-note line-stage" data-tip={s.reason}>
+            {s.reason}
           </span>
         </button>
         {first && first !== "attach" && (
           <button
             type="button"
             className="act line-cta"
-            title={SESSION_ACTION[first].title}
+            data-tip={SESSION_ACTION[first].title}
             onClick={() => {
               ctx.start(s, first);
             }}
@@ -63,11 +68,11 @@ export function SessionRow({ s, ctx }: { s: SessionCard; ctx: SessionCtx }) {
             {SESSION_ACTION[first].label}
           </button>
         )}
-        <span className="line-by">{SESSION_KIND[s.kind]}</span>
-        <span className="line-stage" title={s.reason}>
-          {s.reason}
+        <RowFacts />
+        <span className="line-by line-face">
+          <span className="sr">{SESSION_KIND[s.kind]}</span>
         </span>
-        <span className="line-age" title={`since ${new Date(s.since).toLocaleString()}`}>
+        <span className="line-age" data-tip={`since ${new Date(s.since).toLocaleString()}`}>
           {age(s.since, ctx.now)}
         </span>
       </div>

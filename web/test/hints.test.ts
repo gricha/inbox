@@ -1,4 +1,5 @@
-// The window names no key: no <kbd> chip, and no key written in the words it shows.
+// The window names no key: no <kbd> chip, and no key written in the words it shows. The one exception is drawn by CSS from
+// a button's data-key, only while the platform's modifier is held (styles.css, [data-key]).
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";
