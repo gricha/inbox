@@ -9,6 +9,7 @@ import { Effect } from "effect";
 import { _electron } from "playwright-core";
 import { envVar, probeHealth } from "../electron/lib.ts";
 import { freePort } from "../electron/source.ts";
+import { defaultConfigText } from "../src/config.ts";
 import type { DesktopBridge } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
@@ -22,6 +23,10 @@ const deskUrl = `http://localhost:${port}`;
 const step = (msg: string) => {
   console.log(`• ${msg}`);
 };
+// A home with no config.toml is a first run, whose setup page can cover the window midway through the checks.
+const config = path.join(home, "config.toml");
+fs.mkdirSync(home, { recursive: true });
+if (!fs.existsSync(config)) fs.writeFileSync(config, defaultConfigText({ workOrgs: [] }));
 const env = { ...process.env, DESK_HOME: home, DESK_PORT: port, DESK_SENTRY: "0" } as Record<string, string>;
 delete env.DESK_SOURCE;
 delete env.DESK_DEV;
