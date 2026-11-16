@@ -1,5 +1,6 @@
 // Settings: how the desk behaves, stored in settings.json (only values that differ from the default).
 // Adding a setting = one entry in SETTINGS: validation, `desk settings` and its section's part of the Settings page (`more` folds it).
+import type { AgentModels } from "./models.ts";
 import fs from "node:fs";
 import path from "node:path";
 import { Effect, Result } from "effect";
@@ -417,11 +418,14 @@ const BYPASS = {
   OpenCode:
     "Approves what your OpenCode config asks about; off, that's refused. OpenCode has no sandbox either way. Its deny rules still hold.",
 };
-export function agentDefs(harness: string): SettingDef[] {
+// models: what your agent takes, for its model and effort dropdowns; none known, they stay text fields.
+export function agentDefs(harness: string, models?: AgentModels): SettingDef[] {
   const name = agentName(harness);
-  if (name === "Claude") return [...SETTINGS];
   const say = (t: string) => t.replaceAll(/Claude( Code)?/g, name);
   return SETTINGS.map((d: SettingDef) => {
+    if (d.key === "agent.coordinator_model" && models?.models.length) return { ...d, choices: models.models };
+    if (d.key === "agent.coordinator_effort" && models?.efforts.length) return { ...d, choices: models.efforts };
+    if (name === "Claude") return d;
     if (AGENT_WORDED.has(d.key)) return { ...d, label: say(d.label), ...(d.help && { help: say(d.help) }) };
     if (d.key === "agent.coordinator_bypass") return { ...d, help: BYPASS[name] };
     return d;

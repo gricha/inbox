@@ -3704,12 +3704,10 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
-    // GitHub's part at the top, its tuning and prompts folded behind More.
+    // GitHub's part at the top, its tuning and prompts in a section of their own under it.
     name: "settings-github",
     go: async (page) => {
       await at("#/settings/github")(page);
-      if (await page.evaluate<boolean>(`!!document.getElementById("setting-github.poll_seconds")?.getClientRects().length`))
-        failures.push("settings-github: More GitHub settings is open on arrival");
       const rows = await statusRows(page, "github");
       if (rows.length !== 1 || !rows[0]!.startsWith("Signed in as @"))
         failures.push(`settings-github: GitHub's status rows read ${JSON.stringify(rows)}`);
@@ -3719,21 +3717,19 @@ const SHOTS: Shot[] = [
     sizes: ["wide", "mid", "min", "mac", "xl"],
   },
   {
-    // More GitHub settings opened with a click: its rows in the same sheet, under it.
+    // More GitHub settings: a section of its own under GitHub's, always open, every row there.
     name: "settings-github-more",
     go: async (page) => {
       await at("#/settings/github")(page);
-      await page.getByRole("button", { name: "More GitHub settings" }).click();
       const hidden = await page.evaluate<
         string[]
       >(`["github.my_repos", "github.bots", "github.close_collaborator_min", "github.poll_seconds",
         "handoff.prompt", "handoff.mine", "handoff.issue"].filter((k) => !document.getElementById("setting-" + k)?.getClientRects().length)`);
-      if (hidden.length) failures.push(`settings-github-more: ${hidden.join(", ")} still folded`);
-      await page.evaluate(`scrollBy(0, document.querySelector(".s-more").getBoundingClientRect().top - 160)`);
+      if (hidden.length) failures.push(`settings-github-more: ${hidden.join(", ")} not shown`);
+      const head = page.locator("#s-github .group-head", { hasText: "More GitHub settings" });
+      if (!(await head.count())) failures.push("settings-github-more: no More GitHub settings heading");
+      else await head.scrollIntoViewIfNeeded();
       await page.waitForTimeout(200);
-    },
-    after: async (page) => {
-      await page.getByRole("button", { name: "More GitHub settings" }).click();
     },
   },
   {
@@ -3881,7 +3877,6 @@ const SHOTS: Shot[] = [
         },
         want: "never",
       });
-      await page.getByRole("button", { name: "More GitHub settings" }).click();
       const repos = page.locator('[id="setting-github.my_repos"]');
       await saveStep(page, "a repo", "github.my_repos", {
         edit: async () => {
@@ -3911,7 +3906,6 @@ const SHOTS: Shot[] = [
       }
       await resetStep(page, "github.my_repos", [], false);
       await resetStep(page, "github.resolve_on_others_approval", "always");
-      await page.getByRole("button", { name: "More GitHub settings" }).click();
       await at("#/settings/queue")(page);
       await resetStep(page, "notify.enabled", true);
       await resetStep(page, "notify.quiet", "19:00-09:00");
@@ -3925,8 +3919,6 @@ const SHOTS: Shot[] = [
           reset: ["queue.quiet_days", "notify.quiet", "notify.enabled", "github.resolve_on_others_approval", "app.hotkey"],
         })}) })`,
       );
-      const open = page.locator('.s-more [aria-expanded="true"]');
-      if (await open.count()) await open.click();
       await at("#/")(page);
     },
   },
@@ -4100,9 +4092,12 @@ const SHOTS: Shot[] = [
         "agent.harness": "Agent / Sorts your desk and reviews PRs ahead of time, on your own login.",
         "policy.judge":
           "Sort my desk with Codex / Codex places each item by weighing every rule that matches it; off, the first matching rule does.",
-        "agent.coordinator": "Run your agent / A Codex session that answers Ask your agent and gets what you hand off merged.",
+        "agent.coordinator": "Run your agent / Two Codex sessions: one answers Ask your agent, the other gets what you hand off merged.",
       };
       if (JSON.stringify(said) !== JSON.stringify(want)) failures.push(`settings-agent-codex: the rows read ${JSON.stringify(said)}`);
+      const models = await page.locator("#setting-agent\\.coordinator_model option").allTextContents();
+      if (models.join("|") !== "Its own default|GPT-6|GPT-6 mini")
+        failures.push(`settings-agent-codex: the model dropdown offers ${JSON.stringify(models)}`);
     },
     after: async (page) => {
       await page.evaluate(
@@ -4111,13 +4106,12 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // More Agent settings, opened: the decision model's key is a password field whose help says what leaves this computer;
+    // More Agent settings, a section of its own: the decision model's key is a password field whose help says what leaves this computer;
     // saved, it shows dots and the desk never sends the key back, and Reset to default clears it. Shot with one saved.
     name: "settings-agent-more",
     go: async (page) => {
       const KEY = "sk-or-v1-shots-0000000000000000000000000000000000000000000000000000";
       await at("#/settings/agent")(page);
-      await page.getByRole("button", { name: "More Agent settings" }).click();
       const key = page.locator('[id="setting-agent.decision_key"]');
       const row = page.locator('[id="row-agent.decision_key"]');
       const seen = await page.evaluate<{ type: string; value: string; hint: string | null; help: string }>(`(() => {
@@ -4133,7 +4127,7 @@ const SHOTS: Shot[] = [
         failures.push(`settings-agent-more: the key's row reads ${JSON.stringify(seen)}`);
       const model = await page.locator('[id="setting-agent.decision_model"]').inputValue();
       if (model !== "typesafe/jev-1.14") failures.push(`settings-agent-more: the model reads ${JSON.stringify(model)}`);
-      // The judge's hourly cap is tuning: folded here, now that Your policy is gone.
+      // The judge's hourly cap is tuning: here, now that Your policy is gone.
       if (!(await page.locator('[id="row-policy.max_per_hour"]').isVisible()))
         failures.push("settings-agent-more: no Let Claude sort up to in More Agent settings");
       if (await page.locator(".s-view-row").filter({ hasText: "Your policy" }).count())
@@ -4151,7 +4145,7 @@ const SHOTS: Shot[] = [
       const dots = "\u2022".repeat(8);
       if (after.shown !== dots || after.api !== dots || after.onPage || !after.reset)
         failures.push(`settings-agent-more: with a key saved the row is ${JSON.stringify(after)}`);
-      await page.evaluate(`scrollBy(0, document.querySelector("#s-agent .s-more").getBoundingClientRect().top - 160)`);
+      await page.locator("#s-agent .group-head", { hasText: "More Agent settings" }).scrollIntoViewIfNeeded();
       await page.waitForTimeout(200);
     },
     after: async (page) => {
@@ -4159,7 +4153,6 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
       const cleared = await deskHas(page, "agent.decision_key");
       if (cleared !== "") failures.push(`settings-agent-more: Reset to default leaves ${JSON.stringify(cleared)}`);
-      await page.getByRole("button", { name: "More Agent settings" }).click();
     },
   },
   {

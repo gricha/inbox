@@ -28,6 +28,7 @@ import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
 import { FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
 import { mergeLine, peopleOf, stage, standings } from "../../src/stage.ts";
+import { CLAUDE_MODELS, type AgentModels } from "../../src/models.ts";
 import { agentDefs, agentName, checkSetting, DEFAULTS, LEGACY_TABLES, masked, SECTIONS, settingDef } from "../../src/settings.ts";
 import { GitHubAuthError, type ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
@@ -3875,10 +3876,23 @@ function github(): GitHubStatus {
   };
 }
 
+// What each agent offers in Settings' model and effort dropdowns (the real desk reads them from the agent).
+const MOCK_MODELS: Record<string, AgentModels> = {
+  "claude-code": CLAUDE_MODELS,
+  codex: {
+    models: [
+      { value: "gpt-6", label: "GPT-6" },
+      { value: "gpt-6-mini", label: "GPT-6 mini" },
+    ],
+    efforts: CLAUDE_MODELS.efforts.filter((e) => e.value !== "max"),
+  },
+  opencode: { models: [{ value: "opencode/big-pickle", label: "opencode/big-pickle" }], efforts: [] },
+};
+
 const settingsView = (): SettingsView => ({
   path: `${homedir()}/.inbox/settings.json (mock, in memory)`,
   sections: SECTIONS,
-  defs: agentDefs(setting("agent.harness")),
+  defs: agentDefs(setting("agent.harness"), MOCK_MODELS[setting("agent.harness")]),
   values: masked({ ...DEFAULTS, ...overrides }),
   overridden: Object.keys(overrides),
   errors: [],

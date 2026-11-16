@@ -280,6 +280,19 @@ function SelectField({ def, value, commit, id, invalid, disabled }: FieldProps) 
   );
 }
 
+// A string the desk offers choices for (your agent's models): a dropdown, its default first, and a value set before
+// that isn't among them still shown, so it's kept until you pick another.
+function ChoiceField(p: FieldProps) {
+  const now = String(p.value);
+  const listed = p.def.choices ?? [];
+  const options = [
+    { value: "", label: p.def.placeholder ?? "Default" },
+    ...(now && !listed.some((c) => c.value === now) ? [{ value: now, label: now }] : []),
+    ...listed,
+  ];
+  return <SelectField {...p} def={{ ...p.def, options }} />;
+}
+
 function HotkeyField(p: FieldProps) {
   const d = useDraft(MAC ? { ...p, value: macKeys(String(p.value)) } : p); // the field in the Mac's words there
   const [recording, setRecording] = useState(false);
@@ -468,7 +481,6 @@ function Row({
   onView,
   extra,
   help,
-  hidden,
   disabled = false,
 }: {
   def: SettingDef;
@@ -477,7 +489,6 @@ function Row({
   onView: (v: SettingsView) => void;
   extra?: ReactNode;
   help?: { text: string; bad: boolean } | null; // a live line in place of the def's help: null keeps the def's
-  hidden?: boolean;
   disabled?: boolean;
 }) {
   const [status, setStatus] = useState<"saved" | { error: string } | null>(null);
@@ -540,7 +551,7 @@ function Row({
   }
 
   const id = `setting-${def.key}`;
-  const Control = BY_KEY[def.key] ?? CONTROLS[def.type] ?? StringField;
+  const Control = BY_KEY[def.key] ?? (def.choices?.length ? ChoiceField : CONTROLS[def.type]) ?? StringField;
   const control = (
     <Control
       key={epoch}
@@ -568,11 +579,11 @@ function Row({
     </button>
   );
   // Free text (a prompt, a path) takes the row's width under its label; a value with a set shape stays beside it.
-  const wide = def.type === "text" || (def.type === "string" && !def.pattern);
+  const wide = def.type === "text" || (def.type === "string" && !def.pattern && !def.choices?.length);
   const said = help ?? (def.help ? { text: def.help, bad: false } : null);
 
   return (
-    <div id={`row-${def.key}`} className={cls("setting", `st-${def.type}`, wide && "wide", disabled && "s-off")} hidden={hidden}>
+    <div id={`row-${def.key}`} className={cls("setting", `st-${def.type}`, wide && "wide", disabled && "s-off")}>
       <div className="s-label-col">
         <label className="s-label" htmlFor={id}>
           {def.label}
@@ -1113,20 +1124,6 @@ function ViewHead({ id, line }: { id: string; line: string }) {
   );
 }
 
-// A part's folded settings: tuning and prompts, one click away, in the same sheet.
-function MoreToggle({ title, open, controls, onToggle }: { title: string; open: boolean; controls: string; onToggle: () => void }) {
-  return (
-    <div className="s-more">
-      <button type="button" className="link-btn" aria-expanded={open} aria-controls={controls} onClick={onToggle}>
-        More {title} settings
-        <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="M4.5 6.5 8 10l3.5-3.5" />
-        </svg>
-      </button>
-    </div>
-  );
-}
-
 export function Settings({
   active,
   section,
@@ -1153,7 +1150,6 @@ export function Settings({
   onAsked: () => void; // your agent has your words about an automation or a criterion: its chat opens
 }) {
   const [live, setLive] = useState<DesktopStatus | null>(null);
-  const [more, setMore] = useState<Record<string, boolean>>({});
   const inView = settingsBack(section) !== null;
   const au = useAutomations(active, loads, flash);
   // Who answers an automation's question: the decision model once its key is set, else Claude.
@@ -1217,7 +1213,7 @@ export function Settings({
     };
   }, [active, section]);
 
-  const row = (d: SettingDef | undefined, folded = false) =>
+  const row = (d: SettingDef | undefined) =>
     view &&
     d && (
       <Row
@@ -1226,7 +1222,6 @@ export function Settings({
         view={view}
         loads={loads}
         onView={onView}
-        hidden={folded}
         disabled={DISABLED[d.key]?.(view.values) ?? false}
         {...(d.type === "hotkey" && { help: hotkeyHelp(String(view.values[d.key] ?? d.default), live?.hotkey ?? null, MAC) })}
         extra={d.key === "app.source" && live && <SourceLine s={live.source ?? null} />}
@@ -1276,9 +1271,7 @@ export function Settings({
         {view?.sections.map((x) => {
           const p: PartProps = { view, active, now, loads, configErrors, flash };
           const defs = view.defs.filter((d) => d.section === x.id && (SHOWN[d.key]?.(view.values, desktop) ?? true));
-          const folded = defs.filter((d) => d.more);
-          // A problem in settings.json on a folded setting opens its part's More, so you see the row it's about.
-          const open = more[x.id] ?? folded.some((d) => view.errors.some((e) => e.path === d.key));
+          const tuning = defs.filter((d) => d.more);
           const lead = LEAD[x.id];
           return (
             <section key={x.id} id={`s-${x.id}`} className="s-part" aria-label={x.title} hidden={section !== (x.part ?? x.id)}>
@@ -1297,18 +1290,14 @@ export function Settings({
                         {AFTER[d.key]?.(p)}
                       </Fragment>
                     ))}
-                  {folded.length > 0 && (
-                    <MoreToggle
-                      title={x.title}
-                      open={open}
-                      controls={folded.map((d) => `row-${d.key}`).join(" ")}
-                      onToggle={() => {
-                        setMore({ ...more, [x.id]: !open });
-                      }}
-                    />
-                  )}
-                  {folded.map((d) => row(d, !open))}
                 </div>
+              )}
+              {/* Tuning and prompts: a section of their own under the part's, always open. */}
+              {tuning.length > 0 && (
+                <>
+                  <h2 className="group-head">More {x.title} settings</h2>
+                  <div className="lines s-sheet">{tuning.map((d) => row(d))}</div>
+                </>
               )}
               {SETTINGS_PARTS.some((s) => s.plugin && s.automations !== false && s.id === x.id) && (
                 <>

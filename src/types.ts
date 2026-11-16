@@ -288,6 +288,7 @@ export interface SettingDef {
   type: SettingType;
   default: number | boolean | string | readonly string[];
   options?: readonly { value: string; label: string; off?: string }[]; // select only; off: why it can't be picked yet
+  choices?: readonly { value: string; label: string }[]; // a string's dropdown, filled by the desk (your agent's models); still any value its pattern takes
   min?: number;
   max?: number;
   unit?: string; // a number's, shown after its field ("days")

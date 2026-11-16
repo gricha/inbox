@@ -156,6 +156,7 @@ import { fixAskText, readOwnIssueSkill, type FetchIssueError, type IssueRun, typ
 import { Conversations, talked } from "./conversation.ts";
 import { checksView } from "./checks.ts";
 import { AGENT, askLine, Coordinator, MERGING, REBASE, wakeFor } from "./coordinator.ts";
+import { modelsOf, type AgentModels } from "./models.ts";
 import {
   checkSetting,
   effective,
@@ -1198,13 +1199,31 @@ export class Desk {
     });
   }
 
+  // Your agent's models and efforts for Settings' dropdowns, read once per agent in the background; until then, none.
+  models = new Map<string, AgentModels | "reading">();
+  agentModels(): AgentModels | undefined {
+    const harness = this.settings["agent.harness"];
+    const had = this.models.get(harness);
+    if (had === undefined && !this.stopped) {
+      this.models.set(harness, "reading");
+      this.runner.fork(
+        "models",
+        Effect.map(modelsOf(harness), (m) => {
+          this.models.set(harness, m);
+          this.changed();
+        }),
+      );
+    }
+    return had === "reading" ? undefined : had;
+  }
+
   getSettings(): SettingsView {
     const ctx = this.ctx;
     const spaces = this.loaded?.config.spaces ?? [];
     return {
       path: this.settingsPath,
       sections: SECTIONS,
-      defs: agentDefs(this.settings["agent.harness"]),
+      defs: agentDefs(this.settings["agent.harness"], this.agentModels()),
       values: masked(this.settings),
       overridden: Object.keys(this.settingsOverrides),
       errors: this.settingsErrors,

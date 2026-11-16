@@ -481,9 +481,9 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 - Settings are rows on one sheet: label and help on the left, the control on the right edge. A number has its unit after it ("[14] days"). A prompt or path takes the row's width. On a narrow sheet controls go under their words; switches stay beside them.
 - Clicking a label flips its switch.
 - Under the control: "Saved" (green, briefly), "Not saved: …" (red, your input kept), or **Reset to default** on a changed setting (the default in its tooltip).
-- Tuning folds behind one quiet row at the sheet's end, **More <part> settings**, closed on open.
+- Tuning sits at the sheet's end in its own section, **More <part> settings**, always open.
 - A row that would do nothing here isn't drawn (`SHOWN`); one that waits on another is greyed (`DISABLED`). `desk settings` and settings.json still set every one.
-- When settings.json has a problem, a notice above the part names each setting by label and key, and opens More if needed.
+- When settings.json has a problem, a notice above the part names each setting by label and key.
 - Old links still land: `#/settings/automations`, `notify` → Inbox and notifications, `review` and `handoff` → GitHub, `#/rules` → Searches and rules, `policy` (Your policy, gone) → Agent.
 - **Views**: Searches and rules (`#/settings/rules`) and each automation (`#/settings/automations/<id>`; a plugin's `github.<id>`) open as views. Their head is the way back to their part ("‹ GitHub", "‹ Automations"), and so is Esc once you've left the editor. Coming back puts focus on what opened it.
 - Esc on a part goes to the Inbox.
@@ -507,7 +507,7 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 - **Score the Inbox with Claude** (`agent.score`).
 - **Run your agent**. Off stops it, nothing wakes it, and no Ask your agent shows.
 - **Let your agent run without asking** (on by default; only while Run your agent is on): bypass permissions mode (its deny list still holds). Changing it restarts it.
-- **Your agent's model** and **Your agent's effort** (only while Run your agent is on; no effort on OpenCode): a name and a level as your agent's own command takes them, empty for its own default. On Claude Code a change starts a copy of the session that runs with it. The chat's menus set the same.
+- **Your agent's model** and **Your agent's effort** (only while Run your agent is on; no effort on OpenCode): dropdowns of what the picked agent takes (Claude Code's aliases and levels; Codex's models cache; `opencode models`), Default first for its own default; a value set by hand stays listed. Where nothing can be read, a text field. On Claude Code a change starts a copy of the session that runs with it. The chat's menus set the same.
 - **More Agent settings**: **Let Claude sort up to** so many items an hour, **Decision model key** (an OpenRouter key, saved only from this page in `secrets.json`; shows dots once saved; pasting replaces it; Reset to default clears it; its help says what goes to OpenRouter) and **Decision model** (its id).
 
 ### Automations

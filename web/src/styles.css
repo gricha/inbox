@@ -1225,7 +1225,7 @@ html::-webkit-scrollbar-corner,
 /* Settings is a short page of rows; its Searches and rules view is wider, so the editor and its rail fit side by side. The
    page head's name or back link follows it. */
 .col:has(.settings:not([hidden])) {
-  --col-w: 760px;
+  --col-w: 980px;
 }
 
 .col:has(.rules-wrap:not([hidden])) {
@@ -5070,7 +5070,7 @@ html::-webkit-scrollbar-corner,
   font-size: 13px;
 }
 
-/* More GitHub settings: a quiet row of its own, its rows under it in the same sheet. */
+/* A quiet row of its own at a sheet's end: New automation, New criterion. */
 .s-more {
   padding: 10px 16px;
 }
@@ -5083,16 +5083,6 @@ html::-webkit-scrollbar-corner,
   text-decoration: none;
 }
 
-.s-more .i {
-  transition: transform 0.15s;
-}
-
-.s-more [aria-expanded="true"] .i {
-  transform: rotate(180deg);
-}
-
-/* A row that opens a view: its name in ink like a label, only its words a link; its Edit, an automation's Run now and New
-   automation in the accent's ink. */
 .s-name {
   justify-self: start;
 }
