@@ -113,7 +113,9 @@ test("picking a ready agent sets it, connects it like Settings' Connect, and the
     const s = (await res.json()) as { needed: boolean; agent: string };
     assert.deepEqual([s.needed, s.agent], [false, "codex"]);
     assert.equal(t.desk.settings["agent.harness"], "codex");
-    assert.match(readFileSync(join(home, "codex-args"), "utf8"), /^mcp\nadd\ninbox\n--url\nhttp:\/\/localhost:47823\/mcp\n$/);
+    // Settings' model list asks `codex debug models` too, at any point
+    const args = readFileSync(join(home, "codex-args"), "utf8").replace("debug\nmodels\n", "");
+    assert.match(args, /^mcp\nadd\ninbox\n--url\nhttp:\/\/localhost:47823\/mcp\n$/);
     assert.ok(existsSync(join(home, ".agents", "skills", "inbox", "SKILL.md")));
   } finally {
     t.desk.stop();

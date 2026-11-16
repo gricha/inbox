@@ -268,7 +268,7 @@ async function coordinating(c: TestContext, settings: Record<string, unknown> = 
   fs.mkdirSync(dir, { recursive: true });
   if (trust) fake.trust(dir);
   // Only the coordinator's calls: a tool-less call reads its prompt from stdin.
-  const turns = () => fake.calls().filter((x) => x.args.at(-1) !== "-");
+  const turns = () => fake.calls().filter((x) => x.args.at(-1) !== "-" && x.args[0] !== "debug");
   const view = () => runSync(t.desk.inflight()).coordinator;
   return { ...t, fake, dir, turns, view };
 }
