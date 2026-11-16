@@ -291,7 +291,7 @@ A ref is `owner/repo#123`, `repo#123` when unique, a GitHub URL, or an `inbox://
 
 ## Sentry (`src/sentry.ts`)
 
-- `desk serve` starts it before the server's modules load. `DESK_SENTRY=0` turns it off. The packaged app doesn't ship the SDK, and the app's in-process desk doesn't start it.
+- `desk serve` starts it before the server's modules load. `DESK_SENTRY=0` turns it off. The packaged app doesn't ship the SDK, and the app's own desk doesn't start it.
 - It sends request spans, log lines, 5xx responses, and `report()` from catches that would otherwise only log (sync, the judge, AI reviews, the coordinator, automations…), tagged with `what` and the item.
 - A refusal the desk chose (a `DeskHttpError` under 500, or a 503 while starting) isn't an issue.
 - Bodies, MCP arguments and results, and IPs stay out. Log lines carry what they say (an agent's question, a hand-back's reason).
@@ -309,10 +309,10 @@ What the pages do: [ui.md](ui.md). How they look: [visual.md](visual.md).
 `electron/main.ts` is a thin shell around the desk:
 
 - fixes PATH for GUI launches;
-- attaches to a desk already on the port, or starts one;
+- attaches to a desk already on the port, or starts its own in an Electron utility process (`electron/desk-host.ts`), so nothing the desk does synchronously holds up the window, tray or app switching. The two talk over its parent port (`ToHost`, `FromHost` in `electron/lib.ts`): the desk's log lines go to the app's `desk.log`, its notifications show from the app, and an update it asks for is installed by the app;
 - opens a window on it, with a tray count, a global hotkey, notifications, "Open at login" and the `inbox://` protocol.
 
-Pure logic is in `electron/lib.ts` (tested in `test/electron.test.ts`). `electron/preload.cjs` exposes `window.desktop` (`DesktopBridge` in `src/types.ts`). A desk outside the app's process sends notifications to the app through `/api/events?notify=1`.
+Pure logic is in `electron/lib.ts` (tested in `test/electron.test.ts`). `electron/preload.cjs` exposes `window.desktop` (`DesktopBridge` in `src/types.ts`). A desk the app didn't start sends notifications to the app through `/api/events?notify=1`.
 
 The app keeps `window.json` and `theme.json` in Electron's userData (`~/Library/Application Support/Inbox`, `~/.config/Inbox`, `%APPDATA%\Inbox`; `<home>/app` with `DESK_HOME` set). On first start it copies them from Review Desk's folder if it has none (`carryOver`). "Open at login" lives in settings.json (`app.open_at_login`).
 
@@ -320,7 +320,7 @@ Packaging: electron-builder, config in `package.json`, output in `release/`. App
 
 ### Run from a checkout
 
-With `app.source` (or `DESK_SOURCE`) set, the app runs the desk from that checkout instead of in-process. `npm run app:dev` does this on the repo itself. Which mode: `deskPlan` in `electron/lib.ts`.
+With `app.source` (or `DESK_SOURCE`) set, the app runs the desk from that checkout instead of its own. `npm run app:dev` does this on the repo itself. Which mode: `deskPlan` in `electron/lib.ts`.
 
 - `electron/source.ts` starts two children in their own process groups, logging to `<home>/live.log`:
   - `node --watch --watch-path=src src/cli.ts serve`: a `src/` change restarts the desk (it stops its agent processes first, `src/children.ts`).
@@ -328,7 +328,7 @@ With `app.source` (or `DESK_SOURCE`) set, the app runs the desk from that checko
 - An `electron/` change needs a rebuilt app.
 - The desk passes the Vite server through (`fromUi()`, `proxyUpgrades()` in `src/server.ts`), so `http://localhost:47823` always serves the checkout's current UI. While Vite is down it answers 503 with a page that retries every 2 s.
 - The window keeps its page across a desk restart and reconnects.
-- A desk that exits waits for the next change under `src/` or an `npm install`. The window shows its last lines. The app never falls back to an in-process desk.
+- A desk that exits waits for the next change under `src/` or an `npm install`. The window shows its last lines. The app never falls back to its own desk.
 - **Node**: the first `node` 22.18+ on the login shell's PATH (`zsh -ilc`, retried for up to 20 s on a slow first shell), else where nvm, Volta, mise, asdf or fnm keep it (`fallbackDirs`).
 - Missing node, `node_modules` or a checkout: the window says what's missing and the app looks again every 15 s.
 - Quitting stops both children. Every launch first stops what a crashed app left (pids in `<home>/live.json`). Changing `app.source` relaunches the app.

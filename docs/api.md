@@ -749,7 +749,7 @@ interface AutomationView extends Automation {
 `GET /api/events` is a server-sent events stream:
 
 - `event: update`, `data: {"rev": n}`: once on connect, then after any change (a sync, a triage action or undo, a config or settings save, an AI review or judge call starting or finishing, an approval, a draft marked ready, a note, a hand-back, a hand-off or Back to desk). Refetch what you show.
-- `event: notify`, `data: {"title", "body"}`: only with `?notify=1`. The desktop app asks for these when it attaches to a desk it doesn't run in-process; while one listens, the desk shows no notification of its own.
+- `event: notify`, `data: {"title", "body"}`: only with `?notify=1`. The desktop app asks for these when it attaches to a desk it didn't start; while one listens, the desk shows no notification of its own.
 - `event: omarchy`: the Omarchy theme changed (the same value as `GET /api/omarchy`).
 - `: ping` comment lines every 25 s keep the connection open.
 
