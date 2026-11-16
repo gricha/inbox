@@ -9,15 +9,16 @@ import { run } from "./helpers/run.ts";
 
 const posix = { skip: process.platform === "win32" };
 
-test("Codex's models are the ones its cache lists that reason, in its order; its efforts are the levels any takes", (c) => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-codex-models-"));
-  c.after(() => {
-    fs.rmSync(home, { recursive: true, force: true });
-  });
-  const levels = (...e: string[]) => e.map((effort) => ({ effort, description: "" }));
-  fs.writeFileSync(
-    path.join(home, "models_cache.json"),
-    JSON.stringify({
+test(
+  "Codex's models are what `codex debug models` lists and reasons with, in its order; its efforts are the levels any takes",
+  posix,
+  async (c) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-codex-models-"));
+    c.after(() => {
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+    const levels = (...e: string[]) => e.map((effort) => ({ effort, description: "" }));
+    const catalog = {
       models: [
         {
           slug: "gpt-6-mini",
@@ -26,26 +27,30 @@ test("Codex's models are the ones its cache lists that reason, in its order; its
           priority: 3,
           supported_reasoning_levels: levels("low", "medium"),
         },
-        { slug: "gpt-6", display_name: "GPT-6", visibility: "list", priority: 1, supported_reasoning_levels: levels("medium", "xhigh") },
+        { slug: "gpt-6", display_name: "GPT-6", visibility: "list", priority: 1, supported_reasoning_levels: levels("medium", "ultra") },
         { slug: "image-1", display_name: "Image", visibility: "list", priority: 2, supported_reasoning_levels: [] },
         { slug: "internal", display_name: "Hidden", visibility: "hide", priority: 0, supported_reasoning_levels: levels("high") },
       ],
-    }),
-  );
-  const m = codexModels({ CODEX_HOME: home });
-  assert.deepEqual(
-    m.models.map((x) => [x.value, x.label]),
-    [
-      ["gpt-6", "GPT-6"],
-      ["gpt-6-mini", "GPT-6 mini"],
-    ],
-  );
-  assert.deepEqual(
-    m.efforts.map((x) => x.value),
-    ["low", "medium", "xhigh"],
-  );
-  assert.deepEqual(codexModels({ CODEX_HOME: path.join(home, "none") }), { models: [], efforts: [] }, "no cache: nothing to offer");
-});
+    };
+    fs.writeFileSync(path.join(dir, "catalog.json"), JSON.stringify(catalog));
+    const bin = path.join(dir, "codex");
+    fs.writeFileSync(bin, `#!/bin/sh\n[ "$1 $2" = "debug models" ] && cat "${path.join(dir, "catalog.json")}"\n`);
+    fs.chmodSync(bin, 0o755);
+    const m = await run(codexModels(bin));
+    assert.deepEqual(
+      m.models.map((x) => [x.value, x.label]),
+      [
+        ["gpt-6", "GPT-6"],
+        ["gpt-6-mini", "GPT-6 mini"],
+      ],
+    );
+    assert.deepEqual(
+      m.efforts.map((x) => x.value),
+      ["low", "medium", "ultra"],
+    );
+    assert.deepEqual(await run(codexModels(path.join(dir, "missing"))), { models: [], efforts: [] }, "not installed: nothing to offer");
+  },
+);
 
 test("OpenCode's models are what `opencode models` lists, one provider/model a line; it takes no effort", posix, async (c) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-opencode-models-"));

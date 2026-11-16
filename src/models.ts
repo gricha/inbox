@@ -1,11 +1,8 @@
 // The models and effort levels your chosen agent takes, for Settings' dropdowns. Each agent's own: Claude Code names
-// aliases in its --model help, Codex keeps the models your account can use in its models cache, OpenCode lists them with
-// `opencode models`. What can't be read is an empty list: the window then offers only your agent's default and what's set.
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
+// aliases in its --model help, Codex lists its catalog with `codex debug models`, OpenCode with `opencode models`.
+// What can't be read is an empty list: the window then offers only your agent's default and what's set.
 import { Effect, Result } from "effect";
-import { claudeSpawn, opencodeCommand, opencodeMissing, runCommand } from "./review.ts";
+import { claudeSpawn, codexCommand, codexMissing, opencodeCommand, opencodeMissing, runCommand } from "./review.ts";
 import { field, isRecord, str } from "./narrow.ts";
 
 export interface Choice {
@@ -19,7 +16,15 @@ export interface AgentModels {
 }
 
 const choice = (value: string, label = value): Choice => ({ value, label });
-const LEVEL: Record<string, string> = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max" };
+const LEVEL: Record<string, string> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Max",
+  ultra: "Ultra",
+};
 const levels = (names: string[]) => names.map((n) => choice(n, LEVEL[n] ?? n));
 
 // Claude Code lists no models; its --model takes these aliases for the latest of each, and --effort these levels.
@@ -28,11 +33,10 @@ export const CLAUDE_MODELS: AgentModels = {
   efforts: levels(["low", "medium", "high", "xhigh", "max"]),
 };
 
-// Codex's models cache: the ones it lists, that reason (the rest make images or audio), in its own order; the efforts
-// are the levels any of them takes.
-export function codexModels(env: NodeJS.ProcessEnv = process.env): AgentModels {
-  const file = path.join(env.CODEX_HOME?.trim() ? env.CODEX_HOME : path.join(os.homedir(), ".codex"), "models_cache.json");
-  const read = Result.try({ try: (): unknown => JSON.parse(fs.readFileSync(file, "utf8")), catch: () => null });
+// Codex's catalog (`codex debug models`): the models it lists, that reason (the rest make images or audio), in its own
+// order; the efforts are the levels any of them takes.
+export function codexCatalog(json: string): AgentModels {
+  const read = Result.try({ try: (): unknown => JSON.parse(json), catch: () => null });
   const listed = field(Result.getOrNull(read), "models");
   const rows = (Array.isArray(listed) ? listed : []).filter(isRecord).flatMap((m) => {
     const slug = str(m.slug);
@@ -45,6 +49,12 @@ export function codexModels(env: NodeJS.ProcessEnv = process.env): AgentModels {
   const all = new Set(rows.flatMap((r) => r.efforts));
   return { models: rows.map((r) => r.model), efforts: levels(Object.keys(LEVEL).filter((l) => all.has(l))) };
 }
+
+export const codexModels = (command = codexCommand()): Effect.Effect<AgentModels> =>
+  Effect.gen(function* () {
+    const spawnAs = yield* claudeSpawn(command, ["debug", "models"]);
+    return codexCatalog(yield* runCommand(spawnAs, { timeout: 20_000, missing: codexMissing(command) }));
+  }).pipe(Effect.orElseSucceed((): AgentModels => ({ models: [], efforts: [] })));
 
 // `opencode models`: one provider/model a line. OpenCode takes no effort.
 export const opencodeModels = (command = opencodeCommand()): Effect.Effect<AgentModels> =>
@@ -59,4 +69,4 @@ export const opencodeModels = (command = opencodeCommand()): Effect.Effect<Agent
   }).pipe(Effect.orElseSucceed((): AgentModels => ({ models: [], efforts: [] })));
 
 export const modelsOf = (harness: string): Effect.Effect<AgentModels> =>
-  harness === "codex" ? Effect.sync(() => codexModels()) : harness === "opencode" ? opencodeModels() : Effect.succeed(CLAUDE_MODELS);
+  harness === "codex" ? codexModels() : harness === "opencode" ? opencodeModels() : Effect.succeed(CLAUDE_MODELS);

@@ -507,7 +507,7 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 - **Score the Inbox with Claude** (`agent.score`).
 - **Run your agent**. Off stops it, nothing wakes it, and no Ask your agent shows.
 - **Let your agent run without asking** (on by default; only while Run your agent is on): bypass permissions mode (its deny list still holds). Changing it restarts it.
-- **Your agent's model** and **Your agent's effort** (only while Run your agent is on; no effort on OpenCode): dropdowns of what the picked agent takes (Claude Code's aliases and levels; Codex's models cache; `opencode models`), Default first for its own default; a value set by hand stays listed. Where nothing can be read, a text field. On Claude Code a change starts a copy of the session that runs with it. The chat's menus set the same.
+- **Your agent's model** and **Your agent's effort** (only while Run your agent is on; no effort on OpenCode): dropdowns of what the picked agent takes (Claude Code's aliases and levels; `codex debug models`; `opencode models`), Default first for its own default; a value set by hand stays listed. Where nothing can be read, a text field. On Claude Code a change starts a copy of the session that runs with it. The chat's menus set the same.
 - **More Agent settings**: **Let Claude sort up to** so many items an hour, **Decision model key** (an OpenRouter key, saved only from this page in `secrets.json`; shows dots once saved; pasting replaces it; Reset to default clears it; its help says what goes to OpenRouter) and **Decision model** (its id).
 
 ### Automations

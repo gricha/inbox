@@ -1199,22 +1199,24 @@ export class Desk {
     });
   }
 
-  // Your agent's models and efforts for Settings' dropdowns, read once per agent in the background; until then, none.
-  models = new Map<string, AgentModels | "reading">();
+  // Your agent's models and efforts for Settings' dropdowns, read in the background and again after a few minutes
+  // (an agent's update brings new ones); until the first read, none.
+  models = new Map<string, { at: number; reading: boolean; got?: AgentModels }>();
   agentModels(): AgentModels | undefined {
     const harness = this.settings["agent.harness"];
     const had = this.models.get(harness);
-    if (had === undefined && !this.stopped) {
-      this.models.set(harness, "reading");
+    const now = this.now().getTime();
+    if (!this.stopped && !had?.reading && (!had || now - had.at > 5 * 60_000)) {
+      this.models.set(harness, { at: now, reading: true, ...(had?.got && { got: had.got }) });
       this.runner.fork(
         "models",
         Effect.map(modelsOf(harness), (m) => {
-          this.models.set(harness, m);
-          this.changed();
+          this.models.set(harness, { at: this.now().getTime(), reading: false, got: m });
+          if (JSON.stringify(m) !== JSON.stringify(had?.got)) this.changed();
         }),
       );
     }
-    return had === "reading" ? undefined : had;
+    return had?.got;
   }
 
   getSettings(): SettingsView {
