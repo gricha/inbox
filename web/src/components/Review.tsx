@@ -236,6 +236,9 @@ export function Review({
     keepComment(id, text);
   };
   const [shut, setShut] = useState<ReadonlySet<string>>(new Set()); // files whose diff you folded, by path
+  const [viewed, setViewed] = useState<ReadonlySet<string>>(new Set()); // the marks of the hunks you've viewed (ReviewView.viewed)
+  const marking = useRef(new Map<string, boolean>()); // clicks on their way to the desk: a refresh landing first doesn't undo them
+  const [peek, setPeek] = useState<ReadonlySet<string>>(new Set()); // sections you viewed and opened again, by key
   const [shutDirs, setShutDirs] = useState<ReadonlySet<string>>(new Set()); // folders you folded in the sidebar's files
   const [draft, setDraft] = useState<Draft | null>(() => restored(id, 1));
   const [sent, setSent] = useState<Sent[]>([]);
@@ -305,6 +308,7 @@ export function Review({
             tabbed.current = true;
             setView(r);
             setRead(r.item.head_oid);
+            setViewed(withMarks(new Set(r.viewed), marking.current));
           },
           // Keep what's on screen if a refresh fails.
           onFailure: (e) => {
@@ -350,8 +354,11 @@ export function Review({
     return { list: shown, rest: shown.length, steps: w.steps, left: after.filter((y) => !flagged.includes(y)), beyond: w.beyond };
   }, [order, guiding, bugs]);
   const leftFiles = new Set(left.map((y) => y.path)).size;
-  // Guided, a test file stays folded until you open it.
-  const isShut = (path: string) => shut.has(path) || (guiding && isTestPath(path) && !testsOpen.has(path));
+  const isViewed = (x: Section) => x.marks.every((m) => viewed.has(m));
+  // Guided, a test file stays folded until you open it; one you've viewed, until you open it again.
+  const isShut = (x: Section) =>
+    shut.has(x.path) || (guiding && isTestPath(x.path) && !testsOpen.has(x.path)) || (isViewed(x) && !peek.has(x.key));
+  const seen = new Set(guiding ? [] : list.filter((x) => isViewed(x)).map((x) => x.path)); // Traditional's files you've viewed
   // The sidebar's rows in the guided review: its steps.
   const noted = (at: number, end: number) => list.slice(at, end).some((y) => y.notes.length > 0);
   const stops = steps.map((st, k) => {
@@ -483,19 +490,47 @@ export function Review({
     goTo(steps[k]!.at, `#rv-step-${k}`);
   }
 
-  function toggleFold(path: string, at: number) {
+  function toggleFold(x: Section, at: number) {
     holdKeys(false); // you've left the box for the fold
-    if (guiding && isTestPath(path) && !testsOpen.has(path)) {
-      setTestsOpen(new Set([...testsOpen, path]));
-      setShut(new Set([...shut].filter((p) => p !== path)));
-      setStay(at);
-      return;
-    }
-    const next = new Set(shut);
-    if (next.has(path)) next.delete(path);
-    else next.add(path);
-    setShut(next);
+    if (isShut(x)) unfold(x, isViewed(x));
+    else if (isViewed(x)) setPeek(without(peek, x.key));
+    else setShut(new Set([...shut, x.path]));
     setStay(at);
+  }
+
+  function unfold(x: Section, viewedNow: boolean) {
+    setShut((cur) => without(cur, x.path));
+    if (guiding && isTestPath(x.path)) setTestsOpen((cur) => new Set([...cur, x.path]));
+    if (viewedNow) setPeek((cur) => new Set([...cur, x.key]));
+  }
+
+  // Viewed folds it, as GitHub's checkbox does, and unviewed opens it. A refusal puts it back as it was.
+  function markViewed(x: Section, at: number, on: boolean) {
+    holdKeys(false);
+    const change = new Map(x.marks.map((m) => [m, on]));
+    for (const m of x.marks) marking.current.set(m, on);
+    setViewed((cur) => withMarks(cur, change));
+    setPeek(without(peek, x.key));
+    if (!on) unfold(x, false);
+    setStay(at);
+    runUi(
+      api.viewed(id, x.marks, on).pipe(
+        Effect.match({
+          onSuccess: () => {},
+          onFailure: (e) => {
+            if (!alive.current) return;
+            const back = x.marks.filter((m) => marking.current.get(m) === on); // not those you've clicked again since
+            setViewed((cur) => withMarks(cur, new Map(back.map((m) => [m, !on]))));
+            flash(`Couldn't mark ${x.path} ${on ? "viewed" : "not viewed"}: ${e.message}`, true);
+          },
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            for (const m of x.marks) if (marking.current.get(m) === on) marking.current.delete(m);
+          }),
+        ),
+      ),
+    );
   }
 
   // To the words you haven't sent, opening their file (or the rest, which goTo opens) if it's folded, with the cursor in them.
@@ -503,9 +538,10 @@ export function Review({
     if (!v) return;
     setTalking(false);
     const i = drawnAt(d, list, v.conversation, v.diff_head);
-    const path = list[i]?.path;
-    if (path && shut.has(path)) setShut((cur) => new Set([...cur].filter((p) => p !== path)));
-    if (path && guiding && isTestPath(path)) setTestsOpen((cur) => new Set([...cur, path]));
+    const x = list[i];
+    if (x && shut.has(x.path)) setShut((cur) => without(cur, x.path));
+    if (x && guiding && isTestPath(x.path)) setTestsOpen((cur) => new Set([...cur, x.path]));
+    if (x && isViewed(x)) setPeek((cur) => new Set([...cur, x.key]));
     if (i >= 0) goTo(i, ".rv-inline", "center");
     else document.querySelector(".rv-orphan")?.scrollIntoView({ block: "center" });
     setFocusAsk((f) => f + 1);
@@ -794,9 +830,13 @@ export function Review({
       order={notes}
       bugs={bugs}
       now={now}
-      shut={isShut(x.path)}
+      shut={isShut(x)}
       onFold={() => {
-        toggleFold(x.path, i);
+        toggleFold(x, i);
+      }}
+      viewed={isViewed(x)}
+      onViewed={(on) => {
+        markViewed(x, i, on);
       }}
       conversation={view.conversation}
       canComment={open}
@@ -1265,6 +1305,7 @@ export function Review({
                   <span>
                     {files.length} {files.length === 1 ? "file" : "files"}
                   </span>
+                  {seen.size > 0 && <span className="rv-lvl">{seen.size} viewed</span>}
                 </h2>
                 {/* The guide's timeline, nested: a folder's files hang under it, the file you're in marked as you scroll. */}
                 <FileTree
@@ -1272,6 +1313,7 @@ export function Review({
                   list={list}
                   on={onPath}
                   shut={shutDirs}
+                  seen={seen}
                   onFold={(d) => {
                     setShutDirs((ds) => new Set(ds.has(d) ? [...ds].filter((x) => x !== d) : [...ds, d]));
                   }}
@@ -1286,6 +1328,16 @@ export function Review({
   );
 }
 
+const without = (set: ReadonlySet<string>, x: string): ReadonlySet<string> => (set.has(x) ? new Set([...set].filter((y) => y !== x)) : set);
+// The marks viewed once these changes land: true adds one, false takes it out.
+const withMarks = (marks: ReadonlySet<string>, change: ReadonlyMap<string, boolean>): ReadonlySet<string> => {
+  const next = new Set(marks);
+  for (const [m, on] of change) {
+    if (on) next.add(m);
+    else next.delete(m);
+  }
+  return next;
+};
 // Whether any of these folders holds the file.
 const hasInside = (dirs: ReadonlySet<string>, path: string) => [...dirs].some((d) => path.startsWith(`${d}/`));
 
@@ -1296,6 +1348,7 @@ function FileTree({
   list,
   on,
   shut,
+  seen,
   onFold,
   onGo,
 }: {
@@ -1303,6 +1356,7 @@ function FileTree({
   list: Section[];
   on: string | null; // the file you're in
   shut: ReadonlySet<string>; // folded folders, by path
+  seen: ReadonlySet<string>; // files you've viewed, by path
   onFold: (dir: string) => void;
   onGo: (i: number) => void;
 }) {
@@ -1327,19 +1381,20 @@ function FileTree({
                 <span className="rv-step-name">{n.name}</span>
                 {!open && <span className="rv-lvl">{countFiles(n)}</span>}
               </button>
-              {open && <FileTree nodes={n.kids} list={list} on={on} shut={shut} onFold={onFold} onGo={onGo} />}
+              {open && <FileTree nodes={n.kids} list={list} on={on} shut={shut} seen={seen} onFold={onFold} onGo={onGo} />}
             </li>
           );
         }
         const i = list.findIndex((y) => y.path === n.path);
         const level = list[i]?.level;
+        const viewed = seen.has(n.path);
         return (
           <li key={n.path}>
             <button
               type="button"
-              className={cls("rv-step-row", on === n.path && "on")}
+              className={cls("rv-step-row", on === n.path && "on", viewed && "seen")}
               aria-current={on === n.path ? "location" : undefined}
-              title={n.path}
+              title={viewed ? `${n.path} · viewed` : n.path}
               onClick={() => {
                 onGo(i);
               }}
@@ -1348,6 +1403,11 @@ function FileTree({
               <span className="rv-step-name">{n.name}</span>
               {list.some((y) => y.path === n.path && y.notes.length > 0) && <span className="rv-nn" title="AI notes" />}
               {level && <span className="rv-lvl">{LEVEL[level]}</span>}
+              {viewed && (
+                <span className="rv-lvl" aria-hidden="true">
+                  ✓
+                </span>
+              )}
             </button>
           </li>
         );
@@ -2347,6 +2407,8 @@ function SectionView({
   now,
   shut,
   onFold,
+  viewed,
+  onViewed,
   conversation,
   canComment,
   draft,
@@ -2371,6 +2433,8 @@ function SectionView({
   now: number;
   shut: boolean; // you folded this file
   onFold: () => void;
+  viewed: boolean; // you marked every hunk of it viewed
+  onViewed: (on: boolean) => void;
   conversation: Convo[];
   canComment: boolean;
   draft: Draft | null;
@@ -2545,6 +2609,19 @@ function SectionView({
           </span>
         )}
         {x.hunks.length > 0 && <span className="rv-delta">{`+${adds} −${dels}`}</span>}
+        <label
+          className="rv-viewed"
+          title={viewed ? "Viewed: folded until a push changes it" : "Mark as viewed: folds it until a push changes it"}
+        >
+          <input
+            type="checkbox"
+            checked={viewed}
+            onChange={(e) => {
+              onViewed(e.target.checked);
+            }}
+          />
+          Viewed
+        </label>
       </h3>
       {!shut && mine.filter((n) => !n.inline).map((n) => <Note key={n.index} index={n.index} body={n.note.body} bug={n.index < bugs} />)}
       {!shut && fileDiff && (

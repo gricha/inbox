@@ -26,6 +26,7 @@ export interface Section {
   why: string | null; // Claude's few words, why it wasn't read, or why the desk folded the file
   hunks: ReviewHunk[]; // none for a file with no text diff
   notes: number[]; // indices into ai.notes, in reading order
+  marks: string[]; // what marking it viewed marks: its hunks', or a file's own without any
 }
 
 // A file's neighbouring hunks at one level and for one reason, as one section.
@@ -36,7 +37,9 @@ function grouped(hunks: ReviewHunk[], list: Section[] = []): Section[] {
     if (last?.path === h.path && last.level === h.level && last.why === h.why) {
       last.hunks.push(h);
       last.notes.push(...h.notes);
-    } else list.push({ key: h.id, path: h.path, file: h.file, level: h.level, why: h.why, hunks: [h], notes: [...h.notes] });
+      last.marks.push(h.mark);
+    } else
+      list.push({ key: h.id, path: h.path, file: h.file, level: h.level, why: h.why, hunks: [h], notes: [...h.notes], marks: [h.mark] });
   }
   return list;
 }
@@ -50,6 +53,7 @@ const restOf = (o: ReviewOrder): Section[] =>
     why: r.why,
     hunks: r.hunks,
     notes: [...r.notes, ...r.hunks.flatMap((h) => h.notes)],
+    marks: r.hunks.length ? r.hunks.map((h) => h.mark) : [r.mark],
   }));
 
 // The desk's reading order as sections: ranked, unread, skipped, then from `rest` on, the files the desk folds away.
@@ -67,7 +71,8 @@ export function traditional(o: ReviewOrder): { list: Section[]; rest: number } {
     .toSorted(([a], [b]) => a - b)
     .map(([file, hs]): Section => {
       const hunks = hs.toSorted((x, y) => Number(x.id.slice(1)) - Number(y.id.slice(1)));
-      return { key: `file:${file}`, path: hunks[0]!.path, file, level: null, why: null, hunks, notes: hunks.flatMap((h) => h.notes) };
+      const notes = hunks.flatMap((h) => h.notes);
+      return { key: `file:${file}`, path: hunks[0]!.path, file, level: null, why: null, hunks, notes, marks: hunks.map((h) => h.mark) };
     });
   return { list: [...list, ...restOf(o)], rest: list.length };
 }

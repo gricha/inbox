@@ -527,6 +527,16 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       return Effect.as(desk.reviewerAct(c.req.param("id"), b.login.trim(), act), { ok: true });
     }),
   );
+  // Hunks of a PR you marked viewed, or unmarked: { marks, viewed }. It writes nothing to GitHub, but a mark folds code away,
+  // so only your hands make one.
+  app.post("/api/review/:id{.+}/viewed", (c) =>
+    write(c, "mark what you've viewed from the PR's review in the desk's window", (b) => {
+      const marks = stringsOf(b.marks);
+      if (!marks?.length || marks.length > 5000 || marks.some((m) => !m || m.length > 64) || typeof b.viewed !== "boolean")
+        return bad("need { marks: the hunks' marks, viewed: true or false }");
+      return Effect.as(desk.markViewed(c.req.param("id"), marks, b.viewed), { ok: true });
+    }),
+  );
   // The More menu's GitHub writes (close, draft, ready, merge, reopen, request changes), from the desk's own window only.
   app.post("/api/github", (c) =>
     write(c, "GitHub actions are yours, from the desk's window", (b) => {

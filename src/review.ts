@@ -1,7 +1,7 @@
 // A PR's review: its changed files from GitHub (read-only `gh api`), and the AI review your own agent (Claude Code, Codex or OpenCode)
 // writes from them. The agent gets no tools, no MCP and an empty working directory: PR text can sway what it writes but can't act.
 import { spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -374,7 +374,7 @@ export const fetchPr = Effect.fn("fetchPr")(function* (item: Item, since?: strin
   const repo = `repos/${owner}/${name}`;
   const pr = `${repo}/pulls/${item.number}`;
   const gh = (args: string[]) => runCommand({ file: "gh", args, shell: false }, { timeout: 60_000, missing: GH_MISSING });
-  const fields = "{filename, previous_filename, status, additions, deletions, patch, contents_url}";
+  const fields = "{filename, previous_filename, status, additions, deletions, patch, sha, contents_url}";
   const [files, body, delta] = yield* Effect.all(
     [
       gh(["api", "--paginate", `${pr}/files?per_page=100`, "--jq", `.[] | ${fields}`]),
@@ -422,7 +422,7 @@ export function parseFiles(ndjson: string): ReviewFile[] {
     .filter((l) => l.trim())
     .map((l) => {
       const f: unknown = JSON.parse(l);
-      return {
+      const out: ReviewFile = {
         path: String(field(f, "filename")),
         previous_path: str(field(f, "previous_filename")) ?? null,
         status: STATUSES.find((s) => s === field(f, "status")) ?? "modified",
@@ -430,6 +430,9 @@ export function parseFiles(ndjson: string): ReviewFile[] {
         deletions: Number(field(f, "deletions")) || 0,
         patch: str(field(f, "patch")) ?? null,
       };
+      const sha = str(field(f, "sha"));
+      if (sha !== undefined) out.sha = sha;
+      return out;
     });
 }
 
@@ -467,6 +470,10 @@ export function numberPatch(patch: string): string {
 
 type Hunk = Omit<ReviewHunk, "level" | "rank" | "why" | "notes">;
 
+// A short fingerprint of what's marked viewed.
+const markOf = (parts: (string | null | undefined)[]): string =>
+  createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
+
 // h1, h2, … across the files in order: the ids the prompt shows, the ranking names and the review view orders by.
 function hunksOf(files: ReviewFile[]): Hunk[] {
   const out: Hunk[] = [];
@@ -476,14 +483,20 @@ function hunksOf(files: ReviewFile[]): Hunk[] {
       if (line.startsWith("@@")) parts.push([line]);
       else parts.at(-1)?.push(line);
     }
+    const twins = new Map<string, number>();
     for (const lines of parts) {
       const body = lines.slice(1);
+      // Its changed lines alone: a rebase moves the @@ numbers and can change the context around them.
+      const mark = markOf([f.path, ...body.filter((l) => /^[-+\\]/.test(l))]);
+      const twin = twins.get(mark) ?? 0;
+      twins.set(mark, twin + 1);
       out.push({
         id: `h${out.length + 1}`,
         path: f.path,
         file,
         header: lines[0]!,
         patch: lines.join("\n"),
+        mark: twin ? `${mark}.${twin}` : mark,
         additions: body.filter((l) => l.startsWith("+")).length,
         deletions: body.filter((l) => l.startsWith("-")).length,
       });
@@ -1636,7 +1649,8 @@ export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boo
         ? "renamed without changes"
         : "no text diff: binary or too large";
     const hs = folded.map((h) => view(h, "skip", null, null));
-    rest.push({ path: f.path, file: i, why, hunks: hs, notes: own.length ? [] : take(f.path, []) });
+    const mark = markOf([f.path, f.previous_path, f.status, f.sha]);
+    rest.push({ path: f.path, file: i, why, hunks: hs, notes: own.length ? [] : take(f.path, []), mark });
   }
   const guide = ranking && fresh?.guide?.steps.every((st) => st.hunks.every((h) => byId.get(h.id)?.path === h.path)) ? fresh.guide : null;
   return {

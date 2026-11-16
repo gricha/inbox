@@ -235,6 +235,9 @@ export const api = {
   // One reviewer of your open PR, from its review's sidebar: off it (asked, not reviewed yet), or asked again (reviewed).
   reviewer: (id: string, login: string, act: "remove" | "rerequest") =>
     call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/reviewer`, { login, act }),
+  // Hunks you've read, by their marks: folded on every open until a push rewrites one. Nothing goes to GitHub.
+  viewed: (id: string, marks: string[], viewed: boolean) =>
+    call<{ ok: true }>("POST", `/api/review/${encodeURIComponent(id)}/viewed`, { marks, viewed }),
   inquiry: (id: string) => call<InquiryView>("GET", `/api/inquiries/${encodeURIComponent(id)}`),
   // A session that needs you: Kick or Resume starts it again where it left off, Open follows its own link.
   kickSession: (id: string) => call<{ ok: true; args: string[] }>("POST", `/api/sessions/${encodeURIComponent(id)}/kick`),

@@ -715,6 +715,7 @@ test("the review reads in the desk's order: a file's hunks next to each other at
     file: path === "a.ts" ? 0 : 1,
     header: "@@ -1,3 +1,4 @@",
     patch: "@@ -1,3 +1,4 @@\n+x",
+    mark: `m-${id}`,
     additions: 1,
     deletions: 0,
     level,
@@ -731,7 +732,9 @@ test("the review reads in the desk's order: a file's hunks next to each other at
     ],
     unread: [hunk("h5", "b.ts", "unread", "its file was too long to read whole")],
     skipped: [hunk("h6", "b.ts", "skip", null)],
-    rest: [{ path: "a.lock", file: 0, why: "lockfile or generated", hunks: [hunk("h4", "a.lock", "skip", null)], notes: [] }],
+    rest: [
+      { path: "a.lock", file: 0, why: "lockfile or generated", hunks: [hunk("h4", "a.lock", "skip", null)], notes: [], mark: "m-a.lock" },
+    ],
     notes: [1, 0],
   };
   const { list, rest } = sections(ranked);
@@ -752,16 +755,21 @@ test("the review reads in the desk's order: a file's hunks next to each other at
     chunks: [hunk("h1", "a.ts", null, null, [0]), hunk("h2", "a.ts", null, null), hunk("h3", "b.ts", null, null)],
     unread: [],
     skipped: [],
-    rest: [{ path: "logo.png", file: 2, why: "no text diff: binary or too large", hunks: [], notes: [2] }],
+    rest: [{ path: "logo.png", file: 2, why: "no text diff: binary or too large", hunks: [], notes: [2], mark: "m-logo.png" }],
     notes: [0, 2],
   });
   assert.deepEqual(
-    plain.list.map((s) => [s.path, s.level, s.hunks.length, s.notes]),
+    plain.list.map((s) => [s.path, s.level, s.hunks.length, s.notes, s.marks]),
     [
-      ["a.ts", null, 2, [0]],
-      ["b.ts", null, 1, []],
-      ["logo.png", null, 0, [2]],
+      ["a.ts", null, 2, [0], ["m-h1", "m-h2"]],
+      ["b.ts", null, 1, [], ["m-h3"]],
+      ["logo.png", null, 0, [2], ["m-logo.png"]],
     ],
+    "marking a section viewed marks its hunks, or a file with none by its own mark",
+  );
+  assert.deepEqual(
+    list.map((s) => s.marks),
+    [["m-h3"], ["m-h1", "m-h2"], ["m-h5"], ["m-h6"], ["m-h4"]],
   );
 });
 
@@ -772,6 +780,7 @@ test("the walk-through is one list: each step's sections, then what no step cove
     file: path === "a.ts" ? 0 : 1,
     header: "@@ -1,3 +1,4 @@",
     patch: "@@ -1,3 +1,4 @@\n+x",
+    mark: `m-${id}`,
     additions: 1,
     deletions: 0,
     level,
@@ -791,7 +800,7 @@ test("the walk-through is one list: each step's sections, then what no step cove
     chunks: [h3, h1, h2, h6],
     unread: [h5],
     skipped: [],
-    rest: [{ path: "a.lock", file: 0, why: "lockfile or generated", hunks: [hunk("h4", "a.lock", "skip")], notes: [] }],
+    rest: [{ path: "a.lock", file: 0, why: "lockfile or generated", hunks: [hunk("h4", "a.lock", "skip")], notes: [], mark: "m-a.lock" }],
     notes: [],
     steps: [
       { title: "The type", body: "b", check: "c", hunks: [h1, h2, h3] },
@@ -835,6 +844,7 @@ test("Traditional is every file in the PR's order, all its hunks in diff order, 
     file,
     header: "@@ -1,3 +1,4 @@",
     patch: "@@ -1,3 +1,4 @@\n+x",
+    mark: `m-${id}`,
     additions: 1,
     deletions: 0,
     level,
@@ -847,16 +857,18 @@ test("Traditional is every file in the PR's order, all its hunks in diff order, 
     chunks: [hunk("h3", "b.ts", 1, "look"), hunk("h2", "a.ts", 0, "skim")],
     unread: [hunk("h4", "b.ts", 1, "unread")],
     skipped: [hunk("h1", "a.ts", 0, "skip")],
-    rest: [{ path: "c.lock", file: 2, why: "lockfile or generated", hunks: [hunk("h5", "c.lock", 2, "skip")], notes: [] }],
+    rest: [
+      { path: "c.lock", file: 2, why: "lockfile or generated", hunks: [hunk("h5", "c.lock", 2, "skip")], notes: [], mark: "m-c.lock" },
+    ],
     notes: [0],
   };
   const t = traditional(o);
   assert.deepEqual(
-    t.list.map((s) => [s.path, s.level, s.hunks.map((h) => h.id), s.notes]),
+    t.list.map((s) => [s.path, s.level, s.hunks.map((h) => h.id), s.notes, s.marks]),
     [
-      ["a.ts", null, ["h1", "h2"], []],
-      ["b.ts", null, ["h3", "h4"], [0]],
-      ["c.lock", "skip", ["h5"], []],
+      ["a.ts", null, ["h1", "h2"], [], ["m-h1", "m-h2"]],
+      ["b.ts", null, ["h3", "h4"], [0], ["m-h3", "m-h4"]],
+      ["c.lock", "skip", ["h5"], [], ["m-h5"]],
     ],
   );
   assert.equal(t.rest, 2);

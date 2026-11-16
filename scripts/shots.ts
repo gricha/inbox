@@ -2775,6 +2775,29 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Viewed folds a file, keeps it folded when the PR opens again, and ticks it in the sidebar; unticked, it opens.
+    name: "review-viewed",
+    go: async (page) => {
+      const bad = (why: string) => failures.push(`review-viewed: ${why}`);
+      await review("acme/api#4154")(page);
+      const first = page.locator(".rv-file-sec").first();
+      await first.locator(".rv-viewed input").check();
+      if (!(await first.evaluate((el) => el.classList.contains("shut")))) bad("ticked, the file stays open");
+      await at("#/")(page);
+      await review("acme/api#4154")(page);
+      if (!(await first.evaluate((el) => el.classList.contains("shut")))) bad("opened again, a viewed file isn't folded");
+      if (!(await first.locator(".rv-viewed input").isChecked())) bad("opened again, its box isn't ticked");
+      const side = page.locator(".rv-tree");
+      if ((await side.count()) && !(await side.locator(".rv-step-row.seen").count())) bad("the sidebar's files don't tick it");
+      if ((await side.count()) && !(await side.locator(".rv-side-head").innerText()).includes("1 viewed"))
+        bad("the files' count doesn't say 1 viewed");
+    },
+    after: async (page) => {
+      const box = page.locator(".rv-file-sec").first().locator(".rv-viewed input");
+      if ((await box.count()) && (await box.isChecked())) await box.uncheck();
+    },
+  },
+  {
     // The toggle, only where the sidebar can't sit beside the diff: open over the diff where it starts folded (narrow).
     name: "review-side-toggled",
     go: async (page) => {

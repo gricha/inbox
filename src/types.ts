@@ -769,6 +769,7 @@ export interface ReviewFile {
   additions: number;
   deletions: number;
   patch: string | null; // unified hunks; null for binary files and diffs GitHub won't show
+  sha?: string; // its blob at the head; absent on diffs kept from before the desk asked for it
 }
 
 // A short "what this does / why it matters" note on a line of the diff; line 0 is about the whole file.
@@ -872,6 +873,7 @@ export interface ReviewHunk {
   file: number; // index in ReviewView.files
   header: string; // its @@ line
   patch: string; // its own lines, the @@ line first
+  mark: string; // what it changes: the same after a rebase that only moves it, new once a push rewrites its lines
   additions: number;
   deletions: number;
   level: "look" | "skim" | "skip" | "unread" | null; // null: no ranking for this commit
@@ -910,6 +912,7 @@ export interface ReviewRest {
   why: string; // "lockfile or generated", "no text diff: binary or too large", "renamed without changes"
   hunks: ReviewHunk[]; // level "skip"; none for a file with no text diff
   notes: number[]; // the file's own notes when it has no hunks to carry them
+  mark: string; // the file's own mark, for one with no hunks to carry them: new once a push changes it
 }
 
 export interface ItemDetail {
@@ -981,6 +984,7 @@ export interface ReviewView {
   reading: boolean; // Claude is reading the ones waiting on you
   reading_error: string | null; // its last try on this PR failed
   asks: Ask[]; // yours to the coordinator about it, oldest first
+  viewed: string[]; // the marks of hunks (or of files without one) you marked viewed; a mark a push rewrote matches nothing on screen
 }
 
 // One check on a PR's head commit: a check run (an Actions job, an app's) or a commit status. Its name is untrusted GitHub text.

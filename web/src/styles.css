@@ -7036,6 +7036,11 @@ ul.rv-status-why {
   opacity: 0.6;
 }
 
+/* A file you've viewed reads quieter still, its tick after it. */
+.rv-step-row.seen:not(.on) .rv-step-name {
+  opacity: 0.4;
+}
+
 .rv-step-row:hover .rv-step-name {
   opacity: 1;
 }
@@ -7492,8 +7497,40 @@ p.rv-next {
   margin-left: auto;
 }
 
+/* Viewed: GitHub's checkbox, at the header's end; it folds the file until a push changes what it changes. */
+.rv-viewed {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  align-self: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--pencil);
+  font-weight: 450;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.rv-delta + .rv-viewed {
+  margin-left: 0;
+}
+
+.rv-viewed:hover,
+.rv-viewed:has(:checked) {
+  color: var(--ink-2);
+}
+
+.rv-viewed input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--ink-2);
+  cursor: pointer;
+}
+
+/* Short of room, the folder gives way first; a name longer than the whole row breaks within it (max-width). */
 .rv-fhead .rv-base {
-  flex: 0 1 auto;
+  flex: none;
   white-space: normal;
   overflow-wrap: anywhere;
 }

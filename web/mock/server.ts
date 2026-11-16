@@ -3073,6 +3073,7 @@ const MODEL = "claude-opus-5[1m]";
 const generating = new Set<string>();
 const aiErrors = new Map<string, string>();
 const approved = new Set<string>();
+const VIEWED = new Map<string, Set<string>>(); // the marks you marked viewed, by PR
 const LOGGED_OUT = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
 let aiPaused: string | null = process.env.MOCK_AI_PAUSED ? LOGGED_OUT : null; // why AI reviews nobody asked for are paused
 let agentsBusy = false; // the judge at work: POST /api/mock/agents-busy { busy }
@@ -3496,6 +3497,7 @@ function reviewView(r: Rec, ahead = false): ReviewView {
     reading: false,
     reading_error: null,
     asks: ASKS.filter((a) => a.item_id === r.id),
+    viewed: [...(VIEWED.get(r.id) ?? [])],
   };
 }
 
@@ -4169,10 +4171,22 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     bump();
     return { ok: true, url: "" };
   }
-  const review = /^\/api\/review\/(.+?)(\/ai|\/approve|\/reply)?$/.exec(url.pathname);
+  const review = /^\/api\/review\/(.+?)(\/ai|\/approve|\/reply|\/viewed)?$/.exec(url.pathname);
   if (review) {
     const r = resolve(decodeURIComponent(review[1]!));
     if (req.method === "GET" && !review[2]) return reviewView(r, url.searchParams.get("ahead") === "1");
+    // As the desk: kept by mark, nothing sent anywhere.
+    if (req.method === "POST" && review[2] === "/viewed") {
+      const { marks, viewed } = await readBody(req);
+      if (!Array.isArray(marks) || typeof viewed !== "boolean") throw new HttpError(400, "need { marks, viewed }");
+      const kept = VIEWED.get(r.id) ?? new Set<string>();
+      for (const m of marks.map(String)) {
+        if (viewed) kept.add(m);
+        else kept.delete(m);
+      }
+      VIEWED.set(r.id, kept);
+      return { ok: true };
+    }
     if (req.method === "POST" && review[2] === "/ai") {
       const { force } = await readBody(req);
       const cur = reviews.get(r.id);

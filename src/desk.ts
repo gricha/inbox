@@ -501,6 +501,7 @@ const ReviewFileSchema = schemaOf<ReviewFile>()(
     additions: Schema.Number,
     deletions: Schema.Number,
     patch: Schema.NullOr(Schema.String),
+    sha: opt(Schema.String),
   }),
 );
 // The changed files and description kept per head commit (kv `pr:<id>`); the owner's review.md is read fresh each run.
@@ -1375,6 +1376,7 @@ export class Desk {
     this.store.pruneKv("sorted:", kept);
     this.store.pruneKv("acted:", kept);
     this.store.pruneKv("shown:", kept);
+    this.store.pruneKv("viewed:", kept);
     this.store.pruneKv("take:", kept);
     this.store.pruneKv("said:", kept);
     this.store.pruneKv("score:", kept);
@@ -2434,8 +2436,27 @@ export class Desk {
         ...checks,
         reviewers: standings(d.item, this.me()),
         merge: mergeLine(d.item),
+        viewed: this.viewedOf(id),
         ...talk,
       };
+    });
+  }
+
+  // The marks (ReviewHunk.mark, ReviewRest.mark) you marked viewed on a PR, kept while it's on the desk.
+  private viewedOf(id: string): string[] {
+    return this.store.read(`viewed:${id}`, arrayOf(Schema.String)) ?? [];
+  }
+
+  // POST /api/review/:id/viewed: marks hunks viewed, or not. It writes nothing to GitHub.
+  markViewed(ref: string, marks: string[], viewed: boolean): Effect.Effect<void, RefError | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const id = (yield* this.pr(ref)).item.id;
+      const kept = new Set(this.viewedOf(id));
+      for (const m of marks) {
+        if (viewed) kept.add(m);
+        else kept.delete(m);
+      }
+      this.store.set(`viewed:${id}`, [...kept]);
     });
   }
 

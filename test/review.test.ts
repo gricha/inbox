@@ -98,18 +98,26 @@ test("diff lines carry the number a note anchors to: n for the new file, o for r
 test("gh's one-object-per-line files become ReviewFiles", () => {
   const out = parseFiles(
     [
-      JSON.stringify({ filename: "a.ts", previous_filename: null, status: "modified", additions: 2, deletions: 1, patch: "@@ -1 +1 @@" }),
+      JSON.stringify({
+        filename: "a.ts",
+        previous_filename: null,
+        status: "modified",
+        additions: 2,
+        deletions: 1,
+        patch: "@@ -1 +1 @@",
+        sha: "b1",
+      }),
       JSON.stringify({ filename: "img.png", status: "added", additions: 0, deletions: 0 }),
       JSON.stringify({ filename: "b.py", previous_filename: "old.py", status: "renamed", additions: 0, deletions: 0 }),
       "",
     ].join("\n"),
   );
   assert.deepEqual(
-    out.map((f) => [f.path, f.previous_path, f.status, f.patch === null]),
+    out.map((f) => [f.path, f.previous_path, f.status, f.patch === null, f.sha]),
     [
-      ["a.ts", null, "modified", false],
-      ["img.png", null, "added", true],
-      ["b.py", "old.py", "renamed", true],
+      ["a.ts", null, "modified", false, "b1"],
+      ["img.png", null, "added", true, undefined],
+      ["b.py", "old.py", "renamed", true, undefined],
     ],
   );
 });
@@ -1354,6 +1362,19 @@ test("with a walk-through, steps, the hunks no step covers and the desk's fold h
   assert.ok(!("steps" in reviewOrder(files, ai, false)), "a retargeted base: no walk-through");
   assert.ok(!("steps" in reviewOrder(files, aiOf({ chunks, guide: { steps: [] } }), true)), "a stale review: none");
   assert.ok(!("steps" in reviewOrder(files, aiOf({ chunks }), false)), "a review written before walk-throughs: none");
+});
+
+test("a hunk's mark is what it changes: not where it sits or the lines around it, and the same change twice is two", () => {
+  const marks = (patch: string, at = FILE.path) => reviewOrder([{ ...FILE, path: at, patch }], null, false).chunks.map((h) => h.mark);
+  const base = marks("@@ -10,3 +10,4 @@ fn a() {\n ctx\n-old\n+new\n+more\n end\n@@ -40,2 +41,2 @@\n x\n-y\n+z");
+  assert.deepEqual(marks("@@ -14,3 +14,4 @@ fn b() {\n other\n-old\n+new\n+more\n end\n@@ -52,2 +53,2 @@\n w\n-y\n+z"), base, "a rebase");
+  const pushed = marks("@@ -10,3 +10,4 @@ fn a() {\n ctx\n-old\n+new\n+more\n end\n@@ -40,2 +41,2 @@\n x\n-y\n+zz");
+  assert.deepEqual([pushed[0] === base[0], pushed[1] === base[1]], [true, false], "a push rewrote the second");
+  assert.notEqual(marks("@@ -1 +1 @@\n-old\n+new\n+more", "src/b.ts")[0], marks("@@ -1 +1 @@\n-old\n+new\n+more")[0], "another file");
+  assert.equal(new Set(marks("@@ -1 +1 @@\n-a\n+b\n@@ -9 +9 @@\n-a\n+b")).size, 2, "twins in one file");
+  const noText = (sha: string) => reviewOrder([{ ...PNG, sha }], null, false).rest[0]!.mark;
+  assert.equal(noText("aaa"), noText("aaa"));
+  assert.notEqual(noText("bbb"), noText("aaa"), "a file with no text diff is new when its blob is");
 });
 
 test("without a ranking for this commit the order is today's: every hunk file by file; an older commit's notes aren't placed", () => {

@@ -332,7 +332,9 @@ Neighbouring hunks of a file at one level read as one. Without a ranking (none y
 
 **Drawing.** `@pierre/diffs`: unified, word-level changes, wrapped lines, Shiki highlighting in the theme's syntax colours (`diff` in `src/themes.ts`, `web/src/diffThemes.ts`). Unchanged lines fold into a band ("14 unmodified lines"); its arrows open ten more at a time, in either review. A drawn file is read whole ahead (`GET /api/file/:id?path=`: the file at the PR's head; before it is the same run back through its patch, `oldFromNew()` in `web/src/view.ts`), so the first click opens lines. A file GitHub won't give whole (binary, too big) says so in a bubble. Each file's name sticks under the review's bar while you read it.
 
-**Folding files.** A file's header folds its diff and everything on it. Consecutive folded files read as one list. A different PR starts with every file open.
+**Folding files.** A file's header folds its diff and everything on it. Consecutive folded files read as one list. A different PR starts with every file open but those you've viewed.
+
+**Viewed.** A **Viewed** checkbox at the right of a file's header, as GitHub's: ticked, the file folds, and it opens folded each time you come back, until a push changes what it changes. Unticked, it opens. A click on a viewed file's header opens it for now. The mark is kept per hunk, by its path and changed lines alone (`ReviewHunk.mark`): a rebase that moves the code or changes the lines around it keeps it, and a push that rewrites one hunk unticks its file (in Guided Review, the step holding that hunk). A file with no text diff is new once its blob is. The desk keeps the marks (kv `viewed:<id>`) while the PR is on it; nothing goes to GitHub.
 
 ### Notes and threads on the diff
 
@@ -384,7 +386,7 @@ Top to bottom:
 
 - **The stack**, when the PR is in one: "Stack on main", its open PRs bottom first as a timeline like the guide's (a node each on one line), each with only what's news (a red cross for CI failing, "changes" in amber, a green tick for approved). The PR on screen has the accent's node and its title in ink, no fill or ring. A long stack shows four and "16 more". A click opens that PR.
 - **The checks**, when any ran on its head: one line ("CI passing · 14 checks", "2 failing of 14 checks", "3 running of 14 checks"), red while a required check fails. A click opens every check, worst first, each linking to its page. A failing check the base branch doesn't require reads "failing, not required". Fetched when the review opens; "Couldn't load the checks: …" if GitHub won't give them.
-- **The files**, in Traditional, in the PR's order with a dot when they have notes. A click scrolls there. The one you're reading is marked.
+- **The files**, in Traditional, in the PR's order with a dot when they have notes and a tick once you've viewed them ("3 viewed" by the count). A click scrolls there. The one you're reading is marked.
 - **The reviewers**, always: one line ("Approved by marco · waiting on sam and @backend", "Changes requested by kofi", "Waiting on you", "Nobody's asked"), amber on changes requested. A click lists each person or team, who holds it first. Bots and the author are left out.
 - **The merge**, only when something's in the way: "Merge conflict with main", in amber. Only asked for your own PRs.
 
