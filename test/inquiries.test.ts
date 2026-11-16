@@ -173,6 +173,29 @@ test("the coordinator ends its turn once it asks: your answer, or that you dismi
   assert.equal(told[2], `My answer to your question ${old.id} ("Rebase #3?"): "No"`);
 });
 
+test("your agent's question is answered back to your agent, never to the coordinator, which is a session of its own", async (c) => {
+  const t = await setup([myPr(3)], { settings: { "agent.coordinator": true } });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const told: [string, string][] = [];
+  t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(["coordinator", line]), Effect.void));
+  t.desk.yourAgent.tell = (line: string) => Effect.sync(() => (told.push(["agent", line]), Effect.void));
+  const q = runSync(t.desk.inquire(full({ from: "Inbox agent", question: "Which branch?" })));
+  runSync(t.desk.answerInquiry(q.id, "main"));
+  assert.deepEqual(told, [["agent", `My answer to your question ${q.id} ("Which branch?"): "main"`]]);
+});
+
+test("asks a desk kept from when one session did both move to your agent at start; answers to the coordinator's questions stay", async (c) => {
+  const t = await setup([myPr(3)], { settings: { "agent.coordinator": false } });
+  c.after(t.cleanup);
+  const ask = 'My ask a1: "is it green?" Answer it with desk_answer.';
+  const answer = 'My answer to your question q1 ("Rebase?"): "Yes"';
+  t.desk.store.set("coordinator_asks", [ask, answer]);
+  t.desk.start();
+  assert.deepEqual([t.desk.coordinator.asks(), t.desk.yourAgent.asks()], [[answer], [ask]]);
+  t.desk.stop();
+});
+
 test("a dismissed question tells the agent so", async (c) => {
   const t = await setup([]);
   c.after(t.cleanup);
@@ -382,9 +405,9 @@ test("Wake it under an ask it stopped without answering hands that ask over agai
   c.after(t.cleanup);
   await run(t.desk.sync());
   const told: string[] = [];
-  t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
+  t.desk.yourAgent.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
   t.desk.coordinator.now = () => Promise.reject(new Error("not this one"));
-  t.desk.coordinator.saved = () => ({ id: "c0ffee01" });
+  t.desk.yourAgent.saved = () => ({ id: "c0ffee01" });
   const a = {
     id: "a1",
     at: new Date().toISOString(),

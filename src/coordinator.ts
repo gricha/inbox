@@ -52,6 +52,7 @@ import {
   runCommand,
 } from "./review.ts";
 import {
+  AGENT_NAME,
   COORDINATOR_NAME,
   isCoordinator,
   type ActivityEvent,
@@ -64,14 +65,7 @@ import {
 import { report } from "./sentry.ts";
 import { reviewOptional } from "./stage.ts";
 
-const NAME = COORDINATOR_NAME;
-const KEY = "coordinator_bg"; // "coordinator" holds the old desk-run coordinator's state
-const NEWS = "coordinator_news"; // kept so a desk restart or a failed start doesn't drop it
-const ASKS = "coordinator_asks"; // the owner's asks it hasn't been told yet, as their lines
-const ERROR = "coordinator_error"; // why it last couldn't run; kept so a desk restart doesn't notify again
 const FRESH = 15_000; // how often Merging may look for its claude.ai link until it has one
-const CODEX_KEY = "coordinator_codex"; // its Codex session, kept beside Claude Code's so switching back finds each
-const OPENCODE_KEY = "coordinator_opencode"; // and its OpenCode session
 const TURN = 60 * 60_000; // a wake on Codex or OpenCode is one turn the desk waits on; past this it's stopped
 // Off on Codex: what reaches past the desk and your shell (apps and plugins bring their own MCP servers, browsers, the screen).
 const CODEX_OFF = ["apps", "plugins", "browser_use", "browser_use_external", "in_app_browser", "computer_use"].flatMap((f) => [
@@ -169,8 +163,46 @@ const turnKind = (agent: "codex" | "opencode"): TurnKind =>
       };
 
 // Every message is one line of ids, URLs, kinds and the owner's asks: never PR text, and an argument cmd.exe can pass (claudeSpawn).
-const ROLE =
-  "You are my Inbox coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging, or when I ask you something in the desk. Follow the Coordinator section of the inbox skill.";
+// The desk runs two seats, each its own background session with its own folder and saved state: the coordinator gets
+// news on PRs in Merging, your agent gets your asks. Each answers its own questions' answers. Apart, so a merge it's busy
+// with never holds up a question, and the other way round.
+export interface Seat {
+  name: string; // the session's name in claude agents and on claude.ai
+  dir: string; // its folder in the desk's home
+  role: string; // what its first message starts with
+  key: string; // its Claude Code session; [key]_codex and [key]_opencode its others'
+  news: string; // what changed on PRs in Merging, until delivered
+  asks: string; // your asks and answers it hasn't been told yet, as their lines
+  error: string; // why it last couldn't run; kept so a desk restart doesn't notify again
+}
+export const MERGING: Seat = {
+  name: COORDINATOR_NAME,
+  dir: "coordinator",
+  role: "You are my Inbox coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging. Follow the Coordinator section of the inbox skill.",
+  key: "coordinator_bg", // "coordinator" holds the old desk-run coordinator's state
+  news: "coordinator_news",
+  asks: "coordinator_asks",
+  error: "coordinator_error",
+};
+export const AGENT: Seat = {
+  name: AGENT_NAME,
+  dir: "agent",
+  role: "You are my Inbox agent: the desk keeps you running and wakes you with a message when I ask you something in the desk. Follow the Your agent section of the inbox skill.",
+  key: "agent_bg",
+  news: "agent_news",
+  asks: "agent_asks",
+  error: "agent_error",
+};
+const sessionKey = (seat: Seat, own: "codex" | "opencode" | null) =>
+  own === "codex"
+    ? seat === MERGING
+      ? "coordinator_codex"
+      : `${seat.key}_codex`
+    : own === "opencode"
+      ? seat === MERGING
+        ? "coordinator_opencode"
+        : `${seat.key}_opencode`
+      : seat.key;
 const PR = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
 const PERMISSION = { bypass: "bypassPermissions", default: "default" } as const;
 type Mode = keyof typeof PERMISSION;
@@ -326,7 +358,15 @@ export function wakeFor(e: Pick<ActivityEvent, "kind" | "data">): string | null 
 
 // A Codex start or wake: bypass is no sandbox and no approvals; else it writes in its folder and reaches the network,
 // never asking. `codex exec resume` takes no --sandbox or -C, so a wake sets the sandbox by config and runs in the folder.
-function codexArgs(dir: string, mcp: string[], bypass: boolean, id: string | undefined, text: string, runs: Runs = NO_RUNS): string[] {
+function codexArgs(
+  role: string,
+  dir: string,
+  mcp: string[],
+  bypass: boolean,
+  id: string | undefined,
+  text: string,
+  runs: Runs = NO_RUNS,
+): string[] {
   const sandbox = bypass
     ? ["--dangerously-bypass-approvals-and-sandbox"]
     : [
@@ -340,7 +380,7 @@ function codexArgs(dir: string, mcp: string[], bypass: boolean, id: string | und
   const fence = ["--skip-git-repo-check", ...as, ...CODEX_OFF, ...mcp];
   return id
     ? ["exec", "resume", "--json", ...sandbox, ...fence, id, text]
-    : ["exec", "--json", ...sandbox, "-C", dir, ...fence, `${ROLE} ${text}`];
+    : ["exec", "--json", ...sandbox, "-C", dir, ...fence, `${role} ${text}`];
 }
 
 // The model and effort your agent runs with (agent.coordinator_model, agent.coordinator_effort): "" is its own default.
@@ -373,8 +413,11 @@ export class Coordinator {
   turn: ChildProcess | null = null; // on Codex or OpenCode: the wake in flight
   turnOf: TurnKind | null = null; // and whose it is
 
-  constructor(desk: Desk) {
+  seat: Seat;
+
+  constructor(desk: Desk, seat: Seat = MERGING) {
     this.desk = desk;
+    this.seat = seat;
   }
 
   get on(): boolean {
@@ -389,13 +432,12 @@ export class Coordinator {
 
   // The chosen agent's session. A record from before the bypass setting has no mode: that session was started in default.
   saved(): typeof SAVED.Type | null {
-    const key = this.own === "codex" ? CODEX_KEY : this.own === "opencode" ? OPENCODE_KEY : KEY;
-    return Result.getOrNull(decode(SAVED, this.desk.store.get(key)));
+    return Result.getOrNull(decode(SAVED, this.desk.store.get(sessionKey(this.seat, this.own))));
   }
 
   // [PR id, what changed], oldest first; only appended to until delivered.
   news(): [string, string][] {
-    const kept = this.desk.store.get(NEWS);
+    const kept = this.desk.store.get(this.seat.news);
     return (Array.isArray(kept) ? kept : []).flatMap((n): [string, string][] => {
       const [id, what] = strings(n) ?? [];
       return id !== undefined && what !== undefined ? [[id, what]] : [];
@@ -403,11 +445,11 @@ export class Coordinator {
   }
 
   asks(): string[] {
-    return strings(this.desk.store.get(ASKS)) ?? [];
+    return strings(this.desk.store.get(this.seat.asks)) ?? [];
   }
 
   error(): string | null {
-    return str(this.desk.store.get(ERROR)) ?? null;
+    return str(this.desk.store.get(this.seat.error)) ?? null;
   }
 
   // Shown in Merging until a run succeeds, and notified once: news waits on it, and the log alone went unseen for hours.
@@ -415,14 +457,14 @@ export class Coordinator {
     if (this.desk.stopped) return;
     const was = this.error();
     if (was === why) return;
-    this.desk.store.set(ERROR, why);
+    this.desk.store.set(this.seat.error, why);
     this.desk.changed();
     if (why && !was && this.desk.mayNotify()) this.desk.notify("Your agent can't run", why);
   }
 
   // The desk home's coordinator directory; its project settings keep every rule of the deny list, beside the owner's own.
   dir(): Effect.Effect<string, FsError> {
-    return denyDir(this.desk.home, "coordinator", DENY);
+    return denyDir(this.desk.home, this.seat.dir, DENY);
   }
 
   view(): CoordinatorView {
@@ -469,14 +511,14 @@ export class Coordinator {
   wake(id: string, what: string): void {
     if (!this.on || !PR.test(id)) return;
     const news = this.news();
-    if (!news.some(([i, w]) => i === id && w === what)) this.desk.store.set(NEWS, [...news, [id, what]]);
+    if (!news.some(([i, w]) => i === id && w === what)) this.desk.store.set(this.seat.news, [...news, [id, what]]);
     this.schedule();
   }
 
   // Your ask goes now, not with the next batch: what cmd.exe can't pass fails before it's kept; what it gives waits for the run.
   tell(line: string): Effect.Effect<Effect.Effect<void>, UnsafeArgument> {
     return Effect.map(claudeSpawn(this.own ? turnKind(this.own).command : claudeCommand(), [line]), () => {
-      this.desk.store.set(ASKS, [...this.asks(), line]);
+      this.desk.store.set(this.seat.asks, [...this.asks(), line]);
       this.watch();
       return this.ran(this.again());
     });
@@ -533,12 +575,12 @@ export class Coordinator {
   // Answered while it waited to go again (the desk asked again while your agent was on it): it never goes.
   answered(id: string): void {
     const left = this.asks().filter((l) => askOf(l) !== id);
-    if (left.length !== this.asks().length) this.desk.store.set(ASKS, left);
+    if (left.length !== this.asks().length) this.desk.store.set(this.seat.asks, left);
   }
 
   untell(line: string): void {
     this.desk.store.set(
-      ASKS,
+      this.seat.asks,
       this.asks().filter((l) => l !== line),
     );
   }
@@ -573,8 +615,8 @@ export class Coordinator {
 
   // Turned off in Settings: stopped, its history kept for when it's turned on again.
   stop(): void {
-    this.desk.store.set(NEWS, null);
-    this.desk.store.set(ASKS, null);
+    this.desk.store.set(this.seat.news, null);
+    this.desk.store.set(this.seat.asks, null);
     this.asked = false;
     const flushing = this.flushing;
     const stop = Effect.gen({ self: this }, function* () {
@@ -635,6 +677,8 @@ export class Coordinator {
       const stopping = this.stopping;
       if (stopping) yield* Effect.promise(() => stopping);
       if (!this.on) return;
+      // Your agent, never started and asked nothing: nothing to look for.
+      if (this.seat === AGENT && !this.saved() && !this.news().length && !this.asks().length && !this.asked) return;
       const own = this.own;
       if (own) {
         yield* this.runOwn(own);
@@ -653,8 +697,10 @@ export class Coordinator {
       // A resumed session keeps the mode, model and effort it started with; passing one makes claude start a copy with its
       // history, so only to change it.
       const changing = !!a && ((this.saved()?.mode ?? "default") !== mode || (this.saved()?.runs ?? "|") !== runsKey(runs));
+      const NAME = this.seat.name;
       // One started under its name from before the rename to Inbox goes on as a copy under the new one, as a switch does.
-      const switching = changing || (!!a?.name && a.name !== NAME && isCoordinator(a.name));
+      const switching =
+        changing || (this.seat === MERGING && !!a?.name && a.name !== NAME && isCoordinator(a.name) && a.name !== AGENT_NAME);
       // A copy may not keep its original's name and Remote Control, so the switch passes them again.
       const resume = a ? ["--resume", a.sessionId, "--bg", ...(switching ? ["--name", NAME, "--remote-control", NAME, ...flags] : [])] : [];
       // Stuck on a permission prompt is why bypass gets turned on: it switches now, and the copy gets a turn to carry on.
@@ -666,7 +712,7 @@ export class Coordinator {
         // Created only with something to deliver: a scratch desk's would reach the owner's desk through its MCP tools.
         if (!a)
           yield* this.launch(
-            ["--bg", "--name", NAME, "--remote-control", NAME, ...(mode === "bypass" ? flags : as), `${ROLE} ${text}`],
+            ["--bg", "--name", NAME, "--remote-control", NAME, ...(mode === "bypass" ? flags : as), `${this.seat.role} ${text}`],
             mode,
             runs,
           );
@@ -674,8 +720,8 @@ export class Coordinator {
           yield* this.halt(a);
           yield* this.launch([...resume, text], mode, runs);
         }
-        this.desk.store.set(NEWS, this.news().slice(news.length));
-        this.desk.store.set(ASKS, this.asks().slice(asks.length));
+        this.desk.store.set(this.seat.news, this.news().slice(news.length));
+        this.desk.store.set(this.seat.asks, this.asks().slice(asks.length));
         for (const l of asks) {
           const id = askOf(l);
           if (id) this.desk.jobs.begin("ask", id); // it has your ask now: its job runs until it answers
@@ -693,7 +739,7 @@ export class Coordinator {
         const logs = yield* claude(["logs", s.id]).pipe(Effect.orElseSucceed(() => ""));
         const url = /https:\/\/claude\.ai\/code\/session_\w+/.exec(logs)?.[0];
         if (url) {
-          this.desk.store.set(KEY, { ...s, url });
+          this.desk.store.set(this.seat.key, { ...s, url });
           this.desk.changed();
         }
       }
@@ -756,7 +802,7 @@ export class Coordinator {
       const key = runsKey(runs);
       if (id !== s?.id || mode !== s.mode || key !== (s.runs ?? "|")) {
         const { runs: _, ...kept } = id === s?.id ? s : { id };
-        this.desk.store.set(KEY, { ...kept, mode, ...(key !== "|" && { runs: key }) });
+        this.desk.store.set(this.seat.key, { ...kept, mode, ...(key !== "|" && { runs: key }) });
         this.desk.changed();
       }
       const note = /^note: .*/m.exec(out)?.[0];
@@ -790,14 +836,14 @@ export class Coordinator {
       // name, or the link the move left, which opens this one) is let go; one working in another folder, a worktree, isn't,
       // even once that's removed.
       const its = (cwd: string) => Result.getOrElse(Result.try({ try: () => fs.realpathSync(cwd), catch: () => null }), () => null);
-      if (a?.cwd && !here.has(a.cwd) && (a.cwd === path.join(oldHome(), "coordinator") || its(a.cwd) === real)) {
+      if (a?.cwd && !here.has(a.cwd) && (a.cwd === path.join(oldHome(), this.seat.dir) || its(a.cwd) === real)) {
         this.desk.log(`coordinator: ${a.id} ran in ${a.cwd}, not ${dir}, so the next wake starts a fresh one here`);
         yield* this.halt(a);
         a = null;
       }
       if (a?.id !== saved?.id) {
         // The desk didn't see its mode, so the next launch sets the setting's.
-        this.desk.store.set(KEY, a && { id: a.id, mode: "unknown" });
+        this.desk.store.set(this.seat.key, a && { id: a.id, mode: "unknown" });
         this.desk.changed();
       }
       this.session = a && { sessionId: a.sessionId, cwd: a.cwd };
@@ -826,20 +872,20 @@ export class Coordinator {
       if (agent === "codex") {
         const dir = yield* this.codexDir();
         const mcp = yield* codexMcp(kind.command, dir, { url });
-        started = yield* this.ownTurn(kind, codexArgs(dir, mcp, bypass, id, text, this.runs()), dir);
+        started = yield* this.ownTurn(kind, codexArgs(this.seat.role, dir, mcp, bypass, id, text, this.runs()), dir);
       } else {
         const dir = yield* this.dir();
         const config = yield* opencodeConfig(kind.command, dir, () => ({ bash: OPENCODE_RULES }), { url });
         const model = this.runs().model;
-        const args = [...opencodeRunArgs(NAME, id), ...(model ? ["--model", model] : [])];
+        const args = [...opencodeRunArgs(this.seat.name, id), ...(model ? ["--model", model] : [])];
         // Nobody is there to answer what your config asks about: with bypass it's approved (--auto), without it refused.
-        const said = id ? text : `${ROLE} ${text}`;
+        const said = id ? text : `${this.seat.role} ${text}`;
         started = yield* this.ownTurn(kind, [...args, ...(bypass ? ["--auto"] : []), said], dir, { OPENCODE_CONFIG_CONTENT: config });
       }
-      if (started !== id) this.desk.store.set(agent === "codex" ? CODEX_KEY : OPENCODE_KEY, { id: started });
+      if (started !== id) this.desk.store.set(sessionKey(this.seat, agent), { id: started });
       this.desk.log(`coordinator: ${id ? "woke" : "created"} ${started} on ${agent === "codex" ? "Codex" : "OpenCode"}`);
-      this.desk.store.set(NEWS, this.news().slice(news.length));
-      this.desk.store.set(ASKS, this.asks().slice(asks.length));
+      this.desk.store.set(this.seat.news, this.news().slice(news.length));
+      this.desk.store.set(this.seat.asks, this.asks().slice(asks.length));
       for (const l of asks) {
         const ask = askOf(l);
         if (ask) this.desk.jobs.begin("ask", ask);

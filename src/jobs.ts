@@ -169,7 +169,7 @@ export class Jobs {
     else if (a.answer) {
       if (j.state !== "done") this.done(j.kind, j.key);
     } else if (j.state === "running" || j.state === "queued") {
-      if (desk.coordinator.on) this.again(j, a, now);
+      if (desk.yourAgent.on) this.again(j, a, now);
       else this.fail(j.kind, j.key, "your agent is off: Settings → Agent");
     }
   }
@@ -189,7 +189,7 @@ export class Jobs {
 
   // Handed over and unanswered: once its wait is over with your agent idle, it goes again, or it's failed after ATTEMPTS.
   private again(j: Job, a: Ask, now: number): void {
-    const c = this.desk.coordinator;
+    const c = this.desk.yourAgent;
     if (j.state === "queued") return; // it gets it once it's idle
     // On it or on something else, unable to run, or about to be told it again: never asked twice.
     const idle = c.status === "idle" || c.status === "stopped" || c.status === null;

@@ -13,7 +13,7 @@ import type { Ask, AskLines, AskPlace } from "../src/types.ts";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
-import { posix, until, alive, settle, starts, resumes, stops, ROLE, coordinated, asking } from "./helpers/coordinator.ts";
+import { posix, until, alive, settle, starts, resumes, stops, ROLE, AGENT_ROLE, coordinated, asking } from "./helpers/coordinator.ts";
 
 test(
   "a desk starting with nothing waiting only looks; the first hand-off starts one background session, its deny list, its link",
@@ -468,7 +468,7 @@ test("a line ask keeps its lines and wakes the coordinator with where they are b
   await until(() => t.said().length === 1);
   assert.equal(
     t.said()[0],
-    `${ROLE} My ask ${ask.id}, about my PR acme/web#3 (https://github.com/acme/web/pull/3), not handed off, on lines 20-23 of its diff (desk_ask ${ask.id} says where): "why only between batches?" Answer it with desk_answer.`,
+    `${AGENT_ROLE} My ask ${ask.id}, about my PR acme/web#3 (https://github.com/acme/web/pull/3), not handed off, on lines 20-23 of its diff (desk_ask ${ask.id} says where): "why only between batches?" Answer it with desk_answer.`,
   );
   assert.ok(!t.fake.calls().flat().join(" ").includes("ignore that"), "never the file's name");
 });
@@ -479,8 +479,8 @@ async function telling(c: TestContext, items = [myPr(3), myPr(4), reviewAsk(7, {
   c.after(t.cleanup);
   await run(t.desk.sync());
   const told: string[] = [];
-  t.desk.coordinator.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
-  t.desk.coordinator.saved = () => ({ id: "c0ffee01" });
+  t.desk.yourAgent.tell = (line: string) => Effect.sync(() => (told.push(line), Effect.void));
+  t.desk.yourAgent.saved = () => ({ id: "c0ffee01" });
   t.desk.coordinator.wake = () => {}; // a hand-off's news isn't what these are about
   const merged = async (id: string) => {
     const it = t.gh.items.get(id)!;

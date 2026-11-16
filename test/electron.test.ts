@@ -30,6 +30,7 @@ import {
   fallbackDirs,
   findNode,
   followEvents,
+  fromHost,
   getJson,
   ipcAnswer,
   isAppUrl,
@@ -47,6 +48,7 @@ import {
   OLD_APP_NAME,
   parseJson,
   parseNotice,
+  toHost,
   parseShellPath,
   parseSSE,
   probeHealth,
@@ -256,6 +258,28 @@ test("desktopSettings falls back to the defaults", () => {
 test("parseNotice reads a desk's notify event and ignores anything else", () => {
   assert.deepEqual(parseNotice('{"title":"Inbox","body":"api#7 · asks you"}'), { title: "Inbox", body: "api#7 · asks you" });
   for (const bad of ["", "null", '{"title":1,"body":"x"}', '{"title":"t"}', "{"]) assert.equal(parseNotice(bad), null, bad);
+});
+
+test("the app's own desk and the app read each other's messages, and nothing else", () => {
+  const start = { type: "start", port: 47823, home: "/h", app: { version: "0.2.32", install: true } };
+  assert.deepEqual(toHost(start), start);
+  assert.deepEqual(toHost({ type: "start", port: 1, home: "/h" }), { type: "start", port: 1, home: "/h" });
+  assert.deepEqual(toHost({ type: "installed", id: 2, error: "no token" }), { type: "installed", id: 2, error: "no token" });
+  assert.deepEqual(toHost({ type: "stop" }), { type: "stop" });
+  for (const bad of [null, "stop", {}, { type: "start", port: "1", home: "/h" }, { type: "installed" }, { type: "log", msg: "x" }])
+    assert.equal(toHost(bad), null, JSON.stringify(bad));
+
+  for (const ok of [
+    { type: "log", msg: "Inbox on http://localhost:1" },
+    { type: "notify", title: "Inbox", body: "api#7" },
+    { type: "started" },
+    { type: "failed", message: "port in use" },
+    { type: "install", id: 1 },
+    { type: "stopped" },
+  ])
+    assert.deepEqual(fromHost(ok), ok);
+  for (const bad of [undefined, { type: "notify", title: "t" }, { type: "install", id: "1" }, { type: "stop" }])
+    assert.equal(fromHost(bad), null, JSON.stringify(bad));
 });
 
 test("sourceDir: off when empty, ~ is your home, relative paths resolve", () => {

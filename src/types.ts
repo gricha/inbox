@@ -1156,11 +1156,13 @@ export interface Work extends Job {
   from?: string; // an answer's: the session that asked
 }
 
-// The session the desk starts and wakes, as claude.ai and `claude agents` name it; the window calls it "your agent".
+// The desk's two background sessions, as claude.ai and `claude agents` name them: the coordinator gets what you hand off
+// merged, your agent answers what you ask it. The window calls either "your agent".
 export const COORDINATOR_NAME = "Inbox coordinator";
-// Its name before the rename to Inbox, which its questions from then, and a session that follows the old skill, still give.
+export const AGENT_NAME = "Inbox agent";
+// The coordinator's name before the rename to Inbox, which its questions from then, and a session that follows the old skill, still give.
 const OLD_COORDINATOR_NAME = "Review Desk coordinator";
-export const isCoordinator = (from: string): boolean => from === COORDINATOR_NAME || from === OLD_COORDINATOR_NAME;
+export const isCoordinator = (from: string): boolean => from === COORDINATOR_NAME || from === OLD_COORDINATOR_NAME || from === AGENT_NAME;
 
 // The background Claude Code session the desk starts and wakes (README → Coordinator).
 export interface CoordinatorView {

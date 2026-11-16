@@ -26,7 +26,7 @@ import { failure, run, runSync } from "./helpers/run.ts";
 const posix = { skip: process.platform === "win32" };
 const MCP = "http://localhost:49402/mcp";
 const ROLE =
-  "You are my Inbox coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging, or when I ask you something in the desk. Follow the Coordinator section of the inbox skill.";
+  "You are my Inbox coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging. Follow the Coordinator section of the inbox skill.";
 const RUN = ["run", "--format", "json", "--pure", "--agent", OPENCODE_AGENT];
 
 interface Call {

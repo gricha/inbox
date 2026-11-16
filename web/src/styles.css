@@ -2139,11 +2139,17 @@ html::-webkit-scrollbar-corner,
 
 /* The list beside a review ------------------------------------------------ */
 
-/* A column of its own between the sidebar and the page's, never around the page: open, 320 to 360px; folded, a 28px rail. */
+/* A column of its own between the sidebar and the page's, never around the page: open, 320 to 360px and whatever the page
+   at its widest (its --col-w) leaves; folded, a 28px rail. */
 .app:has(> .beside) {
-  --list-w: var(--list-w-user, clamp(320px, 28vw, 360px));
+  --page-max: 880px;
+  --list-w: max(var(--list-w-user, clamp(320px, 28vw, 360px)), calc(100vw - var(--side-w) - var(--page-max) - var(--beside-chat, 0px)));
 
   grid-template-columns: var(--side-w) var(--list-w) minmax(0, 1fr);
+}
+
+.app:has(> .beside):has(.col .review) {
+  --page-max: 1280px;
 }
 
 /* Folded, it leaves nothing but its button, on the sidebar's edge. */
@@ -2162,6 +2168,8 @@ html::-webkit-scrollbar-corner,
 }
 
 .app:has(> .beside):has(> .chat) {
+  --beside-chat: var(--chat-w);
+
   grid-template-columns: var(--side-w) var(--list-w) minmax(0, 1fr) var(--chat-w);
 }
 
@@ -6598,7 +6606,6 @@ a.rv-part-row:hover {
 .rv-ai {
   display: grid;
   gap: 6px;
-  max-width: 780px;
   color: var(--ink-2);
   font-size: clamp(13px, 11.5px + 0.2vw, 14.5px);
 }
@@ -6637,10 +6644,6 @@ a.rv-part-row:hover {
   color: var(--ink);
   font-size: clamp(14.5px, 13px + 0.2vw, 16px);
   line-height: 1.5;
-}
-
-.rv-desc {
-  max-width: 780px;
 }
 
 /* The goal leads, in ink and a step larger; the rest a step quieter, at the section's size. */
@@ -6819,7 +6822,6 @@ ul.rv-status-why {
 }
 
 .rv-concerns li {
-  max-width: 80ch;
   padding: 1px 0 1px 12px;
   border-left: 2px solid var(--rule-strong);
   color: var(--ink-2);
@@ -6830,7 +6832,6 @@ ul.rv-status-why {
 .rv-convo {
   display: grid;
   gap: 12px;
-  max-width: 780px;
   padding: 0 12px;
   color: var(--ink-2);
   font-size: clamp(13.5px, 12px + 0.2vw, 15px);
@@ -7496,7 +7497,6 @@ ul.rv-status-why {
 .rv-step {
   display: grid;
   gap: 4px;
-  max-width: 780px;
   margin: 10px 0 -12px;
   scroll-margin-top: 64px;
 }
@@ -7526,7 +7526,6 @@ ul.rv-status-why {
 }
 
 .rv-step-note {
-  max-width: 80ch;
   padding-left: 12px;
   border-left: 2px solid var(--rule);
 }

@@ -376,6 +376,9 @@ test("what sorts and reviews, and your agent, name the agent you chose", () => {
   assert.equal(codex.get("review.auto_ai")!.label, "Codex reviews other people's PRs ahead of time");
   assert.match(codex.get("agent.decision_key")!.help!, /Empty: Codex answers\.$/);
   assert.equal(codex.get("agent.harness")!.help, "Sorts your desk and reviews PRs ahead of time, on your own login.");
-  assert.equal(codex.get("agent.coordinator")!.help, "A Codex session that answers Ask your agent and gets what you hand off merged.");
+  assert.equal(
+    codex.get("agent.coordinator")!.help,
+    "Two Codex sessions: one answers Ask your agent, the other gets what you hand off merged.",
+  );
   assert.match(codex.get("agent.coordinator_bypass")!.help!, /^No sandbox and no approvals/);
 });

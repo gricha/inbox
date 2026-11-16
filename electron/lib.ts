@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { Cause, Data, Effect, Result, type Schema } from "effect";
+import { Cause, Data, Effect, Result, Schema } from "effect";
 import { fsError, messageOf, type FsError } from "../src/errors.ts";
 import { hashOf, placeOf } from "../src/links.ts";
 import { codeOf, decode, field, num } from "../src/narrow.ts";
@@ -355,6 +355,36 @@ export const probeHealth = (base: string, timeoutMs = 1000): Effect.Effect<Probe
   );
 
 export const backoff = (attempt: number): number => Math.min(30_000, 1000 * 2 ** attempt);
+
+// ---------------------------------------------------------------- the app's own desk (electron/desk-host.ts)
+
+// What the app tells the desk it runs in a utility process: start (with the build an update replaces, when it can be
+// replaced), an install's outcome, stop.
+const ToHostSchema = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("start"),
+    port: Schema.Number,
+    home: Schema.String,
+    app: Schema.optionalKey(Schema.Struct({ version: Schema.String, install: Schema.Boolean })),
+  }),
+  Schema.Struct({ type: Schema.Literal("installed"), id: Schema.Number, error: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ type: Schema.Literal("stop") }),
+]);
+export type ToHost = typeof ToHostSchema.Type;
+
+// What that desk tells the app: its log lines and notifications, that it started or why not, an install to do, that it stopped.
+const FromHostSchema = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("log"), msg: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("notify"), title: Schema.String, body: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("started") }),
+  Schema.Struct({ type: Schema.Literal("failed"), message: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("install"), id: Schema.Number }),
+  Schema.Struct({ type: Schema.Literal("stopped") }),
+]);
+export type FromHost = typeof FromHostSchema.Type;
+
+export const toHost = (v: unknown): ToHost | null => Result.getOrNull(decode(ToHostSchema, v));
+export const fromHost = (v: unknown): FromHost | null => Result.getOrNull(decode(FromHostSchema, v));
 
 // ---------------------------------------------------------------- SSE
 

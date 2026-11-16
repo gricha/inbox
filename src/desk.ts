@@ -28,7 +28,7 @@ import {
 } from "./errors.ts";
 import { Automations, canOf } from "./automations.ts";
 import { Urgency } from "./urgency.ts";
-import { GONE, Jobs } from "./jobs.ts";
+import { askOf, GONE, Jobs } from "./jobs.ts";
 import type { GitHub } from "./github/index.ts";
 import type { GitHubWriter, InlineThread } from "./github/write.ts";
 import { KEEP_RESOLVED, type Connector, type NewEvent } from "./connectors/connector.ts";
@@ -103,7 +103,7 @@ import type {
   UpdateView,
   Work,
 } from "./types.ts";
-import { BUCKETS, byPart, isCoordinator, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
+import { AGENT_NAME, BUCKETS, byPart, isCoordinator, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
 import { decodeEach, isKeyOf, keysOf, oneOf, schemaOf, strings } from "./narrow.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
@@ -155,7 +155,7 @@ import { readOwnSkill, REVIEW_SKILL_VERSION, type OwnSkill } from "./connectors/
 import { fixAskText, readOwnIssueSkill, type FetchIssueError, type IssueRun, type IssueText, type OwnIssueSkill } from "./issue.ts";
 import { Conversations, talked } from "./conversation.ts";
 import { checksView } from "./checks.ts";
-import { askLine, Coordinator, REBASE, wakeFor } from "./coordinator.ts";
+import { AGENT, askLine, Coordinator, MERGING, REBASE, wakeFor } from "./coordinator.ts";
 import {
   checkSetting,
   effective,
@@ -651,7 +651,8 @@ export class Desk {
   decisions: string | undefined;
   judge: Judge;
   convos: Conversations;
-  coordinator: Coordinator;
+  coordinator: Coordinator; // gets what you hand off merged
+  yourAgent: Coordinator; // answers what you ask, apart, so a merge never holds up a question
   sessions: Sessions;
   opener: (url: string) => Effect.Effect<void, CommandError>;
   automations: Automations;
@@ -724,7 +725,8 @@ export class Desk {
     this.connectors = [this.gh];
     this.judge = new Judge(this);
     this.convos = new Conversations(this);
-    this.coordinator = new Coordinator(this);
+    this.coordinator = new Coordinator(this, MERGING);
+    this.yourAgent = new Coordinator(this, AGENT);
     this.sessions = new Sessions(this, opts.sessions);
     this.opener = opts.open ?? openLink;
     this.automations = new Automations(this);
@@ -835,7 +837,9 @@ export class Desk {
   start(): void {
     this.automations.start(); // before the first sync, whose events are a fresh desk's first news for what GitHub comes with
     for (const c of this.connectors) c.start();
+    this.moveAsks();
     this.coordinator.start();
+    this.yourAgent.start();
     this.sessions.start();
     this.jobs.start();
     this.updates.start();
@@ -861,6 +865,7 @@ export class Desk {
     this.judge.stop();
     this.convos.stop();
     this.coordinator.close();
+    this.yourAgent.close();
     this.sessions.stop();
     this.automations.stop();
     this.urgency.stop();
@@ -1036,13 +1041,15 @@ export class Desk {
         this.automations.held.clear();
         this.urgency.held = null;
       }
-      if (coordinator && !this.settings["agent.coordinator"]) this.coordinator.stop();
-      if (!coordinator && this.settings["agent.coordinator"]) this.coordinator.flush();
-      else if (ran !== runs(this.settings) && this.settings["agent.coordinator"])
-        this.runner.fork(
-          "coordinator",
-          Effect.promise(() => this.coordinator.again()),
-        );
+      for (const seat of [this.coordinator, this.yourAgent]) {
+        if (coordinator && !this.settings["agent.coordinator"]) seat.stop();
+        if (!coordinator && this.settings["agent.coordinator"]) seat.flush();
+        else if (ran !== runs(this.settings) && this.settings["agent.coordinator"])
+          this.runner.fork(
+            "coordinator",
+            Effect.promise(() => seat.again()),
+          );
+      }
       // Sync now only when the searches change; other settings apply to what the desk already has.
       if (this.configText) yield* this.reloadConfig(searchKey(this.settings) !== searches);
       else this.changed();
@@ -3681,20 +3688,22 @@ export class Desk {
       const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
       if (a) {
         if (a.item_id) yield* this.requireConfig(); // askAbout reads the snapshot
-        const told = yield* this.coordinator
+        const told = yield* this.yourAgent
           .tell(askLine(a, this.askAbout(a.item_id)))
           .pipe(Effect.mapError((e) => new BadRequest({ message: e.message })));
         this.jobs.queue("ask", a.id, a.item_id, true);
         yield* told;
-      } else yield* this.coordinator.ran(this.coordinator.now());
-      return yield* this.coordinator.saved() ? Effect.void : this.didntStart();
+        return yield* this.yourAgent.saved() ? Effect.void : this.didntStart(this.yourAgent);
+      }
+      yield* this.coordinator.ran(this.coordinator.now());
+      return yield* this.coordinator.saved() ? Effect.void : this.didntStart(this.coordinator);
     });
   }
 
   // The loop's: an ask your agent stopped without answering goes to it again, as Wake it sends it, its tries counted.
   resendAsk(a: Ask): void {
     this.log(`your agent didn't answer ask ${a.id}: asking it again`);
-    const tell = Effect.flatten(this.coordinator.tell(askLine(a, this.askAbout(a.item_id)))).pipe(
+    const tell = Effect.flatten(this.yourAgent.tell(askLine(a, this.askAbout(a.item_id)))).pipe(
       Effect.catchTag("UnsafeArgument", (e) =>
         Effect.sync(() => {
           this.jobs.fail("ask", a.id, e.message);
@@ -3705,11 +3714,21 @@ export class Desk {
     this.runner.fork("coordinator", tell);
   }
 
-  private didntStart(): Effect.Effect<never, Upstream> {
-    const why = this.coordinator.failure ? messageOf(this.coordinator.failure) : "";
-    return Effect.fail(
-      new Upstream({ message: why ? `Your agent didn't start: ${why}` : "Your agent didn't start", cause: this.coordinator.failure }),
+  private didntStart(seat: Coordinator): Effect.Effect<never, Upstream> {
+    const why = seat.failure ? messageOf(seat.failure) : "";
+    return Effect.fail(new Upstream({ message: why ? `Your agent didn't start: ${why}` : "Your agent didn't start", cause: seat.failure }));
+  }
+
+  // Asks kept for the one session both seats used to be: they're your agent's now. Answers to its questions stay.
+  private moveAsks(): void {
+    const kept = this.coordinator.asks();
+    const asks = kept.filter((l) => !!askOf(l));
+    if (!asks.length) return;
+    this.store.set(
+      MERGING.asks,
+      kept.filter((l) => !askOf(l)),
     );
+    this.store.set(AGENT.asks, [...this.yourAgent.asks(), ...asks]);
   }
 
   merging(id: string): Merging {
@@ -4031,24 +4050,24 @@ export class Desk {
         answer: null,
       };
       const line = askLine(a, this.askAbout(a.item_id));
-      const started = !!this.coordinator.saved();
+      const started = !!this.yourAgent.saved();
       const send = Effect.gen({ self: this }, function* () {
-        const told = yield* this.coordinator.tell(line).pipe(Effect.mapError((e) => new BadRequest({ message: e.message })));
+        const told = yield* this.yourAgent.tell(line).pipe(Effect.mapError((e) => new BadRequest({ message: e.message })));
         this.store.set("asks", [...this.asks(), a].slice(-ASKS_KEPT));
         this.jobs.queue("ask", a.id, a.item_id, true);
         this.changed();
         // Like Wake it: a coordinator that won't start says so now, rather than the ask waiting for an answer that never comes.
         if (started) return a;
         yield* told;
-        if (this.coordinator.saved()) return a;
-        this.coordinator.untell(line);
+        if (this.yourAgent.saved()) return a;
+        this.yourAgent.untell(line);
         this.store.set(
           "asks",
           this.asks().filter((x) => x.id !== a.id),
         );
         this.jobs.drop("ask", a.id);
         this.changed();
-        return yield* this.didntStart();
+        return yield* this.didntStart(this.yourAgent);
       });
       return yield* Effect.uninterruptible(send);
     });
@@ -4166,7 +4185,9 @@ export class Desk {
         const asked = `your question ${q.id} ("${q.question}")`;
         const line = dismissed ? `I dismissed ${asked}: decide yourself.` : `My answer to ${asked}: "${answer.replaceAll(/\s+/g, " ")}"`;
         // tell() keeps the line and wakes it; nothing here waits for that run.
-        const tell = this.coordinator.tell(line).pipe(
+        // Back to whichever seat asked it.
+        const seat = q.from === AGENT_NAME ? this.yourAgent : this.coordinator;
+        const tell = seat.tell(line).pipe(
           Effect.asVoid,
           Effect.catch((e) =>
             Effect.sync(() => {
@@ -4289,7 +4310,7 @@ export class Desk {
         all.map((x) => (x === a ? done : x)),
       );
       this.jobs.done("ask", id);
-      this.coordinator.answered(id);
+      this.yourAgent.answered(id);
       this.changed();
       const said = lead(done.answer!.text);
       if (!a.answer && this.mayNotify()) {

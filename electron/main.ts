@@ -1,5 +1,6 @@
 // The desktop app: a window, tray and global hotkey around the desk. It attaches to a desk already
-// running on the port (desk serve, launchd), runs one from a checkout (electron/source.ts), or runs one in-process.
+// running on the port (desk serve, launchd), runs one from a checkout (electron/source.ts), or runs its own in a utility
+// process (electron/desk-host.ts), so nothing the desk does holds up the window.
 import {
   app,
   BrowserWindow,
@@ -14,18 +15,20 @@ import {
   session,
   shell,
   Tray,
+  utilityProcess,
 } from "electron";
 import type { IpcMainInvokeEvent, MenuItemConstructorOptions, NativeImage } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline";
 import { Cause, Effect, Exit, Fiber, Result, Schema } from "effect";
 import { BadRequest, Forbidden, messageOf, Upstream, type FsError } from "../src/errors.ts";
 import { readToken } from "../src/github/client.ts";
 import { deskHome, settleHome } from "../src/home.ts";
 import { field } from "../src/narrow.ts";
 import { report } from "../src/sentry.ts";
-import { DEFAULT_PORT, startServer } from "../src/server.ts";
+import { DEFAULT_PORT } from "../src/server.ts";
 import { readSettings, settingsPath } from "../src/settings.ts";
 import { RELEASES } from "../src/updates.ts";
 import type { SourceStatus } from "../src/types.ts";
@@ -45,6 +48,7 @@ import {
   fallbackDirs,
   findNode,
   followEvents,
+  fromHost,
   getJson,
   ipcAnswer,
   isAppUrl,
@@ -79,6 +83,7 @@ import {
   type DeskPlan,
   type DesktopSettings,
   type SSEvent,
+  type ToHost,
 } from "./lib.ts";
 import { reap, startSource, type Source } from "./source.ts";
 
@@ -104,11 +109,14 @@ const Status = Schema.Struct({ now: Schema.Number, today: Schema.Number, text: S
 const TrayCard = Schema.Struct({ repo: Schema.String, number: Schema.Number, title: Schema.String, url: Schema.String });
 const Focus = Schema.Struct({ sections: Schema.Struct({ now: Schema.Array(TrayCard), today: Schema.Array(TrayCard) }) });
 const Settings = Schema.Struct({ values: Schema.Record(Schema.String, Schema.Unknown) });
-type Server = Awaited<ReturnType<typeof startServer>>;
+// The app's own desk, in its utility process.
+interface Server {
+  stop(): Effect.Effect<void>;
+}
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
-let server: Server | null = null; // set when this process runs the desk
+let server: Server | null = null; // set while the app's own desk runs
 let source: Source | null = null; // set when the desk and UI run from a checkout
 let quitting = false;
 let closing = false;
@@ -234,18 +242,10 @@ function main(): Effect.Effect<void> {
   });
 }
 
-// The desk this process runs closed and what runs from a checkout stopped, each failure logged; then the app exits.
+// The app's own desk closed and what runs from a checkout stopped, each failure logged; then the app exits.
 function stopDesk(s: Server | null, src: Source | null): Effect.Effect<void> {
   return Effect.gen(function* () {
-    const closed = s
-      ? Effect.tryPromise({ try: () => s.close(), catch: (cause) => new DeskFailed({ cause }) }).pipe(
-          Effect.catch((err) =>
-            Effect.sync(() => {
-              log(`closing the desk: ${err.message}`);
-            }),
-          ),
-        )
-      : Effect.void;
+    const closed = s ? s.stop() : Effect.void;
     const stopped = src
       ? src.stop().pipe(
           Effect.catch((err) =>
@@ -373,7 +373,7 @@ function connect(): Effect.Effect<boolean> {
       }
       const settled = yield* settleHome(port, settleLog);
       home = settled;
-      // A desk from source that fails, or can't start yet, shows that in the window and waits for a fix; never an in-process desk in its place.
+      // A desk from source that fails, or can't start yet, shows that in the window and waits for a fix; never the app's own desk in its place.
       if (plan.run === "wait") {
         if (plan.problem !== waitingOn) {
           waitingOn = plan.problem;
@@ -411,12 +411,7 @@ function connect(): Effect.Effect<boolean> {
         return true;
       }
       log(`starting a desk on ${deskUrl}`);
-      const started = yield* Effect.result(
-        Effect.tryPromise({
-          try: () => startServer({ port, home: settled, notify, log, ...(app.isPackaged ? { app: updater() } : {}) }),
-          catch: (cause) => new DeskFailed({ cause }),
-        }),
-      );
+      const started = yield* Effect.result(startHost(settled));
       if (Result.isSuccess(started)) {
         server = started.success;
         return true;
@@ -441,7 +436,93 @@ function connect(): Effect.Effect<boolean> {
   });
 }
 
-// Follows /api/events: refreshes the tray on each update, shows a desk's notifications when it isn't in this process, and
+// The app's own desk in a utility process: started once it listens, or DeskFailed with why not. Its log lines go to
+// desk.log and its notifications show here; an update it asks for installs here. Should it exit, server goes back to null
+// and watch() starts another.
+function startHost(at: string): Effect.Effect<Server, DeskFailed> {
+  return Effect.callback<Server, DeskFailed>((resume) => {
+    const child = utilityProcess.fork(path.join(app.getAppPath(), "electron", "desk-host.ts"), [], {
+      serviceName: "Inbox desk",
+      env: { ...process.env }, // with the login shell's PATH, set since launch
+      stdio: "pipe",
+    });
+    let exited = false;
+    // An install's answer can come after the quit it started has ended the process.
+    const tell = (m: ToHost) => {
+      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a utility process, not a window: it has no origin
+      if (!exited) child.postMessage(m);
+    };
+    let up = false;
+    let stopping = false;
+    let stopped: (() => void) | null = null;
+    // What the desk's process prints itself (a crash, a library's warning), as it never goes through its log.
+    for (const out of [child.stdout, child.stderr])
+      if (out)
+        readline.createInterface({ input: out }).on("line", (line) => {
+          log(`desk process: ${line}`);
+        });
+    const host: Server = {
+      stop: () =>
+        Effect.callback<void>((done) => {
+          stopping = true;
+          stopped = () => {
+            done(Effect.void);
+          };
+          tell({ type: "stop" });
+        }).pipe(
+          Effect.timeoutOption(5000),
+          Effect.andThen(
+            Effect.sync(() => {
+              child.kill();
+            }),
+          ),
+        ),
+    };
+    child.on("message", (raw: unknown) => {
+      const m = fromHost(raw);
+      if (!m) log(`the desk's process sent what the app can't read: ${JSON.stringify(raw)}`);
+      else if (m.type === "log") log(m.msg);
+      else if (m.type === "notify") notify(m.title, m.body);
+      else if (m.type === "started") {
+        up = true;
+        resume(Effect.succeed(host));
+      } else if (m.type === "failed") {
+        child.kill();
+        resume(Effect.fail(new DeskFailed({ cause: m.message })));
+      } else if (m.type === "install") {
+        const id = m.id;
+        runner.fork(
+          "installing an update",
+          installUpdate().pipe(
+            Effect.match({
+              onFailure: (e) => {
+                tell({ type: "installed", id, error: e.message });
+              },
+              onSuccess: () => {
+                tell({ type: "installed", id });
+              },
+            }),
+          ),
+        );
+      } else stopped?.();
+    });
+    child.on("exit", (code) => {
+      exited = true;
+      stopped?.();
+      if (!up) resume(Effect.fail(new DeskFailed({ cause: `its process exited (${code})` })));
+      else if (server === host && !stopping) {
+        server = null;
+        log(`the desk's process exited (${code})`);
+      }
+    });
+    tell({ type: "start", port, home: at, ...(app.isPackaged ? { app: updater() } : {}) });
+    return Effect.sync(() => {
+      if (!up) child.kill();
+    });
+  });
+}
+
+// Follows /api/events: refreshes the tray on each update, shows a desk's notifications when it isn't the app's own, and
 // takes over when an attached desk goes away. A desk from source restarting is just a reconnect.
 function watch(): Effect.Effect<void> {
   return Effect.gen(function* () {
@@ -667,10 +748,10 @@ function showPage(text: string): void {
 
 // ---------------------------------------------------------------- updates
 
-// What the desk checks a newer release against, and the install where electron-updater can do one (selfUpdates).
-function updater(): { version: string; install?: () => Effect.Effect<void, Upstream> } {
+// What the desk checks a newer release against, and whether electron-updater can install one here (selfUpdates).
+function updater(): { version: string; install: boolean } {
   const nsis = fs.existsSync(path.join(path.dirname(process.execPath), `Uninstall ${app.getName()}.exe`));
-  return { version: app.getVersion(), ...(selfUpdates(process.platform, process.env, nsis) ? { install: installUpdate } : {}) };
+  return { version: app.getVersion(), install: selfUpdates(process.platform, process.env, nsis) };
 }
 
 // The latest release, with the owner's token since the repo is private: downloaded, then the app quits into it.

@@ -215,7 +215,7 @@ Every write here is own page only, logged, and answers 502 with GitHub's reason 
 | POST   | `/api/inflight/:id/handback` | `{ why }` → `{ ok, reason }` (`desk_hand_back`): the PR leaves Merging for the top of the queue. 409 unless your open PR in Merging                                                                                         | ✓   |
 | POST   | `/api/coordinator/wake`      | Starts the coordinator, or has it look at Merging now (Start it now, Wake it). 409 while `agent.coordinator` is off                                                                                                         | ✓   |
 | POST   | `/api/ask`                   | `{ text, item_id?, thread_id?, thread_url?, lines? }` → `{ ok, ask }`: your words to the coordinator ([Asks](#asks)), up to 2,000 characters. Own page only. 409 while `agent.coordinator` is off; 502 when it didn't start | ✓   |
-| GET    | `/api/asks`                  | `{ on, asks, coordinator, options }`: whether it's on, your asks oldest first, what it's doing (`saying`: its words so far this turn), and how it runs (`AgentOptions`)                                                     |     |
+| GET    | `/api/asks`                  | `{ on, asks, coordinator, options }`: whether it's on, your asks oldest first with their answers, what your agent is doing (`saying`: its words so far this turn), and how it runs (`AgentOptions`)                         |     |
 | GET    | `/api/asks/:id`              | `AskPlace` (`desk_ask`): where the ask is. Agents may read it. 404 for an unknown ask                                                                                                                                       | ✓   |
 | POST   | `/api/asks/:id/answer`       | `{ text }` → `{ ok, ask }` (`desk_answer`). Paragraphs kept; control, bidi and zero-width characters dropped; at most one blank line in a row. 400 over 6,000 characters (never cut); 404 for an unknown ask                |     |
 
@@ -750,7 +750,7 @@ interface AutomationView extends Automation {
 `GET /api/events` is a server-sent events stream:
 
 - `event: update`, `data: {"rev": n}`: once on connect, then after any change (a sync, a triage action or undo, a config or settings save, an AI review or judge call starting or finishing, an approval, a draft marked ready, a note, a hand-back, a hand-off or Back to desk). Refetch what you show.
-- `event: notify`, `data: {"title", "body"}`: only with `?notify=1`. The desktop app asks for these when it attaches to a desk it doesn't run in-process; while one listens, the desk shows no notification of its own.
+- `event: notify`, `data: {"title", "body"}`: only with `?notify=1`. The desktop app asks for these when it attaches to a desk it didn't start; while one listens, the desk shows no notification of its own.
 - `event: omarchy`: the Omarchy theme changed (the same value as `GET /api/omarchy`).
 - `: ping` comment lines every 25 s keep the connection open.
 
@@ -1244,7 +1244,7 @@ News is queued one entry per PR. A minute after the first, the desk delivers it 
 
 #### On Claude Code
 
-**Starting.** On the first hand-off or ask, the desk runs `claude --bg --name "Inbox coordinator" --remote-control "Inbox coordinator" "<role line> <news>"` in `<home>/coordinator`.
+**Starting.** On the first hand-off, the desk runs `claude --bg --name "Inbox coordinator" --remote-control "Inbox coordinator" "<role line> <news>"` in `<home>/coordinator`. On the first ask it starts your agent the same way: named "Inbox agent", in `<home>/agent`, with its own role line. They're two seats of one class (`MERGING` and `AGENT` in `src/coordinator.ts`), each with its own session, folder and kv keys (`coordinator_*`, `agent_*`), so a merge never holds up an ask. A question either asks is answered back to that one.
 
 - Before that it adds any missing rule of its deny list to the folder's `.claude/settings.json`; your own settings there stay.
 - With `agent.coordinator_bypass` on it adds `--permission-mode bypassPermissions`. Deny rules still apply in every mode.
@@ -1296,11 +1296,11 @@ The same shape as Codex (`Coordinator.runOwn()`), each turn the desk's child:
 
 ### Asks
 
-An ask is your words to the coordinator (`POST /api/ask`, Ask your agent in the window). It doesn't wait for the news batch:
+An ask is your words to your agent (`POST /api/ask`, Ask your agent in the window), a session apart from the coordinator. It doesn't wait for a batch:
 
 - the desk keeps it (kv `asks`, the latest 200);
-- queues one line for it in kv `coordinator_asks`;
-- delivers it as soon as a run in progress is done (busy: it waits; not started: it starts it), ahead of any news in the same message.
+- queues one line for it in kv `agent_asks` (asks a desk kept in `coordinator_asks`, from when one session did both, move there at start);
+- delivers it as soon as a run in progress is done (busy: it waits; not started: it starts it).
 
 `agent.coordinator` off refuses it. One that isn't started and won't start is a 502, and the ask is dropped. `desk_answer` stores the answer on the ask, updates the views and, on its first answer, notifies you with its first paragraph (`notify.enabled`, outside `notify.quiet`).
 

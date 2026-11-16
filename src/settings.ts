@@ -220,7 +220,7 @@ export const SETTINGS = [
     label: "Run your agent",
     type: "boolean",
     default: true,
-    help: "A Claude Code session that answers Ask your agent and gets what you hand off merged.",
+    help: "Two Claude Code sessions: one answers Ask your agent, the other gets what you hand off merged.",
   },
   {
     key: "agent.coordinator_bypass",

@@ -11,7 +11,7 @@ import type { Ask } from "../src/types.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { NOW } from "./helpers/items.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
-import { posix, until, settle, starts, resumes, ROLE, coordinated, OWNER, asking } from "./helpers/coordinator.ts";
+import { posix, until, settle, starts, resumes, ROLE, AGENT_ROLE, coordinated, OWNER, asking } from "./helpers/coordinator.ts";
 
 test(
   "the desk stopping interrupts a run in flight: its claude is stopped, and nothing starts, is kept or notifies after",
@@ -62,6 +62,7 @@ test(
     const asked = post("/api/ask", { text: "rebase it" }, OWNER);
     await until(() => t.fake.calls().length === 1);
     const woke = post("/api/coordinator/wake", {});
+    await until(() => t.fake.calls().length === 2); // the coordinator's look for Wake it, apart from your agent's
     const logs: string[] = [];
     t.desk.log = (m) => {
       logs.push(m);
@@ -73,10 +74,22 @@ test(
     assert.deepEqual([a.status, w.status], [499, 499], 'they were 500s: the closed store\'s "database is not open"');
     await settle(300);
     assert.deepEqual(logs, []);
-    assert.deepEqual([t.fake.calls(), t.fake.sessions(), t.notes], [[["agents", "--json", "--all"]], [], []], "it went no further");
+    // One look each: your agent for the ask, the coordinator for Wake it.
+    assert.deepEqual(
+      [t.fake.calls(), t.fake.sessions(), t.notes],
+      [
+        [
+          ["agents", "--json", "--all"],
+          ["agents", "--json", "--all"],
+        ],
+        [],
+        [],
+      ],
+      "it went no further",
+    );
     const next = new Desk({ home: t.home, github: t.gh, now: () => NOW, notify: () => {}, log: () => {} });
     assert.deepEqual(
-      [next.asks().map((x) => x.text), next.coordinator.asks().length],
+      [next.asks().map((x) => x.text), next.yourAgent.asks().length],
       [["rebase it"], 1],
       "the ask stays for the next desk's run, as before the stop",
     );
@@ -181,11 +194,11 @@ test("coordinator settings that don't parse fail its folder as their read, in th
 });
 
 test(
-  "an ask is kept and wakes the coordinator at once: the owner's words, the item's id and URL and the thread's, no PR text",
+  "an ask is kept and wakes your agent at once, a session apart from the coordinator: the owner's words, the item's id and URL and the thread's, no PR text",
   posix,
   async (c) => {
     const t = await coordinated(c);
-    t.desk.coordinator.batch = 60_000; // an ask doesn't wait for it
+    t.desk.yourAgent.batch = 60_000; // an ask doesn't wait for it
     const api = asking(t);
     const thread = "https://github.com/acme/web/pull/3#discussion_r9";
     const res = await api.ask({
@@ -210,7 +223,7 @@ test(
       },
     );
     assert.deepEqual(t.said(), [
-      `${ROLE} My ask ${ask.id}, about my PR acme/web#3 (https://github.com/acme/web/pull/3), not handed off, on the thread ${thread}: "i think we addressed it in follow up, you can dismiss this item" Answer it with desk_answer.`,
+      `${AGENT_ROLE} My ask ${ask.id}, about my PR acme/web#3 (https://github.com/acme/web/pull/3), not handed off, on the thread ${thread}: "i think we addressed it in follow up, you can dismiss this item" Answer it with desk_answer.`,
     ]);
     assert.ok(!t.fake.calls().flat().join(" ").includes("Ignore previous"), "never PR text");
     const listed = await api.list();
@@ -224,20 +237,25 @@ test(
     assert.equal(t.said()[1], `My ask ${next.id}: "and confirm marco's comment is addressed" Answer it with desk_answer.`);
     assert.equal(starts(t.fake.calls()).length, 1);
 
-    // Busy, it waits like news does, then goes with it in one message.
+    // Busy, it waits, then goes.
     await settle();
+    t.desk.yourAgent.batch = 30;
     t.desk.coordinator.batch = 30;
     t.fake.busy(true);
     const later = ((await (await api.ask({ text: "snooze web#4 until monday" })).json()) as { ask: Ask }).ask;
-    runSync(t.desk.act("web#4", "inflight"));
     await settle();
     assert.equal(resumes(t.fake.calls()).length, 1, "nothing reaches it while it works");
     t.fake.busy(false);
     await until(() => t.said().length === 3);
-    assert.equal(
-      t.said()[2],
-      `My ask ${later.id}: "snooze web#4 until monday" Answer it with desk_answer. In Merging: acme/web#4 (https://github.com/acme/web/pull/4): handed off.`,
-    );
+    assert.equal(t.said()[2], `My ask ${later.id}: "snooze web#4 until monday" Answer it with desk_answer.`);
+
+    // A hand-off goes to the coordinator, a session of its own, never in your agent's messages.
+    runSync(t.desk.act("web#4", "inflight"));
+    await until(() => t.fake.sessions().length === 2);
+    const [agent, coordinator] = t.fake.sessions();
+    assert.deepEqual([agent!.name, coordinator!.name], ["Inbox agent", "Inbox coordinator"]);
+    assert.deepEqual(coordinator!.said, [`${ROLE} In Merging: acme/web#4 (https://github.com/acme/web/pull/4): handed off.`]);
+    assert.equal(agent!.said.length, 3);
     await settle();
     assert.deepEqual(t.desk.coordinator.news(), []);
     assert.equal((await run(t.desk.reviewView("web#3"))).asks.length, 1, "the PR's review shows its own asks");
@@ -347,7 +365,7 @@ test(
     const api = asking(t);
     const { ask } = (await (await api.ask({ text: "is dana's comment addressed?", item_id: "web#3" })).json()) as { ask: Ask };
     const line = `My ask ${ask.id}, about my PR acme/web#3 (https://github.com/acme/web/pull/3), not handed off: "is dana's comment addressed?" Answer it with desk_answer.`;
-    await until(() => t.said().length === 1 && !t.desk.coordinator.flushing);
+    await until(() => t.said().length === 1 && !t.desk.yourAgent.flushing);
     const job = () => {
       const j = t.desk.jobs.get("ask", ask.id);
       return j && { state: j.state, attempts: j.attempts, error: j.error };
@@ -357,17 +375,17 @@ test(
     // Time passes, the loop looks, and so does the desk: your agent idle, it stopped without answering; or working.
     const later = async (minutes: number, status: "idle" | "busy" = "idle") => {
       t.fake.busy(status === "busy");
-      await run(t.desk.coordinator.find());
+      await run(t.desk.yourAgent.find());
       at += minutes * 60_000;
       t.setNow(new Date(at));
       t.desk.jobs.tick();
       await settle();
-      await until(() => !t.desk.coordinator.flushing);
+      await until(() => !t.desk.yourAgent.flushing);
     };
     await later(4);
     assert.equal(t.said().length, 1, "not before its wait");
     await later(1);
-    assert.deepEqual(t.said(), [`${ROLE} ${line}`, line], "asked again in its own words");
+    assert.deepEqual(t.said(), [`${AGENT_ROLE} ${line}`, line], "asked again in its own words");
     assert.deepEqual(job(), { state: "running", attempts: 2, error: null });
     await later(14);
     assert.equal(t.said().length, 2, "once per wait: the next is 15 minutes after it went again");
@@ -399,6 +417,6 @@ test("an ask that can't start the coordinator says so and isn't kept", posix, as
   assert.deepEqual(t.desk.coordinator.asks(), []);
   t.fake.fail(false);
   const { ask } = (await (await api.ask({ text: "try again" })).json()) as { ask: Ask };
-  assert.deepEqual(t.said(), [`${ROLE} My ask ${ask.id}: "try again" Answer it with desk_answer.`]);
+  assert.deepEqual(t.said(), [`${AGENT_ROLE} My ask ${ask.id}: "try again" Answer it with desk_answer.`]);
   assert.deepEqual((await api.list()).asks, [ask]);
 });

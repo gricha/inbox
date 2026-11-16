@@ -13,7 +13,7 @@ import { run, runSync } from "./helpers/run.ts";
 const posix = { skip: process.platform === "win32" };
 const MCP = "http://localhost:49401/mcp";
 const ROLE =
-  "You are my Inbox coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging, or when I ask you something in the desk. Follow the Coordinator section of the inbox skill.";
+  "You are my Inbox coordinator: the desk keeps you running and wakes you with a message when something changes on a PR in Merging. Follow the Coordinator section of the inbox skill.";
 const TOOL_LESS_OFF = ["shell_tool", "unified_exec", "apps", "plugins", "browser_use", "browser_use_external", "in_app_browser"]
   .concat(["computer_use", "image_generation", "view_image", "multi_agent", "hooks", "memories"])
   .flatMap((x) => ["--disable", x]);
