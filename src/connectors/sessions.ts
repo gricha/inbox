@@ -533,6 +533,7 @@ export class Sessions {
   polled = 0; // when the last pass started
   asked = new Map<string, Asked>(); // the model's read, by session, for its last event
   askFailed = 0; // when a model call last failed: none again for a while
+  records = new Map<string, { key: string; record: DesktopRecord | null }>(); // the desktop app's, by file
 
   constructor(desk: Desk, at: Roots = roots()) {
     this.desk = desk;
@@ -574,13 +575,7 @@ export class Sessions {
   look(rows: AgentRow[], now: number): Seen[] {
     const home = this.desk.home;
     const since = now - RECENT;
-    const records = this.roots.desktop
-      .flatMap((dir) => desktopFiles(dir))
-      .flatMap((f) => {
-        const text = readText(f);
-        const r = text === null ? null : readDesktopRecord(text);
-        return r && !r.archived && r.active_at >= since ? [r] : [];
-      });
+    const records = this.desktopRecords(since).filter((r) => !r.archived && r.active_at >= since);
     const byTranscript = new Map(records.map((r) => [r.session_id, r]));
     const transcripts = transcriptIndex(path.join(this.roots.claude, "projects"));
     const out: Seen[] = [];
@@ -649,6 +644,25 @@ export class Sessions {
       });
     }
     return out.filter((s) => !!(s.tail ?? s.codex ?? s.row ?? s.desktop));
+  }
+
+  // The app keeps every session's record, some of them megabytes, and writes the one it's in: a file untouched since
+  // `since` holds no activity after it, and one unchanged since the last pass is the record it was.
+  desktopRecords(since: number): DesktopRecord[] {
+    const kept = new Map<string, { key: string; record: DesktopRecord | null }>();
+    for (const f of this.roots.desktop.flatMap((dir) => desktopFiles(dir))) {
+      const st = Result.getOrElse(Result.try({ try: () => fs.statSync(f), catch: () => null }), () => null);
+      if (!st || st.mtimeMs < since) continue;
+      const key = `${st.mtimeMs} ${st.size}`;
+      const was = this.records.get(f);
+      if (was?.key === key) kept.set(f, was);
+      else {
+        const text = readText(f);
+        kept.set(f, { key, record: text === null ? null : readDesktopRecord(text) });
+      }
+    }
+    this.records = kept;
+    return [...kept.values()].flatMap((r) => (r.record ? [r.record] : []));
   }
 
   tailOf(file: string | undefined): Tail | null {

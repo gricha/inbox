@@ -16,6 +16,7 @@ import {
   readRollout,
   readTail,
   readTranscript,
+  Sessions,
   TAIL,
   untilText,
   type AgentRow,
@@ -258,6 +259,39 @@ test("the desktop app's own read of a turn and its error mark, and Codex's open 
     null,
   );
   assert.equal(readRollout("nothing\n{}"), null);
+});
+
+test("the desktop app's records are read only when written in the last days, and parsed again only once changed", (c) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "desk-records-"));
+  c.after(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const dir = path.join(root, "sessions", "org", "acct");
+  fs.mkdirSync(dir, { recursive: true });
+  const now = Date.now();
+  const write = (id: string, title: string, mtime: number) => {
+    const f = path.join(dir, `${id}.json`);
+    const o = { sessionId: id, cliSessionId: `cli-${id}`, title, cwd: root, isArchived: false, lastActivityAt: now };
+    fs.writeFileSync(f, JSON.stringify(o));
+    fs.utimesSync(f, new Date(mtime), new Date(mtime));
+  };
+  const s = new Sessions({ home: path.join(root, "home") } as never, {
+    claude: path.join(root, ".claude"),
+    desktop: [path.join(root, "sessions")],
+    codex: path.join(root, ".codex"),
+  });
+  const titles = () =>
+    s
+      .look([], now)
+      .map((x) => x.name)
+      .sort();
+  write("local_old", "Stale", now - 4 * 24 * 60 * MIN);
+  write("local_new", "Fresh", now - MIN);
+  assert.deepEqual(titles(), ["Fresh"], "a file untouched for days isn't opened, whatever it says inside");
+  write("local_new", "Fixed", now - MIN);
+  assert.deepEqual(titles(), ["Fresh"], "same time and size: the parsed record is kept");
+  write("local_new", "Moved", now);
+  assert.deepEqual(titles(), ["Moved"], "written again: read again");
 });
 
 test("Codex's threads come from its index, read only: yours, unarchived and recent; its own runs and a changed table are left out", (c) => {
