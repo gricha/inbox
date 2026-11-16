@@ -39,6 +39,7 @@ import {
   deskPlan,
   desktopEntry,
   desktopSettings,
+  echoTo,
   ElectronRefused,
   envVar,
   fallbackDirs,
@@ -127,9 +128,10 @@ if (process.env.DESK_HOME) {
 }
 
 let logFile = "";
+const echo = app.isPackaged ? null : echoTo(process.stderr);
 function log(msg: string): void {
   const line = `${new Date().toISOString()} ${msg}\n`;
-  if (!app.isPackaged) process.stderr.write(line);
+  echo?.(line);
   // Logging never fails what it logs: a line it can't write is left out.
   quietly(() => {
     if (!logFile) {

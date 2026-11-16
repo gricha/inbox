@@ -87,6 +87,20 @@ export const quietly = (f: () => void): void => {
   Result.try({ try: f, catch: () => null });
 };
 
+// Writes lines to a terminal that can close before the app does (EPIPE on quit): after its first error it writes nothing.
+export const echoTo = (stream: NodeJS.WritableStream): ((line: string) => void) => {
+  let open = true;
+  stream.on("error", () => {
+    open = false;
+  });
+  return (line) => {
+    if (open)
+      quietly(() => {
+        stream.write(line);
+      });
+  };
+};
+
 // JSON someone else wrote (a desk's notice, the app's own window.json), or null when it isn't JSON.
 export const parseJson = (text: string): unknown => tryOr((): unknown => JSON.parse(text), null);
 

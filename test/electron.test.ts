@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { Writable } from "node:stream";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import fs from "node:fs";
@@ -18,6 +19,7 @@ import {
   carryOver,
   commandOutput,
   DESK_ARGS,
+  echoTo,
   DeskCallFailed,
   DeskFailed,
   deskPlan,
@@ -890,3 +892,24 @@ test(
 function tryRead(file: string): string {
   return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
 }
+
+test("echoTo stops writing once the terminal is gone, without an uncaught EPIPE", async () => {
+  const written: string[] = [];
+  let broken = false;
+  const stream = new Writable({
+    write(chunk: Buffer, _enc, done) {
+      if (broken) done(Object.assign(new Error("write EPIPE"), { code: "EPIPE" }));
+      else {
+        written.push(chunk.toString());
+        done();
+      }
+    },
+  });
+  const echo = echoTo(stream);
+  echo("one\n");
+  broken = true;
+  echo("two\n");
+  await sleep(10);
+  echo("three\n");
+  assert.deepEqual(written, ["one\n"]);
+});
