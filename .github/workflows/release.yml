@@ -86,20 +86,31 @@ jobs:
           retention-days: 7
           path: out/*
 
+  # The tests already ran on this commit in main's CI (ci.yml): a release waits for that run and needs it green, rather
+  # than running them a second time.
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
       - run: bash scripts/release-version.sh "${{ inputs.version }}"
-      - run: npm ci
+      - name: main's CI on this commit is green
         env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-      - run: npm run check
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 120); do
+            run=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --commit "$GITHUB_SHA" --event push --limit 1 --json status,conclusion,url --jq '.[0] // empty')
+            if [ -n "$run" ]; then
+              status=$(jq -r .status <<<"$run"); conclusion=$(jq -r .conclusion <<<"$run")
+              if [ "$status" = completed ]; then
+                [ "$conclusion" = success ] && { echo "CI is green: $(jq -r .url <<<"$run")"; exit 0; }
+                echo "::error::CI on this commit is $conclusion: $(jq -r .url <<<"$run")"; exit 1
+              fi
+            fi
+            sleep 10
+          done
+          echo "::error::no finished CI run for $GITHUB_SHA after 20 minutes"
+          exit 1
 
   publish:
     needs: [check, build]
