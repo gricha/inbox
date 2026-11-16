@@ -253,7 +253,7 @@ Esc goes back to the page it was opened from. A review has no page head: its own
 
 ### Header
 
-- The title first, 10px of air over it; under it its metadata on one line, 10px of air under that: the ref, the author with their picture ("by you" on yours), then the AI review's verdict as a tag, a rounded rectangle filled with the colour of how much it asks of you, as risk is ("Look closely" red, "Skim it" amber, "Skip it" green, its words in the sheet's colour; the model and time in its tooltip), "on an earlier commit" after it when it is. A stack's place is the sidebar's (Stack), not the header's.
+- The title first, 10px of air over it; under it its metadata on one line, 10px of air under that: the ref, the author with their picture ("by you" on yours), then the AI review's verdict as a tag, a rounded rectangle filled with the colour of how much it asks of you, as risk is ("Look closely" red, "Skim it" amber, "Skip it" green, its words in the sheet's colour; the model and time in its tooltip). A review of an earlier commit isn't shown anywhere (header, AI review, Status): the new one's state stands in its place. A stack's place is the sidebar's (Stack), not the header's.
 - How big it is and who reviews it are the sidebar's (Status, Reviewers).
 - Nothing else: why it's on the desk is the row's; CI, the review state, a conflict and what it blocks are the sidebar's.
 - A resolved PR says so under the title: "Resolved: merged by li-wei · 2h".
@@ -284,7 +284,7 @@ No heading; right under the header.
 - **The rest of the summary**: folded, its first lines show and fade out into **Show more** (in the accent), which opens it; then **Show less** under it folds it again. Every PR opens folded. Folded, the preview takes no clicks or focus (`inert`) and draws no diagram.
 - **Since your review**: on a re-review, under the summary, never folded.
 - A named part (**In the stack**, how it fits its goal, **Also risky**, **Interfaces**, **Could be better**, **Since your review**) is its name on a line of its own, then what it says on the next.
-- **Concerns**: each is also a note in the code. They're listed only when no note can sit there (none, or an earlier commit's review).
+- **Concerns**: each is also a note in the code. They're listed only when no note can sit there.
 - All of it is drawn as plain prose (`code`, **bold**, lists), never HTML. URLs stay text: the PR's author can steer what Claude writes.
 
 States:

@@ -2109,19 +2109,36 @@ const SHOTS: Shot[] = [
     after: at("#/"),
   },
   {
-    // A re-review being written over one on an earlier commit: since and the concerns stay out of the fold.
-    name: "review-ai-since",
+    // A re-review being written over one on an earlier commit: the earlier one isn't shown.
+    name: "review-ai-earlier",
     go: async (page) => {
       await review("acme/api#4099")(page);
       const ai = page.locator(".rv-ai");
+      if ((await page.locator(".rv-head .verdict, [data-part=status] .rv-signal").count()) || (await ai.locator(".rv-gist").count()))
+        failures.push("review-ai-earlier: the earlier commit's review shows");
+      if (!(await ai.innerText()).includes("is reviewing it")) failures.push("review-ai-earlier: it doesn't say the review is running");
+    },
+  },
+  {
+    // A re-review of this commit: since and the concerns stay out of the fold.
+    name: "review-ai-since",
+    go: async (page) => {
+      await reviewAs((v) => {
+        Object.assign(v, { ai_stale: false, generating: false, ai_job: null });
+      })(page);
+      await at(`#/review/${encodeURIComponent("acme/api#4099")}`)(page);
+      const ai = page.locator(".rv-ai");
+      await ai.locator(".rv-gist").waitFor();
       if (!(await ai.locator('.rv-show[aria-expanded="false"]').count()))
         failures.push("review-ai-since: the AI review doesn't open folded");
-      if (!(await page.locator(".rv-ref").innerText()).includes("on an earlier commit"))
-        failures.push("review-ai-since: the verdict's tag isn't marked on an earlier commit");
       if (!(await ai.allInnerTexts()).join("").includes("Since your review")) failures.push("review-ai-since: no since line while folded");
       if ((await ai.locator(".rv-since code, .rv-concerns code").count()) < 2)
         failures.push("review-ai-since: since or a concern shows code raw");
       if ((await ai.allInnerTexts()).join("").includes("`")) failures.push("review-ai-since: a backtick shows");
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
     },
   },
   {
