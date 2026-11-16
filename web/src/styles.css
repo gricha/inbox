@@ -2139,11 +2139,17 @@ html::-webkit-scrollbar-corner,
 
 /* The list beside a review ------------------------------------------------ */
 
-/* A column of its own between the sidebar and the page's, never around the page: open, 320 to 360px; folded, a 28px rail. */
+/* A column of its own between the sidebar and the page's, never around the page: open, 320 to 360px and whatever the page
+   at its widest (its --col-w) leaves; folded, a 28px rail. */
 .app:has(> .beside) {
-  --list-w: var(--list-w-user, clamp(320px, 28vw, 360px));
+  --page-max: 880px;
+  --list-w: max(var(--list-w-user, clamp(320px, 28vw, 360px)), calc(100vw - var(--side-w) - var(--page-max) - var(--beside-chat, 0px)));
 
   grid-template-columns: var(--side-w) var(--list-w) minmax(0, 1fr);
+}
+
+.app:has(> .beside):has(.col .review) {
+  --page-max: 1280px;
 }
 
 /* Folded, it leaves nothing but its button, on the sidebar's edge. */
@@ -2162,6 +2168,8 @@ html::-webkit-scrollbar-corner,
 }
 
 .app:has(> .beside):has(> .chat) {
+  --beside-chat: var(--chat-w);
+
   grid-template-columns: var(--side-w) var(--list-w) minmax(0, 1fr) var(--chat-w);
 }
 
