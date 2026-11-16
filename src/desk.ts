@@ -104,7 +104,7 @@ import type {
   Work,
 } from "./types.ts";
 import { AGENT_NAME, BUCKETS, byPart, isCoordinator, isSessionRef, RANK, SECRET_SET, UNTIL } from "./types.ts";
-import { decodeEach, isKeyOf, keysOf, oneOf, schemaOf, strings } from "./narrow.ts";
+import { decodeEach, field, isKeyOf, isRecord, keysOf, oneOf, schemaOf, str, strings } from "./narrow.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
 import { AGENTS, agentView, githubView } from "./setup.ts";
@@ -627,6 +627,8 @@ export interface IssueDeps {
 type PrTextError = Conflict | FetchPrError;
 type AiError = PrTextError | CommandError | ClaudeError;
 type IssueError = Conflict | FetchIssueError | ClaudeError;
+
+const PER_AGENT = ["agent.coordinator_model", "agent.coordinator_effort"] as const;
 
 export class Desk {
   store: Store;
@@ -1273,6 +1275,22 @@ export class Desk {
         else next[k] = v;
       }
       for (const k of patch.reset ?? []) delete next[k];
+      // Each agent keeps its own model and effort: a switch puts the outgoing one's away and brings the incoming one's back.
+      const from = this.settings["agent.harness"];
+      const to = patch.set?.["agent.harness"];
+      if (typeof to === "string" && to !== from) {
+        const kept = this.store.get("agent_models");
+        this.store.set("agent_models", {
+          ...(isRecord(kept) ? kept : {}),
+          [from]: Object.fromEntries(PER_AGENT.map((k) => [k, this.settings[k]])),
+        });
+        for (const k of PER_AGENT) {
+          if (patch.set && k in patch.set) continue;
+          const back = str(field(field(kept, to), k)) ?? "";
+          if (back && !checkSetting(k, back)) next[k] = back;
+          else delete next[k];
+        }
+      }
       const problems = yield* this.saveSettings(next);
       if (problems.length) return { ok: false, errors: problems, settings: this.getSettings() };
       yield* this.reloadSettings();

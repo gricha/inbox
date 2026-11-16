@@ -37,7 +37,7 @@ Settings → Agent is where you change it afterwards.
 
 ### Your agent (Settings → Agent)
 
-`agent.harness` picks your agent: `claude-code` (the default), `codex` or `opencode`. Every agent run the desk makes follows it ([Your own agent](#your-own-agent)), and so does Connect (`driverOf()` in `src/agents.ts`).
+`agent.harness` picks your agent: `claude-code` (the default), `codex` or `opencode`. Every agent run the desk makes follows it ([Your own agent](#your-own-agent)), and so does Connect (`driverOf()` in `src/agents.ts`). `agent.coordinator_model` and `agent.coordinator_effort` belong to the agent: a `PUT /api/settings` that changes `agent.harness` keeps the outgoing agent's in the store (`agent_models`) and sets the incoming one's (empty the first time), unless the same request sets them.
 
 Settings → Agent shows a row when your agent lacks the desk's MCP tools or the Inbox skill ([skills/inbox/SKILL.md](../skills/inbox/SKILL.md)). **Connect &lt;agent&gt;** installs what's missing (`POST /api/agents/connect`); **Update the skill** shows when only the skill is out of date. When both are in place the row is gone. From a terminal:
 

@@ -83,3 +83,31 @@ test("your agent's model and effort settings offer what it takes as choices, and
   assert.equal(def("agent.coordinator_model", agentDefs("opencode", { models: [], efforts: [] })).choices, undefined);
   assert.equal(def("agent.coordinator_effort", agentDefs("codex")).choices, undefined);
 });
+
+test("each agent keeps its own model and effort: switching agents puts one's away and brings the other's back", async (c) => {
+  const { setup } = await import("./helpers/desk.ts");
+  const was = process.env.DESK_CODEX;
+  process.env.DESK_CODEX = path.join(os.tmpdir(), "desk-no-codex-here");
+  c.after(() => {
+    if (was === undefined) delete process.env.DESK_CODEX;
+    else process.env.DESK_CODEX = was;
+  });
+  const t = await setup([], { settings: { "agent.coordinator_model": "opus", "agent.coordinator_effort": "high" } });
+  c.after(() => {
+    t.desk.stop();
+  });
+  const now = () => [
+    t.desk.settings["agent.harness"],
+    t.desk.settings["agent.coordinator_model"],
+    t.desk.settings["agent.coordinator_effort"],
+  ];
+  await run(t.desk.putSettings({ set: { "agent.harness": "codex" } }));
+  assert.deepEqual(now(), ["codex", "", ""], "Codex's first time: its own defaults, not Claude's opus");
+  await run(t.desk.putSettings({ set: { "agent.coordinator_model": "gpt-6", "agent.coordinator_effort": "ultra" } }));
+  await run(t.desk.putSettings({ set: { "agent.harness": "claude-code" } }));
+  assert.deepEqual(now(), ["claude-code", "opus", "high"], "Claude Code's come back");
+  await run(t.desk.putSettings({ set: { "agent.harness": "codex" } }));
+  assert.deepEqual(now(), ["codex", "gpt-6", "ultra"], "and Codex's");
+  await run(t.desk.putSettings({ set: { "agent.harness": "claude-code", "agent.coordinator_model": "sonnet" } }));
+  assert.deepEqual(now(), ["claude-code", "sonnet", "high"], "a model set with the switch wins");
+});
