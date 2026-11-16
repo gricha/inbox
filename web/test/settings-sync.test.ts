@@ -47,7 +47,7 @@ test("the desk names each part as the sidebar does", () => {
 
 test("the docs list Settings' parts as the sidebar does, each with its own heading", () => {
   const ui = read("docs/ui.md");
-  assert.ok(ui.includes(`- The core's: ${core.map((p) => p.name).join(", ")}.`), "docs/ui.md's line listing the core's parts");
+  assert.ok(ui.includes(`- **App**, the app's own: ${core.map((p) => p.name).join(", ")}.`), "docs/ui.md's line listing the app's parts");
   for (const p of core) assert.ok(new RegExp(`^#{3,4} ${p.name}$`, "m").test(ui), `docs/ui.md has no heading for ${p.name}`);
   const line = read("README.md")
     .split("\n")

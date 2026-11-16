@@ -1074,7 +1074,7 @@ export class Automations {
     if (!a) return Effect.succeed(refused("it was deleted during its run"));
     if (started.on && !a.on) return Effect.succeed(refused("it was turned off during its run"));
     if (!verb) return Effect.succeed(refused(`"${String(x.do)}" isn't something the desk does: ${VERBS.join(", ")}`));
-    if (!canOf(a).includes(verb)) return Effect.succeed(refused(`it may not ${VERB[verb]}: allow that in Settings → Automation Rules`));
+    if (!canOf(a).includes(verb)) return Effect.succeed(refused(`it may not ${VERB[verb]}: allow that in Settings → Automations`));
     const desk = this.desk;
     const failed = (e: { message: string }) => Effect.succeed({ ...failedItem(x, e.message), ...(verb !== "add" && { do: verb }) });
     if (verb === "add") return desk.push(x.ref, x.why, a).pipe(Effect.catch(failed));

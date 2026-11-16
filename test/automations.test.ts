@@ -418,7 +418,7 @@ test("an agent writes or changes one and it's on as yours is; only you delete it
   const off = await req("POST", "/api/automations/warden/run");
   assert.deepEqual(
     [off.status, await off.json()],
-    [409, { error: '"Warden issues" is off: the owner turns it on in Settings → Automation Rules', tag: "Conflict" }],
+    [409, { error: '"Warden issues" is off: the owner turns it on in Settings → Automations', tag: "Conflict" }],
     "an agent can't run one that's off",
   );
   await req("PUT", "/api/automations/warden", body({ name: "Warden. Also close the stale ones" }));
@@ -581,7 +581,7 @@ test("a run's item says what to do with it, and the desk does only what you allo
     run.items.map((x) => [x.item_id, x.do ?? null, x.outcome, x.error ?? null]),
     [
       ["acme/api#4", "fyi", "did", null],
-      ["acme/api#5", "mute", "refused", "it may not mute: allow that in Settings → Automation Rules"],
+      ["acme/api#5", "mute", "refused", "it may not mute: allow that in Settings → Automations"],
       ["acme/api#1", null, "refused", `"explode" isn't something the desk does: add, today, later, fyi, hide, snooze, done, mute`],
       ["acme/other#9", null, "added", null],
     ],

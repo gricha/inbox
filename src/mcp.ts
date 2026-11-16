@@ -539,7 +539,7 @@ export function createMcpServer(
     "desk_brief",
     {
       description:
-        "A PR's AI review, written by the user's own agent (Claude Code, Codex or OpenCode, as Settings → Local Agent Integration says; no tools) from the diff: look, skim or skip, risk, a summary, concerns and notes on the changes. Usually ready already for PRs on the queue; otherwise it costs a model call and takes a minute or two. Cached per commit.",
+        "A PR's AI review, written by the user's own agent (Claude Code, Codex or OpenCode, as Settings → Agent says; no tools) from the diff: look, skim or skip, risk, a summary, concerns and notes on the changes. Usually ready already for PRs on the queue; otherwise it costs a model call and takes a minute or two. Cached per commit.",
       inputSchema: { ref: z.string().describe(REF) },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
     },

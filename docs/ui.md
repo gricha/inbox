@@ -72,7 +72,7 @@ Sticky, and the desktop app's drag handle. It holds only the page's own controls
 
 - Inbox, Blocked, Archive: the page's name, the filter by person and New note; Merging: its name and the filter by person. The search is at the top of the sidebar, on every page but Settings (it searches the lists, and Settings has none): its words match a row's title, repo or author, and one query searches the Inbox, Blocked, Merging and the Archive, and the list beside a review. Esc in it clears its words. The filter by person is an icon button; a count on it says how many people it picks. It opens a popover with a box to find someone, then **Author** (who opened it; a bot's PR counts as the person it was opened for) and **Involves** (anyone on it: its author, assignees, who was asked, who reviewed, commented or answered a thread), you first in each. A click picks or unpicks a person (a tick marks who's picked); **Clear** unpicks them all. Esc or a click outside closes it. The picks and the search's words apply together.
 - Merging and a Settings part: the page's name.
-- A review has its own bar in the head's place ([The diff](#the-diff)). A question, a Settings view: the way back ("‹ Inbox", "‹ Blocked", "‹ Merging", "‹ Archive", "‹ GitHub", "‹ Local Agent Integration", "‹ Automation Rules"). Its tooltip names Esc, and for a review or question, ⌘[ and ⌘].
+- A review has its own bar in the head's place ([The diff](#the-diff)). A question, a Settings view: the way back ("‹ Inbox", "‹ Blocked", "‹ Merging", "‹ Archive", "‹ GitHub", "‹ Agent", "‹ Automations"). Its tooltip names Esc, and for a review or question, ⌘[ and ⌘].
 
 ### The list beside a review
 
@@ -295,7 +295,7 @@ States:
 - None yet on an open PR: "No AI review yet. **Ask Claude for one**". On a merged or closed PR: "No AI review."
 - Your own PR shows the section only once a review exists or is running.
 
-The agent's name in these lines follows Settings → Local Agent Integration (Claude, Codex or OpenCode).
+The agent's name in these lines follows Settings → Agent (Claude, Codex or OpenCode).
 
 ### What reviewers said
 
@@ -415,7 +415,7 @@ What you do on a row takes it off. It comes back when the PR it waits on merges.
 
 - When it can't run: "**Your agent can't run:**" in red, the reason, and **Try again**.
 - Before it's started: "Your agent starts on your first hand-off or ask." and **Start it now**.
-- Off: says it's off in Settings → Local Agent Integration.
+- Off: says it's off in Settings → Agent.
 
 **Rows**: open PRs first, latest activity on top.
 
@@ -466,12 +466,12 @@ Code: `src/links.ts`; the protocol in `electron/main.ts`.
 
 ## Settings
 
-No tabs. In Settings the sidebar lists its parts in place of the pages, under **‹ Inbox** (⌘1–⌘4 still open the pages):
+No tabs. In Settings the sidebar lists its parts in place of the pages, under **‹ Inbox** and a rule (⌘1–⌘4 still open the pages). There's no search there. Two groups, each under a quiet heading:
 
-- The core's: Inbox and notifications, Local Agent Integration, Automation Rules, Appearance, This device, Network.
-- After them, one per plugin: GitHub, Sessions.
+- **App**, the app's own: Inbox and notifications, Automations, Agent, This device, Network.
+- **Integrations**, one per plugin: GitHub, Sessions.
 
-`SETTINGS_PARTS` in `web/src/view.ts`. The sidebar's Settings and `#/settings` open the first part.
+`SETTINGS_PARTS` in `web/src/settings-parts.ts`. The sidebar's Settings and `#/settings` open the first part.
 
 ### How a part works
 
@@ -483,7 +483,7 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 - A row that would do nothing here isn't drawn (`SHOWN`); one that waits on another is greyed (`DISABLED`). `desk settings` and settings.json still set every one.
 - When settings.json has a problem, a notice above the part names each setting by label and key, and opens More if needed.
 - Old links still land: `#/settings/automations`, `notify` → Inbox and notifications, `review` and `handoff` → GitHub, `#/rules` → Searches and rules, `policy` (Your policy, gone) → Agent.
-- **Views**: Searches and rules (`#/settings/rules`) and each automation (`#/settings/automations/<id>`; a plugin's `github.<id>`) open as views. Their head is the way back to their part ("‹ GitHub", "‹ Automation Rules"), and so is Esc once you've left the editor. Coming back puts focus on what opened it.
+- **Views**: Searches and rules (`#/settings/rules`) and each automation (`#/settings/automations/<id>`; a plugin's `github.<id>`) open as views. Their head is the way back to their part ("‹ GitHub", "‹ Automations"), and so is Esc once you've left the editor. Coming back puts focus on what opened it.
 - Esc on a part goes to the Inbox.
 - Parts and views stay mounted once opened, so an unsaved rules or automation draft survives leaving and coming back.
 
@@ -494,7 +494,7 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 - Notify me when something needs me.
 - Quiet hours: two times (in this computer's 12- or 24-hour clock) and a switch. Off saves `""` and greys the times, keeping them; on saves `19:00-09:00`. A time saves when you leave its field. The row greys while notifications are off.
 
-### Local Agent Integration
+### Agent
 
 - **Agent** (`agent.harness`): Claude Code, Codex or OpenCode. Every run is your own `claude`, `codex` or `opencode` from your PATH, on your own login; there's no command or model to set. Labels across Settings name the one you picked.
 - **Status rows**, only while something needs you:
@@ -505,9 +505,9 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 - **Score the Inbox with Claude** (`agent.score`).
 - **Run your agent**. Off stops it, nothing wakes it, and no Ask your agent shows.
 - **Let your agent run without asking** (on by default; only while Run your agent is on): bypass permissions mode (its deny list still holds). Changing it restarts it.
-- **More Local Agent Integration settings**: **Let Claude sort up to** so many items an hour, **Decision model key** (an OpenRouter key, saved only from this page in `secrets.json`; shows dots once saved; pasting replaces it; Reset to default clears it; its help says what goes to OpenRouter) and **Decision model** (its id).
+- **More Agent settings**: **Let Claude sort up to** so many items an hour, **Decision model key** (an OpenRouter key, saved only from this page in `secrets.json`; shows dots once saved; pasting replaces it; Reset to default clears it; its help says what goes to OpenRouter) and **Decision model** (its id).
 
-### Automation Rules
+### Automations
 
 `#/settings/automations` (`#/settings/criteria` goes here too): **Your automations**, then **Urgency**, one page.
 
@@ -533,7 +533,7 @@ Each row:
 - **Run now** (not for a rule, or a question on events without a check), **Edit**, **Turn off**/**Turn on**.
 - Its runs: when and how ("on schedule", "run now", "on an event"), what it did ("put 2 on your desk, sorted 3 to FYI, snoozed 1"), the agent's summary, each item with what came of it (Added, Sorted to FYI, Hidden, Snoozed until CI passes, Marked done, Muted, Already on your desk, You'd dealt with it, Nobody needs it now, Held where it is; Not allowed and Couldn't add in red) and why.
 - **Copy resume command** copies `cd <home>/automations && claude --resume <id>` (`codex resume` or `opencode --session` for those agents).
-- Deleting one goes back to Automation Rules. A link to one that isn't there says so.
+- Deleting one goes back to Automations. A link to one that isn't there says so.
 
 **The editor** (New automation, or Edit in a view):
 
@@ -557,12 +557,9 @@ Your criteria on one sheet, under your automations ([api.md → Urgency](api.md#
 - **From GitHub**: the criteria GitHub comes with ("Asked by name", "Waiting on your reply", "Ready to merge", "Your draft", "Your PR others wait on", "Handed back"). You only switch them.
 - Under the sheets, quietly, who last scored your Inbox. A question waiting on its model says why on the first row.
 
-### Appearance
-
-- **Theme**: System, Omarchy (when available), then the light themes and the dark ones. Kept per device, not a desk setting ([Themes](#themes)).
-
 ### This device
 
+- **Theme**: System, Omarchy (when available), then the light themes and the dark ones. Kept per device, not a desk setting ([Themes](#themes)). `#/settings/appearance`, where it was, opens here.
 - Only in the desktop app:
   - **Shortcut to show or hide the window**: its field, **Record** (tooltip names the keys it takes), **Turn off** while set. Help: "Works from any app.", "Off.", or in red why it couldn't take it ("Couldn't use Control+Alt+D: another app has this shortcut."). On a Mac it uses Option and Command. Default Control+Alt+D.
   - **Open at login**.
@@ -627,7 +624,7 @@ A desk that was never set up shows one page in the window's place, without the s
 - **GitHub**: "Signed in as @you", or why not ("You're not signed in to GitHub.", "The GitHub CLI isn't installed.", "Couldn't reach GitHub: …") with the command to run and **Retry**.
 - **Your agent**: one line on what it does, then Claude Code, Codex and OpenCode, each "Installed and logged in." with a green **Use Claude Code**, or "Not logged in." / "Not installed." with the command to run and **Retry**. While GitHub isn't connected the agents say only where they stand; GitHub's Retry asks about everything.
 - **Use …** is one press: "Connecting…", then the Inbox with the first sync running. What fails (the CLI refusing the MCP server, or missing) is red under that agent; a name something else of yours keeps never does, as Connect picks another, and the button stays to try again.
-- It never shows again. Settings → Local Agent Integration changes the agent; `desk setup` does the same from a terminal.
+- It never shows again. Settings → Agent changes the agent; `desk setup` does the same from a terminal.
 
 ## Bubbles
 
@@ -635,15 +632,15 @@ What's wrong with the system is never a line in a page. It's a small stack of bu
 
 In order:
 
-| Bubble                                                                                   | Fix                                     |
-| ---------------------------------------------------------------------------------------- | --------------------------------------- |
-| "The desk isn't running" / "The desk is starting"                                        | Retry                                   |
-| "Restarting the desk" / "The desk stopped" (with its last lines)                         | none                                    |
-| "Your rules don't load" / "Your rules have 2 errors" (not on Searches and rules)         | Fix rules                               |
-| "Claude is paused" / "AI reviews are paused" (not on Settings → Local Agent Integration) | Open Settings → Local Agent Integration |
-| "Sync failed" and the error                                                              | Try again ("Syncing…" while it runs)    |
-| "GitHub's rate limit is used up" and when syncing resumes                                | none: every sync waits for the reset    |
-| An action that failed (GitHub refused, a save refused)                                   | none; fades after 8 s unless hovered    |
+| Bubble                                                                           | Fix                                  |
+| -------------------------------------------------------------------------------- | ------------------------------------ |
+| "The desk isn't running" / "The desk is starting"                                | Retry                                |
+| "Restarting the desk" / "The desk stopped" (with its last lines)                 | none                                 |
+| "Your rules don't load" / "Your rules have 2 errors" (not on Searches and rules) | Fix rules                            |
+| "Claude is paused" / "AI reviews are paused" (not on Settings → Agent)           | Open Settings → Agent                |
+| "Sync failed" and the error                                                      | Try again ("Syncing…" while it runs) |
+| "GitHub's rate limit is used up" and when syncing resumes                        | none: every sync waits for the reset |
+| An action that failed (GitHub refused, a save refused)                           | none; fades after 8 s unless hovered |
 
 - While the desk is down, only that is said: what it said last is stale.
 - A dot before the title: red for failing, amber for a caution.
@@ -696,7 +693,7 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 - It stays open wherever you go until you close it, and through a reload of the window. In a review it's about that PR; elsewhere it stays about what it was, without a spot.
 - When your agent pushes a change you asked for to your own open PR (not handed off): it stays on your desk; the push counts as your activity; an open `+` box stays pinned to the commit you read; the AI review goes stale; the answer names the commit and says to pull first.
 - If your agent won't start, the chat says so and your words stay.
-- With your agent off (Settings → Local Agent Integration), no Ask your agent shows. An open chat says so and its box sends nothing.
+- With your agent off (Settings → Agent), no Ask your agent shows. An open chat says so and its box sends nothing.
 
 ## The update line
 

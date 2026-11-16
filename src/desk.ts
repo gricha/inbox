@@ -931,7 +931,7 @@ export class Desk {
     return agentDir(this.home);
   }
 
-  // The agent the tool-less calls run on (Settings → Local Agent Integration): Claude Code unless it's Codex or OpenCode.
+  // The agent the tool-less calls run on (Settings → Agent): Claude Code unless it's Codex or OpenCode.
   agent(): agents.DriverId {
     return agents.driverOf(this.settings["agent.harness"]);
   }
@@ -1315,7 +1315,7 @@ export class Desk {
     });
   }
 
-  // The first-run page's choice: your agent, connected as Settings → Local Agent Integration's Connect does it. The page is then done for good,
+  // The first-run page's choice: your agent, connected as Settings → Agent's Connect does it. The page is then done for good,
   // or once GitHub is connected: the installer picks the agent that ran it before you've signed in.
   chooseAgent(id: string, mcpUrl: string): Effect.Effect<SetupView, BadRequest | Conflict | Upstream | FsError> {
     return Effect.gen({ self: this }, function* () {
@@ -3484,7 +3484,7 @@ export class Desk {
       if (p?.judge?.by === a.name && p.rule_bucket === bucket) return { ...said, outcome: "did" as const };
       const pin = this.store.lastPin(id)?.agent?.startsWith("automation:") ? "an automation's pin" : "your pin";
       const holds = !a.on
-        ? "it's off, so what it sorts doesn't hold: turn it on in Settings → Automation Rules"
+        ? "it's off, so what it sorts doesn't hold: turn it on in Settings → Automations"
         : (this.raised(now, id) ??
           (p?.floor ? `${p.hard ? "a hard rule" : pin} keeps it in ${AT[p.floor]} or above` : "a final rule places it"));
       return { ...said, outcome: "held" as const, error: holds };
@@ -3653,8 +3653,7 @@ export class Desk {
   // there) as the cause.
   wakeCoordinator(askId?: string): Effect.Effect<void, Conflict | BadRequest | Upstream | Unavailable> {
     return Effect.gen({ self: this }, function* () {
-      if (!this.settings["agent.coordinator"])
-        return yield* new Conflict({ message: "your agent is off: Settings → Local Agent Integration" });
+      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings → Agent" });
       const a = askId ? this.asks().find((x) => x.id === askId && !x.answer) : undefined;
       if (a) {
         if (a.item_id) yield* this.requireConfig(); // askAbout reads the snapshot
@@ -3970,8 +3969,7 @@ export class Desk {
     fix?: boolean; // fixIssue()'s: never from the window's own words
   }): Effect.Effect<Ask, Conflict | RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
-      if (!this.settings["agent.coordinator"])
-        return yield* new Conflict({ message: "your agent is off: Settings → Local Agent Integration" });
+      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings → Agent" });
       const ref = b.item_id ? yield* this.resolve(b.item_id) : null; // before the snapshot, which needs the config
       const item = ref ? this.snapshot().entries.get(ref)!.item : null;
       const bad = (message: string) => new BadRequest({ message });

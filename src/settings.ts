@@ -31,7 +31,7 @@ const ACCELERATOR =
 export const SECTIONS: SettingsSection[] = [
   { id: "github", title: "GitHub" },
   { id: "sessions", title: "Sessions" },
-  { id: "agent", title: "Local Agent Integration" },
+  { id: "agent", title: "Agent" },
   { id: "queue", title: "Inbox and notifications" },
   { id: "app", title: "This device" },
   { id: "tailscale", title: "Tailscale", part: "network" },

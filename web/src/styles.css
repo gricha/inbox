@@ -746,6 +746,21 @@ html::-webkit-scrollbar-corner,
   padding: 6px 10px 24px;
 }
 
+/* In Settings: a rule under the way back, then a quiet heading over each group of parts (App, Integrations). */
+.side-sep {
+  height: 1px;
+  margin: 6px 10px;
+  background: var(--rule);
+}
+
+.side-group {
+  padding: 10px 10px 4px;
+  color: var(--pencil);
+  font: 600 11px var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .side-item {
   display: flex;
   align-items: center;
@@ -8040,6 +8055,18 @@ p.rv-next {
 
   .side-foot {
     margin-left: auto;
+  }
+
+  /* In a row: the rule stands up, and the headings go (the row has no room for them). */
+  .side-sep {
+    flex: none;
+    width: 1px;
+    height: 16px;
+    margin: 0 6px;
+  }
+
+  .side-group {
+    display: none;
   }
 
   .side-item {

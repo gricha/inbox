@@ -828,7 +828,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   });
   app.delete("/api/automations/:id", (c) => {
     const remove = Effect.gen(function* () {
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "delete it in the desk's window: Settings → Automation Rules" });
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "delete it in the desk's window: Settings → Automations" });
       yield* desk.automations.remove(c.req.param("id"));
       return { ok: true };
     });
@@ -840,7 +840,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       const a = yield* desk.automations.get(c.req.param("id"));
       if (!a.on && !fromDesk(c))
         return yield* new Conflict({
-          message: `"${a.name}" is off: the owner turns it on in Settings → ${a.plugin ? (desk.connectors.find((x) => x.id === a.plugin)?.name ?? a.plugin) : "Automation Rules"}`,
+          message: `"${a.name}" is off: the owner turns it on in Settings → ${a.plugin ? (desk.connectors.find((x) => x.id === a.plugin)?.name ?? a.plugin) : "Automations"}`,
         });
       desk.automations.run(a, "now");
       return { ok: true, running: a.id };
@@ -876,7 +876,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     const turn = Effect.gen(function* () {
       yield* up;
       if (!fromDesk(c))
-        return yield* new Forbidden({ message: "only the owner switches it, in the desk's window: Settings → Automation Rules → Urgency" });
+        return yield* new Forbidden({ message: "only the owner switches it, in the desk's window: Settings → Automations → Urgency" });
       const { on } = yield* bodyOf(c);
       if (typeof on !== "boolean") return yield* new BadRequest({ message: "need { on: true or false }" });
       return { ok: true, criterion: yield* desk.urgency.switch(c.req.param("id"), on) };
@@ -943,7 +943,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       // A key (a secret setting) is set or cleared in the desk's window only, as approve is: no agent, CLI or curl reaches it.
       const keys = [...(b.set && typeof b.set === "object" ? Object.keys(b.set) : []), ...(Array.isArray(b.reset) ? b.reset : [])];
       if (keys.some((k) => typeof k === "string" && isSecret(k)) && !fromDesk(c))
-        return yield* new Forbidden({ message: "set or clear a key in the desk's window: Settings → Local Agent Integration" });
+        return yield* new Forbidden({ message: "set or clear a key in the desk's window: Settings → Agent" });
       return yield* desk.putSettings({ set: b.set, reset: b.reset });
     });
     return respond(c, put, { log });

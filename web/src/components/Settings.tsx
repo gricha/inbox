@@ -1059,6 +1059,8 @@ interface PartProps {
 
 // Rows a part's sheet starts with, before its settings', by the part's id: a plugin's part adds one entry.
 const LEAD: Record<string, (p: PartProps) => ReactNode> = {
+  // Every device's own: in the browser too, where the rest of This device is the desktop app's.
+  app: () => <ThemeRow />,
   github: (p) => (
     <>
       <GitHubStatusRow gh={p.view.github} />
@@ -1270,13 +1272,6 @@ export function Settings({
               })}
             </span>
           </div>
-        )}
-        {view && (
-          <section id="s-appearance" className="s-part" aria-label="Appearance" hidden={section !== "appearance"}>
-            <div className="lines s-sheet">
-              <ThemeRow />
-            </div>
-          </section>
         )}
         {view?.sections.map((x) => {
           const p: PartProps = { view, active, now, loads, configErrors, flash };

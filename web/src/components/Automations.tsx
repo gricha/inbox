@@ -1,4 +1,4 @@
-// Settings → Automation Rules: your instructions, on a schedule or when something happens; a plugin's part lists the ones it
+// Settings → Automations: your instructions, on a schedule or when something happens; a plugin's part lists the ones it
 // comes with, which you only switch or copy. The part lists them (turn one on, run it now, write a new one); each opens a view of its own that says in plain words what starts it, its check, how it decides
 // and what it may do, with its editor and its runs. A run's summary and whys are an agent's words: shown as text, never markup.
 import { Effect } from "effect";
@@ -66,7 +66,7 @@ const WAY: Record<Way, { name: string; help: string }> = {
   ask: { name: "Ask a model", help: "One call reads the items and answers for each, or leaves it as it is." },
   agent: { name: "An agent with tools", help: "Your own agent, read only, with tools: it can look further than the items." },
 };
-// Who answers a question: your decision model once its key is set (Settings → Local Agent Integration), else Claude.
+// Who answers a question: your decision model once its key is set (Settings → Agent), else Claude.
 const answers = (model: string | null) => (model ? `${model} answers, through OpenRouter` : `${aiName()} answers, without tools`);
 // Codex's and OpenCode's run have only the desk's read tools: neither can hold a shell to gh's reads, so they have none.
 const agentRun = () =>

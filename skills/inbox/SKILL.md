@@ -111,7 +111,7 @@ Expressions: `&& || ! == != < <= > >= in matches`, `len() lower() contains() sta
 
 ### Urgency: "I care about X"
 
-When the user says what matters ("PRs about service accounts", "anything from dana first", "big PRs can wait"), save a criterion with `desk_criteria set`. It's on as soon as it's saved; tell them they can switch it off in Settings → Automation Rules → Urgency.
+When the user says what matters ("PRs about service accounts", "anything from dana first", "big PRs can wait"), save a criterion with `desk_criteria set`. It's on as soon as it's saved; tell them they can switch it off in Settings → Automations → Urgency.
 
 - `when`: a rule expression, free and exact. Use it alone when facts settle it (`item.author == 'dana'`).
 - `ask`: a yes-or-no question a model answers from the item's title, labels, people, state and description start. Use it for a topic or judgement ("Is it about service accounts?"), with `when` to narrow it (`!me.author` for other people's PRs).

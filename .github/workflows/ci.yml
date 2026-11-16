@@ -10,15 +10,23 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Each check is a job of its own, so a red run names what failed. The static checks give the same answer on every OS, so
+# they run once, on Linux. The tests run in shards (node --test-shard) on Linux and macOS, and on Windows only on main:
+# Windows runs them several times slower, and what breaks only there is rare enough to catch after the merge.
 jobs:
-  check:
+  static:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    # A run takes under 10 minutes; a hung test fails here instead of holding a runner for GitHub's 6 hours.
-    timeout-minutes: 20
+        check:
+          - { name: format, run: npm run format:check }
+          - { name: lint, run: npm run lint && npm run lint:css }
+          - { name: typecheck, run: npm run typecheck }
+          - { name: knip, run: npm run knip }
+          - { name: build, run: npm run build }
+    name: ${{ matrix.check.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -29,5 +37,48 @@ jobs:
       - run: npm ci
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-      - run: npm run check
-      - run: npm run build
+      - run: ${{ matrix.check.run }}
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        shard: [1, 2, 3]
+    name: test (${{ matrix.os }}, ${{ matrix.shard }}/3)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: npm test
+        env:
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}/3
+
+  test-windows:
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    name: test (windows-latest, ${{ matrix.shard }}/3)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: npm test
+        env:
+          NODE_OPTIONS: --test-shard=${{ matrix.shard }}/3

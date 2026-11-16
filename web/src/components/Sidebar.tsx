@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Overview } from "../../../src/types.ts";
 import { cls, MOD } from "../format.ts";
 import { SETTINGS_PARTS } from "../settings-parts.ts";
@@ -72,17 +72,21 @@ export function Sidebar({
             </svg>
             <span className="side-name">Inbox</span>
           </a>
-          {SETTINGS_PARTS.map((p) => {
+          <div className="side-sep" aria-hidden="true" />
+          {SETTINGS_PARTS.map((p, i) => {
             const on = p.id === part;
+            const head = i === 0 ? "App" : p.plugin && !SETTINGS_PARTS[i - 1]?.plugin ? "Integrations" : null;
             return (
-              <a
-                key={p.id}
-                href={routeHash({ name: "settings", section: p.id })}
-                className={cls("side-item", on && "on")}
-                aria-current={on ? "page" : undefined}
-              >
-                <span className="side-name">{p.name}</span>
-              </a>
+              <Fragment key={p.id}>
+                {head && <div className="side-group">{head}</div>}
+                <a
+                  href={routeHash({ name: "settings", section: p.id })}
+                  className={cls("side-item", on && "on")}
+                  aria-current={on ? "page" : undefined}
+                >
+                  <span className="side-name">{p.name}</span>
+                </a>
+              </Fragment>
             );
           })}
         </nav>

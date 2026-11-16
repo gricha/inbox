@@ -1,7 +1,7 @@
 {
   "name": "@gricha/inbox",
   "productName": "Inbox",
-  "version": "0.2.27",
+  "version": "0.2.31",
   "description": "A local desk that sorts your GitHub review load into boards and a priority queue.",
   "license": "UNLICENSED",
   "repository": {
@@ -134,8 +134,7 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ],
       "identity": "-",
       "hardenedRuntime": false
@@ -150,12 +149,6 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "tar.gz",
-          "arch": [
-            "x64"
-          ]
         }
       ],
       "artifactName": "${productName}-${version}.${ext}"
@@ -167,12 +160,6 @@
       "target": [
         {
           "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        },
-        {
-          "target": "zip",
           "arch": [
             "x64"
           ]

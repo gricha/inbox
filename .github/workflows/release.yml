@@ -1,0 +1,134 @@
+name: release
+
+# A release by hand: Actions → release → Run workflow, or `gh workflow run release.yml` (with `-f version=0.3.0`, or
+# none for the next patch). Everything runs at once on main's commit: the checks, and one build per installer, each on
+# its own runner and stamped with the version (scripts/release-version.sh, the same answer in every job). Only when all
+# of them pass does publish commit the version, push main and the tag together (refused if main moved since), and
+# create the Release from the builds. A Mac does the same by hand with npm run release and npm run release:publish.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "x.y.z (empty: the next patch)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+# One release at a time; never cancelled halfway.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # The builds first, so they take the runners before the checks: one installer each, side by side, and exactly its
+  # files. Only what's installed or updated from is built: the dmg (install.sh), the Windows installer and the AppImage
+  # (with the latest*.yml their updater reads). The Mac doesn't update itself (it's ad hoc signed), so no Mac zip.
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - {
+              name: mac-arm64,
+              os: macos-latest,
+              target: --mac dmg --arm64,
+              files: "Inbox-$VERSION-arm64.dmg Inbox-$VERSION-arm64.dmg.blockmap",
+            }
+          - { name: mac-x64, os: macos-latest, target: --mac dmg --x64, files: "Inbox-$VERSION.dmg Inbox-$VERSION.dmg.blockmap" }
+          - {
+              name: win,
+              os: windows-latest,
+              target: --win nsis,
+              files: "Inbox-Setup-$VERSION.exe Inbox-Setup-$VERSION.exe.blockmap latest.yml",
+            }
+          - { name: linux, os: ubuntu-latest, target: --linux AppImage, files: "Inbox-$VERSION.AppImage latest-linux.yml" }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      # electron-builder's downloads (Electron per platform, NSIS, AppImage tools), kept between releases.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+          key: electron-${{ matrix.name }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ matrix.name }}-
+      - run: echo "VERSION=$(bash scripts/release-version.sh '${{ inputs.version }}')" >> "$GITHUB_ENV"
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: npm version "$VERSION" --no-git-tag-version
+      - run: npm run build
+      - run: npx electron-builder ${{ matrix.target }} --publish never
+      - name: This installer's files
+        run: |
+          mkdir out
+          cd release
+          for f in ${{ matrix.files }}; do [ -e "$f" ] || { echo "::error::no $f"; exit 1; }; cp "$f" ../out/; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: inbox-${{ matrix.name }}
+          if-no-files-found: error
+          retention-days: 7
+          path: out/*
+
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: bash scripts/release-version.sh "${{ inputs.version }}"
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: npm run check
+
+  publish:
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      # The version on the commit everything was built from; main must still be there, or the push is refused.
+      - run: |
+          VERSION=$(bash scripts/release-version.sh "${{ inputs.version }}")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npm version "$VERSION" --no-git-tag-version
+          git commit -qm "Inbox $VERSION: package.json at $VERSION for the v$VERSION release" package.json package-lock.json
+          git tag -a "v$VERSION" -m "Inbox $VERSION"
+          git push --atomic origin "HEAD:refs/heads/main" "refs/tags/v$VERSION" || {
+            echo "::error::main moved since this release started: run it again"
+            exit 1
+          }
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: gh release create "v$VERSION" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "Inbox $VERSION" --generate-notes

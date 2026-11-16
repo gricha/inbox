@@ -1307,7 +1307,7 @@ export const VERB: Record<Verb, string> = {
 export const WAYS = ["rule", "ask", "agent"] as const;
 export type Way = (typeof WAYS)[number];
 
-// An automation (Settings → Automation Rules): your instruction, run on its schedule or when something happens on an item, by
+// An automation (Settings → Automations): your instruction, run on its schedule or when something happens on an item, by
 // your own Claude Code, read only. What a run lists, the desk acts on: only the verbs you allow it (`can`). An agent may
 // write or edit one, on as yours is.
 export interface Automation {
@@ -1397,7 +1397,7 @@ export interface AutomationItem {
   error?: string;
 }
 
-// A criterion (Settings → Automation Rules → Urgency): a yes-or-no about an item that orders the Inbox and never acts on it. `when` is free (the
+// A criterion (Settings → Automations → Urgency): a yes-or-no about an item that orders the Inbox and never acts on it. `when` is free (the
 // rules' language); `ask` is a question a model answers, only of the items whose `when` passes. A yes from an `urgent` one
 // puts the item in Urgent whatever its score. An agent's is saved on: it only orders.
 export interface Criterion {

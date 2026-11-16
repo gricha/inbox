@@ -39,7 +39,7 @@ The owner's direction: a small core, with every source (GitHub first) as a plugi
 
 - Urgency (`src/urgency.ts`): the Inbox's Urgent, Standard and FYI sections, criteria and scores. "Now" and "Today" below are the internal buckets those sections are drawn from.
 - Claude's work ledger (`src/jobs.ts`).
-- The chosen agent: the judge, automations, AI reviews and the coordinator run Claude Code, Codex or OpenCode (`askAgent()`, Settings → Local Agent Integration).
+- The chosen agent: the judge, automations, AI reviews and the coordinator run Claude Code, Codex or OpenCode (`askAgent()`, Settings → Agent).
 
 ## 1. The core, and what it isn't
 
@@ -276,7 +276,7 @@ builtin = "review"  # the source's rule set
 queries = ["is:open is:pr review-requested:{me}"]
 ```
 
-**Settings.** `SETTINGS` stays one static array, so `desk.settings["github.bots"]` still typechecks. GitHub's entries (`github.*`, `review.*`, `handoff.*`, keys unchanged) move to GitHub's own file and are spread in. In Settings, the sidebar lists the core's parts (Inbox and notifications, Local Agent Integration, Automation Rules, Appearance, This device, Tailscale), then one part per plugin (`SETTINGS_PARTS`). GitHub's part holds its account, its entries, Searches and rules, and its automations; `more` folds its tuning behind More GitHub settings. Its section shows `status()` beside its entries.
+**Settings.** `SETTINGS` stays one static array, so `desk.settings["github.bots"]` still typechecks. GitHub's entries (`github.*`, `review.*`, `handoff.*`, keys unchanged) move to GitHub's own file and are spread in. In Settings, the sidebar lists the core's parts (Inbox and notifications, Agent, Automations, Appearance, This device, Tailscale), then one part per plugin (`SETTINGS_PARTS`). GitHub's part holds its account, its entries, Searches and rules, and its automations; `more` folds its tuning behind More GitHub settings. Its section shows `status()` beside its entries.
 
 **Built-in automations** (built). A plugin ships automations so a fresh install works with no config (GitHub's: `src/connectors/github-automations.ts`).
 

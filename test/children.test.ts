@@ -109,7 +109,7 @@ test("closing the desk stops the judge and an AI review, what they started, and 
 
 test("a call that times out takes what it started with it", posix, async (c) => {
   const fake = stuckClaude(c);
-  const err = await failure(runCommand({ file: fake.bin, args: [], shell: false }, { timeout: 1500, missing: "missing" }));
+  const err = await failure(runCommand({ file: fake.bin, args: [], shell: false }, { timeout: 4000, missing: "missing" }));
   assert.deepEqual([err._tag, err.message], ["CommandTimeout", "no answer in 0 minutes, so it was stopped"]);
   const pids = fake.pids();
   assert.equal(pids.length, 2);

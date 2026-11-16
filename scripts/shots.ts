@@ -353,8 +353,7 @@ const settingsView = async (page: Page, name: string, title: string, part: strin
       col: getComputedStyle(document.querySelector(".main")).maxWidth,
     };
   })()`);
-  const to =
-    ({ github: "GitHub", agent: "Local Agent Integration", automations: "Automation Rules" } as Record<string, string>)[part] ?? part;
+  const to = ({ github: "GitHub", agent: "Agent", automations: "Automations" } as Record<string, string>)[part] ?? part;
   if (seen.back !== to) failures.push(`${name}: the page head's way back reads ${JSON.stringify(seen.back)}, not ${to}`);
   if (seen.href !== `#/settings/${part}`) failures.push(`${name}: the way back goes to ${seen.href}, not #/settings/${part}`);
   if (seen.h1 !== title) failures.push(`${name}: the view's name reads ${JSON.stringify(seen.h1)}`);
@@ -1394,7 +1393,7 @@ const SHOTS: Shot[] = [
   },
   {
     // Claude logged out: one bubble at the window's edge instead of a line on the page or a note on every card, its words and
-    // the way to Settings → Local Agent Integration; on that page, none, as the page says it.
+    // the way to Settings → Agent; on that page, none, as the page says it.
     name: "queue-ai-paused",
     writes: true,
     go: async (page) => {
@@ -1407,7 +1406,7 @@ const SHOTS: Shot[] = [
         b[0]!.title !== "Claude is paused" ||
         !b[0]!.text?.includes("Run claude auth login") ||
         b[0]!.tone !== "red" ||
-        b[0]!.fix !== "Open Settings → Local Agent Integration" ||
+        b[0]!.fix !== "Open Settings → Agent" ||
         !b[0]!.placed
       )
         failures.push(`queue-ai-paused: the bubbles read ${JSON.stringify(b)}`);
@@ -1416,12 +1415,11 @@ const SHOTS: Shot[] = [
         failures.push(`queue-ai-paused: the queue starts with ${JSON.stringify(first)}, not its first section`);
     },
     after: async (page) => {
-      await page.locator(".bubble-fix", { hasText: "Open Settings → Local Agent Integration" }).click();
+      await page.locator(".bubble-fix", { hasText: "Open Settings → Agent" }).click();
       await page.waitForTimeout(400);
       const hash = await page.evaluate<string>("location.hash");
-      if (hash !== "#/settings/agent") failures.push(`queue-ai-paused: Open Settings → Local Agent Integration went to ${hash}`);
-      if (await page.locator(".bubble").count())
-        failures.push("queue-ai-paused: Settings → Local Agent Integration says it and still has the bubble");
+      if (hash !== "#/settings/agent") failures.push(`queue-ai-paused: Open Settings → Agent went to ${hash}`);
+      if (await page.locator(".bubble").count()) failures.push("queue-ai-paused: Settings → Agent says it and still has the bubble");
       await at("#/")(page);
       await pauseAi(false)(page);
     },
@@ -3957,8 +3955,7 @@ const SHOTS: Shot[] = [
       if (!filled) failures.push("settings-agent: no filled Connect Claude Code");
       // The part is the agent's: its name is the first row's choice, Codex listed beside it; its status follows.
       const head = await settingsSays(page);
-      if (head !== onPart("Local Agent Integration"))
-        failures.push(`settings-agent: the head and the sidebar read ${JSON.stringify(head)}`);
+      if (head !== onPart("Agent")) failures.push(`settings-agent: the head and the sidebar read ${JSON.stringify(head)}`);
       const first = await page.evaluate<{ label: string; options: [string, boolean][]; status: boolean } | null>(`(() => {
         const row = document.querySelector("#s-agent .setting");
         const sel = row?.querySelector("select");
@@ -4018,13 +4015,13 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // More Local Agent Integration settings, opened: the decision model's key is a password field whose help says what leaves this computer;
+    // More Agent settings, opened: the decision model's key is a password field whose help says what leaves this computer;
     // saved, it shows dots and the desk never sends the key back, and Reset to default clears it. Shot with one saved.
     name: "settings-agent-more",
     go: async (page) => {
       const KEY = "sk-or-v1-shots-0000000000000000000000000000000000000000000000000000";
       await at("#/settings/agent")(page);
-      await page.getByRole("button", { name: "More Local Agent Integration settings" }).click();
+      await page.getByRole("button", { name: "More Agent settings" }).click();
       const key = page.locator('[id="setting-agent.decision_key"]');
       const row = page.locator('[id="row-agent.decision_key"]');
       const seen = await page.evaluate<{ type: string; value: string; hint: string | null; help: string }>(`(() => {
@@ -4042,7 +4039,7 @@ const SHOTS: Shot[] = [
       if (model !== "typesafe/jev-1.14") failures.push(`settings-agent-more: the model reads ${JSON.stringify(model)}`);
       // The judge's hourly cap is tuning: folded here, now that Your policy is gone.
       if (!(await page.locator('[id="row-policy.max_per_hour"]').isVisible()))
-        failures.push("settings-agent-more: no Let Claude sort up to in More Local Agent Integration settings");
+        failures.push("settings-agent-more: no Let Claude sort up to in More Agent settings");
       if (await page.locator(".s-view-row").filter({ hasText: "Your policy" }).count())
         failures.push("settings-agent-more: a Your policy row is still drawn");
       await key.fill(KEY);
@@ -4066,7 +4063,7 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
       const cleared = await deskHas(page, "agent.decision_key");
       if (cleared !== "") failures.push(`settings-agent-more: Reset to default leaves ${JSON.stringify(cleared)}`);
-      await page.getByRole("button", { name: "More Local Agent Integration settings" }).click();
+      await page.getByRole("button", { name: "More Agent settings" }).click();
     },
   },
   {
@@ -4141,13 +4138,13 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Settings → Automation Rules → Urgency: your criteria (the agent's, on), then GitHub's under their heading, each with its switch; who last
+    // Settings → Automations → Urgency: your criteria (the agent's, on), then GitHub's under their heading, each with its switch; who last
     // scored the Inbox, quietly under the sheets.
     name: "settings-criteria",
     go: async (page) => {
       await at("#/settings/criteria")(page);
       const says = await settingsSays(page);
-      if (says !== onPart("Automation Rules")) failures.push(`settings-criteria: the head and the sidebar read ${JSON.stringify(says)}`);
+      if (says !== onPart("Automations")) failures.push(`settings-criteria: the head and the sidebar read ${JSON.stringify(says)}`);
       const rows = await page.locator("#s-criteria .cr-row").count();
       if (rows !== 7) failures.push(`settings-criteria: ${rows} rows, not the mock's one and GitHub's six`);
       if ((await page.locator("#s-criteria .switch:checked").count()) !== rows) failures.push("settings-criteria: a criterion is off");
@@ -4176,7 +4173,7 @@ const SHOTS: Shot[] = [
       const setting = await page.evaluate<number>(`document.querySelector('[id="setting-notify.enabled"]').getBoundingClientRect().right`);
       await at("#/settings/automations")(page);
       const says = await settingsSays(page);
-      if (says !== onPart("Automation Rules")) failures.push(`settings-automations: the head and the sidebar read ${JSON.stringify(says)}`);
+      if (says !== onPart("Automations")) failures.push(`settings-automations: the head and the sidebar read ${JSON.stringify(says)}`);
       if (await page.locator("#s-github").isVisible()) failures.push("settings-automations: another part shows on Your automations");
       const [mine, draft, rule, ask, ...more] = await automationRows(page);
       if (
@@ -4567,9 +4564,9 @@ const SHOTS: Shot[] = [
       if (links.join() !== want.join()) failures.push(`settings-nav: the sidebar links to ${JSON.stringify(links)}`);
       if (await page.locator(".page-head .head-tabs").count()) failures.push("settings-nav: the page head still has tabs");
       for (const [name, id] of [
-        ["Local Agent Integration", "agent"],
+        ["Agent", "agent"],
         ["GitHub", "github"],
-        ["Automation Rules", "automations"],
+        ["Automations", "automations"],
       ] as const) {
         await side(name).click();
         await page.waitForTimeout(300);
@@ -4579,10 +4576,10 @@ const SHOTS: Shot[] = [
       // A new one half written, then another part and back.
       await page.locator("#s-automations").getByRole("button", { name: "New automation" }).click();
       await page.locator("#s-automations .au-editor input").first().fill("Half written");
-      await side("Local Agent Integration").click();
+      await side("Agent").click();
       await page.waitForTimeout(300);
       if (await page.locator("#s-automations").isVisible()) failures.push("settings-nav: Your automations shows on Agent");
-      await side("Automation Rules").click();
+      await side("Automations").click();
       await page.waitForTimeout(300);
       const kept = await page
         .locator("#s-automations .au-editor input")
@@ -4596,13 +4593,13 @@ const SHOTS: Shot[] = [
       const name = "Warden and dotagents issues";
       await page.locator("#s-automations .s-name", { hasText: name }).click();
       await page.waitForTimeout(300);
-      if ((await sideOn(page)) !== "Automation Rules") failures.push(`settings-nav: in a view, the sidebar marks ${await sideOn(page)}`);
+      if ((await sideOn(page)) !== "Automations") failures.push(`settings-nav: in a view, the sidebar marks ${await sideOn(page)}`);
       await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).click();
       await page.locator(".s-view .au-editor input").first().fill("Warden, edited");
       await page.locator(".side-foot .side-item", { hasText: "Settings" }).click();
       await page.waitForTimeout(400);
       if ((await hash()) !== "#/settings") failures.push(`settings-nav: the footer's Settings goes to ${await hash()}`);
-      await side("Automation Rules").click();
+      await side("Automations").click();
       await page.locator("#s-automations .s-name", { hasText: name }).click();
       await page.waitForTimeout(300);
       const edited = await page
@@ -5051,9 +5048,9 @@ const SHOTS: Shot[] = [
     name: "theme-omarchy-settings",
     go: async (page) => {
       await omarchyAs(HACKERMAN)(page);
-      await at("#/settings/appearance")(page);
+      await at("#/settings/app")(page);
       const row = await page.evaluate<[string, string]>(
-        `[document.getElementById("s-theme").value, document.querySelector("#s-appearance .setting .s-help").textContent]`,
+        `[document.getElementById("s-theme").value, document.getElementById("s-theme").closest(".setting").querySelector(".s-help").textContent]`,
       );
       if (row[0] !== "omarchy" || !row[1].includes("(now Hackerman)"))
         failures.push(`theme-omarchy-settings: the row reads ${JSON.stringify(row)}`);
