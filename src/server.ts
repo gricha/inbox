@@ -639,7 +639,12 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       return respond(c, go, { log });
     });
   app.get("/api/asks", (c) =>
-    total(c, () => ({ on: desk.settings["agent.coordinator"], asks: desk.asks(), coordinator: desk.coordinator.view() })),
+    total(c, () => ({
+      on: desk.settings["agent.coordinator"],
+      asks: desk.asks(),
+      coordinator: desk.coordinator.view(),
+      options: desk.coordinator.options(),
+    })),
   );
   // desk_ask: local only, so agents may read where an ask is.
   app.get("/api/asks/:id", (c) =>

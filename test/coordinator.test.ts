@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { activityOf, askLine, NO_REVIEW, transcriptPath, trustClaude, trustCodex, wakeFor } from "../src/coordinator.ts";
+import { activityOf, askLine, NO_REVIEW, sayingOf, transcriptPath, trustClaude, trustCodex, wakeFor } from "../src/coordinator.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { Ask, AskLines, AskPlace } from "../src/types.ts";
@@ -28,6 +28,7 @@ test(
       status: null,
       queued: [],
       activity: [],
+      saying: "",
     });
     t.desk.start();
     await until(() => t.fake.calls().length === 1);
@@ -64,6 +65,7 @@ test(
       status: "busy",
       queued: [],
       activity: [],
+      saying: "",
     });
   },
 );
@@ -738,4 +740,21 @@ test("what it's doing: its steps since the latest prompt from its transcript, sa
     if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = was;
   }
+});
+
+test("what it's said this turn: its text since the latest prompt, message by message, never a tool's use or result", () => {
+  const line = (o: unknown) => JSON.stringify(o);
+  const said = (text: string) => line({ type: "assistant", message: { content: [{ type: "text", text }] } });
+  const jsonl = [
+    line({ type: "user", message: { content: "an earlier ask" } }),
+    said("An earlier answer."),
+    line({ type: "user", message: { content: "what should I look at first?" } }),
+    said("Looking at the retry first."),
+    line({ type: "assistant", message: { content: [{ type: "tool_use", name: "Read", input: { file_path: "/x/app.py" } }] } }),
+    line({ type: "user", message: { content: [{ type: "tool_result", content: "secret file text" }] } }),
+    said("  It wraps the whole handler.  "),
+    "not json",
+  ].join("\n");
+  assert.equal(sayingOf(jsonl), "Looking at the retry first.\n\nIt wraps the whole handler.");
+  assert.equal(sayingOf(""), "");
 });

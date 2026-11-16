@@ -60,6 +60,7 @@ import type {
   GitHubAction,
   GitHubStatus,
   InflightRow,
+  AgentOptions,
   CoordinatorView,
   InflightView,
   Check,
@@ -2379,6 +2380,8 @@ const coordinator: CoordinatorView = {
     "The retry wraps the whole handler, so a second webhook can double-charge. Checking the idempotency key next.",
     "Searched for idempotency_key",
   ],
+  saying:
+    "The retry wraps the whole handler, so a second webhook can double-charge.\n\nChecking how the idempotency key is read before I say whether it's safe.",
 };
 
 // Agent sessions' questions for you: one with options, one without. Answering one takes it off the main page. Then two
@@ -4231,7 +4234,16 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (route === "GET /api/inflight") return inflight();
   if (route === "POST /api/coordinator/wake") return { ok: true };
-  if (route === "GET /api/asks") return { on: setting("agent.coordinator"), asks: ASKS, coordinator };
+  if (route === "GET /api/asks") {
+    const harness = setting("agent.harness");
+    const options: AgentOptions = {
+      agent: harness === "codex" || harness === "opencode" ? harness : "claude-code",
+      bypass: setting("agent.coordinator_bypass"),
+      model: setting("agent.coordinator_model"),
+      effort: harness === "opencode" ? "" : setting("agent.coordinator_effort"),
+    };
+    return { on: setting("agent.coordinator"), asks: ASKS, coordinator, options };
+  }
   if (route === "GET /api/automations") return automationsView();
   const auto = /^\/api\/automations\/([^/]+)(\/run|\/on)?$/.exec(url.pathname);
   if (auto) {

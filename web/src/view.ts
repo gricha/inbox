@@ -132,6 +132,8 @@ const inApp = (_: Values, app: Shell) => app !== undefined;
 // Settings' rows that would do nothing here aren't drawn, by key; `desk settings` and settings.json still set them.
 export const SHOWN: Record<string, ((values: Values, app: Shell) => boolean) | undefined> = {
   "agent.coordinator_bypass": (v) => v["agent.coordinator"] !== false,
+  "agent.coordinator_model": (v) => v["agent.coordinator"] !== false,
+  "agent.coordinator_effort": (v) => v["agent.coordinator"] !== false && v["agent.harness"] !== "opencode",
   "app.hotkey": inApp,
   "app.open_at_login": inApp,
   "app.menu_bar_count": (_, app) => app?.platform === "darwin", // only macOS's tray draws a title beside the icon

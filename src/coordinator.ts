@@ -29,6 +29,7 @@ import {
 import { oldHome, ownersHome } from "./home.ts";
 import { answerOf, askOf } from "./jobs.ts";
 import { decode, field, isRecord, num, oneOf, str, strings } from "./narrow.ts";
+import { checkSetting } from "./settings.ts";
 import {
   CODEX_DOWN,
   claudeCommand,
@@ -54,6 +55,7 @@ import {
   COORDINATOR_NAME,
   isCoordinator,
   type ActivityEvent,
+  type AgentOptions,
   type Ask,
   type AskAbout,
   type AskLines,
@@ -120,6 +122,7 @@ interface TurnKind {
   missing: string;
   id: (line: string) => string | null;
   failed: (line: string) => string | null;
+  said: (line: string) => string | null; // a message of the agent's in its events
   down: RegExp;
   error: (why: string) => ClaudeNotLoggedIn | ClaudeApiError;
 }
@@ -133,6 +136,17 @@ function codexFailure(line: string): string | null {
   return null;
 }
 
+// What the agent said, in one event: Codex's finished agent message, OpenCode's text part.
+function codexSaid(line: string): string | null {
+  const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null }));
+  const item = field(e, "item");
+  return field(e, "type") === "item.completed" && field(item, "type") === "agent_message" ? (str(field(item, "text")) ?? null) : null;
+}
+function opencodeSaid(line: string): string | null {
+  const e = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null }));
+  return field(e, "type") === "text" ? (str(field(field(e, "part"), "text")) ?? null) : null;
+}
+
 const turnKind = (agent: "codex" | "opencode"): TurnKind =>
   agent === "codex"
     ? {
@@ -140,6 +154,7 @@ const turnKind = (agent: "codex" | "opencode"): TurnKind =>
         missing: codexMissing(codexCommand()),
         id: codexThread,
         failed: codexFailure,
+        said: codexSaid,
         down: CODEX_DOWN,
         error: codexError,
       }
@@ -148,6 +163,7 @@ const turnKind = (agent: "codex" | "opencode"): TurnKind =>
         missing: opencodeMissing(opencodeCommand()),
         id: opencodeSession,
         failed: opencodeFailure,
+        said: opencodeSaid,
         down: OPENCODE_DOWN,
         error: opencodeError,
       };
@@ -204,6 +220,7 @@ const SAVED = Schema.Struct({
   id: Schema.String,
   url: Schema.optionalKey(Schema.String),
   mode: Schema.optionalKey(Schema.Literals(["bypass", "default", "unknown"])),
+  runs: Schema.optionalKey(Schema.String), // the model and effort it started with ("opus|high"); absent: its own defaults
 });
 const STATUSES = ["busy", "shell", "waiting", "idle", "stopped"] as const;
 
@@ -309,7 +326,7 @@ export function wakeFor(e: Pick<ActivityEvent, "kind" | "data">): string | null 
 
 // A Codex start or wake: bypass is no sandbox and no approvals; else it writes in its folder and reaches the network,
 // never asking. `codex exec resume` takes no --sandbox or -C, so a wake sets the sandbox by config and runs in the folder.
-function codexArgs(dir: string, mcp: string[], bypass: boolean, id: string | undefined, text: string): string[] {
+function codexArgs(dir: string, mcp: string[], bypass: boolean, id: string | undefined, text: string, runs: Runs = NO_RUNS): string[] {
   const sandbox = bypass
     ? ["--dangerously-bypass-approvals-and-sandbox"]
     : [
@@ -319,11 +336,20 @@ function codexArgs(dir: string, mcp: string[], bypass: boolean, id: string | und
         "-c",
         'approval_policy="never"',
       ];
-  const fence = ["--skip-git-repo-check", ...CODEX_OFF, ...mcp];
+  const as = [...(runs.model ? ["-m", runs.model] : []), ...(runs.effort ? ["-c", `model_reasoning_effort="${runs.effort}"`] : [])];
+  const fence = ["--skip-git-repo-check", ...as, ...CODEX_OFF, ...mcp];
   return id
     ? ["exec", "resume", "--json", ...sandbox, ...fence, id, text]
     : ["exec", "--json", ...sandbox, "-C", dir, ...fence, `${ROLE} ${text}`];
 }
+
+// The model and effort your agent runs with (agent.coordinator_model, agent.coordinator_effort): "" is its own default.
+interface Runs {
+  model: string;
+  effort: string;
+}
+const NO_RUNS: Runs = { model: "", effort: "" };
+const SAID = 12_000; // the most of what it's said that the chat is sent
 
 export class Coordinator {
   desk: Desk;
@@ -341,6 +367,7 @@ export class Coordinator {
   watchEvery = 10_000; // while an ask of yours waits on its answer
   activityEvery = 2_000; // and how often its transcript is read for what it's doing, while it works
   activity: string[] = [];
+  saying = ""; // what it's said so far this turn
   session: { sessionId: string; cwd: string } | null = null; // its row's, from the last look
   failure: unknown = null; // the last run's, already reported: the routes' "didn't start" carries it
   turn: ChildProcess | null = null; // on Codex or OpenCode: the wake in flight
@@ -410,7 +437,21 @@ export class Coordinator {
       status: this.on ? (this.own ? own : this.status) : null,
       queued: this.asks().flatMap((l) => askOf(l) ?? []),
       activity: this.on && !this.own && (this.status === "busy" || this.status === "shell") ? this.activity : [],
+      saying: this.on && (this.own ? !!this.turn : this.status === "busy" || this.status === "shell") ? this.saying.slice(-SAID) : "",
     };
+  }
+
+  // What it runs with; a value the setting's own check would refuse (a hand-edited settings.json) counts as none.
+  runs(): Runs {
+    const ok = (key: "agent.coordinator_model" | "agent.coordinator_effort") => {
+      const v = this.desk.settings[key].trim();
+      return v && checkSetting(key, v) === null ? v : "";
+    };
+    return { model: ok("agent.coordinator_model"), effort: this.own === "opencode" ? "" : ok("agent.coordinator_effort") };
+  }
+
+  options(): AgentOptions {
+    return { agent: this.own ?? "claude-code", bypass: this.desk.settings["agent.coordinator_bypass"], ...this.runs() };
   }
 
   // Desk start: the one it has is picked up, and checked every few minutes so one that crashed or was stopped comes back.
@@ -476,10 +517,14 @@ export class Coordinator {
         this.following = null;
         return;
       }
+      if (this.own) return; // a Codex or OpenCode turn says its own, as its events come
       const busy = this.status === "busy" || this.status === "shell";
-      const lines = busy && this.session && !this.own ? activityOf(readTail(transcriptPath(this.session))) : [];
-      if (lines.join("\n") === this.activity.join("\n")) return;
+      const tail = busy && this.session ? readTail(transcriptPath(this.session)) : "";
+      const lines = activityOf(tail);
+      const saying = sayingOf(tail);
+      if (lines.join("\n") === this.activity.join("\n") && saying === this.saying) return;
       this.activity = lines;
+      this.saying = saying;
       this.desk.changed();
     }, this.activityEvery);
     this.following.unref();
@@ -602,9 +647,12 @@ export class Coordinator {
       const waiting = news.length > 0 || asks.length > 0 || this.asked;
       const idle = !a?.status || a.status === "idle";
       const mode: Mode = this.desk.settings["agent.coordinator_bypass"] ? "bypass" : "default";
-      const flags = ["--permission-mode", PERMISSION[mode]];
-      // A resumed session keeps the mode it started with; passing one makes claude start a copy with its history, so only to change it.
-      const changing = !!a && (this.saved()?.mode ?? "default") !== mode;
+      const runs = this.runs();
+      const as = [...(runs.model ? ["--model", runs.model] : []), ...(runs.effort ? ["--effort", runs.effort] : [])];
+      const flags = ["--permission-mode", PERMISSION[mode], ...as];
+      // A resumed session keeps the mode, model and effort it started with; passing one makes claude start a copy with its
+      // history, so only to change it.
+      const changing = !!a && ((this.saved()?.mode ?? "default") !== mode || (this.saved()?.runs ?? "|") !== runsKey(runs));
       // One started under its name from before the rename to Inbox goes on as a copy under the new one, as a switch does.
       const switching = changing || (!!a?.name && a.name !== NAME && isCoordinator(a.name));
       // A copy may not keep its original's name and Remote Control, so the switch passes them again.
@@ -618,12 +666,13 @@ export class Coordinator {
         // Created only with something to deliver: a scratch desk's would reach the owner's desk through its MCP tools.
         if (!a)
           yield* this.launch(
-            ["--bg", "--name", NAME, "--remote-control", NAME, ...(mode === "bypass" ? flags : []), `${ROLE} ${text}`],
+            ["--bg", "--name", NAME, "--remote-control", NAME, ...(mode === "bypass" ? flags : as), `${ROLE} ${text}`],
             mode,
+            runs,
           );
         else {
           yield* this.halt(a);
-          yield* this.launch([...resume, text], mode);
+          yield* this.launch([...resume, text], mode, runs);
         }
         this.desk.store.set(NEWS, this.news().slice(news.length));
         this.desk.store.set(ASKS, this.asks().slice(asks.length));
@@ -636,7 +685,7 @@ export class Coordinator {
         this.saw("busy"); // it has a turn now; the next look says how it goes
       } else if (a && (!a.pid || (switching && idle))) {
         yield* this.halt(a);
-        yield* this.launch(resume, mode); // no prompt, so no turn
+        yield* this.launch(resume, mode, runs); // no prompt, so no turn
       }
       const s = this.saved();
       if (s && !s.url) {
@@ -693,7 +742,7 @@ export class Coordinator {
   }
 
   // Keeps the id claude says it backgrounded: a copy's, if it made one.
-  launch(args: string[], mode: Mode): Effect.Effect<void, CommandError | FsError | ClaudeBadOutput> {
+  launch(args: string[], mode: Mode, runs: Runs = NO_RUNS): Effect.Effect<void, CommandError | FsError | ClaudeBadOutput> {
     return Effect.gen({ self: this }, function* () {
       const dir = yield* this.dir();
       // Only the owner's own desk (a scratch desk never touches their config), under both paths Claude Code may key it by.
@@ -704,8 +753,10 @@ export class Coordinator {
       const out = yield* claude(args, dir);
       const id = yield* backgrounded(out);
       const s = this.saved();
-      if (id !== s?.id || mode !== s.mode) {
-        this.desk.store.set(KEY, id === s?.id ? { ...s, mode } : { id, mode });
+      const key = runsKey(runs);
+      if (id !== s?.id || mode !== s.mode || key !== (s.runs ?? "|")) {
+        const { runs: _, ...kept } = id === s?.id ? s : { id };
+        this.desk.store.set(KEY, { ...kept, mode, ...(key !== "|" && { runs: key }) });
         this.desk.changed();
       }
       const note = /^note: .*/m.exec(out)?.[0];
@@ -775,11 +826,12 @@ export class Coordinator {
       if (agent === "codex") {
         const dir = yield* this.codexDir();
         const mcp = yield* codexMcp(kind.command, dir, { url });
-        started = yield* this.ownTurn(kind, codexArgs(dir, mcp, bypass, id, text), dir);
+        started = yield* this.ownTurn(kind, codexArgs(dir, mcp, bypass, id, text, this.runs()), dir);
       } else {
         const dir = yield* this.dir();
         const config = yield* opencodeConfig(kind.command, dir, () => ({ bash: OPENCODE_RULES }), { url });
-        const args = opencodeRunArgs(NAME, id);
+        const model = this.runs().model;
+        const args = [...opencodeRunArgs(NAME, id), ...(model ? ["--model", model] : [])];
         // Nobody is there to answer what your config asks about: with bypass it's approved (--auto), without it refused.
         const said = id ? text : `${ROLE} ${text}`;
         started = yield* this.ownTurn(kind, [...args, ...(bypass ? ["--auto"] : []), said], dir, { OPENCODE_CONFIG_CONTENT: config });
@@ -869,8 +921,14 @@ export class Coordinator {
           kill(child);
         }, TURN);
         timer.unref();
+        this.saying = "";
         const read = (line: string) => {
           said = kind.failed(line) ?? said;
+          const words = kind.said(line)?.trim();
+          if (words) {
+            this.saying = this.saying ? `${this.saying}\n\n${words}` : words;
+            this.desk.changed();
+          }
           if (id) return;
           id = kind.id(line);
           if (!id) return;
@@ -926,6 +984,7 @@ export class Coordinator {
     const kind = this.turnOf;
     this.turn = null;
     this.turnOf = null;
+    this.saying = "";
     if (this.desk.stopped || !this.on) return; // turned off: stop() ended it
     if (why) {
       const e = kind?.down.test(why) ? kind.error(why) : new ClaudeApiError({ message: why });
@@ -1051,6 +1110,31 @@ export function activityOf(jsonl: string): string[] {
   }
   return steps.slice(-STEPS);
 }
+
+// What it's said since the latest prompt it was given: its text, message by message, a blank line between. Claude Code
+// writes a message to the transcript whole, so this grows a message at a time.
+export function sayingOf(jsonl: string): string {
+  let said: string[] = [];
+  for (const line of jsonl.split("\n")) {
+    if (!line.trim()) continue;
+    const entry = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(line), catch: () => null }));
+    const type = field(entry, "type");
+    const content = field(field(entry, "message"), "content");
+    if (type === "user") {
+      const prompt = typeof content === "string" || (Array.isArray(content) && content.some((b) => field(b, "type") !== "tool_result"));
+      if (prompt && field(entry, "isMeta") !== true) said = [];
+      continue;
+    }
+    if (type !== "assistant" || !Array.isArray(content)) continue;
+    for (const b of content) {
+      const text = field(b, "type") === "text" ? str(field(b, "text"))?.trim() : undefined;
+      if (text) said.push(text);
+    }
+  }
+  return said.join("\n\n");
+}
+
+const runsKey = (r: Runs) => `${r.model}|${r.effort}`;
 
 const base = (p: string | undefined) => (p ? path.basename(p) : "");
 

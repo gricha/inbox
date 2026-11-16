@@ -507,6 +507,7 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 - **Score the Inbox with Claude** (`agent.score`).
 - **Run your agent**. Off stops it, nothing wakes it, and no Ask your agent shows.
 - **Let your agent run without asking** (on by default; only while Run your agent is on): bypass permissions mode (its deny list still holds). Changing it restarts it.
+- **Your agent's model** and **Your agent's effort** (only while Run your agent is on; no effort on OpenCode): a name and a level as your agent's own command takes them, empty for its own default. On Claude Code a change starts a copy of the session that runs with it. The chat's menus set the same.
 - **More Agent settings**: **Let Claude sort up to** so many items an hour, **Decision model key** (an OpenRouter key, saved only from this page in `secrets.json`; shows dots once saved; pasting replaces it; Reset to default clears it; its help says what goes to OpenRouter) and **Decision model** (its id).
 
 ### Automations
@@ -674,17 +675,21 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 
 ### The chat
 
-- **Head**: "Your agent", the item it's about, **Close**. Outside a review, a × after the item switches to general asks, keeping what you typed.
+- **Head**: your agent's own name with its mark ("Claude Code", "Codex", "OpenCode"; the marks are Lobe Icons'), the item it's about, and at the right edge an icon button that closes the chat (its tip names Esc). Outside a review, a × after the item switches to general asks, keeping what you typed.
 - **The spot**, above the box: "On dana's thread on src/auth.ts:42", "On plan.ts:20–23", "On plan.ts:17–18, removed". Full path and commit in its tooltip. A × drops it so the next ask is about the whole PR. Picking another spot replaces it; leaving the review drops it.
 - **Open questions** from your agent about the item: "Your agent asks: … · Answer".
 - **History**: one conversation, every ask you've sent oldest first, whatever it was about: your words on the right with their time, the PR it was about (a link to its review) and spot; each answer as plain prose (paragraphs, lists, `code`, code blocks, bold; https links shown as URLs; never HTML or images). Each code block has a **Copy** that keeps its ``` fence, ready to paste as a GitHub suggestion.
 - **Under your latest unanswered ask**: "On it", "Queued: …", "Waiting on a permission prompt" (answer it on claude.ai), or "It stopped without answering" with **Wake it**, plus a link to watch it on claude.ai.
-- With nothing asked yet: "Ask or tell it something about web#3: it answers here."
+- **While it works**, under your latest unanswered ask: what it's said so far this turn, a message at a time as its agent writes them, a shade quieter than an answer; its answer takes their place. The pane follows its newest words unless you've scrolled up.
+- **Under each answer**: when, and three icon buttons, each named in its tip: **Copy this answer**, **Go to what you asked**, **Go to the top of the conversation**.
+- With nothing asked yet there's no log: the box takes the pane, you write at its top ("Ask or tell it something about web#3") and its controls keep the foot.
 - It opens at the newest turn's top and returns there on a send and when an answer lands. Shift+Tab from the box reaches the log.
 
 ### The box
 
-- Enter, ⌘↵ or **Send** sends; Shift+Enter is a new line.
+- No frame of its own: you write on the pane. Enter, ⌘↵ or **Send** (the accent's square with a paper plane, named in its tip) sends; Shift+Enter is a new line.
+- In its top corner, once there's a conversation, an icon button expands the box over the log to write at length, and shrinks it back; sending shrinks it.
+- **How your agent runs**, left of Send: up to three menus of the desk's own, each saved as you pick it and the same settings as Settings → Agent. How freely it runs, in the agent's words ("Ask first" / "Bypass permissions" on Claude Code, "Workspace only" / "Full access" on Codex, "Refuse what asks" / "Approve what asks" on OpenCode); its model ("Model" while it's the agent's default; Claude Code lists Fable, Opus, Sonnet and Haiku, and every agent takes a typed one); its effort ("Effort" while default; none on OpenCode). A menu opens over its words with the one in force ticked; while it's open its trigger shows no tooltip; Esc or a click away closes it.
 - Esc in the empty box closes the chat; with words, Esc leaves the box and keeps them.
 - Esc anywhere outside a text box closes the chat before the page reads it as "back". Esc in another box stays that box's.
 - Focus stays in the box after a send.

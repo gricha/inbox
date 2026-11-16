@@ -1175,6 +1175,17 @@ export interface CoordinatorView {
   // While it works on Claude Code: its latest steps from its session's transcript, oldest first ("Read app.py", what it
   // said along the way). Its thinking isn't there: Claude Code keeps it empty. Every string is the session's, so text.
   activity: string[];
+  // While it works: what it's said so far this turn, whole messages as its agent writes them (Claude Code's transcript,
+  // Codex's and OpenCode's events), oldest first; "" when it's said nothing yet or isn't working. The session's, so text.
+  saying: string;
+}
+
+// How your agent runs, as the chat's own controls set it: the same settings Settings → Agent has.
+export interface AgentOptions {
+  agent: "claude-code" | "codex" | "opencode";
+  bypass: boolean; // agent.coordinator_bypass
+  model: string; // agent.coordinator_model; "" is the agent's own default
+  effort: string; // agent.coordinator_effort; "" is its own default (OpenCode takes none)
 }
 
 // Your words to the coordinator from the desk's window (Ask your agent), about what you were on, and its answer (desk_answer).
@@ -1469,6 +1480,7 @@ export interface AsksView {
   on: boolean; // the coordinator setting: off, nothing is sent
   asks: Ask[]; // oldest first
   coordinator: CoordinatorView; // what it's doing, for an ask that waits on its answer
+  options: AgentOptions;
 }
 
 // GET /api/config

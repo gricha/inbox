@@ -4359,14 +4359,51 @@ html::-webkit-scrollbar-corner,
 }
 
 .chat-title {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 7px;
   margin: 0;
   color: var(--ink-2);
   font-size: 13px;
   font-weight: 600;
+  white-space: nowrap;
+}
+
+/* The agent's own mark, the size of its name. */
+.chat-mark {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  fill: currentcolor;
+}
+
+/* Close: the pane's own icon, at the head's right edge. */
+.chat-close {
+  display: grid;
+  flex: none;
+  align-self: center;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 6px 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--pencil);
+  cursor: pointer;
+}
+
+.chat-close:hover {
+  background: var(--wash);
+  color: var(--ink);
 }
 
 .chat-about {
   flex: 0 1 auto;
+  align-self: center;
+  margin: 0;
   min-width: 0;
   overflow: hidden;
   color: var(--pencil);
@@ -4464,21 +4501,75 @@ html::-webkit-scrollbar-corner,
 }
 
 .chat-box {
-  display: grid;
+  position: relative;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   margin-top: auto;
   padding: 10px 12px 12px;
   border-top: 1px solid var(--rule);
 }
 
+/* Nothing said yet, or the box expanded: it takes the pane, you write at its top and its controls keep the foot. */
+.chat-box.fill {
+  flex: 1;
+  min-height: 0;
+  margin-top: 0;
+  border-top: 0;
+}
+
+.chat-box.fill .chat-field {
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-box.fill .chat-input {
+  height: 100%;
+  max-height: none;
+  field-sizing: fixed;
+}
+
+/* The words you write, and in their top corner the button that expands the box. */
+.chat-field {
+  position: relative;
+  display: flex;
+}
+
+/* Expand and shrink, in the box's top corner. */
+.chat-tall {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--pencil);
+  cursor: pointer;
+}
+
+.chat-tall:hover {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+.chat-field:has(> .chat-tall) .chat-input {
+  padding-right: 30px;
+}
+
+/* No box of its own: you write on the pane, the rule above and the controls below frame it. */
 .chat-input {
   width: 100%;
   min-height: 40px;
   max-height: 30vh;
-  padding: 8px 10px;
-  border: 1px solid var(--rule-strong);
-  border-radius: 8px;
-  background: var(--sheet);
+  padding: 4px 2px;
+  border: 0;
+  background: none;
   color: var(--ink);
   font: 14px/1.45 var(--sans);
   field-sizing: content;
@@ -4486,7 +4577,6 @@ html::-webkit-scrollbar-corner,
 }
 
 .chat-input:focus {
-  border-color: var(--pencil);
   outline: none;
 }
 
@@ -4494,16 +4584,164 @@ html::-webkit-scrollbar-corner,
   color: var(--pencil);
 }
 
-.chat-input:disabled {
-  border-color: var(--rule);
-  background: var(--wash);
-}
-
 .chat-send {
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* Send: the accent's own square, a paper plane in it; pale until there's something to send. */
+.chat-go {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--on-accent);
+  cursor: pointer;
+}
+
+.chat-go:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 88%, #000);
+}
+
+.chat-go:disabled {
+  background: var(--wash);
+  color: var(--faint);
+  cursor: default;
+}
+
+/* How your agent runs, by Send: quiet words that open their choices, wrapping in a narrow chat. */
+.chat-opts {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  min-width: 0;
+}
+
+.chat-pick {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.chat-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 4px 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--pencil);
+  font: 12.5px var(--sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-opt:hover,
+.chat-opt[aria-expanded="true"] {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+.chat-chev {
+  width: 12px;
+  height: 12px;
+}
+
+/* Its menu opens over the words, as the box sits at the pane's foot. */
+.chat-pop {
+  top: auto;
+  bottom: calc(100% + 4px);
+  left: 0;
+  width: 210px;
+}
+
+.chat-pop.end {
+  right: 0;
+  left: auto;
+}
+
+.chat-pop .pop-item {
+  gap: 6px;
+  height: 30px;
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.chat-tick {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--accent-ink);
+}
+
+.chat-free {
+  width: 100%;
+  height: 30px;
+  margin-top: 4px;
+  padding: 0 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+  font: 13px var(--sans);
+}
+
+.chat-free:focus {
+  border-color: var(--pencil);
+  outline: none;
+}
+
+/* An answer's foot: when, then its tools at the right, quiet until the pointer is on the turn. */
+.chat-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-tools {
+  display: flex;
+  gap: 2px;
+}
+
+.chat-tool {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--faint);
+  cursor: pointer;
+}
+
+.chat-turn:hover .chat-tool,
+.chat-tool:focus-visible {
+  color: var(--pencil);
+}
+
+.chat-tool:hover {
+  background: var(--wash);
+  color: var(--ink);
+}
+
+/* What it's said so far: its words as they come, a shade quieter than an answer. */
+.chat-saying .prose {
+  color: var(--ink-2);
 }
 
 .chat-hint,
@@ -4531,11 +4769,6 @@ html::-webkit-scrollbar-corner,
 .chat-q a {
   flex: none;
   color: var(--ink-2);
-}
-
-/* The head's x sits after the item; Close keeps the right edge. */
-.chat-head > .act {
-  margin-left: auto;
 }
 
 /* An agent's words (src/prose.ts) at a reading size; code sits on the sheet in a hairline, as the diff does, never like your words. */

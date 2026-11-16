@@ -127,6 +127,9 @@ interface Shot {
   writes?: true; // changes the desk's settings or state: only against the mock, never a real desk at --url
   sizes?: string[]; // only at these of SIZES; without it, at every size but the ones a shot must ask for
 }
+// Your agent with nothing to do, and how it runs by default: for a shot that answers /api/asks itself.
+const IDLE_AGENT = { on: true, id: null, url: null, error: null, status: null, queued: [], activity: [], saying: "" };
+const AGENT_OPTIONS = { agent: "claude-code", bypass: true, model: "", effort: "" };
 const at = (hash: string) => async (page: Page) => {
   await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
   await page.waitForTimeout(400);
@@ -3505,6 +3508,74 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Nothing said yet: the box takes the pane, you write at its top and its controls keep the foot. The head names the
+    // agent with its mark; how it runs is three menus of its own words (Codex's here), and an open one shows no tooltip.
+    name: "ask-empty",
+    sizes: ["wide", "mac", "mid"],
+    go: async (page) => {
+      await page.route("**/api/asks", (route) =>
+        route.fulfill({
+          json: { on: true, asks: [], coordinator: IDLE_AGENT, options: { agent: "codex", bypass: true, model: "", effort: "high" } },
+        }),
+      );
+      await at("#/")(page);
+      await page.locator(".side-ask").click();
+      // A chat reopened draws what it last fetched at once: this one's answer lands a moment later.
+      await page.locator(".chat-title", { hasText: "Codex" }).waitFor({ timeout: 5000 });
+      const seen = await page.evaluate<{
+        title: string;
+        mark: boolean;
+        log: number;
+        top: number;
+        opts: string[];
+        send: string | null;
+      }>(`(() => {
+        const head = document.querySelector(".chat-head").getBoundingClientRect();
+        return {
+          title: document.querySelector(".chat-title").textContent.trim(),
+          mark: !!document.querySelector(".chat-title svg"),
+          log: document.querySelectorAll(".chat-log, .chat-empty").length,
+          top: Math.round(document.querySelector(".chat-input").getBoundingClientRect().top - head.bottom),
+          opts: [...document.querySelectorAll(".chat-opt")].map((b) => b.textContent.trim()),
+          send: document.querySelector(".chat-go")?.getAttribute("aria-label") ?? null,
+        };
+      })()`);
+      if (seen.title !== "Codex" || !seen.mark)
+        failures.push(`ask-empty: the head names ${JSON.stringify(seen.title)}, its mark ${seen.mark}`);
+      if (seen.log || seen.top > 24)
+        failures.push(`ask-empty: the box isn't at the pane's top (${seen.top}px under the head, ${seen.log} logs)`);
+      if (seen.opts.join(" · ") !== "Full access · Model · High") failures.push(`ask-empty: its options read ${JSON.stringify(seen.opts)}`);
+      if (seen.send !== "Send") failures.push(`ask-empty: Send is named ${JSON.stringify(seen.send)}`);
+      // A menu of the desk's own, over its words; while it's open its trigger has no tooltip.
+      const effort = page.locator(".chat-opt").last();
+      await effort.hover();
+      await page.locator(".tip").waitFor({ timeout: 3000 });
+      await effort.click();
+      await page.locator(".chat-pop").waitFor();
+      await page.waitForTimeout(500);
+      const menu = await page.evaluate<{ items: string[]; ticked: string | null; tip: number; native: number; inside: boolean }>(`(() => {
+        const pop = document.querySelector(".chat-pop"), r = pop.getBoundingClientRect(), pane = document.querySelector(".chat").getBoundingClientRect();
+        return {
+          items: [...pop.querySelectorAll(".pop-item")].map((b) => b.textContent.trim()),
+          ticked: pop.querySelector('[aria-checked="true"]')?.textContent.trim() ?? null,
+          tip: document.querySelectorAll(".tip").length,
+          native: document.querySelectorAll(".chat select").length,
+          inside: r.left >= pane.left && r.right <= pane.right && r.top >= 0,
+        };
+      })()`);
+      if (menu.items.join(" · ") !== "Default effort · Low · Medium · High · Xhigh" || menu.ticked !== "High")
+        failures.push(`ask-empty: the effort menu reads ${JSON.stringify(menu)}`);
+      if (menu.tip) failures.push("ask-empty: a tooltip shows while a menu is open");
+      if (menu.native) failures.push("ask-empty: an option is the system's own dropdown");
+      if (!menu.inside) failures.push("ask-empty: the menu runs past the chat");
+    },
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+      await unroute(page);
+      await closeChat(page);
+    },
+  },
+  {
     // The sidebar's Ask your agent on the queue: the chat about the selected row; the head's x makes it about nothing.
     name: "ask-general",
     go: async (page) => {
@@ -3548,7 +3619,7 @@ const SHOTS: Shot[] = [
       await review("acme/api#4154")(page);
       await page.locator(".side-ask").click();
       await page.locator(".chat-input").waitFor();
-      if ((page.viewportSize()?.width ?? 0) <= 1100) await page.locator(".chat-head button", { hasText: "Close" }).click();
+      if ((page.viewportSize()?.width ?? 0) <= 1100) await page.locator(".chat-close").click();
       await page
         .locator(".chat")
         .waitFor({ state: "detached", timeout: 1000 })
@@ -3582,7 +3653,9 @@ const SHOTS: Shot[] = [
     // Your agent off: no Ask your agent anywhere.
     name: "ask-off",
     go: async (page) => {
-      await page.route("**/api/asks", (route) => route.fulfill({ json: { on: false, asks: [] } }));
+      await page.route("**/api/asks", (route) =>
+        route.fulfill({ json: { on: false, asks: [], coordinator: { ...IDLE_AGENT, on: false }, options: AGENT_OPTIONS } }),
+      );
       await overviewAs((o) => {
         o.agent = false;
       })(page);

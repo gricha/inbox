@@ -228,6 +228,7 @@ const inflightView: InflightView = {
     status: "idle",
     queued: [],
     activity: [],
+    saying: "",
   },
   work: [],
 };

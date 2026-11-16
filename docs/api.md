@@ -215,7 +215,7 @@ Every write here is own page only, logged, and answers 502 with GitHub's reason 
 | POST   | `/api/inflight/:id/handback` | `{ why }` → `{ ok, reason }` (`desk_hand_back`): the PR leaves Merging for the top of the queue. 409 unless your open PR in Merging                                                                                         | ✓   |
 | POST   | `/api/coordinator/wake`      | Starts the coordinator, or has it look at Merging now (Start it now, Wake it). 409 while `agent.coordinator` is off                                                                                                         | ✓   |
 | POST   | `/api/ask`                   | `{ text, item_id?, thread_id?, thread_url?, lines? }` → `{ ok, ask }`: your words to the coordinator ([Asks](#asks)), up to 2,000 characters. Own page only. 409 while `agent.coordinator` is off; 502 when it didn't start | ✓   |
-| GET    | `/api/asks`                  | `{ on, asks, coordinator }`: whether it's on, your asks oldest first with their answers, and what it's doing                                                                                                                |     |
+| GET    | `/api/asks`                  | `{ on, asks, coordinator, options }`: whether it's on, your asks oldest first, what it's doing (`saying`: its words so far this turn), and how it runs (`AgentOptions`)                                                     |     |
 | GET    | `/api/asks/:id`              | `AskPlace` (`desk_ask`): where the ask is. Agents may read it. 404 for an unknown ask                                                                                                                                       | ✓   |
 | POST   | `/api/asks/:id/answer`       | `{ text }` → `{ ok, ask }` (`desk_answer`). Paragraphs kept; control, bidi and zero-width characters dropped; at most one blank line in a row. 400 over 6,000 characters (never cut); 404 for an unknown ask                |     |
 
@@ -1238,7 +1238,7 @@ It never posts comments or replies as you.
 
 News is queued one entry per PR. A minute after the first, the desk delivers it as one line of ids, URLs and kinds of change, never PR text. Queued news stays in kv `coordinator_news` until a start or resume succeeds, so a restart or a failed start keeps it. News on a merged or closed PR doesn't wake it, and a second Wake it while one runs adds nothing.
 
-**Settings.** `agent.coordinator` off stops it, and nothing wakes it; on again resumes it once the stopped process has exited. `agent.coordinator_bypass` (default on) runs it without permission prompts.
+**Settings.** `agent.coordinator` off stops it, and nothing wakes it; on again resumes it once the stopped process has exited. `agent.coordinator_bypass` (default on) runs it without permission prompts. `agent.coordinator_model` and `agent.coordinator_effort` (empty: the agent's own) go to it as `--model` and `--effort` on Claude Code (at its start; a change resumes it as a copy with them, as a change of mode does), `-m` and `-c model_reasoning_effort="…"` on every Codex turn, and `--model` on every OpenCode run (it takes no effort). A value the setting's own check refuses is never passed.
 
 **Status** shows in Merging as `InflightView.coordinator`: on, its id (null until started), its link, and `error`, what the agent said when it last couldn't start or resume (kv `coordinator_error`, cleared once a run succeeds). The error shows in red in Merging, with one notification when it first fails.
 
