@@ -444,9 +444,11 @@ function startHost(at: string): Effect.Effect<Server, DeskFailed> {
       env: { ...process.env }, // with the login shell's PATH, set since launch
       stdio: "pipe",
     });
+    let exited = false;
+    // An install's answer can come after the quit it started has ended the process.
     const tell = (m: ToHost) => {
       // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a utility process, not a window: it has no origin
-      child.postMessage(m);
+      if (!exited) child.postMessage(m);
     };
     let up = false;
     let stopping = false;
@@ -503,6 +505,7 @@ function startHost(at: string): Effect.Effect<Server, DeskFailed> {
       } else stopped?.();
     });
     child.on("exit", (code) => {
+      exited = true;
       stopped?.();
       if (!up) resume(Effect.fail(new DeskFailed({ cause: `its process exited (${code})` })));
       else if (server === host && !stopping) {

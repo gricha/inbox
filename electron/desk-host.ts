@@ -75,6 +75,11 @@ const stop = () => {
   );
 };
 
+// The app's kill after its 5 s wait: exiting this way, not by the default, runs the exit hook that stops the agents (src/children.ts).
+process.once("SIGTERM", () => {
+  process.exit(1);
+});
+
 port.on("message", (e) => {
   const m = toHost(e.data);
   if (!m) {
