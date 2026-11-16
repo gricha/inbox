@@ -6,8 +6,8 @@ import { Effect, Schema, type Fiber } from "effect";
 import { areaFiles, areasFor, touched } from "./areas.ts";
 import type { Desk } from "./desk.ts";
 import { field, oneOf, schemaOf, str } from "./narrow.ts";
-import { askAgent, makeAgentDir, notLoggedIn } from "./review.ts";
-import { agentName } from "./settings.ts";
+import { askAgent, makeAgentDir, notLoggedIn, withModel } from "./review.ts";
+import { agentName, rulesModel } from "./settings.ts";
 import { andMore, pushAnswered, pushesOf } from "./stage.ts";
 import {
   BUCKETS,
@@ -513,7 +513,10 @@ export class Judge {
       const prompt = buildJudgePrompt(batch, desk.me() || "the owner", desk.ctx);
       const dir = yield* makeAgentDir(desk.home);
       const agent = desk.agent();
-      const answers = parseVerdicts((yield* askAgent(prompt, { schema: JUDGE_SCHEMA, dir, agent })).answer, ids);
+      const answers = parseVerdicts(
+        (yield* askAgent(prompt, { schema: JUDGE_SCHEMA, dir, agent, ...withModel(rulesModel(desk.settings)) })).answer,
+        ids,
+      );
       // Only answered calls count toward the hour: a failed one (an expired login) mustn't use it up.
       desk.store.set("judge_spent", [...this.spent(), ...batch.map(() => Date.now())]);
       const at = new Date().toISOString();

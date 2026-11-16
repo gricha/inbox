@@ -89,6 +89,16 @@ A `ref` is `owner/repo#123`, `repo#123` when unique, a GitHub URL, or an item's 
   2. For one PR, `desk_brief` once its AI review is ready (desk_add says whether it's being written). When adding several, don't brief each.
   3. Report: "Added sentry#123 to your desk; AI review: skim, low risk (undo: seq 42)". Never request a review, assign or comment to get something there.
 
+### Cost: cheapest that works
+
+When you set up a rule, criterion or automation, pick the cheapest way that does the job, in this order:
+
+1. **Deterministic, no model:** a rule, a criterion's `when` alone, an automation's `decide: "rule"`. Use it whenever fields settle it: repo, author, labels, CI, size, or words in the title (`contains(item.title, 'viewer context')`).
+2. **A question:** a criterion's `ask`, an automation's `decide: "ask"`. The decision model answers when the user set its key (Settings → Agent → Decision model key); otherwise their agent on its cheap rules model (Settings → Agent → Model for sorting and questions: Haiku on Claude Code unless set). Narrow it with `when` so it's asked of few items.
+3. **An agent run:** an automation's `decide: "agent"`, only when it must read beyond the item (other repos, other tools).
+
+When a deterministic rule covers most of it and a question would catch the rest, set both and say which one costs a model call.
+
 ### Changing the rules
 
 1. `desk_item` on a matching item shows which rule placed it. `desk fields` (or `GET /api/fields`) lists what rules can read. `desk show <ref> --json` shows an item's values under `signals`.
@@ -113,7 +123,7 @@ Expressions: `&& || ! == != < <= > >= in matches`, `len() lower() contains() sta
 
 When the user says what matters ("PRs about service accounts", "anything from dana first", "big PRs can wait"), save a criterion with `desk_criteria set`. It's on as soon as it's saved; tell them they can switch it off in Settings → Automations → Urgency.
 
-- `when`: a rule expression, free and exact. Use it alone when facts settle it (`item.author == 'dana'`).
+- `when`: a rule expression, free and exact. Use it alone when facts settle it (`item.author == 'dana'`): no model, so first choice ([Cost](#cost-cheapest-that-works)).
 - `ask`: a yes-or-no question a model answers from the item's title, labels, people, state and description start. Use it for a topic or judgement ("Is it about service accounts?"), with `when` to narrow it (`!me.author` for other people's PRs).
 - `urgent: true`: a yes puts the item in Urgent whatever its score. Otherwise a yes raises the score.
 - `name`: a few words the row shows ("Service accounts"). `id`: lowercase letters, digits and `-`.
@@ -186,7 +196,7 @@ When the user wants something checked on a schedule or on events ("every morning
 - `schedule` (local time): `daily 09:00`, `weekdays 09:00,13:00`, `mon 09:00`, `mon,thu 17:30`, `weekdays hourly`.
 - `events`, instead of a schedule: `desk_events` kinds (`review_requested`, `pushed`, `ci`, `commented`, `reviewed`, `merged`, `mentioned`, `assigned`, …). It runs once per sync for the items they landed on.
 - `when`: an optional rule expression checked first, against the events' items or, on a schedule, each open item on the desk. Nothing passes: nothing runs and no model is called. Use it whenever the job starts from items already on the desk.
-- `decide`, cheapest that works:
+- `decide`, cheapest that works ([Cost](#cost-cheapest-that-works)):
   - `rule`: no model. `when` is the condition, `rule` is `{ do, why, until? }`; no `prompt`. ("When CI goes red on my PR, snooze it until CI passes.")
   - `ask`: one tool-less model call per batch, for what the item itself settles.
   - `agent` (default): a read-only agent run, for when it has to look further.

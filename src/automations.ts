@@ -25,6 +25,7 @@ import {
   opencodeRun,
   makeAgentDir,
   runCommand,
+  withModel,
 } from "./review.ts";
 import {
   ACTIVITY_KINDS,
@@ -42,7 +43,7 @@ import {
   type Verb,
 } from "./types.ts";
 import { report } from "./sentry.ts";
-import { agentName, secretsPath } from "./settings.ts";
+import { agentName, rulesModel, secretsPath } from "./settings.ts";
 
 const KEY = "automations";
 const RUNS = "automation_runs";
@@ -850,6 +851,7 @@ export class Automations {
         schema: askSchema(canOf(a)),
         dir,
         agent: desk.agent(),
+        ...withModel(rulesModel(desk.settings)),
       });
       const list = field(answer, "items");
       const said: Said[] = [];

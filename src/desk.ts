@@ -628,7 +628,7 @@ type PrTextError = Conflict | FetchPrError;
 type AiError = PrTextError | CommandError | ClaudeError;
 type IssueError = Conflict | FetchIssueError | ClaudeError;
 
-const PER_AGENT = ["agent.coordinator_model", "agent.coordinator_effort"] as const;
+const PER_AGENT = ["agent.coordinator_model", "agent.coordinator_effort", "agent.rules_model"] as const;
 
 export class Desk {
   store: Store;

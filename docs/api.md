@@ -37,7 +37,7 @@ Settings → Agent is where you change it afterwards.
 
 ### Your agent (Settings → Agent)
 
-`agent.harness` picks your agent: `claude-code` (the default), `codex` or `opencode`. Every agent run the desk makes follows it ([Your own agent](#your-own-agent)), and so does Connect (`driverOf()` in `src/agents.ts`). `agent.coordinator_model` and `agent.coordinator_effort` belong to the agent: a `PUT /api/settings` that changes `agent.harness` keeps the outgoing agent's in the store (`agent_models`) and sets the incoming one's (empty the first time), unless the same request sets them.
+`agent.harness` picks your agent: `claude-code` (the default), `codex` or `opencode`. Every agent run the desk makes follows it ([Your own agent](#your-own-agent)), and so does Connect (`driverOf()` in `src/agents.ts`). `agent.coordinator_model`, `agent.coordinator_effort` and `agent.rules_model` belong to the agent: a `PUT /api/settings` that changes `agent.harness` keeps the outgoing agent's in the store (`agent_models`) and sets the incoming one's (empty the first time), unless the same request sets them.
 
 Settings → Agent shows a row when your agent lacks the desk's MCP tools or the Inbox skill ([skills/inbox/SKILL.md](../skills/inbox/SKILL.md)). **Connect &lt;agent&gt;** installs what's missing (`POST /api/agents/connect`); **Update the skill** shows when only the skill is out of date. When both are in place the row is gone. From a terminal:
 
@@ -795,7 +795,7 @@ interface AutomationView extends Automation {
 
 ### Your own agent
 
-Settings → Agent (`agent.harness`) picks who sorts and reviews: Claude Code (the default), Codex or OpenCode. It is always your own CLI from PATH, on your own login, model and config. The desk passes no model and sets no API key. (`DESK_CLAUDE`, `DESK_CODEX` and `DESK_OPENCODE` only point tests at fakes.)
+Settings → Agent (`agent.harness`) picks who sorts and reviews: Claude Code (the default), Codex or OpenCode. It is always your own CLI from PATH, on your own login and config, and sets no API key. Your model runs everything but what applies your rules: the judge's sort, the Inbox's score, and the criteria's and automations' questions the decision model doesn't answer run on the rules model (`agent.rules_model`, `rulesModel()` in `src/settings.ts`), passed as `--model`. Empty, it's `haiku` on Claude Code (`CHEAP`) and your own default on Codex and OpenCode, which name no cheapest model to pick. (`DESK_CLAUDE`, `DESK_CODEX` and `DESK_OPENCODE` only point tests at fakes.)
 
 There are two kinds of runs:
 
@@ -809,7 +809,7 @@ The only model the desk calls that isn't your agent is [the decision model](#the
 #### Claude Code
 
 - **Command:** `claude -p --json-schema … --tools "" --strict-mcp-config --no-session-persistence`, prompt on stdin.
-- **Yours:** no `--model`, `--agents`, `--system-prompt` or `--bare`, and no `ANTHROPIC_API_KEY` set (one in the desk's own environment would reach it, as it would your own `claude -p`). Your model, effort and plugins apply.
+- **Yours:** no `--model` but the rules model's, no `--agents`, `--system-prompt` or `--bare`, and no `ANTHROPIC_API_KEY` set (one in the desk's own environment would reach it, as it would your own `claude -p`). Your model, effort and plugins apply.
 - **Fenced:** no tools, and `--strict-mcp-config` loads none of your MCP servers (Slack, Linear, GitHub, …).
 - **Stopping:** each run is its own process group (`taskkill /T` on Windows), so stopping it stops what it started. When the desk closes it stops every run (SIGTERM, SIGKILL 2 s later) and waits for them, so a restart under `node --watch` leaves none behind.
 - **Logged out:** a 401 reads ``Claude Code isn't logged in. Run `claude auth login` in a terminal.``; desk.log keeps Claude's own words.
@@ -824,7 +824,7 @@ The only model the desk calls that isn't your agent is [the decision model](#the
   - `--output-schema <file> -o <file> -`, prompt on stdin.
 - **Fenced:** Codex has no "no tools" switch, so this turns off everything that can run, reach out or act, and the read-only sandbox refuses writes.
 - **MCP servers off:** overriding the whole `mcp_servers` table would merge with yours, so the desk first asks `codex <the same --disable flags> mcp list --json` (kept 5 minutes, asked again when you switch agents) and turns each enabled one off by name. `--disable plugins` drops plugins' servers. If the list fails, the call doesn't run: `CodexServersUnknown` ("Couldn't confirm Codex's MCP servers are off, so it didn't run: …"), held like a logged-out agent.
-- **Yours:** no `--model`, `--profile` or `--ignore-user-config`; your `config.toml` stays in charge.
+- **Yours:** no `--model` but the rules model's (when set), no `--profile` or `--ignore-user-config`; your `config.toml` stays in charge.
 - **Files:** the schema and the last message go through two files in `~/.inbox/agent/`, removed after the run.
 - **Answer:** the last message. With none, the turn's failure is the error: a login pauses the desk in Codex's words (``Codex isn't logged in. Run `codex login` in a terminal.``); a usage or rate limit holds what asked without spending a try.
 - **Login check:** `codex login status`, or a `model_provider` in `config.toml` (as for OpenRouter) whose `env_key` is set in the desk's environment.
@@ -838,7 +838,7 @@ The only model the desk calls that isn't your agent is [the decision model](#the
   - `mcp.<name>.enabled: false` for each MCP server `opencode debug config --pure` lists enabled (kept 5 minutes; if it can't be read, the call is refused);
   - `share: "disabled"`.
 - `--pure` leaves out external plugins, which run code in the process whatever the permissions say.
-- **Yours:** no `--model`, so your default model runs it.
+- **Yours:** no `--model` but the rules model's (when set), so otherwise your default model runs it.
 - **Answer:** the last text part. Reviews say `opencode`. The session is deleted after it's read (`opencode session delete <id>`).
 - **Errors:** status 401 (or a message about logging in) pauses the desk (``OpenCode isn't logged in. Run `opencode auth login` in a terminal.``); 429 or 402 holds what asked; anything else keeps its words. A provider with no key fails with OpenCode's "Unexpected server error", which the desk can't tell apart.
 - **Login check:** `opencode auth list` counts a stored credential or a provider key set in the environment.

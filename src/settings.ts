@@ -288,6 +288,18 @@ export const SETTINGS = [
     help: "Which of OpenRouter's decision models answers. A pinned one keeps answering the same way.",
   },
   {
+    key: "agent.rules_model",
+    section: "agent",
+    more: true,
+    label: "Model for sorting and questions",
+    type: "string",
+    default: "",
+    placeholder: "Haiku, the cheapest",
+    pattern: "^[\\w.:/@-]{1,80}$",
+    pattern_hint: "a model's name as your agent's own command takes it, like haiku",
+    help: "Sorts, scores and answers your rules' questions when no decision model does: a small model does it for less.",
+  },
+  {
     key: "queue.quiet_days",
     section: "queue",
     label: "Move untouched items to FYI after",
@@ -418,6 +430,11 @@ const BYPASS = {
   OpenCode:
     "Approves what your OpenCode config asks about; off, that's refused. OpenCode has no sandbox either way. Its deny rules still hold.",
 };
+// What applies your rules when its setting is empty: the cheapest model your agent names; where it names none to pick from
+// (Codex, OpenCode), its own default.
+const CHEAP: Record<string, string> = { "claude-code": "haiku" };
+export const rulesModel = (s: Settings): string | undefined => s["agent.rules_model"] || CHEAP[s["agent.harness"]];
+
 // models: what your agent takes, for its model and effort dropdowns; none known, they stay text fields.
 export function agentDefs(harness: string, models?: AgentModels): SettingDef[] {
   const name = agentName(harness);
@@ -425,6 +442,8 @@ export function agentDefs(harness: string, models?: AgentModels): SettingDef[] {
   return SETTINGS.map((d: SettingDef) => {
     if (d.key === "agent.coordinator_model" && models?.models.length) return { ...d, choices: models.models };
     if (d.key === "agent.coordinator_effort" && models?.efforts.length) return { ...d, choices: models.efforts };
+    if (d.key === "agent.rules_model")
+      return { ...d, ...(!CHEAP[harness] && { placeholder: "Its own default" }), ...(models?.models.length && { choices: models.models }) };
     if (name === "Claude") return d;
     if (AGENT_WORDED.has(d.key)) return { ...d, label: say(d.label), ...(d.help && { help: say(d.help) }) };
     if (d.key === "agent.coordinator_bypass") return { ...d, help: BYPASS[name] };

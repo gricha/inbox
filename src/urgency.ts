@@ -12,9 +12,9 @@ import { BadRequest, DecisionModelDown, fsError, messageOf, NotFound } from "./e
 import { compile, type Compiled } from "./expr.ts";
 import { sortKey, textHash } from "./judge.ts";
 import { decodeEach, decodeValues, field, keysOf, num, schemaOf, str } from "./narrow.ts";
-import { agentDown, askAgent, makeAgentDir } from "./review.ts";
+import { agentDown, askAgent, makeAgentDir, withModel } from "./review.ts";
 import { report } from "./sentry.ts";
-import { agentName } from "./settings.ts";
+import { agentName, rulesModel } from "./settings.ts";
 import { BUCKETS, type Bucket, type Card, type CriteriaView, type Criterion, type InboxSection } from "./types.ts";
 
 const KEY = "criteria";
@@ -520,7 +520,12 @@ export class Urgency {
           ...items.flatMap((x) => [...sent.get(x.id)!, `  questions: ${x.cs.map((c) => c.id).join(", ")}`]),
           `</items-${tag}>`,
         ].join("\n");
-        const { answer } = yield* askAgent(prompt, { schema: ASK_SCHEMA, dir: yield* makeAgentDir(desk.home), agent: desk.agent() });
+        const { answer } = yield* askAgent(prompt, {
+          schema: ASK_SCHEMA,
+          dir: yield* makeAgentDir(desk.home),
+          agent: desk.agent(),
+          ...withModel(rulesModel(desk.settings)),
+        });
         const list = field(answer, "items");
         const said = new Map<string, string[]>();
         for (const raw of Array.isArray(list) ? list : []) {
@@ -624,7 +629,12 @@ export class Urgency {
           ...[...input.values()].flatMap((x) => x.lines.concat(`  ${criteriaLine(x.criteria)}`)),
           `</items-${tag}>`,
         ].join("\n");
-        const { answer } = yield* askAgent(prompt, { schema: SCORE_SCHEMA, dir: yield* makeAgentDir(desk.home), agent: desk.agent() });
+        const { answer } = yield* askAgent(prompt, {
+          schema: SCORE_SCHEMA,
+          dir: yield* makeAgentDir(desk.home),
+          agent: desk.agent(),
+          ...withModel(rulesModel(desk.settings)),
+        });
         const list = field(answer, "items");
         for (const raw of Array.isArray(list) ? list : []) {
           const id = str(field(raw, "id"))?.trim() ?? "";

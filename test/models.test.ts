@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CLAUDE_MODELS, codexModels, opencodeModels } from "../src/models.ts";
-import { agentDefs } from "../src/settings.ts";
+import { agentDefs, DEFAULTS, rulesModel } from "../src/settings.ts";
 import { run } from "./helpers/run.ts";
 
 const posix = { skip: process.platform === "win32" };
@@ -110,4 +110,12 @@ test("each agent keeps its own model and effort: switching agents puts one's awa
   assert.deepEqual(now(), ["codex", "gpt-6", "ultra"], "and Codex's");
   await run(t.desk.putSettings({ set: { "agent.harness": "claude-code", "agent.coordinator_model": "sonnet" } }));
   assert.deepEqual(now(), ["claude-code", "sonnet", "high"], "a model set with the switch wins");
+});
+
+test("rules are applied on the cheapest model: Haiku on Claude Code, your own default where your agent names none, or what you set", () => {
+  const s = (harness: string, set = "") => ({ ...DEFAULTS, "agent.harness": harness, "agent.rules_model": set });
+  assert.equal(rulesModel(s("claude-code")), "haiku");
+  assert.equal(rulesModel(s("codex")), undefined);
+  assert.equal(rulesModel(s("opencode")), undefined);
+  assert.equal(rulesModel(s("codex", "gpt-5.6-luna")), "gpt-5.6-luna");
 });

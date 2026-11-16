@@ -622,7 +622,11 @@ export interface AskOpts {
   dir: string; // agentDir(): claude keeps a ~/.claude/projects entry per directory it runs in
   schema?: object;
   agent?: DriverId; // agent.harness: Claude Code unless it says Codex or OpenCode
+  model?: string; // a model its CLI takes (the rules model); none, your agent's own default
 }
+
+// A run's model, when one is named: optional fields stay out rather than undefined.
+export const withModel = (model: string | undefined): { model?: string } => (model ? { model } : {});
 
 export const claudeMissing = (command: string) => `${command} not found: install Claude Code so claude runs from your PATH`;
 
@@ -653,6 +657,7 @@ export const askClaude = Effect.fn("askClaude")(function* (
     "--no-session-persistence",
     "--json-schema",
     JSON.stringify(opts.schema ?? SCHEMA),
+    ...(opts.model ? ["--model", opts.model] : []),
   ];
   const spawnAs = yield* claudeSpawn(command, args);
   const out = yield* runCommand(spawnAs, {
@@ -675,7 +680,7 @@ export const codexCommand = () => (process.env.DESK_CODEX?.trim() ? process.env.
 export const codexMissing = (command: string) => `${command} not found: install Codex so codex runs from your PATH`;
 
 // Codex has no "no tools": everything that can act or reach out is turned off, and what's left runs in a read-only sandbox.
-// Your model, profile and login stay yours (no --model, no --ignore-user-config); each of your MCP servers is turned off by name.
+// Your profile and login stay yours (no --ignore-user-config), and your model unless a run names one; each of your MCP servers is turned off by name.
 const CODEX_OFF = [
   "shell_tool",
   "unified_exec",
@@ -692,8 +697,9 @@ const CODEX_OFF = [
   "memories",
 ];
 const codexOff = CODEX_OFF.flatMap((f) => ["--disable", f]);
-const codexArgs = (dir: string, schema: string, out: string, mcp: string[], persist: boolean): string[] => [
+const codexArgs = (dir: string, schema: string, out: string, mcp: string[], persist: boolean, model?: string): string[] => [
   "exec",
+  ...(model ? ["--model", model] : []),
   "--json",
   "--sandbox",
   "read-only",
@@ -816,7 +822,7 @@ export const codexRun = Effect.fn("codexRun")(function* (
     // The agent's own directory, made by the desk: failing to write in it is a defect.
     const mcp = yield* codexMcp(command, opts.dir, opts.desk);
     fs.writeFileSync(schema, JSON.stringify(strictSchema(opts.schema ?? SCHEMA)));
-    const spawnAs = yield* claudeSpawn(command, codexArgs(opts.dir, schema, out, mcp, !!opts.desk));
+    const spawnAs = yield* claudeSpawn(command, codexArgs(opts.dir, schema, out, mcp, !!opts.desk, opts.model));
     const events = yield* runCommand(spawnAs, {
       input: prompt,
       cwd: opts.dir,
@@ -912,13 +918,14 @@ const OPENCODE_TOOLS = ["read", "edit", "glob", "grep", "list", "bash", "task", 
 const OPENCODE_DENY_ALL: Record<string, string> = Object.fromEntries(["*", ...OPENCODE_TOOLS].map((k) => [k, "deny"]));
 // --pure: no external plugins, which run code in the process whatever the permissions say. A new session's --title keeps
 // opencode from asking your small model for one, a second call that would carry the prompt to another model.
-export const opencodeRunArgs = (title: string, session?: string) => [
+export const opencodeRunArgs = (title: string, session?: string, model?: string) => [
   "run",
   "--format",
   "json",
   "--pure",
   "--agent",
   OPENCODE_AGENT,
+  ...(model ? ["--model", model] : []),
   ...(session ? ["--session", session] : ["--title", title]),
 ];
 
@@ -994,7 +1001,7 @@ export const opencodeRun = Effect.fn("opencodeRun")(function* (
     ...Object.fromEntries((desk?.tools ?? []).map((t) => [`${server}_${t}`, "allow"])),
   });
   const config = yield* opencodeConfig(command, opts.dir, permits, desk);
-  const spawnAs = yield* claudeSpawn(command, opencodeRunArgs(desk ? "Inbox automation" : "Inbox"));
+  const spawnAs = yield* claudeSpawn(command, opencodeRunArgs(desk ? "Inbox automation" : "Inbox", undefined, opts.model));
   const events = yield* runCommand(spawnAs, {
     input: withSchema(prompt, opts.schema ?? SCHEMA),
     cwd: opts.dir,
