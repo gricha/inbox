@@ -16,24 +16,40 @@ if ((await Effect.runPromise(probeHealth(`http://127.0.0.1:${port}`))).kind === 
   console.warn(`For a separate dev desk: DESK_PORT=47900 DESK_HOME=/tmp/desk-dev npm run app:dev`);
 }
 
-// macOS names the menu bar after the running bundle, and npm's Electron.app calls itself Electron: name it Inbox, as the
-// packaged app is. app.setName can't change that title.
-if (process.platform === "darwin") {
-  const plist = path.join(path.dirname(path.dirname(electron)), "Info.plist");
-  for (const key of ["CFBundleName", "CFBundleDisplayName"]) {
-    const r = spawnSync("plutil", ["-replace", key, "-string", "Inbox", plist]);
-    if (r.status !== 0) console.warn(`Couldn't name the dev app Inbox (${key}): ${String(r.stderr).trim()}`);
+// macOS names the menu bar after the bundle's CFBundleName and the Dock after its file name, and npm's Electron.app says
+// Electron in both: run a copy named Inbox.app, as the packaged app is. app.setName can't change either.
+function inboxBundle(): string {
+  const source = path.dirname(path.dirname(path.dirname(electron)));
+  const bundle = path.join(path.dirname(source), "Inbox.app");
+  const version = (app: string) =>
+    spawnSync("plutil", ["-extract", "CFBundleVersion", "raw", path.join(app, "Contents", "Info.plist")], {
+      encoding: "utf8",
+    }).stdout.trim();
+  if (!fs.existsSync(bundle) || version(bundle) !== version(source)) {
+    fs.rmSync(bundle, { recursive: true, force: true });
+    // -c clones on APFS, so the copy costs no space.
+    const cp = spawnSync("cp", ["-cR", source, bundle]);
+    if (cp.status !== 0) {
+      console.warn(`Couldn't copy Electron.app to Inbox.app, so the Dock says Electron: ${String(cp.stderr).trim()}`);
+      return electron;
+    }
+    for (const key of ["CFBundleName", "CFBundleDisplayName"]) {
+      const r = spawnSync("plutil", ["-replace", key, "-string", "Inbox", path.join(bundle, "Contents", "Info.plist")]);
+      if (r.status !== 0) console.warn(`Couldn't name the dev app Inbox (${key}): ${String(r.stderr).trim()}`);
+    }
+    // Launch Services keeps a bundle's old name until it's registered again.
+    const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+    spawnSync(lsregister, ["-f", bundle]);
   }
-  // Launch Services keeps a bundle's old name until it's registered again.
-  const lsregister = "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
-  spawnSync(lsregister, ["-f", path.dirname(path.dirname(path.dirname(electron)))]);
+  return path.join(bundle, path.relative(source, electron));
 }
+const binary = process.platform === "darwin" ? inboxBundle() : electron;
 
 let child: ChildProcess | null = null;
 let stopping = false;
 
 function launch(): void {
-  const c = spawn(electron, [root], { stdio: "inherit", env: { ...process.env, DESK_SOURCE: root } });
+  const c = spawn(binary, [root], { stdio: "inherit", env: { ...process.env, DESK_SOURCE: root } });
   child = c;
   // Quitting the app (Cmd+Q, tray) ends the dev session too.
   c.on("exit", () => {
