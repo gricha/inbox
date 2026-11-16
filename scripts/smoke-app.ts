@@ -93,7 +93,8 @@ try {
     items.find((i) => i.label === "Settings…")!.click();
   });
   await page.waitForURL((u) => u.hash.startsWith("#/settings"), { timeout: 5000 });
-  await page.locator('.side a.side-item[aria-current="page"]', { hasText: "Settings" }).waitFor({ timeout: 10_000 });
+  // In Settings the sidebar lists its parts, one of them current, in place of the pages.
+  await page.locator('.side nav[aria-label="Settings"] a.side-item[aria-current="page"]').waitFor({ timeout: 10_000 });
   step("Settings… opened #/settings");
 
   await app.close();
