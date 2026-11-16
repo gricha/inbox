@@ -6,7 +6,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
-import { activityOf, askLine, carryTrust, NO_REVIEW, transcriptPath, wakeFor } from "../src/coordinator.ts";
+import { activityOf, askLine, NO_REVIEW, transcriptPath, trustClaude, trustCodex, wakeFor } from "../src/coordinator.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { Ask, AskLines, AskPlace } from "../src/types.ts";
@@ -649,23 +649,53 @@ test("GET /api/asks/:id says where an ask is and where a change may go: only the
   assert.deepEqual([broken.status, broken.body.error?.startsWith("config has errors: ")], [503, true], JSON.stringify(broken));
 });
 
-test("the coordinator's folder inherits the trust you gave its folder before the move to ~/.inbox, and nothing else is trusted for you", () => {
+test("the coordinator's own folder is trusted for Claude Code, the rest of its config as it was", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-trust-"));
   const file = path.join(dir, ".claude.json");
-  const write = (projects: Record<string, unknown>) => {
-    fs.writeFileSync(file, JSON.stringify({ numStartups: 3, projects }));
+  const write = (conf: Record<string, unknown>) => {
+    fs.writeFileSync(file, JSON.stringify(conf));
   };
   const read = () =>
     JSON.parse(fs.readFileSync(file, "utf8")) as { numStartups: number; projects: Record<string, Record<string, unknown>> };
-  write({ "/old/coordinator": { hasTrustDialogAccepted: true }, "/new/coordinator": { allowedTools: ["x"] } });
-  assert.equal(carryTrust("/old/coordinator", "/new/coordinator", file), true);
-  assert.deepEqual(read().projects["/new/coordinator"], { allowedTools: ["x"], hasTrustDialogAccepted: true }, "its other settings kept");
+  write({ numStartups: 3, projects: { "/home/coordinator": { allowedTools: ["x"] }, "/other": { hasTrustDialogAccepted: false } } });
+  assert.equal(trustClaude("/home/coordinator", file), true);
+  assert.deepEqual(read().projects["/home/coordinator"], { allowedTools: ["x"], hasTrustDialogAccepted: true }, "its other settings kept");
+  assert.deepEqual(read().projects["/other"], { hasTrustDialogAccepted: false }, "no other folder touched");
   assert.equal(read().numStartups, 3, "the rest of the file as it was");
-  assert.equal(carryTrust("/old/coordinator", "/new/coordinator", file), false, "once: already trusted");
-  write({ "/old/coordinator": { hasTrustDialogAccepted: false } });
-  assert.equal(carryTrust("/old/coordinator", "/new/coordinator", file), false, "never trusted before: still yours to trust");
-  assert.equal(read().projects["/new/coordinator"], undefined);
-  assert.equal(carryTrust("/old/coordinator", "/new/coordinator", path.join(dir, "missing.json")), false, "no file: nothing written");
+  assert.equal(trustClaude("/home/coordinator", file), false, "once: already trusted");
+  write({ numStartups: 1 });
+  assert.equal(trustClaude("/home/coordinator", file), true, "a config with no projects yet");
+  assert.deepEqual(read().projects, { "/home/coordinator": { hasTrustDialogAccepted: true } });
+  assert.equal(
+    trustClaude("/home/coordinator", path.join(dir, "missing.json")),
+    false,
+    "no config: Claude Code never ran, nothing written",
+  );
+  assert.equal(fs.existsSync(path.join(dir, "missing.json")), false);
+  fs.writeFileSync(file, "not json");
+  assert.equal(trustClaude("/home/coordinator", file), false, "a config it can't read is left alone");
+  assert.equal(fs.readFileSync(file, "utf8"), "not json");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("the coordinator's own folder is trusted for Codex: a table added to its config, never over one that's there", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-trust-"));
+  const file = path.join(dir, "codex", "config.toml");
+  assert.equal(trustCodex("/home/coordinator", file), true, "no config yet: it's made");
+  assert.equal(fs.readFileSync(file, "utf8"), '[projects."/home/coordinator"]\ntrust_level = "trusted"\n');
+  assert.equal(trustCodex("/home/coordinator", file), false, "once: its table is there");
+  fs.writeFileSync(file, 'model = "gpt"\n\n[projects."/work"]\ntrust_level = "trusted"');
+  assert.equal(trustCodex("/home/coordinator", file), true);
+  assert.equal(
+    fs.readFileSync(file, "utf8"),
+    'model = "gpt"\n\n[projects."/work"]\ntrust_level = "trusted"\n\n[projects."/home/coordinator"]\ntrust_level = "trusted"\n',
+    "the rest of the file as it was",
+  );
+  fs.writeFileSync(file, '[projects."/home/coordinator"]\ntrust_level = "untrusted"\n');
+  assert.equal(trustCodex("/home/coordinator", file), false, "marked untrusted: still yours to change");
+  fs.writeFileSync(file, "not = = toml");
+  assert.equal(trustCodex("/home/coordinator", file), false, "a config it can't read is left alone");
+  assert.equal(fs.readFileSync(file, "utf8"), "not = = toml");
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

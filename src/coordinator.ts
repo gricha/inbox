@@ -696,9 +696,11 @@ export class Coordinator {
   launch(args: string[], mode: Mode): Effect.Effect<void, CommandError | FsError | ClaudeBadOutput> {
     return Effect.gen({ self: this }, function* () {
       const dir = yield* this.dir();
-      // Only the owner's own desk: a scratch desk (a test) never touches their Claude Code config.
-      if (ownersHome(this.desk.home) && carryTrust(path.join(oldHome(), "coordinator"), dir))
-        this.desk.log(`coordinator: trusted ${dir}, as you trusted its folder before the move`);
+      // Only the owner's own desk (a scratch desk never touches their config), under both paths Claude Code may key it by.
+      if (ownersHome(this.desk.home)) {
+        const real = Result.getOrNull(Result.try({ try: () => fs.realpathSync(dir), catch: () => null }));
+        for (const d of new Set([dir, real ?? dir])) if (trustClaude(d)) this.desk.log(`coordinator: trusted ${d} for Claude Code`);
+      }
       const out = yield* claude(args, dir);
       const id = yield* backgrounded(out);
       const s = this.saved();
@@ -816,8 +818,13 @@ export class Coordinator {
       const read = Result.try({ try: () => parse(fs.readFileSync(config, "utf8")), catch: () => null });
       const projects = field(Result.getOrNull(read), "projects");
       const trust = (d: string) => field(field(projects, d), "trust_level") === "trusted";
-      if (!trust(real) && !trust(dir)) return yield* new CodexUntrusted({ dir: real, config });
-      return dir;
+      if (trust(real) || trust(dir)) return dir;
+      // Only the owner's own desk, as for Claude Code; a folder they marked otherwise stays theirs to change.
+      if (ownersHome(this.desk.home) && trustCodex(real, config)) {
+        this.desk.log(`coordinator: trusted ${real} for Codex`);
+        return dir;
+      }
+      return yield* new CodexUntrusted({ dir: real, config });
     });
   }
 
@@ -938,22 +945,43 @@ export class Coordinator {
   }
 }
 
-// The home's move to ~/.inbox left Claude Code's trust on the coordinator's old folder: the owner's yes there carries over to
-// the new one, once, so it starts as before. A folder never trusted is still the owner's to trust; this grants nothing new.
-export function carryTrust(from: string, to: string, file = claudeConfig()): boolean {
+// The coordinator's folder is the desk's own: it made it and wrote everything in it (the deny list, its settings). So the
+// desk answers Claude Code's trust prompt for it, in Claude Code's own config, and the agent starts without a trip to a
+// terminal. True when it wrote; false when it's trusted already, or there's no config to write to (Claude Code never ran).
+export function trustClaude(dir: string, file = claudeConfig()): boolean {
   const read = Result.try({ try: (): unknown => JSON.parse(fs.readFileSync(file, "utf8")), catch: () => null });
   const conf = Result.getOrNull(read);
-  const projects = field(conf, "projects");
-  const accepted = (d: string) => field(field(projects, d), "hasTrustDialogAccepted") === true;
-  if (!isRecord(projects) || !accepted(from) || accepted(to)) return false;
-  const was = projects[to];
-  projects[to] = { ...(isRecord(was) ? was : {}), hasTrustDialogAccepted: true };
+  if (!isRecord(conf)) return false;
+  const projects = isRecord(conf.projects) ? conf.projects : {};
+  const was = projects[dir];
+  if (field(was, "hasTrustDialogAccepted") === true) return false;
+  conf.projects = { ...projects, [dir]: { ...(isRecord(was) ? was : {}), hasTrustDialogAccepted: true } };
   const tmp = `${file}.inbox-${process.pid}`;
   return Result.isSuccess(
     Result.try({
       try: () => {
         fs.writeFileSync(tmp, JSON.stringify(conf, null, 2));
         fs.renameSync(tmp, file);
+      },
+      catch: () => null,
+    }),
+  );
+}
+
+// The same for Codex, which reads the folder's deny rules only once its config trusts it: a `[projects."<dir>"]` table
+// added to the end of config.toml, the rest of the file untouched. Never over a table that's there: a folder the owner
+// marked untrusted is theirs to change. True when it wrote.
+export function trustCodex(dir: string, file: string): boolean {
+  const text = Result.getOrNull(Result.try({ try: () => fs.readFileSync(file, "utf8"), catch: () => null })) ?? "";
+  const conf = Result.getOrNull(Result.try({ try: (): unknown => parse(text), catch: () => null }));
+  if (text.trim() && !isRecord(conf)) return false; // a config it can't read: not one to add to
+  if (field(field(conf, "projects"), dir) !== undefined) return false;
+  const table = `[projects.${JSON.stringify(dir)}]\ntrust_level = "trusted"\n`;
+  return Result.isSuccess(
+    Result.try({
+      try: () => {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        fs.writeFileSync(file, text ? `${text.replace(/\n*$/, "\n\n")}${table}` : table);
       },
       catch: () => null,
     }),
