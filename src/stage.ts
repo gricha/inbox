@@ -22,9 +22,10 @@ export function approved(it: Item, self: string): boolean {
 }
 
 // Its repo needs no review to merge it: GitHub gives no review decision then. A stacked PR's base is another PR's branch,
-// which never requires one, while where it lands may, so only a PR on the default branch counts.
+// which never requires one, while where it lands may, so only a PR on the default branch counts. In a repo you can only
+// read, its maintainer still has to take it.
 export const reviewOptional = (it: Item): boolean =>
-  it.kind === "pr" && it.review_decision === "none" && !!it.default_branch && it.base === it.default_branch;
+  it.kind === "pr" && it.review_decision === "none" && !!it.default_branch && it.base === it.default_branch && it.can_merge !== false;
 
 // `self` is the person whose own review doesn't count: the PR's author, or you on yours.
 export function stage(it: Item, self: string): Stage | undefined {

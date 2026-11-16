@@ -76,7 +76,11 @@ export type RawCheck = typeof RAW_CHECK.Type;
 
 export const RAW_NODE = Schema.Struct({
   ...HIT,
-  repository: Schema.Struct({ nameWithOwner: Schema.String, viewerDefaultMergeMethod: Schema.optionalKey(Schema.String) }),
+  repository: Schema.Struct({
+    nameWithOwner: Schema.String,
+    viewerDefaultMergeMethod: Schema.optionalKey(Schema.String),
+    viewerPermission: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  }),
   title: Schema.String,
   url: Schema.String,
   state: Schema.Literals(["OPEN", "CLOSED", "MERGED"]),
@@ -154,6 +158,7 @@ const DECISION: Record<string, ReviewDecision> = {
   CHANGES_REQUESTED: "changes_requested",
   REVIEW_REQUIRED: "required",
 };
+const MERGERS = new Set(["WRITE", "MAINTAIN", "ADMIN"]);
 const MERGEABLE: Record<string, Mergeable> = { MERGEABLE: "clean", CONFLICTING: "conflict" };
 const MERGE_METHODS = ["MERGE", "SQUASH", "REBASE"] as const;
 
@@ -292,6 +297,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     ...(checks && { checks_failed: checks.filter(checkFailed).map(checkName) }),
     ...(optional.length > 0 && { checks_optional: optional }),
     ...(mergeMethod && { merge_method: mergeMethod }),
+    ...("viewerPermission" in n.repository && { can_merge: MERGERS.has(n.repository.viewerPermission ?? "") }),
     review_requests: (n.reviewRequests?.nodes ?? [])
       .filter((r) => r.requestedReviewer)
       .map((r) => Object.assign(reviewer(r.requestedReviewer!), { codeowner: r.asCodeOwner })),

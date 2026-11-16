@@ -224,6 +224,16 @@ test("your PR's repo's merge method, only when asked", () => {
   assert.equal(method("FAST_FORWARD"), undefined);
 });
 
+test("whether you can merge your PR: only with write access to its repo, and only when asked", () => {
+  const n = fixture("pr-mine");
+  assert.equal(normalize(n, NOW).can_merge, undefined);
+  const can = (p: string | null) => normalize({ ...n, repository: { ...n.repository, viewerPermission: p } }, NOW).can_merge;
+  assert.deepEqual(
+    [can("ADMIN"), can("MAINTAIN"), can("WRITE"), can("TRIAGE"), can("READ"), can(null)],
+    [true, true, true, false, false, false],
+  );
+});
+
 test("toHit builds the light search hit", () => {
   const hit = toHit({
     __typename: "Issue",

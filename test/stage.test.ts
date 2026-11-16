@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { andMore, askedAt, mergeLine, peopleOf, stage, standings } from "../src/stage.ts";
+import { andMore, askedAt, mergeLine, peopleOf, reviewOptional, stage, standings } from "../src/stage.ts";
 import type { Item } from "../src/types.ts";
 import { reviewAsk, myPr, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
@@ -212,4 +212,10 @@ test("peopleOf: everyone on an item, bots and teams aside, first seen first", ()
     ],
   });
   assert.deepEqual(peopleOf(it), ["dana", "greg", "priya", "marco", "li-wei"]);
+});
+
+test("a repo you can't merge in never counts as needing no review: its maintainer still decides", () => {
+  const pr = { review_decision: "none", base: "main", default_branch: "main" } as const;
+  assert.equal(reviewOptional(makeItem(pr)), true);
+  assert.equal(reviewOptional(makeItem({ ...pr, can_merge: false })), false);
 });

@@ -1827,6 +1827,7 @@ export class Desk {
       const it = e.item;
       const sig = e.analysis.signals;
       if (!sig.me.author || !sig.pr.unasked || e.inflight || e.status !== "active" || e.resolved) continue;
+      if (it.can_merge === false) continue; // a repo you can only read: its maintainer picks reviewers, and you can't ask any
       asking.add(it.id);
       if (sig.pr.blocked && best.get(it.id)?.bucket === "blocked") continue;
       if (needs.has(it.id) || !this.stuckUnasked(e)) continue; // handed back: its reason says so
@@ -3084,6 +3085,7 @@ export class Desk {
       it.mergeable !== "conflict" &&
       !e.analysis.signals.pr.stacked &&
       !!it.merge_method &&
+      it.can_merge !== false &&
       !!it.head_oid
         ? (["merge"] as const)
         : [];

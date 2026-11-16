@@ -75,6 +75,7 @@ export interface Item extends Head {
   checks_failed?: string[]; // names of the head commit's failing checks; PRs you authored only
   checks_optional?: string[]; // those of them the base branch doesn't require (ci isn't red for these alone)
   merge_method?: "MERGE" | "SQUASH" | "REBASE"; // the repo's default merge method for you; PRs you authored only
+  can_merge?: boolean; // you have write access to its repo; PRs you authored only, absent on items stored before it was fetched
   review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean; bot?: boolean }[]; // team reviewer = slug; bot: a GitHub App
   review_requests_hidden?: number; // requests whose reviewer GitHub doesn't show you (a team you can't see): still someone asked
   request_events: { at: string; actor: string; actor_bot: boolean; reviewer: string; reviewer_type: "user" | "team" }[];
