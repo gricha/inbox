@@ -35,7 +35,7 @@ export const CLAUDE_MODELS: AgentModels = {
 
 // Codex's catalog (`codex debug models`): the models it lists, that reason (the rest make images or audio), in its own
 // order; the efforts are the levels any of them takes.
-export function codexCatalog(json: string): AgentModels {
+function codexCatalog(json: string): AgentModels {
   const read = Result.try({ try: (): unknown => JSON.parse(json), catch: () => null });
   const listed = field(Result.getOrNull(read), "models");
   const rows = (Array.isArray(listed) ? listed : []).filter(isRecord).flatMap((m) => {
