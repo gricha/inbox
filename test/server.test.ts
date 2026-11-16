@@ -721,8 +721,14 @@ test("on Omarchy the desk answers its theme and tells the window when it switche
   const events = (await t.req("/api/events")).body!.pipeThrough(new TextDecoderStream()).getReader();
   let text = "";
   while (!text.includes("event: update")) text += (await events.read()).value ?? "";
-  wear("rose-pine", `mode = "light"\nbackground = "#faf4ed"\nforeground = "#575279"\n`);
+  // Worn again until the desk says so: its watch polls, and a switch that lands before its first look is its baseline.
+  const rose = () => {
+    wear("rose-pine", `mode = "light"\nbackground = "#faf4ed"\nforeground = "#575279"\n`);
+  };
+  rose();
+  const again = setInterval(rose, 300);
   while (!text.includes("event: omarchy")) text += (await events.read()).value ?? "";
+  clearInterval(again);
   assert.match(text, /event: omarchy\ndata: {"name":"rose-pine","scheme":"light","theme":"rose-pine","tokens":null}\n/);
   await events.cancel();
   for (const [k, v] of Object.entries(saved))
