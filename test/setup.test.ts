@@ -202,7 +202,14 @@ test("the page's words for GitHub and each agent", () => {
     agentView("claude-code", "Claude Code", false, false, "win32").fix,
     "npm install -g @anthropic-ai/claude-code && claude auth login",
   );
-  assert.deepEqual(agentView("codex", "Codex", true, true), { id: "codex", name: "Codex", installed: true, logged_in: true, fix: null });
+  assert.deepEqual(agentView("codex", "Codex", true, true), {
+    id: "codex",
+    name: "Codex",
+    installed: true,
+    logged_in: true,
+    fix: null,
+    url: "https://developers.openai.com/codex/cli",
+  });
 });
 
 test("an agent's CLI counts as installed when it's an executable on PATH", { skip: process.platform === "win32" }, () => {

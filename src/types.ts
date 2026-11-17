@@ -374,6 +374,7 @@ export interface SetupAgent {
   installed: boolean;
   logged_in: boolean;
   fix: string | null; // what to run while it isn't installed or logged in
+  url: string; // its own page on installing it
 }
 
 // GET /api/agents: whether Claude Code has the desk's MCP tools and the Inbox skill.

@@ -53,6 +53,7 @@ import type {
   SetupView,
   AiReview,
   Ask,
+  AsksView,
   IssueReview,
   AskAbout,
   AskLines,
@@ -4058,6 +4059,49 @@ export class Desk {
   asks(item?: string): Ask[] {
     const all = decodeEach(AskSchema, this.store.get("asks"));
     return item === undefined ? all : all.filter((a) => a.item_id === item);
+  }
+
+  // Your chat as it stands: the asks since New chat, what your agent is doing and how it runs.
+  chat(): AsksView {
+    const all = this.asks();
+    const after = str(this.store.get("chat_after"));
+    // The last ask of the chat before, or none: every ask kept is this chat's once that one's no longer kept.
+    const from = after ? all.findIndex((a) => a.id === after) + 1 : 0;
+    return {
+      on: this.settings["agent.coordinator"],
+      asks: all.slice(from),
+      coordinator: this.yourAgent.view(),
+      options: this.yourAgent.options(),
+    };
+  }
+
+  // POST /api/asks/new, from the desk's window: a new chat with your agent, or with another one, which becomes your agent as
+  // Settings → Agent's choice does. Its session starts afresh on your next ask; asks the old one hadn't answered are let go.
+  newChat(id: string | undefined, mcpUrl: string): Effect.Effect<AsksView, BadRequest | Conflict | Upstream | FsError> {
+    return Effect.gen({ self: this }, function* () {
+      if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings → Agent" });
+      if (id !== undefined && id !== this.agent()) {
+        if (!AGENTS.some((a) => a.id === id))
+          return yield* new BadRequest({ message: `unknown agent: ${id} (claude-code, codex or opencode)` });
+        const a = (yield* this.agentChecks(true)).find((x) => x.id === id)!;
+        if (a.fix)
+          return yield* new Conflict({ message: `${a.name} ${a.installed ? "isn't logged in" : "isn't installed"}. Run ${a.fix}` });
+        // The outgoing agent's chat ends too: coming back to it is a new chat, as picking it says.
+        this.yourAgent.fresh();
+        const saved = yield* this.putSettings({ set: { "agent.harness": id } });
+        if (!saved.ok) return yield* new Conflict({ message: saved.errors.map((e) => e.message).join("; ") });
+        yield* this.connectAgent(mcpUrl);
+        this.log(`your agent is ${a.name}, picked in its chat`);
+      }
+      const all = this.asks();
+      for (const a of all) if (!a.answer) this.jobs.drop("ask", a.id);
+      const kept = all.filter((a) => a.answer);
+      this.store.set("asks", kept);
+      this.yourAgent.fresh();
+      this.store.set("chat_after", kept.at(-1)?.id ?? null);
+      this.changed();
+      return this.chat();
+    });
   }
 
   // What an ask is about, in the desk's words; without GitHub context every PR reads someone else's, which fails closed.

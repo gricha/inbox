@@ -637,6 +637,36 @@ export class Coordinator {
     );
   }
 
+  // New chat: its session is let go, with what was queued for it, so your next ask starts one with no history.
+  fresh(): void {
+    this.desk.store.set(this.seat.asks, null);
+    this.asked = false;
+    const own = this.own; // read now: a switch of agent follows
+    const had = !!this.saved();
+    const flushing = this.flushing;
+    const drop = Effect.gen({ self: this }, function* () {
+      if (flushing) yield* Effect.promise(() => flushing);
+      if (this.turn) kill(this.turn);
+      const a = own || !had ? null : yield* this.find();
+      if (a) yield* this.halt(a);
+      this.desk.store.set(sessionKey(this.seat, own), null);
+      this.session = null;
+      this.saying = "";
+      this.activity = [];
+      this.saw(null);
+      this.desk.changed();
+    });
+    this.stopping = this.fork(
+      drop.pipe(
+        Effect.catch((e) =>
+          Effect.sync(() => {
+            this.desk.log(`coordinator: ${e.message}`);
+          }),
+        ),
+      ),
+    );
+  }
+
   // Picks it up, resumes it if it stopped, and hands it what's waiting once it's idle; looks again a batch later while it works.
   // One run at a time, forked through the desk's runner: the desk stopping interrupts it, and what was waiting stays.
   flush(): void {

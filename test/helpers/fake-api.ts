@@ -400,14 +400,15 @@ function setupView(needed: boolean, agent: string): SetupView {
     agent,
     picked: needed ? null : (agent as SetupView["picked"]),
     agents: [
-      { id: "claude-code", name: "Claude Code", installed: true, logged_in: true, fix: null },
-      { id: "codex", name: "Codex", installed: true, logged_in: false, fix: "codex login" },
+      { id: "claude-code", name: "Claude Code", installed: true, logged_in: true, fix: null, url: "https://claude.com/claude-code" },
+      { id: "codex", name: "Codex", installed: true, logged_in: false, fix: "codex login", url: "https://developers.openai.com/codex/cli" },
       {
         id: "opencode",
         name: "OpenCode",
         installed: false,
         logged_in: false,
         fix: "curl -fsSL https://opencode.ai/install | bash && opencode auth login",
+        url: "https://opencode.ai/docs",
       },
     ],
   };

@@ -676,14 +676,16 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 
 ### The chat
 
-- **Head**: your agent's own name with its mark ("Claude Code", "Codex", "OpenCode"; the marks are Lobe Icons'), the item it's about, and at the right edge an icon button that closes the chat (its tip names Esc). Outside a review, a × after the item switches to general asks, keeping what you typed.
+- **Head**: your agent's own name with its mark ("Claude Code", "Codex", "OpenCode"; the marks are Lobe Icons'), the item it's about, and at the right edge **New chat** and an icon button that closes the chat (its tip names Esc). Outside a review, a × after the item switches to general asks, keeping what you typed.
 - **The spot**, above the box: "On dana's thread on src/auth.ts:42", "On plan.ts:20–23", "On plan.ts:17–18, removed". Full path and commit in its tooltip. A × drops it so the next ask is about the whole PR. Picking another spot replaces it; leaving the review drops it.
 - **Open questions** from your agent about the item: "Your agent asks: … · Answer".
 - **History**: one conversation, every ask you've sent oldest first, whatever it was about: your words on the right with their time, the PR it was about (a link to its review) and spot; each answer as plain prose (paragraphs, lists, `code`, code blocks, bold; https links shown as URLs; never HTML or images). Each code block has a **Copy** that keeps its ``` fence, ready to paste as a GitHub suggestion.
 - **Under your latest unanswered ask**: "On it", "Queued: …", "Waiting on a permission prompt" (answer it on claude.ai), or "It stopped without answering" with **Wake it**, plus a link to watch it on claude.ai.
 - **While it works**, under your latest unanswered ask: what it's said so far this turn, a message at a time as its agent writes them, a shade quieter than an answer; its answer takes their place. The pane follows its newest words unless you've scrolled up.
 - **Under each answer**: when, and three icon buttons, each named in its tip: **Copy this answer**, **Go to what you asked**, **Go to the top of the conversation**.
-- With nothing asked yet there's no log: the box takes the pane, you write at its top ("Ask or tell it something about web#3") and its controls keep the foot.
+- **New chat** is one button in two halves. The plus ("New chat with Claude Code, about the same thing" in its tip) starts an empty chat with your agent about what this one was about: its session starts afresh on your next ask, and an ask it hadn't answered is let go. The arrow opens "New chat with" and the three agents, yours marked "Your agent"; picking another starts the new chat with it and makes it your agent, as Settings → Agent does.
+- **An agent that isn't ready**, picked there: the pane says "OpenCode isn't installed" (or "isn't logged in"), the command to run with **Copy the command**, a link to its own page ("How to install OpenCode"), **Check again** (the new chat opens once it's ready) and **Back to Claude Code**.
+- With nothing asked yet there's no log: the box takes the pane, you write at its top ("Ask or tell it something about web#3") and its controls keep the foot. Under the box are examples, gone once you type: "Ask it" (what to look at first, why an item is here) and "Or have it change how Inbox sorts" (a rule to add). A click puts one in the box, unsent.
 - It opens at the newest turn's top and returns there on a send and when an answer lands. Shift+Tab from the box reaches the log.
 
 ### The box

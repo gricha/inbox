@@ -273,6 +273,7 @@ export const api = {
   // With an ask it stopped without answering: that ask goes to it again.
   wakeCoordinator: (ask?: string) => call<{ ok: true }>("POST", "/api/coordinator/wake", ask ? { ask } : {}),
   asks: () => call<AsksView>("GET", "/api/asks"),
+  newChat: (agent?: string) => call<AsksView>("POST", "/api/asks/new", agent ? { agent } : {}),
   ask: (b: { text: string; item_id?: string; thread_id?: string; thread_url?: string; lines?: AskLines }) =>
     call<{ ok: true; ask: Ask }>("POST", "/api/ask", b),
   analyzeIssue: (id: string, trust = false) =>

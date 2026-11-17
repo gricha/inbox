@@ -7,11 +7,11 @@ import path from "node:path";
 import { denyDir, DENY } from "../src/coordinator.ts";
 import { Desk } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
-import type { Ask } from "../src/types.ts";
+import type { Ask, AsksView } from "../src/types.ts";
 import { myPr, setup } from "./helpers/desk.ts";
 import { NOW } from "./helpers/items.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
-import { posix, until, settle, starts, resumes, ROLE, AGENT_ROLE, coordinated, OWNER, asking } from "./helpers/coordinator.ts";
+import { posix, until, settle, starts, resumes, stops, ROLE, AGENT_ROLE, coordinated, OWNER, asking } from "./helpers/coordinator.ts";
 
 test(
   "the desk stopping interrupts a run in flight: its claude is stopped, and nothing starts, is kept or notifies after",
@@ -259,6 +259,44 @@ test(
     await settle();
     assert.deepEqual(t.desk.coordinator.news(), []);
     assert.equal((await run(t.desk.reviewView("web#3"))).asks.length, 1, "the PR's review shows its own asks");
+  },
+);
+
+test(
+  "a new chat lets your agent's session go: its answered asks are kept out of sight, unanswered ones dropped, and the next ask starts a fresh session",
+  posix,
+  async (c) => {
+    const t = await coordinated(c);
+    const api = asking(t);
+    const first = ((await (await api.ask({ text: "is CI green?", item_id: "web#3" })).json()) as { ask: Ask }).ask;
+    await until(() => t.fake.sessions().length === 1);
+    assert.equal((await api.answer(first.id, "Yes.")).status, 200);
+    const second = ((await (await api.ask({ text: "and the conflict?" })).json()) as { ask: Ask }).ask;
+    assert.equal((await api.fresh({}, {})).status, 403, "curl, the CLI and agents");
+    const res = await api.fresh();
+    assert.equal(res.status, 200);
+    assert.deepEqual(((await res.json()) as AsksView).asks, [], "the new chat is empty");
+    assert.deepEqual(
+      t.desk.asks().map((a) => a.id),
+      [first.id],
+      "the one it hadn't answered is let go",
+    );
+    assert.equal((await api.answer(second.id, "late")).status, 404);
+    await t.desk.yourAgent.stopping;
+    assert.equal(t.desk.yourAgent.saved(), null);
+    assert.equal(stops(t.fake.calls()).length, 1, "the old session is stopped");
+    const third = ((await (await api.ask({ text: "what's first today?" })).json()) as { ask: Ask }).ask;
+    await until(() => t.fake.sessions().length === 2);
+    assert.deepEqual(t.said(), [`${AGENT_ROLE} My ask ${third.id}: "what's first today?" Answer it with desk_answer.`]);
+    assert.deepEqual(
+      (await api.list()).asks.map((a) => a.id),
+      [third.id],
+    );
+    const none = await api.fresh({ agent: "opencode" });
+    assert.equal(none.status, 409, "an agent that isn't installed is refused");
+    assert.match(((await none.json()) as { error: string }).error, /^OpenCode isn't installed\. Run /);
+    assert.equal(t.desk.agent(), "claude-code");
+    assert.equal((await api.fresh({ agent: "emacs" })).status, 400);
   },
 );
 

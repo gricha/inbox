@@ -281,6 +281,12 @@ export function asking(t: Awaited<ReturnType<typeof coordinated>>) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text }),
       }),
+    fresh: (body: unknown = {}, headers: Record<string, string> = OWNER) =>
+      app.request("http://127.0.0.1:49401/api/asks/new", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify(body),
+      }),
     list: async () => (await app.request("http://127.0.0.1:49401/api/asks")).json() as Promise<AsksView>,
   };
 }

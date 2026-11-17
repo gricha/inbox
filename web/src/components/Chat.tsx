@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { useEffect, useRef, useState } from "react";
 import { Splitter, type Width } from "./Splitter.tsx";
-import type { AgentOptions, AskLines, AsksView, CoordinatorView, Inquiry } from "../../../src/types.ts";
+import type { AgentOptions, AskLines, AsksView, CoordinatorView, Inquiry, SetupAgent } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed, useKeyedLayout } from "../keyed.ts";
 import { cls, copyText, shortId, sinceText } from "../format.ts";
@@ -57,6 +57,9 @@ export function Chat({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tall, setTall] = useState(false); // the box over the log, to write at length
+  const [starting, setStarting] = useState(false); // a new chat, on its way
+  const [setup, setSetup] = useState<SetupAgent | null>(null); // the agent picked for a new chat, not installed or logged in
+  const input = useRef<HTMLTextAreaElement>(null);
   const log = useRef<HTMLOListElement>(null);
   const aside = useRef<HTMLElement>(null);
 
@@ -117,6 +120,47 @@ export function Chat({
     );
   }
 
+  // New chat, about the same thing: with your agent, or with another one once it's installed and logged in (`again` asks afresh).
+  function fresh(agent?: AgentId, again = false) {
+    if (starting || off || !view) return;
+    setStarting(true);
+    setError(null);
+    type Got = { view: AsksView } | { wants: SetupAgent };
+    const start = Effect.map(api.newChat(agent), (v): Got => ({ view: v }));
+    const ready =
+      agent && agent !== view.options.agent
+        ? Effect.flatMap(again ? api.checkSetup() : api.setup(), (s) => {
+            const a = s.agents.find((x) => x.id === agent);
+            return a?.fix ? Effect.succeed<Got>({ wants: a }) : start;
+          })
+        : start;
+    runUi(
+      ready.pipe(
+        Effect.match({
+          onSuccess: (r) => {
+            if ("wants" in r) {
+              setSetup(r.wants);
+              return;
+            }
+            seen = r.view;
+            setView(r.view);
+            setSetup(null);
+            setTall(false);
+            input.current?.focus();
+          },
+          onFailure: (e) => {
+            setError(e.message);
+          },
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            setStarting(false);
+          }),
+        ),
+      ),
+    );
+  }
+
   const mine = view?.asks ?? [];
   const answered = mine.filter((a) => a.answer).length;
   const saying = view?.coordinator.saying ?? "";
@@ -168,13 +212,37 @@ export function Chat({
             {"\u00d7"}
           </button>
         )}
+        {view && !off && (
+          <NewChat
+            agent={view.options.agent}
+            busy={starting}
+            onNew={(agent) => {
+              fresh(agent);
+            }}
+          />
+        )}
         <button type="button" className="chat-close" aria-label="Close the chat" data-tip="Close the chat (Esc)" onClick={onClose}>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M2.5 3.5h11v9h-11zM10 3.5v9" />
           </svg>
         </button>
       </div>
-      {!fill && (
+      {setup && (
+        <NotReady
+          agent={setup}
+          back={view ? AGENT[view.options.agent].name : "your agent"}
+          busy={starting}
+          error={error}
+          onCheck={() => {
+            fresh(setup.id, true);
+          }}
+          onBack={() => {
+            setError(null);
+            setSetup(null);
+          }}
+        />
+      )}
+      {!setup && !fill && (
         <ol
           ref={log}
           className="chat-log"
@@ -239,7 +307,7 @@ export function Chat({
           ))}
         </ol>
       )}
-      <div className={cls("chat-box", fill && "fill")}>
+      <div className={cls("chat-box", fill && "fill")} hidden={!!setup}>
         {questions.map((q) => (
           <p key={q.id} className="chat-hint chat-q">
             <span title={q.question}>Your agent asks: {q.question}</span>
@@ -287,6 +355,7 @@ export function Chat({
             </button>
           )}
           <textarea
+            ref={input}
             className="chat-input"
             rows={2}
             aria-label="Your words to your agent"
@@ -311,6 +380,16 @@ export function Chat({
             }}
           />
         </div>
+        {empty && !text && !off && (
+          <Examples
+            item={about.item !== null}
+            onPick={(t) => {
+              setText(t);
+              kept.set(key, t);
+              input.current?.focus();
+            }}
+          />
+        )}
         {error && <p className="chat-note t-bad">{error}</p>}
         {off ? (
           <p className="chat-note">{OFF}</p>
@@ -502,6 +581,9 @@ const AGENT = {
   opencode: { name: "OpenCode", run: ["Refuse what asks", "Approve what asks"], models: [], efforts: [] },
 } as const;
 
+type AgentId = AgentOptions["agent"];
+const AGENTS: AgentId[] = ["claude-code", "codex", "opencode"];
+
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // The agent's own mark, from Lobe Icons (lobehub/lobe-icons, MIT), drawn in the words' colour.
@@ -512,11 +594,219 @@ const MARK = {
     "M8.086.457a6.105 6.105 0 013.046-.415c1.333.153 2.521.72 3.564 1.7a.117.117 0 00.107.029c1.408-.346 2.762-.224 4.061.366l.063.03.154.076c1.357.703 2.33 1.77 2.918 3.198.278.679.418 1.388.421 2.126a5.655 5.655 0 01-.18 1.631.167.167 0 00.04.155 5.982 5.982 0 011.578 2.891c.385 1.901-.01 3.615-1.183 5.14l-.182.22a6.063 6.063 0 01-2.934 1.851.162.162 0 00-.108.102c-.255.736-.511 1.364-.987 1.992-1.199 1.582-2.962 2.462-4.948 2.451-1.583-.008-2.986-.587-4.21-1.736a.145.145 0 00-.14-.032c-.518.167-1.04.191-1.604.185a5.924 5.924 0 01-2.595-.622 6.058 6.058 0 01-2.146-1.781c-.203-.269-.404-.522-.551-.821a7.74 7.74 0 01-.495-1.283 6.11 6.11 0 01-.017-3.064.166.166 0 00.008-.074.115.115 0 00-.037-.064 5.958 5.958 0 01-1.38-2.202 5.196 5.196 0 01-.333-1.589 6.915 6.915 0 01.188-2.132c.45-1.484 1.309-2.648 2.577-3.493.282-.188.55-.334.802-.438.286-.12.573-.22.861-.304a.129.129 0 00.087-.087A6.016 6.016 0 015.635 2.31C6.315 1.464 7.132.846 8.086.457zm-.804 7.85a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z",
   opencode: "M16 6H8v12h8V6zm4 16H4V2h16v20z",
 };
-function AgentMark({ agent }: { agent: AgentOptions["agent"] }) {
+function AgentMark({ agent }: { agent: AgentId }) {
   return (
     <svg className="chat-mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path fillRule="evenodd" clipRule="evenodd" d={MARK[agent]} />
     </svg>
+  );
+}
+
+// Esc closes an open menu in the capture phase, so the chat's own Esc never sees the one the menu took.
+function useEscCloses(open: boolean, close: () => void) {
+  const now = useRef({ open, close });
+  now.current = { open, close };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || !now.current.open) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      now.current.close();
+    };
+    window.addEventListener("keydown", h, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", h, { capture: true });
+    };
+  }, []);
+}
+
+// New chat, in the head: the plus starts one with your agent, the arrow beside it picks which agent it's with.
+function NewChat({ agent, busy, onNew }: { agent: AgentId; busy: boolean; onNew: (agent?: AgentId) => void }) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const close = () => {
+    setOpen(false);
+    trigger.current?.focus();
+  };
+  useEscCloses(open, close);
+  const name = AGENT[agent].name;
+  return (
+    <span className="chat-split">
+      <button
+        type="button"
+        className="chat-new"
+        aria-label={`New chat with ${name}`}
+        data-tip={`New chat with ${name}, about the same thing`}
+        disabled={busy}
+        onClick={() => {
+          onNew();
+        }}
+      >
+        {busy ? (
+          <span className="busy" aria-hidden="true" />
+        ) : (
+          <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 3.5v9M3.5 8h9" />
+          </svg>
+        )}
+      </button>
+      <button
+        ref={trigger}
+        type="button"
+        className="chat-new-with"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="New chat with another agent"
+        data-tip={open ? undefined : "New chat with another agent"}
+        disabled={busy}
+        onClick={() => {
+          setOpen(!open);
+        }}
+      >
+        <svg className="i chat-chev" viewBox="0 0 16 16" aria-hidden="true">
+          <path d="M4.5 6.5 8 10l3.5-3.5" />
+        </svg>
+      </button>
+      {open && (
+        <>
+          <div className="scrim-clear" role="presentation" onClick={close} />
+          <div className="popover chat-new-pop" role="menu" aria-label="New chat with">
+            <p className="chat-new-head">New chat with</p>
+            {AGENTS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                role="menuitem"
+                className="pop-item"
+                onClick={() => {
+                  close();
+                  onNew(id);
+                }}
+              >
+                <AgentMark agent={id} />
+                {AGENT[id].name}
+                {id === agent && <span className="chat-new-yours">Your agent</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
+
+// The agent picked for a new chat isn't installed or logged in: what to run, its own page, and a way on or back.
+function NotReady({
+  agent,
+  back,
+  busy,
+  error,
+  onCheck,
+  onBack,
+}: {
+  agent: SetupAgent;
+  back: string;
+  busy: boolean;
+  error: string | null;
+  onCheck: () => void;
+  onBack: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const fix = agent.fix ?? "";
+  return (
+    <div className="chat-setup">
+      <h3 className="chat-setup-title">
+        <AgentMark agent={agent.id} />
+        {agent.name} {agent.installed ? "isn't logged in" : "isn't installed"}
+      </h3>
+      <p className="chat-setup-step">{agent.installed ? "Log in to it in a terminal:" : "Install it and log in, in a terminal:"}</p>
+      <pre className="chat-setup-run">
+        <code>{fix}</code>
+      </pre>
+      <p className="chat-setup-step">
+        <button
+          type="button"
+          className="act"
+          onClick={() => {
+            runUi(
+              copyText(fix).pipe(
+                Effect.match({
+                  onSuccess: () => {
+                    setCopied(true);
+                    window.setTimeout(() => {
+                      setCopied(false);
+                    }, 1500);
+                  },
+                  onFailure: () => {
+                    setCopied(false);
+                  },
+                }),
+              ),
+            );
+          }}
+        >
+          {copied ? "Copied" : "Copy the command"}
+        </button>{" "}
+        <a href={agent.url} target="_blank" rel="noreferrer">
+          {agent.installed ? `${agent.name}'s own page` : `How to install ${agent.name}`}
+        </a>
+      </p>
+      <p className="chat-setup-step">Then check again: your new chat opens with it, and it becomes your agent.</p>
+      {error && <p className="chat-note t-bad">{error}</p>}
+      <p className="chat-setup-acts">
+        <button type="button" className="act primary" disabled={busy} onClick={onCheck}>
+          {busy ? "Checking…" : "Check again"}
+        </button>
+        <button type="button" className="act" onClick={onBack}>
+          Back to {back}
+        </button>
+      </p>
+    </div>
+  );
+}
+
+// A fresh chat's examples: things to ask, and ways to have your agent change how the desk sorts. A click puts one in the box.
+const EXAMPLES = {
+  desk: {
+    ask: ["What should I look at first?", "What's keeping my PRs from merging?", "What changed on my Inbox since yesterday?"],
+    change: [
+      "Add a rule: PRs labelled security are urgent",
+      "Add a rule: a bot's PR goes to FYI unless its CI fails",
+      "Add a rule: my drafts wait in Blocked until they're ready",
+    ],
+  },
+  item: {
+    ask: ["Summarize this for me", "What's the riskiest part of this?", "Why is this on my Inbox?"],
+    change: ["Add a rule so ones like this go to FYI", "Add a rule: this repo's PRs are urgent while CI fails"],
+  },
+};
+function Examples({ item, onPick }: { item: boolean; onPick: (text: string) => void }) {
+  const ex = EXAMPLES[item ? "item" : "desk"];
+  const list = (label: string, texts: string[]) => (
+    <>
+      <p className="chat-hint">{label}</p>
+      <ul className="chat-examples-list">
+        {texts.map((t) => (
+          <li key={t}>
+            <button
+              type="button"
+              className="chat-example"
+              onClick={() => {
+                onPick(t);
+              }}
+            >
+              {t}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+  return (
+    <div className="chat-examples">
+      {list("Ask it", ex.ask)}
+      {list("Or have it change how Inbox sorts", ex.change)}
+    </div>
   );
 }
 
@@ -547,22 +837,7 @@ function Pick({
     setOpen(false);
     trigger.current?.focus();
   };
-  // Capture phase, so the chat's own Esc never sees the one the menu took.
-  const isOpen = useRef(open);
-  isOpen.current = open;
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || !isOpen.current) return;
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      setOpen(false);
-      trigger.current?.focus();
-    };
-    window.addEventListener("keydown", h, { capture: true });
-    return () => {
-      window.removeEventListener("keydown", h, { capture: true });
-    };
-  }, []);
+  useEscCloses(open, close);
   const pick = (v: string) => {
     if (v !== value) onPick(v);
     close();

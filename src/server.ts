@@ -638,14 +638,16 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       });
       return respond(c, go, { log });
     });
-  app.get("/api/asks", (c) =>
-    total(c, () => ({
-      on: desk.settings["agent.coordinator"],
-      asks: desk.asks(),
-      coordinator: desk.yourAgent.view(),
-      options: desk.yourAgent.options(),
-    })),
-  );
+  app.get("/api/asks", (c) => total(c, () => desk.chat()));
+  // New chat, with your agent or another one: from the desk's own window or your paired phone only, as it changes your agent.
+  app.post("/api/asks/new", (c) => {
+    const fresh = Effect.gen(function* () {
+      if (!fromDesk(c)) return yield* new Forbidden({ message: "start a new chat from the desk's window" });
+      const b = yield* bodyOf(c);
+      return yield* desk.newChat(typeof b.agent === "string" ? b.agent : undefined, `http://localhost:${port}/mcp`);
+    });
+    return respond(c, fresh, { log });
+  });
   // desk_ask: local only, so agents may read where an ask is.
   app.get("/api/asks/:id", (c) =>
     respond(

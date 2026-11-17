@@ -14,13 +14,19 @@ const INSTALL: Record<DriverId, { unix: string; win32: string }> = {
   codex: { unix: "npm install -g @openai/codex", win32: "npm install -g @openai/codex" },
   opencode: { unix: "curl -fsSL https://opencode.ai/install | bash", win32: "npm install -g opencode-ai" },
 };
+// Where each agent says how to install it.
+const PAGE: Record<DriverId, string> = {
+  "claude-code": "https://claude.com/claude-code",
+  codex: "https://developers.openai.com/codex/cli",
+  opencode: "https://opencode.ai/docs",
+};
 // The same words as errors.ts's NOT_LOGGED_IN and its kin.
 const LOGIN: Record<DriverId, string> = { "claude-code": "claude auth login", codex: "codex login", opencode: "opencode auth login" };
 
 export function agentView(id: DriverId, name: string, installed: boolean, loggedIn: boolean, platform = process.platform): SetupAgent {
   const install = INSTALL[id][platform === "win32" ? "win32" : "unix"];
   const fix = !installed ? `${install} && ${LOGIN[id]}` : loggedIn ? null : LOGIN[id];
-  return { id, name, installed, logged_in: installed && loggedIn, fix };
+  return { id, name, installed, logged_in: installed && loggedIn, fix, url: PAGE[id] };
 }
 
 export function githubView(login: string, error: GitHubReadError | Upstream | null, platform = process.platform): SetupView["github"] {

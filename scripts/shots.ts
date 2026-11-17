@@ -3716,6 +3716,75 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // A fresh chat: examples under the box, one click puts it in; the head's New chat is a plus and an arrow that lists the agents.
+    name: "ask-new",
+    sizes: ["wide", "mac", "mid"],
+    go: async (page) => {
+      await page.route("**/api/asks", (route) =>
+        route.fulfill({ json: { on: true, asks: [], coordinator: IDLE_AGENT, options: AGENT_OPTIONS } }),
+      );
+      await at("#/settings")(page);
+      await page.locator(".side-ask").click();
+      await page.locator(".chat-example").first().waitFor({ timeout: 5000 });
+      const examples = await page.locator(".chat-example").allTextContents();
+      if (!examples.some((t) => t.startsWith("Add a rule")))
+        failures.push(`ask-new: no example changes a rule: ${JSON.stringify(examples)}`);
+      await page.locator(".chat-example").first().click();
+      const put = await page.locator(".chat-input").inputValue();
+      if (put !== examples[0] || (await page.locator(".chat-example").count()))
+        failures.push(`ask-new: an example's click left the box reading ${JSON.stringify(put)}`);
+      await page.locator(".chat-input").fill("");
+      const tip = await page.locator(".chat-new").getAttribute("data-tip");
+      if (tip !== "New chat with Claude Code, about the same thing") failures.push(`ask-new: the plus says ${JSON.stringify(tip)}`);
+      await page.locator(".chat-new-with").click();
+      await page.locator(".chat-new-pop").waitFor();
+      const menu = await page.evaluate<{ items: string[]; inside: boolean }>(`(() => {
+        const pop = document.querySelector(".chat-new-pop"), r = pop.getBoundingClientRect(), pane = document.querySelector(".chat").getBoundingClientRect();
+        return { items: [...pop.querySelectorAll(".pop-item")].map((b) => b.textContent.trim()), inside: r.left >= pane.left && r.right <= pane.right };
+      })()`);
+      if (menu.items.join(" · ") !== "Claude CodeYour agent · Codex · OpenCode" || !menu.inside)
+        failures.push(`ask-new: the agents' menu reads ${JSON.stringify(menu)}`);
+    },
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+      await unroute(page);
+      await closeChat(page);
+    },
+  },
+  {
+    // New chat with an agent that isn't installed: what to run and its own page, in the pane, and a way back.
+    name: "ask-not-ready",
+    sizes: ["wide", "mid"],
+    go: async (page) => {
+      await page.route("**/api/asks", (route) =>
+        route.fulfill({ json: { on: true, asks: [], coordinator: IDLE_AGENT, options: AGENT_OPTIONS } }),
+      );
+      await at("#/settings")(page);
+      await page.locator(".side-ask").click();
+      await page.locator(".chat-new-with").click();
+      await page.locator(".chat-new-pop .pop-item", { hasText: "OpenCode" }).click();
+      await page.locator(".chat-setup").waitFor({ timeout: 5000 });
+      const seen = await page.evaluate<{ title: string; run: string; href: string | null; box: boolean }>(`(() => ({
+        title: document.querySelector(".chat-setup-title").textContent.trim(),
+        run: document.querySelector(".chat-setup-run").textContent.trim(),
+        href: document.querySelector(".chat-setup a")?.getAttribute("href") ?? null,
+        box: !!document.querySelector(".chat-box:not([hidden])"),
+      }))()`);
+      if (
+        seen.title !== "OpenCode isn't installed" ||
+        !seen.run.includes("opencode") ||
+        seen.href !== "https://opencode.ai/docs" ||
+        seen.box
+      )
+        failures.push(`ask-not-ready: it reads ${JSON.stringify(seen)}`);
+    },
+    after: async (page) => {
+      await page.locator(".chat-setup-acts .act", { hasText: "Back to" }).click();
+      await unroute(page);
+      await closeChat(page);
+    },
+  },
+  {
     // The sidebar's Ask your agent on the queue: the chat about the selected row; the head's x makes it about nothing.
     name: "ask-general",
     go: async (page) => {
