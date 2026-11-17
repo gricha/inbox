@@ -6,7 +6,12 @@ import { GitHubHttpError, Upstream } from "../src/errors.ts";
 import { createGitHub } from "../src/github/index.ts";
 import { Runner } from "../src/runner.ts";
 import { newer, releaseVersion, Updates, type AppUpdater } from "../src/updates.ts";
-import { selfUpdates } from "../electron/lib.ts";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { bundleOf, macDmg, selfUpdates } from "../electron/lib.ts";
+import { download, swap } from "../electron/mac-update.ts";
 import { failure, run } from "./helpers/run.ts";
 
 test("newer compares x.y.z, a v allowed, a prerelease before its release", () => {
@@ -165,10 +170,73 @@ test("the read client asks for the latest release, and a repo with none is no re
   assert.equal(await run(gh.latestRelease("gricha/inbox")), null);
 });
 
-test("the app installs an update itself only from an AppImage or the Windows installer's install", () => {
+test("the app installs an update itself only from an AppImage, the Windows installer's install or a Mac app it can replace", () => {
   assert.equal(selfUpdates("linux", { APPIMAGE: "/home/me/Inbox-0.1.0.AppImage" }, false), true);
   assert.equal(selfUpdates("linux", {}, false), false);
   assert.equal(selfUpdates("win32", {}, true), true);
   assert.equal(selfUpdates("win32", {}, false), false);
-  assert.equal(selfUpdates("darwin", {}, true), false);
+  assert.equal(selfUpdates("darwin", {}, true), true);
+  assert.equal(selfUpdates("darwin", {}, false), false);
+});
+
+test("a Mac's bundle is found from its executable, not when macOS runs a translocated copy", () => {
+  assert.equal(bundleOf("/Applications/Inbox.app/Contents/MacOS/Inbox"), "/Applications/Inbox.app");
+  assert.equal(
+    bundleOf("/repo/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"),
+    "/repo/node_modules/electron/dist/Electron.app",
+  );
+  assert.equal(bundleOf("/private/var/folders/x/AppTranslocation/ABC/d/Inbox.app/Contents/MacOS/Inbox"), null);
+  assert.equal(bundleOf("/usr/local/bin/node"), null);
+  assert.equal(macDmg("0.3.0", "arm64"), "Inbox-0.3.0-arm64.dmg");
+  assert.equal(macDmg("0.3.0", "x64"), "Inbox-0.3.0.dmg");
+});
+
+test("a Mac's update is this Mac's dmg from the latest release, refused unless it matches the release's checksum", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "inbox-test-"));
+  const bytes = Buffer.from("a dmg");
+  let digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  const asked: [string, string | null][] = [];
+  const fake = ((url: string, init: RequestInit) => {
+    asked.push([url, new Headers(init.headers).get("Authorization")]);
+    if (url.endsWith("/releases/latest"))
+      return Promise.resolve(
+        Response.json({
+          tag_name: "v0.3.0",
+          assets: [
+            { name: "Inbox-0.3.0.dmg", url: "https://api.github.com/assets/1", digest: "sha256:intel" },
+            { name: "Inbox-0.3.0-arm64.dmg", url: "https://api.github.com/assets/2", digest },
+          ],
+        }),
+      );
+    return Promise.resolve(new Response(bytes));
+  }) as unknown as typeof fetch;
+  const o = { token: "t", repo: "gricha/inbox", bundle: "/Applications/Inbox.app", arch: "arm64", fetch: fake };
+  const got = await run(download(o, dir));
+  assert.equal(got.version, "0.3.0");
+  assert.equal(fs.readFileSync(got.dmg, "utf8"), "a dmg");
+  assert.deepEqual(asked, [
+    ["https://api.github.com/repos/gricha/inbox/releases/latest", "Bearer t"],
+    ["https://api.github.com/assets/2", "Bearer t"],
+  ]);
+  digest = "sha256:another";
+  assert.match((await failure(download(o, dir))).message, /doesn't match the release's checksum/);
+  assert.match((await failure(download({ ...o, arch: "x64" }, dir))).message, /doesn't match/);
+  fs.rmSync(dir, { recursive: true });
+});
+
+test("the new app takes the old one's place and the old one is deleted; a swap that fails puts the old one back", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "inbox-test-"));
+  const bundle = path.join(dir, "Inbox.app");
+  const staged = path.join(dir, ".Inbox.app.update");
+  fs.mkdirSync(bundle);
+  fs.writeFileSync(path.join(bundle, "v"), "old");
+  fs.mkdirSync(staged);
+  fs.writeFileSync(path.join(staged, "v"), "new");
+  await run(swap(bundle, staged));
+  assert.equal(fs.readFileSync(path.join(bundle, "v"), "utf8"), "new");
+  assert.deepEqual(fs.readdirSync(dir), ["Inbox.app"]);
+  assert.match((await failure(swap(bundle, staged))).message, /moving the new app in/);
+  assert.equal(fs.readFileSync(path.join(bundle, "v"), "utf8"), "new");
+  assert.deepEqual(fs.readdirSync(dir), ["Inbox.app"]);
+  fs.rmSync(dir, { recursive: true });
 });

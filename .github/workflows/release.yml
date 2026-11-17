@@ -24,7 +24,7 @@ concurrency:
 jobs:
   # The builds first, so they take the runners before the checks: one installer each, side by side, and exactly its
   # files. Only what's installed or updated from is built: the dmg (install.sh), the Windows installer and the AppImage
-  # (with the latest*.yml their updater reads). The Mac doesn't update itself (it's ad hoc signed), so no Mac zip.
+  # (with the latest*.yml their updater reads). The Mac updates itself from its dmg (electron/mac-update.ts), so no Mac zip.
   build:
     strategy:
       fail-fast: true

@@ -10,7 +10,7 @@ export const RELEASES = { owner: "gricha", repo: "inbox" } as const;
 
 const CHECK_EVERY = 6 * 60 * 60_000;
 
-// The packaged app running this desk: its version, and its install where electron-updater can replace the build in place.
+// The packaged app running this desk: its version, and its install where the app can replace the build in place.
 export interface AppUpdater {
   version: string;
   install?: () => Effect.Effect<void, Upstream>; // downloads the release and restarts into it; it never returns once it has

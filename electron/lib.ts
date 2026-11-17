@@ -670,10 +670,19 @@ export function desktopEntry(exec: string, args: string[]): string {
   ].join("\n");
 }
 
-// electron-updater replaces an AppImage or the Windows installer's install in place; the macOS build is ad hoc signed,
-// which Squirrel.Mac refuses, and a tar.gz or zip has nothing to run: those get the release page.
+// electron-updater replaces an AppImage or the Windows installer's install in place. The macOS build is ad hoc signed,
+// which Squirrel.Mac refuses, so the app swaps its own bundle (mac-update.ts) where it can write to it. A tar.gz or zip
+// has nothing to run: those get the release page.
 export function selfUpdates(platform: string, env: NodeJS.ProcessEnv, installed: boolean): boolean {
   if (platform === "linux") return !!env.APPIMAGE;
-  if (platform === "win32") return installed;
-  return false;
+  return (platform === "win32" || platform === "darwin") && installed;
 }
+
+// The .app a Mac executable runs from; null outside a bundle, or when macOS runs it from a read-only copy (translocated).
+export function bundleOf(execPath: string): string | null {
+  const m = /^(.+\.app)\/Contents\/MacOS\/[^/]+$/.exec(execPath);
+  return m?.[1] && !execPath.includes("/AppTranslocation/") ? m[1] : null;
+}
+
+// A release's Mac build, named as electron-builder names it (install.sh reads the same names).
+export const macDmg = (version: string, arch: string): string => `Inbox-${version}${arch === "arm64" ? "-arm64" : ""}.dmg`;

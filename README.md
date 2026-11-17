@@ -343,7 +343,7 @@ gh workflow run release.yml                   # the next patch
 gh workflow run release.yml -f version=0.3.0  # a version you pick
 ```
 
-[.github/workflows/release.yml](.github/workflows/release.yml) waits for main's CI on the commit to be green (it doesn't run the tests again) while it builds one installer per runner, all at once: the Mac dmg for Apple silicon, the Mac dmg for Intel, the Windows installer and the AppImage (with the `latest*.yml` their updater reads). Those are what `install.sh` and the updater use: the Mac doesn't update itself (it's ad hoc signed), so there's no Mac zip, and no Windows zip or Linux tar.gz either. Once they all pass it commits the version, pushes main and the tag together (refused if main moved meanwhile) and publishes the Release. It takes a few minutes and doesn't need your machine. It pushes with a deploy key (the `RELEASE_DEPLOY_KEY` secret), which main's ruleset lets through, as it does you; everyone else goes through a PR that needs green CI. From a Mac, by hand:
+[.github/workflows/release.yml](.github/workflows/release.yml) waits for main's CI on the commit to be green (it doesn't run the tests again) while it builds one installer per runner, all at once: the Mac dmg for Apple silicon, the Mac dmg for Intel, the Windows installer and the AppImage (with the `latest*.yml` their updater reads). Those are what `install.sh` and the updater use: the Mac updates itself from its dmg, so there's no Mac zip, and no Windows zip or Linux tar.gz either. Once they all pass it commits the version, pushes main and the tag together (refused if main moved meanwhile) and publishes the Release. It takes a few minutes and doesn't need your machine. It pushes with a deploy key (the `RELEASE_DEPLOY_KEY` secret), which main's ruleset lets through, as it does you; everyone else goes through a PR that needs green CI. From a Mac, by hand:
 
 ```bash
 npm run release 0.2.4             # on a clean main that has GitHub's: sets the version, commits and tags v0.2.4; pushes nothing
@@ -359,8 +359,9 @@ npm run release:publish v0.2.4    # checks, pushes main and the tag, builds ever
 
 **Updates.** The packaged app checks the latest release every 6 hours with your GitHub token (the repo is private). When there's a newer one, the sidebar's footer says so:
 
-- **Update to 0.2.0** where the app can install it (the Linux AppImage, the Windows installer): it downloads, quits and restarts.
-- **Download 0.2.0** elsewhere, including macOS (the ad-hoc signed build can't self-update): download the `.dmg`, drag Inbox over the old one, and open it (right-click → Open the first time).
+- **Update to 0.2.0** where the app can install it (macOS, the Linux AppImage, the Windows installer): it downloads, quits and restarts. What's in `~/.inbox` is untouched.
+  - On macOS the app does it itself, since the ad-hoc signed build can't use the usual updater (`electron/mac-update.ts`): it downloads this Mac's `.dmg`, checks it against the checksum GitHub lists for it, and puts the new app where the old one was, deleting the old one.
+- **Download 0.2.0** elsewhere (an archive, or a Mac app it can't write over, such as one opened straight from the dmg): a link to the release page.
 
 A desk run from a checkout (`npm run app`, `desk serve`, Run from a checkout) never checks.
 

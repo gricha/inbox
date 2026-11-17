@@ -706,10 +706,10 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 
 When a newer Inbox is released, a line appears in the sidebar's footer, above Settings (`Sidebar.tsx`):
 
-- **Update to x.y.z** where the app can install it itself (an AppImage on Linux, the installed Windows app). A click downloads it and restarts into it; it reads "Updating…" meanwhile.
-- **Download x.y.z** elsewhere (macOS, archives): a link to the release page. If an install failed, its tooltip says why.
+- **Update to x.y.z** where the app can install it itself (macOS, an AppImage on Linux, the installed Windows app). A click downloads it and restarts into it; it reads "Updating…" meanwhile.
+- **Download x.y.z** elsewhere (archives, a Mac app it can't write over): a link to the release page. If an install failed, its tooltip says why.
 
-The desk checks the latest GitHub Release every 6 hours, only in the packaged app (`src/updates.ts`; the install is `electron-updater` in `electron/main.ts`). Releases: [README → Release](../README.md#release).
+The desk checks the latest GitHub Release every 6 hours, only in the packaged app (`src/updates.ts`; the install is `electron-updater` in `electron/main.ts`, and the app's own swap in `electron/mac-update.ts` on macOS). Releases: [README → Release](../README.md#release).
 
 ## Keys
 

@@ -74,17 +74,20 @@ import {
   restoreBounds,
   saveBounds,
   selfUpdates,
+  bundleOf,
   SHELL_PATH_COMMAND,
   sourceDir,
   themeColors,
   trayTitle,
   trayTooltip,
+  tryOr,
   writeFile,
   type DeskPlan,
   type DesktopSettings,
   type SSEvent,
   type ToHost,
 } from "./lib.ts";
+import { macUpdate } from "./mac-update.ts";
 import { reap, startSource, type Source } from "./source.ts";
 
 const mac = process.platform === "darwin";
@@ -748,10 +751,15 @@ function showPage(text: string): void {
 
 // ---------------------------------------------------------------- updates
 
-// What the desk checks a newer release against, and whether electron-updater can install one here (selfUpdates).
+// What the desk checks a newer release against, and whether the app can install one itself here (selfUpdates).
 function updater(): { version: string; install: boolean } {
-  const nsis = fs.existsSync(path.join(path.dirname(process.execPath), `Uninstall ${app.getName()}.exe`));
-  return { version: app.getVersion(), install: selfUpdates(process.platform, process.env, nsis) };
+  const bundle = bundleOf(process.execPath);
+  const writable = (p: string) => tryOr(() => (fs.accessSync(p, fs.constants.W_OK), true), false);
+  // A Mac's app must be replaceable (its folder and itself writable); Windows' must be the installer's install.
+  const installed = mac
+    ? !!bundle && writable(bundle) && writable(path.dirname(bundle))
+    : fs.existsSync(path.join(path.dirname(process.execPath), `Uninstall ${app.getName()}.exe`));
+  return { version: app.getVersion(), install: selfUpdates(process.platform, process.env, installed) };
 }
 
 // The latest release, with the owner's token since the repo is private: downloaded, then the app quits into it.
@@ -759,6 +767,16 @@ function installUpdate(): Effect.Effect<void, Upstream> {
   const failed = (what: string) => (cause: unknown) => new Upstream({ message: `${what}: ${messageOf(cause)}`, cause });
   return Effect.gen(function* () {
     const token = yield* readToken().pipe(Effect.mapError(failed("no GitHub token")));
+    const bundle = bundleOf(process.execPath);
+    if (mac && bundle) {
+      const repo = `${RELEASES.owner}/${RELEASES.repo}`;
+      const version = yield* macUpdate({ token, repo, bundle, arch: process.arch });
+      log(`installed Inbox ${version}; restarting into it`);
+      relaunching = true;
+      app.relaunch({ args: process.argv.slice(1).filter((a) => a !== "--hidden") });
+      app.quit();
+      return;
+    }
     const { autoUpdater } = (yield* Effect.tryPromise({ try: () => import("electron-updater"), catch: failed("loading the updater") }))
       .default;
     autoUpdater.logger = { info: log, warn: log, error: log };
