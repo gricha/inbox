@@ -4067,7 +4067,9 @@ export class Desk {
     const after = str(this.store.get("chat_after"));
     // The last ask of the chat before, or none: every ask kept is this chat's once that one's no longer kept.
     const from = after ? all.findIndex((a) => a.id === after) + 1 : 0;
+    const models = this.agentModels();
     return {
+      ...(models && { models }),
       on: this.settings["agent.coordinator"],
       asks: all.slice(from),
       coordinator: this.yourAgent.view(),

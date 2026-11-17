@@ -4909,23 +4909,6 @@ html::-webkit-scrollbar-corner,
   color: var(--accent-ink);
 }
 
-.chat-free {
-  width: 100%;
-  height: 30px;
-  margin-top: 4px;
-  padding: 0 8px;
-  border: 1px solid var(--rule-strong);
-  border-radius: 7px;
-  background: var(--paper);
-  color: var(--ink);
-  font: 13px var(--sans);
-}
-
-.chat-free:focus {
-  border-color: var(--pencil);
-  outline: none;
-}
-
 /* An answer's foot: when, then its tools at the right, quiet until the pointer is on the turn. */
 .chat-foot {
   display: flex;

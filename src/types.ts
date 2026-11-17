@@ -1535,6 +1535,8 @@ export interface AsksView {
   asks: Ask[]; // oldest first
   coordinator: CoordinatorView; // what it's doing, for an ask that waits on its answer
   options: AgentOptions;
+  // What your agent's own command lists (src/models.ts), for the chat's menus; absent until it's been read.
+  models?: { models: { value: string; label: string }[]; efforts: { value: string; label: string }[] };
 }
 
 // GET /api/config

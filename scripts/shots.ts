@@ -3655,7 +3655,20 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       await page.route("**/api/asks", (route) =>
         route.fulfill({
-          json: { on: true, asks: [], coordinator: IDLE_AGENT, options: { agent: "codex", bypass: true, model: "", effort: "high" } },
+          json: {
+            on: true,
+            asks: [],
+            coordinator: IDLE_AGENT,
+            options: { agent: "codex", bypass: true, model: "", effort: "high" },
+            // Codex's own catalog, as the desk reads it; no efforts read, so the chat's own stand in.
+            models: {
+              models: [
+                { value: "gpt-5.6", label: "GPT-5.6" },
+                { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+              ],
+              efforts: [],
+            },
+          },
         }),
       );
       await at("#/")(page);
@@ -3708,6 +3721,16 @@ const SHOTS: Shot[] = [
       if (menu.tip) failures.push("ask-empty: a tooltip shows while a menu is open");
       if (menu.native) failures.push("ask-empty: an option is the system's own dropdown");
       if (!menu.inside) failures.push("ask-empty: the menu runs past the chat");
+      // The model's menu lists what Codex lists, and is never a box to type in.
+      await page.locator(".chat .scrim-clear").click();
+      await page.locator(".chat-opt").nth(1).click();
+      await page.locator(".chat-pop").waitFor();
+      const models = await page.evaluate<{ items: string[]; inputs: number }>(`({
+        items: [...document.querySelectorAll(".chat-pop .pop-item")].map((b) => b.textContent.trim()),
+        inputs: document.querySelectorAll(".chat-pop input").length,
+      })`);
+      if (models.items.join(" · ") !== "Default model · GPT-5.6 · GPT-5.6 Luna" || models.inputs)
+        failures.push(`ask-empty: the model menu reads ${JSON.stringify(models)}`);
     },
     after: async (page) => {
       await page.keyboard.press("Escape");
@@ -3740,6 +3763,13 @@ const SHOTS: Shot[] = [
       await page.locator(".chat-input").fill("");
       const tip = await page.locator(".chat-new").getAttribute("data-tip");
       if (tip !== "New chat with Claude Code, about the same thing") failures.push(`ask-new: the plus says ${JSON.stringify(tip)}`);
+      await page.locator(".chat-new-with").click();
+      await page.locator(".chat-new-pop").waitFor();
+      // Esc closes the menu alone: the chat stays.
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(150);
+      if ((await page.locator(".chat-new-pop").count()) || !(await page.locator(".chat").count()))
+        failures.push("ask-new: Esc on the agents' menu didn't close it alone");
       await page.locator(".chat-new-with").click();
       await page.locator(".chat-new-pop").waitFor();
       const menu = await page.evaluate<{ items: string[]; inside: boolean }>(`(() => {

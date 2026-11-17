@@ -395,7 +395,7 @@ export function Chat({
           <p className="chat-note">{OFF}</p>
         ) : (
           <div className="chat-send">
-            {view && <Options options={view.options} />}
+            {view && <Options options={view.options} known={view.models} />}
             <button
               type="button"
               className="chat-go"
@@ -582,6 +582,10 @@ const AGENT = {
 } as const;
 
 type AgentId = AgentOptions["agent"];
+interface Choice {
+  value: string;
+  label: string;
+}
 const AGENTS: AgentId[] = ["claude-code", "codex", "opencode"];
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -793,28 +797,24 @@ function Examples({ item, onPick }: { item: boolean; onPick: (text: string) => v
   );
 }
 
-// One of the box's choices: its words open a menu over it, the one in force ticked; Esc or a click away closes it. `free`
-// adds a field to type a value the menu doesn't list (a model, as the agent's own command takes it).
+// One of the box's choices: its words open a menu over it, the one in force ticked; Esc or a click away closes it.
 function Pick({
   label,
   tip,
   value,
   said,
   choices,
-  free,
   onPick,
 }: {
   label: string;
   tip: string;
   value: string;
   said: string; // what's in force, as its trigger says it
-  choices: { value: string; label: string }[];
-  free?: string;
+  choices: Choice[];
   onPick: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [end, setEnd] = useState(false); // near the chat's right edge: the menu opens leftward
-  const [typed, setTyped] = useState("");
   const trigger = useRef<HTMLButtonElement>(null);
   const close = () => {
     setOpen(false);
@@ -839,7 +839,6 @@ function Pick({
         onClick={(e) => {
           const pane = e.currentTarget.closest(".chat")?.getBoundingClientRect();
           setEnd(!!pane && e.currentTarget.getBoundingClientRect().left + 220 > pane.right);
-          setTyped("");
           setOpen(!open);
         }}
       >
@@ -869,21 +868,6 @@ function Pick({
                 {c.label}
               </button>
             ))}
-            {free && (
-              <input
-                className="chat-free"
-                aria-label={free}
-                placeholder={free}
-                value={typed}
-                spellCheck={false}
-                onChange={(e) => {
-                  setTyped(e.target.value);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && typed.trim()) pick(typed.trim());
-                }}
-              />
-            )}
           </div>
         </>
       )}
@@ -892,7 +876,7 @@ function Pick({
 }
 
 // How your agent runs, by the box: the same settings as Settings → Agent, each saved as you pick it.
-function Options({ options }: { options: AgentOptions }) {
+function Options({ options, known }: { options: AgentOptions; known: AsksView["models"] }) {
   const [mine, setMine] = useState<Partial<AgentOptions>>({}); // picked, until the desk says the same
   const [error, setError] = useState<string | null>(null);
   const now = { ...options, ...mine };
@@ -919,15 +903,17 @@ function Options({ options }: { options: AgentOptions }) {
       ),
     );
   };
-  const listed = (known: readonly string[], current: string, none: string) => [
-    { value: "", label: none },
-    ...[...known, ...(current && !known.includes(current) ? [current] : [])].map((v) => ({
-      value: v,
-      label: known.includes(v) ? cap(v) : v,
-    })),
-  ];
-  const models = listed(kind.models, now.model, "Default model");
-  const efforts = listed(kind.efforts, now.effort, "Default effort");
+  // What its own command lists, once the desk has read it; until then the few the desk knows. Never a box to type one in.
+  const listed = (read: Choice[] | undefined, fallback: readonly string[], current: string, none: string) => {
+    const list = read?.length ? read : fallback.map((v) => ({ value: v, label: cap(v) }));
+    return [
+      { value: "", label: none },
+      ...list,
+      ...(current && !list.some((c) => c.value === current) ? [{ value: current, label: current }] : []),
+    ];
+  };
+  const models = listed(known?.models, kind.models, now.model, "Default model");
+  const efforts = listed(known?.efforts, kind.efforts, now.effort, "Default effort");
   // Its own default is said in a word, so the three fit one line of a narrow chat; the menu says it whole.
   const said = (list: typeof models, value: string, none: string) => (value ? (list.find((m) => m.value === value)?.label ?? value) : none);
   return (
@@ -951,12 +937,11 @@ function Options({ options }: { options: AgentOptions }) {
         value={now.model}
         said={said(models, now.model, "Model")}
         choices={models}
-        free="Another model"
         onPick={(v) => {
           save("agent.coordinator_model", "model", v);
         }}
       />
-      {kind.efforts.length > 0 && (
+      {efforts.length > 1 && (
         <Pick
           label={`${kind.name}'s effort`}
           tip={`How hard ${kind.name} thinks`}

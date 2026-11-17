@@ -1594,8 +1594,9 @@ export function App() {
       }
     }
     // Esc closes the chat from anywhere but a text box (its own box closes it only when empty, else leaves it), and the
-    // comment bar from anywhere, before a review or a page reads it as "go back"; a More menu over it closes first.
-    const menu = !!document.querySelector(".more-pop");
+    // comment bar from anywhere, before a review or a page reads it as "go back"; a More menu over it, or one of the chat's
+    // own menus, closes first.
+    const menu = !!document.querySelector(".more-pop, .chat .popover");
     if (((asking && !typing) || commenting || noting) && !menu && e.key === "Escape" && !e.isComposing) {
       setAsking(null);
       setCommenting(null);
