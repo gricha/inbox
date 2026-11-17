@@ -765,48 +765,38 @@ function NotReady({
   );
 }
 
-// A fresh chat's examples: things to ask, and ways to have your agent change how the desk sorts. A click puts one in the box.
+// A fresh chat's examples, in the pane's middle until you type: two things to ask and two rules to have it add. A click puts one in the box.
 const EXAMPLES = {
-  desk: {
-    ask: ["What should I look at first?", "What's keeping my PRs from merging?", "What changed on my Inbox since yesterday?"],
-    change: [
-      "Add a rule: PRs labelled security are urgent",
-      "Add a rule: a bot's PR goes to FYI unless its CI fails",
-      "Add a rule: my drafts wait in Blocked until they're ready",
-    ],
-  },
-  item: {
-    ask: ["Summarize this for me", "What's the riskiest part of this?", "Why is this on my Inbox?"],
-    change: ["Add a rule so ones like this go to FYI", "Add a rule: this repo's PRs are urgent while CI fails"],
-  },
+  desk: [
+    "What should I look at first?",
+    "What's keeping my PRs from merging?",
+    "Add a rule: PRs labelled security are urgent",
+    "Add a rule: a bot's PR goes to FYI unless its CI fails",
+  ],
+  item: [
+    "Summarize this for me",
+    "What's the riskiest part of this?",
+    "Why is this on my Inbox?",
+    "Add a rule so ones like this go to FYI",
+  ],
 };
 function Examples({ item, onPick }: { item: boolean; onPick: (text: string) => void }) {
-  const ex = EXAMPLES[item ? "item" : "desk"];
-  const list = (label: string, texts: string[]) => (
-    <>
-      <p className="chat-hint">{label}</p>
-      <ul className="chat-examples-list">
-        {texts.map((t) => (
-          <li key={t}>
-            <button
-              type="button"
-              className="chat-example"
-              onClick={() => {
-                onPick(t);
-              }}
-            >
-              {t}
-            </button>
-          </li>
-        ))}
-      </ul>
-    </>
-  );
   return (
-    <div className="chat-examples">
-      {list("Ask it", ex.ask)}
-      {list("Or have it change how Inbox sorts", ex.change)}
-    </div>
+    <ul className="chat-examples" aria-label="Examples">
+      {EXAMPLES[item ? "item" : "desk"].map((t) => (
+        <li key={t}>
+          <button
+            type="button"
+            className="chat-example"
+            onClick={() => {
+              onPick(t);
+            }}
+          >
+            {t}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 
