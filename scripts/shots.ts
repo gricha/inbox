@@ -3727,8 +3727,12 @@ const SHOTS: Shot[] = [
       await page.locator(".side-ask").click();
       await page.locator(".chat-example").first().waitFor({ timeout: 5000 });
       const examples = await page.locator(".chat-example").allTextContents();
-      if (!examples.some((t) => t.startsWith("Add a rule")))
-        failures.push(`ask-new: no example changes a rule: ${JSON.stringify(examples)}`);
+      if (!examples.includes("Send bot PRs to FYI")) failures.push(`ask-new: no example changes a rule: ${JSON.stringify(examples)}`);
+      const said = await page.evaluate<{ title: string | null; tall: number }>(`({
+        title: document.querySelector(".chat-examples-title")?.textContent ?? null,
+        tall: Math.max(...[...document.querySelectorAll(".chat-example")].map((b) => b.getBoundingClientRect().height)),
+      })`);
+      if (said.title !== "Inspiration" || said.tall > 28) failures.push(`ask-new: the examples read ${JSON.stringify(said)}`);
       await page.locator(".chat-example").first().click();
       const put = await page.locator(".chat-input").inputValue();
       if (put !== examples[0] || (await page.locator(".chat-example").count()))

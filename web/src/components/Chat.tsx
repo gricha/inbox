@@ -765,38 +765,31 @@ function NotReady({
   );
 }
 
-// A fresh chat's examples, in the pane's middle until you type: two things to ask and two rules to have it add. A click puts one in the box.
+// A fresh chat's examples, in the pane's middle until you type: two things to ask and two rules to have it add, a line each. A click puts one in the box.
 const EXAMPLES = {
-  desk: [
-    "What should I look at first?",
-    "What's keeping my PRs from merging?",
-    "Add a rule: PRs labelled security are urgent",
-    "Add a rule: a bot's PR goes to FYI unless its CI fails",
-  ],
-  item: [
-    "Summarize this for me",
-    "What's the riskiest part of this?",
-    "Why is this on my Inbox?",
-    "Add a rule so ones like this go to FYI",
-  ],
+  desk: ["What should I look at first?", "What's blocking my PRs?", "Make security PRs urgent", "Send bot PRs to FYI"],
+  item: ["Summarize this", "What's risky here?", "Why is this on my Inbox?", "Send ones like this to FYI"],
 };
 function Examples({ item, onPick }: { item: boolean; onPick: (text: string) => void }) {
   return (
-    <ul className="chat-examples" aria-label="Examples">
-      {EXAMPLES[item ? "item" : "desk"].map((t) => (
-        <li key={t}>
-          <button
-            type="button"
-            className="chat-example"
-            onClick={() => {
-              onPick(t);
-            }}
-          >
-            {t}
-          </button>
-        </li>
-      ))}
-    </ul>
+    <div className="chat-examples">
+      <p className="chat-examples-title">Inspiration</p>
+      <ul>
+        {EXAMPLES[item ? "item" : "desk"].map((t) => (
+          <li key={t}>
+            <button
+              type="button"
+              className="chat-example"
+              onClick={() => {
+                onPick(t);
+              }}
+            >
+              {t}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

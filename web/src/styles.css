@@ -4539,7 +4539,7 @@ html::-webkit-scrollbar-corner,
   margin: 4px 0 0;
 }
 
-/* A fresh chat's examples: cards in the pane's middle, between the box at its top and the controls at its foot. */
+/* A fresh chat's examples: small pills in the pane's middle, between the box at its top and the controls at its foot. */
 .chat-examples {
   display: flex;
   flex: 1;
@@ -4548,31 +4548,47 @@ html::-webkit-scrollbar-corner,
   justify-content: center;
   gap: 8px;
   min-height: 0;
+  overflow: hidden;
+}
+
+.chat-examples-title {
   margin: 0;
-  padding: 0 8px;
-  overflow-y: auto;
+  color: var(--pencil);
+  font-size: 12px;
+}
+
+.chat-examples ul {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
   list-style: none;
 }
 
 .chat-examples li {
-  width: 100%;
-  max-width: 300px;
+  max-width: 100%;
 }
 
+/* One line each, however narrow the pane. */
 .chat-example {
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid var(--rule);
-  border-radius: 10px;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 13px;
   background: var(--wash);
-  color: var(--ink-2);
-  font: 13px/1.4 var(--sans);
-  text-align: center;
+  color: var(--pencil);
+  font: 12.5px var(--sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .chat-example:hover {
-  border-color: var(--rule-strong);
   color: var(--ink);
 }
 
