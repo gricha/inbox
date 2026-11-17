@@ -447,6 +447,8 @@ const NEWER: UpdateView = {
   url: "https://github.com/gricha/inbox/releases/tag/v0.2.0",
   available: true,
   install: false,
+  downloading: false,
+  ready: false,
   installing: false,
   error: null,
 };
@@ -1119,17 +1121,34 @@ const SHOTS: Shot[] = [
     after: unsettle,
   },
   {
-    // A newer Inbox: the sidebar's footer offers it above Settings in the accent; Update when the app installs it
-    // itself, Download (its release page) when it can't.
+    // A newer Inbox: the sidebar's footer offers it above Ask your agent; Restart to update in the accent once the app
+    // has downloaded it, a quiet line with a spinner while it does, Download (its release page) when it can't.
     name: "sidebar-update",
     go: async (page) => {
       await overviewAs((o) => {
-        o.update = { ...NEWER, install: true };
+        o.update = { ...NEWER, install: true, ready: true };
       })(page);
       await page.reload();
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
-      const text = await page.locator(".side-update").textContent();
-      if (text !== "Update to 0.2.0") failures.push(`sidebar-update: the line reads ${JSON.stringify(text)}`);
+      const text = await page.locator("button.side-update .side-long").textContent();
+      if (text !== "Restart to update") failures.push(`sidebar-update: the line reads ${JSON.stringify(text)}`);
+      const foot = await page.locator(".side-foot .side-item").allInnerTexts();
+      if (!foot[0]?.startsWith("Restart")) failures.push(`sidebar-update: the footer reads ${JSON.stringify(foot)}`);
+    },
+    after: unsettle,
+  },
+  {
+    name: "sidebar-downloading",
+    go: async (page) => {
+      await overviewAs((o) => {
+        o.update = { ...NEWER, install: true, downloading: true };
+      })(page);
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      const line = page.locator(".side-update");
+      const text = await line.locator(".side-long").textContent();
+      if (text !== "Downloading 0.2.0\u2026" || !(await line.locator(".busy").count()))
+        failures.push(`sidebar-downloading: the line reads ${JSON.stringify(text)}`);
     },
     after: unsettle,
   },

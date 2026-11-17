@@ -359,8 +359,8 @@ npm run release:publish v0.2.4    # checks, pushes main and the tag, builds ever
 
 **Updates.** The packaged app checks the latest release every 6 hours with your GitHub token (the repo is private). When there's a newer one, the sidebar's footer says so:
 
-- **Update to 0.2.0** where the app can install it (macOS, the Linux AppImage, the Windows installer): it downloads, quits and restarts. What's in `~/.inbox` is untouched.
-  - On macOS the app does it itself, since the ad-hoc signed build can't use the usual updater (`electron/mac-update.ts`): it downloads this Mac's `.dmg`, checks it against the checksum GitHub lists for it, and puts the new app where the old one was, deleting the old one.
+- Where the app can install it (macOS, the Linux AppImage, the Windows installer) it downloads it unasked, then offers **Restart to update**: it quits and restarts into it. The download is kept across restarts of the app. What's in `~/.inbox` is untouched.
+  - On macOS the app does it itself, since the ad-hoc signed build can't use the usual updater (`electron/mac-update.ts`): it downloads this Mac's `.dmg`, checks it against the checksum GitHub lists for it, keeps the new app beside the old one (`.Inbox.app.update`), and on the restart puts it where the old one was, deleting the old one.
 - **Download 0.2.0** elsewhere (an archive, or a Mac app it can't write over, such as one opened straight from the dmg): a link to the release page.
 
 A desk run from a checkout (`npm run app`, `inbox serve`, Run from a checkout) never checks.

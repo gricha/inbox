@@ -378,7 +378,7 @@ const FromHostSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("notify"), title: Schema.String, body: Schema.String }),
   Schema.Struct({ type: Schema.Literal("started") }),
   Schema.Struct({ type: Schema.Literal("failed"), message: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("install"), id: Schema.Number }),
+  Schema.Struct({ type: Schema.Literal("install"), id: Schema.Number, step: Schema.Literals(["download", "restart"]) }),
   Schema.Struct({ type: Schema.Literal("stopped") }),
 ]);
 export type FromHost = typeof FromHostSchema.Type;

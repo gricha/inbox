@@ -737,9 +737,11 @@ export interface UpdateView {
   latest: string | null; // null until a check found a release
   url: string | null; // the latest release's page, where its builds are
   available: boolean; // latest is newer than current
-  install: boolean; // the app downloads and restarts into it itself (POST /api/update); otherwise url is where to get it
-  installing: boolean;
-  error: string | null; // why the last install failed; install is false after one
+  install: boolean; // the app downloads it itself and restarts into it (POST /api/update); otherwise url is where to get it
+  downloading: boolean; // the app is fetching it, unasked
+  ready: boolean; // downloaded: POST /api/update restarts into it
+  installing: boolean; // restarting into it
+  error: string | null; // why the last download or restart failed; install is false until the next check tries again
 }
 
 // A source of items and events: GitHub today.

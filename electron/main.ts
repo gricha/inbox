@@ -87,7 +87,7 @@ import {
   type SSEvent,
   type ToHost,
 } from "./lib.ts";
-import { macUpdate } from "./mac-update.ts";
+import { macFetch, macInstall } from "./mac-update.ts";
 import { reap, startSource, type Source } from "./source.ts";
 
 const mac = process.platform === "darwin";
@@ -495,8 +495,8 @@ function startHost(at: string): Effect.Effect<Server, DeskFailed> {
       } else if (m.type === "install") {
         const id = m.id;
         runner.fork(
-          "installing an update",
-          installUpdate().pipe(
+          m.step === "download" ? "downloading an update" : "installing an update",
+          (m.step === "download" ? fetchUpdate() : installUpdate()).pipe(
             Effect.match({
               onFailure: (e) => {
                 tell({ type: "installed", id, error: e.message });
@@ -762,57 +762,77 @@ function updater(): { version: string; install: boolean } {
   return { version: app.getVersion(), install: selfUpdates(process.platform, process.env, installed) };
 }
 
-// The latest release, with the owner's token since the repo is private: downloaded, then the app quits into it.
-function installUpdate(): Effect.Effect<void, Upstream> {
-  const failed = (what: string) => (cause: unknown) => new Upstream({ message: `${what}: ${messageOf(cause)}`, cause });
+const updateFailed = (what: string) => (cause: unknown) => new Upstream({ message: `${what}: ${messageOf(cause)}`, cause });
+let updateRefused: unknown = null; // electron-updater's last "error": its install's failures are only emitted
+let updaterSet = false;
+
+// electron-updater on the latest release, with the owner's token since the repo is private.
+function autoUpdater() {
   return Effect.gen(function* () {
-    const token = yield* readToken().pipe(Effect.mapError(failed("no GitHub token")));
+    const { autoUpdater: au } = (yield* Effect.tryPromise({
+      try: () => import("electron-updater"),
+      catch: updateFailed("loading the updater"),
+    })).default;
+    if (updaterSet) return au;
+    const token = yield* readToken().pipe(Effect.mapError(updateFailed("no GitHub token")));
+    updaterSet = true;
+    au.logger = { info: log, warn: log, error: log };
+    au.autoDownload = false;
+    au.autoInstallOnAppQuit = false;
+    au.setFeedURL({ provider: "github", owner: RELEASES.owner, repo: RELEASES.repo, private: true, token });
+    // Its failures are also emitted as "error", which throws with no listener.
+    au.on("error", (e: unknown) => {
+      updateRefused = e;
+    });
+    return au;
+  });
+}
+
+// The latest release, downloaded and kept: a Mac's beside the app, the others' where electron-updater keeps its own, so
+// neither is downloaded again after a restart of the app.
+function fetchUpdate(): Effect.Effect<void, Upstream> {
+  return Effect.gen(function* () {
     const bundle = bundleOf(process.execPath);
     if (mac && bundle) {
-      const repo = `${RELEASES.owner}/${RELEASES.repo}`;
-      const version = yield* macUpdate({ token, repo, bundle, arch: process.arch });
+      const token = yield* readToken().pipe(Effect.mapError(updateFailed("no GitHub token")));
+      const version = yield* macFetch({ token, repo: `${RELEASES.owner}/${RELEASES.repo}`, bundle, arch: process.arch });
+      log(`Inbox ${version} is downloaded`);
+      return;
+    }
+    const au = yield* autoUpdater();
+    yield* Effect.tryPromise({ try: () => au.checkForUpdates(), catch: updateFailed("checking the release") }).pipe(
+      Effect.filterOrFail(
+        (r) => !!r?.isUpdateAvailable,
+        () => new Upstream({ message: "the latest release has no newer build for this computer" }),
+      ),
+    );
+    yield* Effect.tryPromise({ try: () => au.downloadUpdate(), catch: updateFailed("downloading the update") });
+  });
+}
+
+// The app quits into what fetchUpdate downloaded.
+function installUpdate(): Effect.Effect<void, Upstream> {
+  return Effect.gen(function* () {
+    const bundle = bundleOf(process.execPath);
+    if (mac && bundle) {
+      const version = yield* macInstall(bundle);
       log(`installed Inbox ${version}; restarting into it`);
       relaunching = true;
       app.relaunch({ args: process.argv.slice(1).filter((a) => a !== "--hidden") });
       app.quit();
       return;
     }
-    const { autoUpdater } = (yield* Effect.tryPromise({ try: () => import("electron-updater"), catch: failed("loading the updater") }))
-      .default;
-    autoUpdater.logger = { info: log, warn: log, error: log };
-    autoUpdater.autoDownload = false;
-    autoUpdater.autoInstallOnAppQuit = false;
-    autoUpdater.setFeedURL({ provider: "github", owner: RELEASES.owner, repo: RELEASES.repo, private: true, token });
-    // Its failures are also emitted as "error", which throws with no listener; the install's are only emitted.
-    let refused: unknown = null;
-    const onError = (e: unknown) => {
-      refused = e;
-    };
-    autoUpdater.on("error", onError);
-    yield* Effect.gen(function* () {
-      const found = yield* Effect.tryPromise({ try: () => autoUpdater.checkForUpdates(), catch: failed("checking the release") }).pipe(
-        Effect.filterOrFail(
-          (r): r is NonNullable<typeof r> => !!r?.isUpdateAvailable,
-          () => new Upstream({ message: "the latest release has no newer build for this computer" }),
-        ),
-      );
-      yield* Effect.tryPromise({ try: () => autoUpdater.downloadUpdate(), catch: failed("downloading the update") });
-      let appImage = process.env.APPIMAGE;
-      autoUpdater.once("appimage-filename-updated", (p: string) => {
-        appImage = p;
-      });
-      log(`installing Inbox ${found.updateInfo.version}`);
-      // The Windows installer starts the new build itself; an AppImage started now would lose the single-instance lock to this one.
-      autoUpdater.quitAndInstall(true, !linux);
-      if (refused) yield* Effect.fail(failed("installing the update")(refused));
-      if (linux && appImage) app.relaunch({ execPath: appImage, args: [] });
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          autoUpdater.off("error", onError);
-        }),
-      ),
-    );
+    const au = yield* autoUpdater();
+    let appImage = process.env.APPIMAGE;
+    au.once("appimage-filename-updated", (p: string) => {
+      appImage = p;
+    });
+    log("installing the downloaded Inbox");
+    updateRefused = null;
+    // The Windows installer starts the new build itself; an AppImage started now would lose the single-instance lock to this one.
+    au.quitAndInstall(true, !linux);
+    if (updateRefused) yield* Effect.fail(updateFailed("installing the update")(updateRefused));
+    if (linux && appImage) app.relaunch({ execPath: appImage, args: [] });
   });
 }
 

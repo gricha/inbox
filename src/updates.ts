@@ -13,7 +13,8 @@ const CHECK_EVERY = 6 * 60 * 60_000;
 // The packaged app running this desk: its version, and its install where the app can replace the build in place.
 export interface AppUpdater {
   version: string;
-  install?: () => Effect.Effect<void, Upstream>; // downloads the release and restarts into it; it never returns once it has
+  download?: () => Effect.Effect<void, Upstream>; // fetches the latest release and keeps it, across restarts; quick once it has it
+  install?: () => Effect.Effect<void, Upstream>; // restarts into what download fetched; it never returns once it has
 }
 
 // x.y.z, a leading v allowed; anything after a "-" (a prerelease) sorts before the release itself.
@@ -37,6 +38,8 @@ export class Updates {
   private readonly log: (m: string) => void;
   private readonly changed: () => void;
   private latest: { version: string; url: string } | null = null;
+  private fetching = false;
+  private fetched: string | null = null; // the release the app has downloaded, ready to restart into
   private installing = false;
   private error: string | null = null;
   private timer: NodeJS.Timeout | null = null;
@@ -71,12 +74,18 @@ export class Updates {
     this.timer = null;
   }
 
-  // What fails (GitHub down, the rate limit) is logged and the last release known kept: the next check asks again.
+  // What fails (GitHub down, the rate limit) is logged and the last release known kept: the next check asks again, and
+  // tries a download that failed once more.
   check(): Effect.Effect<void> {
     return this.latestRelease().pipe(
       Effect.flatMap((r) =>
         Effect.sync(() => {
           this.found(r);
+          if (this.error && !this.installing) {
+            this.error = null;
+            this.changed();
+          }
+          this.fetch();
         }),
       ),
       Effect.catch((e) =>
@@ -105,12 +114,44 @@ export class Updates {
       url: latest?.url ?? null,
       available: !!latest && newer(latest.version, this.app.version),
       install: !!this.app.install && !this.error,
+      downloading: this.fetching,
+      ready: !!latest && this.fetched === latest.version,
       installing: this.installing,
       error: this.error,
     };
   }
 
-  // The app downloads the release and restarts into it; what fails is said on the line, which then links to the release.
+  // A newer release is downloaded as soon as it's known, nobody asked: the line then offers the restart.
+  private fetch(): void {
+    const want = this.latest?.version;
+    const get = this.app?.download;
+    if (!get || !want || !this.view()?.available || this.fetching || this.fetched === want || this.error) return;
+    this.fetching = true;
+    this.log(`downloading Inbox ${want}`);
+    this.runner.fork(
+      "downloading an update",
+      get().pipe(
+        Effect.match({
+          onSuccess: () => {
+            this.fetching = false;
+            this.fetched = want;
+            this.log(`Inbox ${want} is downloaded`);
+            this.changed();
+            this.fetch(); // a release that came out meanwhile
+          },
+          onFailure: (e) => {
+            this.fetching = false;
+            this.error = e.message;
+            this.log(`downloading Inbox ${want} failed: ${e.message}`);
+            this.changed();
+          },
+        }),
+      ),
+    );
+    this.changed();
+  }
+
+  // The app restarts into the release it downloaded; what fails is said on the line, which then links to the release.
   install(): Effect.Effect<UpdateView, Conflict> {
     return Effect.suspend(() => {
       const v = this.view();
@@ -119,8 +160,12 @@ export class Updates {
       if (!run || !v.install)
         return Effect.fail(new Conflict({ message: `This app can't update itself: get Inbox ${v.latest} from ${v.url}` }));
       if (this.installing) return Effect.succeed(v);
+      if (!v.ready) {
+        this.fetch();
+        return Effect.succeed(this.view() ?? v);
+      }
       this.installing = true;
-      this.log(`updating to Inbox ${v.latest}`);
+      this.log(`restarting into Inbox ${v.latest}`);
       this.runner.fork(
         "updating",
         // Done, the app is quitting into the new build: it stays installing until then.
@@ -136,7 +181,7 @@ export class Updates {
         ),
       );
       this.changed();
-      return Effect.succeed(this.view()!);
+      return Effect.succeed(this.view() ?? v);
     });
   }
 }

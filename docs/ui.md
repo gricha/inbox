@@ -62,7 +62,7 @@ The window's only global chrome. There's no top bar.
   - Blocked, Merging and Archive have no count. Merging's tooltip says how many are merging.
   - A review is marked under the page it was opened from; a question under the Inbox.
   - Clicking Inbox while on it scrolls to the top.
-- **Footer**, bottom up: Settings, then the [update line](#the-update-line) when there's a newer Inbox, then [Ask your agent](#asking-your-agent).
+- **Footer**, bottom up: Settings, then [Ask your agent](#asking-your-agent), then the [update line](#the-update-line) when there's a newer Inbox.
 - **In Settings**, the pages give way to Settings' parts, under **‹ Inbox** ([Settings](#settings)).
 - **Narrow windows**: the sidebar compacts (the mark alone, "Ask" for Ask your agent), then becomes one row across the top that scrolls sideways inside itself.
 
@@ -657,7 +657,7 @@ In order:
 
 ## Asking your agent
 
-A quiet **Ask your agent** in the sidebar's footer opens your chat with your agent on the window's right, about what you're on:
+A quiet **Ask your agent** in the sidebar's footer, under your agent's own mark (Claude Code's, Codex's or OpenCode's, as Settings → Agent has it), or ⌘J, opens your chat with your agent on the window's right, about what you're on:
 
 - In a PR's review: the PR and the last spot you were on: a conversation's reply box (or its **Ask your agent**), a thread's Reply, or lines you picked with `+`.
 - Elsewhere: the Merging row, the selected row, a question's item, or nothing.
@@ -666,7 +666,7 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 
 ### The sidebar item
 
-- "Ask your agent", or "**Your agent · waiting**" (filled bubble) while your latest ask about the review's PR is unanswered. Compact: "Ask" / "Asked".
+- "Ask your agent", or "**Your agent · waiting**" while your latest ask about the review's PR is unanswered. Compact: "Ask" / "Asked".
 - Not drawn while the chat is open, with your agent off, or on your agent's own question's page (its answer box is how you talk to it there).
 
 ### Where the chat sits
@@ -708,16 +708,16 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 
 ## The update line
 
-When a newer Inbox is released, a line appears in the sidebar's footer, above Settings (`Sidebar.tsx`):
+When a newer Inbox is released, a line appears at the top of the sidebar's footer, above Ask your agent (`Sidebar.tsx`):
 
-- **Update to x.y.z** where the app can install it itself (macOS, an AppImage on Linux, the installed Windows app). A click downloads it and restarts into it; it reads "Updating…" meanwhile.
-- **Download x.y.z** elsewhere (archives, a Mac app it can't write over): a link to the release page. If an install failed, its tooltip says why.
+- Where the app can install it itself (macOS, an AppImage on Linux, the installed Windows app), it downloads it unasked: a quiet **Downloading x.y.z…** with a spinner, nothing to press ("Updating…" in the compact sidebar). Then **Restart to update** in the accent ("Restart" compact): a click restarts into it ("Restarting…" meanwhile). The download is kept, so the app quit and opened again offers the restart without downloading again.
+- **Download x.y.z** elsewhere (archives, a Mac app it can't write over): a link to the release page. If a download or restart failed, it's this link and its tooltip says why; the next check tries again.
 
 The desk checks the latest GitHub Release every 6 hours, only in the packaged app (`src/updates.ts`; the install is `electron-updater` in `electron/main.ts`, and the app's own swap in `electron/mac-update.ts` on macOS). Releases: [README → Release](../README.md#release).
 
 ## Keys
 
-Holding ⌘ (Ctrl elsewhere) alone for a moment shows each shortcut as a small chip by its button, growing out of nothing: ⌘1 to ⌘4 on the sidebar's pages, / on the search, ⌘N on New note, ⌘↵ over a conversation's send button. Letting go, or pressing another key, puts them away (`data-key` on the button, `[data-key]` in `styles.css`, the hold in `App.tsx`).
+Holding ⌘ (Ctrl elsewhere) alone for a moment shows each shortcut as a small chip by its button, growing out of nothing: ⌘1 to ⌘4 on the sidebar's pages, / on the search, ⌘N on New note, ⌘J on Ask your agent, ⌘↵ over a conversation's send button. Letting go, or pressing another key, puts them away (`data-key` on the button, `[data-key]` in `styles.css`, the hold in `App.tsx`).
 
 The window names no key; a button's tooltip names its own. Only platform keys work, and / for the filter, as on GitHub. Nothing outside a box you're typing in writes to GitHub or changes an item.
 
@@ -733,6 +733,7 @@ The window names no key; a button's tooltip names its own. Only platform keys wo
 | /                               | Puts you in the search at the top of the sidebar, when you're not typing; not in Settings.                                                                                                                                                                                                                |
 | ⌘1–⌘4                           | Inbox, Blocked, Merging, Archive (Ctrl elsewhere). Each page's tooltip names its key.                                                                                                                                                                                                                     |
 | ⌘] / ⌘[                         | The item after / before the open one in its list (else the selected one; with neither, the first or last), opened as a click would. On Merging, its PRs. Stops at the list's ends and at a fold. Works from a box; does nothing in Settings.                                                              |
+| ⌘J                              | Ask your agent, as its button in the sidebar; with the chat open, back to its box. Its tooltip names the key.                                                                                                                                                                                             |
 | ⌘,                              | Settings (desktop app).                                                                                                                                                                                                                                                                                   |
 | Control+Alt+D                   | Shows or hides the window from any app (desktop app; settable in This device).                                                                                                                                                                                                                            |
 

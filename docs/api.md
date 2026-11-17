@@ -203,7 +203,7 @@ Every write here is own page only, logged, and answers 502 with GitHub's reason 
 | GET    | `/api/setup`          | `SetupView`: `{ needed, github: { login, error, fix }, agent, picked, agents: [{ id, name, installed, logged_in, fix, url }] }`. `fix` is the command to run, null when there's none; `url` its own page on installing it ([The first run](#the-first-run))                |     |
 | POST   | `/api/setup/check`    | `SetupView` after asking GitHub (when it wasn't connected: then the first config and sync) and each agent's CLI again                                                                                                                                                      |     |
 | POST   | `/api/setup`          | `{ agent }` → `SetupView`: sets `agent.harness`, connects it as `POST /api/agents/connect` does, and ends the first-run page once GitHub is connected. 409 while the agent isn't installed and logged in, with what to run                                                 |     |
-| POST   | `/api/update`         | `UpdateView`: the packaged app downloads the newer release and restarts into it. 409 when there's none or the app can't install it itself                                                                                                                                  |     |
+| POST   | `/api/update`         | `UpdateView`: the packaged app restarts into the newer release it downloaded (not yet downloaded: it only starts the download). 409 when there's none or the app can't install it itself                                                                                   |     |
 | GET    | `/api/omarchy`        | The theme Omarchy has on; null off Omarchy                                                                                                                                                                                                                                 |     |
 
 ### Merging, the coordinator and asks
@@ -398,9 +398,11 @@ interface UpdateView {
   latest: string | null;
   url: string | null; // the release's page
   available: boolean;
-  install: boolean; // the app can install it itself (POST /api/update)
-  installing: boolean;
-  error: string | null; // why the last install failed
+  install: boolean; // the app downloads it itself and restarts into it (POST /api/update)
+  downloading: boolean; // the app is fetching it, unasked
+  ready: boolean; // downloaded: POST /api/update restarts into it
+  installing: boolean; // restarting into it
+  error: string | null; // why the last download or restart failed
 }
 
 interface Placement {

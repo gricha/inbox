@@ -274,7 +274,7 @@ test("the app's own desk and the app read each other's messages, and nothing els
     { type: "notify", title: "Inbox", body: "api#7" },
     { type: "started" },
     { type: "failed", message: "port in use" },
-    { type: "install", id: 1 },
+    { type: "install", id: 1, step: "download" },
     { type: "stopped" },
   ])
     assert.deepEqual(fromHost(ok), ok);

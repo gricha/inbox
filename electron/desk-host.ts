@@ -18,21 +18,24 @@ let close: (() => Promise<void>) | null = null;
 let installs = 0;
 const installing = new Map<number, (error: string | undefined) => void>();
 
-// The app downloads and installs; on success it quits, this process with it, so only a failure comes back.
-const install = (): Effect.Effect<void, Upstream> =>
+// The app downloads, then on restart installs; that one quits on success, this process with it, so only a failure comes back.
+const install = (step: "download" | "restart"): Effect.Effect<void, Upstream> =>
   Effect.callback<void, Upstream>((resume) => {
     const id = ++installs;
     installing.set(id, (error) => {
       resume(error === undefined ? Effect.void : Effect.fail(new Upstream({ message: error })));
     });
-    send({ type: "install", id });
+    send({ type: "install", id, step });
     return Effect.sync(() => {
       installing.delete(id);
     });
   });
 
 const start = (o: { port: number; home: string; app?: { version: string; install: boolean } }) => {
-  const app: AppUpdater | undefined = o.app && { version: o.app.version, ...(o.app.install ? { install } : {}) };
+  const app: AppUpdater | undefined = o.app && {
+    version: o.app.version,
+    ...(o.app.install ? { download: () => install("download"), install: () => install("restart") } : {}),
+  };
   Effect.runFork(
     startDesk({
       port: o.port,

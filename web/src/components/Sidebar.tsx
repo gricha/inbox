@@ -3,11 +3,12 @@ import type { Overview } from "../../../src/types.ts";
 import { cls, MOD } from "../format.ts";
 import { SETTINGS_PARTS } from "../settings-parts.ts";
 import { pageOf, routeHash, settingsPart, type ListPage, type Route } from "../view.ts";
+import { AgentMark } from "./Chat.tsx";
 import { ArchiveIcon, BlockedIcon, InboxIcon, MergingIcon, SettingsIcon } from "./SideIcons.tsx";
 import { Splitter, type Width } from "./Splitter.tsx";
 
 // The window's only global chrome, as wide as you drag it. The search leads, on every page but Settings; then the pages, in the owner's order: Inbox, Blocked, Merging and
-// the Archive; in Settings, its parts instead, under the way back to the Inbox: the core's, then the plugins'. In the footer, bottom up, Settings, a newer Inbox (only when there's one) and Ask your agent; what's wrong with
+// the Archive; in Settings, its parts instead, under the way back to the Inbox: the core's, then the plugins'. In the footer, bottom up, Settings, Ask your agent and a newer Inbox (only when there's one); what's wrong with
 // the sync is a bubble (Bubbles.tsx).
 export function Sidebar({
   route,
@@ -146,38 +147,32 @@ export function Sidebar({
         </nav>
       )}
       <div className="side-foot">
-        {ask && (
-          <button
-            type="button"
-            className={cls("side-item", "side-ask", waiting && "waiting")}
-            onClick={onAsk}
-            title={`Ask your agent about what you're on${waiting ? " \u00b7 waiting for its answer" : ""}`}
-          >
-            <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" />
-            </svg>
-            <span className="side-name side-ask-long">{waiting ? "Your agent \u00b7 waiting" : "Ask your agent"}</span>
-            <span className="side-name side-ask-short">{waiting ? "Asked" : "Ask"}</span>
-          </button>
-        )}
-        {/* A newer Inbox: the app installs it where it can, else its release page has the download. */}
-        {up?.install && (
+        {/* A newer Inbox: the app downloads it unasked where it can, then offers the restart; else its release page has it. */}
+        {up?.install && up.ready && (
           <button
             type="button"
             className="side-item side-update"
             onClick={onUpdate}
             disabled={up.installing}
-            title={
-              up.installing
-                ? `Downloading Inbox ${up.latest}; the app restarts into it`
-                : `Download Inbox ${up.latest} and restart into it (this is ${up.current})`
-            }
+            title={`Inbox ${up.latest} is downloaded: restart into it (this is ${up.current})`}
           >
-            <svg className={cls("i", up.installing && "spin")} viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />
-            </svg>
-            <span className="side-name">{up.installing ? "Updating\u2026" : `Update to ${up.latest}`}</span>
+            {up.installing ? (
+              <span className="busy" />
+            ) : (
+              <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M13 8a5 5 0 1 1-1.5-3.55M13 2.5v3h-3" />
+              </svg>
+            )}
+            <span className="side-name side-long">{up.installing ? "Restarting\u2026" : "Restart to update"}</span>
+            <span className="side-name side-short">{up.installing ? "Restarting\u2026" : "Restart"}</span>
           </button>
+        )}
+        {up?.install && !up.ready && up.downloading && (
+          <span className="side-item side-update quiet" title={`Downloading Inbox ${up.latest} (this is ${up.current})`}>
+            <span className="busy" />
+            <span className="side-name side-long">{`Downloading ${up.latest}\u2026`}</span>
+            <span className="side-name side-short">{"Updating\u2026"}</span>
+          </span>
         )}
         {up && !up.install && up.url && (
           <a
@@ -193,6 +188,19 @@ export function Sidebar({
             <span className="side-name">{`Download ${up.latest}`}</span>
           </a>
         )}
+        {ask && (
+          <button
+            type="button"
+            className={cls("side-item", "side-ask", waiting && "waiting")}
+            onClick={onAsk}
+            data-key={`${MOD}J`}
+            title={`Ask your agent about what you're on${waiting ? " \u00b7 waiting for its answer" : ""} (${MOD}J)`}
+          >
+            <AgentMark agent={MARK_OF[overview?.ai_agent ?? "Claude"]} />
+            <span className="side-name side-ask-long">{waiting ? "Your agent \u00b7 waiting" : "Ask your agent"}</span>
+            <span className="side-name side-ask-short">{waiting ? "Asked" : "Ask"}</span>
+          </button>
+        )}
         <a href="#/settings" className={cls("side-item", onSettings && "on")}>
           <SettingsIcon />
           <span className="side-name">Settings</span>
@@ -202,5 +210,8 @@ export function Sidebar({
     </aside>
   );
 }
+
+// Your agent (Settings → Agent), as the chat draws its mark.
+const MARK_OF = { Claude: "claude-code", Codex: "codex", OpenCode: "opencode" } as const;
 
 const SIDE: Width = { key: "desk.side.width", cssVar: "--side-w-user", min: 160, max: 0.3 };

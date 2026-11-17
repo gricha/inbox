@@ -11,7 +11,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { bundleOf, macDmg, selfUpdates } from "../electron/lib.ts";
-import { download, swap } from "../electron/mac-update.ts";
+import { download, release, swap } from "../electron/mac-update.ts";
 import { failure, run } from "./helpers/run.ts";
 
 test("newer compares x.y.z, a v allowed, a prerelease before its release", () => {
@@ -78,6 +78,8 @@ test("a newer release is available; without an install of the app's, its release
     url: null,
     available: false,
     install: false,
+    downloading: false,
+    ready: false,
     installing: false,
     error: null,
   });
@@ -88,6 +90,8 @@ test("a newer release is available; without an install of the app's, its release
     url: URL,
     available: true,
     install: false,
+    downloading: false,
+    ready: false,
     installing: false,
     error: null,
   });
@@ -114,42 +118,60 @@ test("the app's own version or older isn't an update, and no release or a failed
   assert.deepEqual(down.logs, ["checking for an update: GitHub HTTP 502"]);
 });
 
-test("Update runs the app's install once; one that fails says why and leaves the release page", async () => {
+test("a newer release is downloaded unasked, once; Restart then runs the app's install once", async () => {
+  let downloads = 0;
   let installs = 0;
-  let outcome: Effect.Effect<void, Upstream> = Effect.never;
-  const { u } = updates({
+  let done: (() => void) | null = null;
+  const { u, logs } = updates({
     version: "0.1.0",
+    download: () => {
+      downloads++;
+      return Effect.callback<void>((resume) => {
+        done = () => {
+          resume(Effect.void);
+        };
+      });
+    },
     install: () => {
       installs++;
-      return outcome;
+      return Effect.never;
     },
   });
   await run(u.check());
-  assert.equal(u.view()?.install, true);
+  assert.deepEqual([u.view()?.install, u.view()?.downloading, u.view()?.ready], [true, true, false]);
+  await run(u.check());
+  assert.equal((await run(u.install())).installing, false, "a press before it's downloaded restarts nothing");
+  assert.deepEqual([downloads, installs], [1, 0]);
+  done!();
+  await sleep(0);
+  assert.deepEqual([u.view()?.downloading, u.view()?.ready], [false, true]);
   assert.equal((await run(u.install())).installing, true);
   await run(u.install());
-  assert.equal(installs, 1, "a second press while it installs starts nothing");
+  assert.deepEqual([downloads, installs], [1, 1], "a second press while it restarts starts nothing");
+  assert.deepEqual(logs.slice(1), ["downloading Inbox 0.2.0", "Inbox 0.2.0 is downloaded", "restarting into Inbox 0.2.0"]);
+});
 
-  const again = updates({
-    version: "0.1.0",
-    install: () => {
-      installs++;
-      return outcome;
-    },
-  });
-  outcome = Effect.fail(new Upstream({ message: "downloading the update: net::ERR_FAILED" }));
-  await run(again.u.check());
-  await run(again.u.install());
+test("a download that fails says why and leaves the release page; the next check tries again", async () => {
+  let outcome: Effect.Effect<void, Upstream> = Effect.fail(new Upstream({ message: "downloading the update: net::ERR_FAILED" }));
+  const { u } = updates({ version: "0.1.0", download: () => outcome, install: () => Effect.never });
+  await run(u.check());
   await sleep(0);
-  assert.deepEqual(again.u.view(), {
+  assert.deepEqual(u.view(), {
     current: "0.1.0",
     latest: "0.2.0",
     url: URL,
     available: true,
     install: false,
+    downloading: false,
+    ready: false,
     installing: false,
     error: "downloading the update: net::ERR_FAILED",
   });
+  assert.equal((await failure(u.install()))._tag, "Conflict");
+  outcome = Effect.void;
+  await run(u.check());
+  await sleep(0);
+  assert.deepEqual([u.view()?.install, u.view()?.ready, u.view()?.error], [true, true, null]);
 });
 
 test("the read client asks for the latest release, and a repo with none is no release", async () => {
@@ -211,16 +233,17 @@ test("a Mac's update is this Mac's dmg from the latest release, refused unless i
     return Promise.resolve(new Response(bytes));
   }) as unknown as typeof fetch;
   const o = { token: "t", repo: "gricha/inbox", bundle: "/Applications/Inbox.app", arch: "arm64", fetch: fake };
-  const got = await run(download(o, dir));
-  assert.equal(got.version, "0.3.0");
-  assert.equal(fs.readFileSync(got.dmg, "utf8"), "a dmg");
+  const rel = await run(release(o));
+  assert.equal(rel.version, "0.3.0");
+  assert.equal(fs.readFileSync(await run(download(o, rel, dir)), "utf8"), "a dmg");
   assert.deepEqual(asked, [
     ["https://api.github.com/repos/gricha/inbox/releases/latest", "Bearer t"],
     ["https://api.github.com/assets/2", "Bearer t"],
   ]);
   digest = "sha256:another";
-  assert.match((await failure(download(o, dir))).message, /doesn't match the release's checksum/);
-  assert.match((await failure(download({ ...o, arch: "x64" }, dir))).message, /doesn't match/);
+  assert.match((await failure(download(o, await run(release(o)), dir))).message, /doesn't match the release's checksum/);
+  const intel = { ...o, arch: "x64" };
+  assert.match((await failure(download(intel, await run(release(intel)), dir))).message, /doesn't match/);
   fs.rmSync(dir, { recursive: true });
 });
 

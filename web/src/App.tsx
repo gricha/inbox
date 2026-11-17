@@ -1113,7 +1113,7 @@ export function App() {
     });
   }
 
-  // The app downloads the newer Inbox and restarts into it; the overview says how it's going.
+  // The app restarts into the newer Inbox it downloaded; the overview says how it's going.
   function update(): Effect.Effect<void> {
     return Effect.suspend(() => {
       setOverview((o) => (o?.update ? { ...o, update: { ...o.update, installing: true } } : o));
@@ -1567,6 +1567,13 @@ export function App() {
     const listed = LIST_PAGES.has(route.name) || route.name === "inflight" || route.name === "review" || route.name === "inquiry";
     if (mod && digit && !(e.target instanceof HTMLElement && e.target.closest(".hotkey"))) {
       if (!e.repeat) go({ name: SIDE_PAGES[Number(digit) - 1]! });
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
+    // ⌘J: Ask your agent, where its button shows; with the chat open, back to its box.
+    if (mod && e.code === "KeyJ" && overview?.agent) {
+      if (!e.repeat) openAsk(asking?.item ?? undefined, asking?.spot ?? undefined);
       e.preventDefault();
       e.stopImmediatePropagation();
       return;

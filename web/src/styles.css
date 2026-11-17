@@ -942,7 +942,8 @@ html::-webkit-scrollbar-corner,
 }
 
 .side .si,
-.side .i {
+.side .i,
+.side .chat-mark {
   color: var(--ink);
 }
 
@@ -986,13 +987,21 @@ html::-webkit-scrollbar-corner,
   color: var(--accent-ink);
 }
 
-.side-ask-short {
-  display: none;
+/* While the app downloads it there's nothing to press: quiet, a spinner as wide as an icon. */
+.side-foot .side-update.quiet,
+.side-foot .side-update.quiet:hover:not(:disabled) {
+  background: none;
+  color: var(--pencil);
+  cursor: default;
 }
 
-/* Filled while your latest ask waits for its answer. */
-.side-ask.waiting .i path {
-  fill: currentcolor;
+.side-foot .busy {
+  margin: 0 2px;
+}
+
+.side-ask-short,
+.side-short {
+  display: none;
 }
 
 /* A page's own head: sticky, as tall as the sidebar's brand row, the window's drag handle in the desktop app. Its control
@@ -8450,11 +8459,13 @@ p.rv-next {
 
   .side-brand span,
   .side-ask-long,
+  .side-long,
   .side-resize {
     display: none;
   }
 
-  .side-ask-short {
+  .side-ask-short,
+  .side-short {
     display: inline;
   }
 
