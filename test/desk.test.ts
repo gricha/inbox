@@ -53,6 +53,17 @@ test("sync fills boards, focus and status", async () => {
   await t.cleanup();
 });
 
+test("a sync forgets an automation's find about an item the desk no longer holds", async (c) => {
+  const t = await setup([reviewAsk(1)]);
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const found = { name: "Pings", why: "a ping" };
+  t.desk.store.set("pushed:acme/api#1", found);
+  t.desk.store.set("pushed:acme/api#9", found);
+  await run(t.desk.sync());
+  assert.deepEqual([t.desk.store.get("pushed:acme/api#1"), t.desk.store.get("pushed:acme/api#9")], [found, null]);
+});
+
 test("details are only refetched when an item changed or went stale", async () => {
   const item = reviewAsk(1);
   const t = await setup([item]);

@@ -1476,6 +1476,7 @@ export class Desk {
     this.store.pruneKv("said:", kept);
     this.store.pruneKv("score:", kept);
     this.store.pruneKv("attribution:", kept);
+    this.store.pruneKv("pushed:", kept);
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
     if (this.loaded) {
       const top = this.top(this.snapshot(), new Set());
