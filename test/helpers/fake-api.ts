@@ -460,7 +460,7 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       return reply(200, { ok: true, item: { ...d, card: { ...d.card, pinned: true }, generating: true, held: true }, undo_seq: 8 });
     }
     case "POST /api/undo":
-      return reply(200, { ok: true, id: CARDS.now.id, action: "done" });
+      return reply(200, { ok: true, id: body.seq === 9 ? "session:abc" : CARDS.now.id, action: "done" });
     case "POST /api/sync":
       return reply(200, { ok: true });
     case "POST /api/setup/check":

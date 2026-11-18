@@ -658,7 +658,7 @@ const COMMANDS: Record<string, Command> = {
     const seq = x.args[0] === undefined ? undefined : Number(x.args[0]);
     if (seq !== undefined && !Number.isInteger(seq)) return yield* new UsageError({ message: `bad undo number: ${x.args[0]}` });
     const r = yield* api.undo(seq);
-    x.out(`${x.c.green("✓")} Undid ${r.action} on ${r.id.split("/")[1]}`);
+    x.out(`${x.c.green("✓")} Undid ${r.action} on ${r.id}`);
     return 0;
   }),
   sync: (x) =>

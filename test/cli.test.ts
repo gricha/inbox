@@ -280,7 +280,8 @@ test("snooze defaults to tomorrow and passes an explicit until", async () => {
 });
 
 test("undo, sync, prompt", async () => {
-  assert.equal((await run(["undo"])).out, "✓ Undid done on seer#8949\n");
+  assert.equal((await run(["undo", "9"])).out, "✓ Undid done on session:abc\n", "a session's id has no repo");
+  assert.equal((await run(["undo"])).out, "✓ Undid done on getsentry/seer#8949\n");
   assert.equal(lastCall().path, "/api/undo");
   assert.equal((await run(["sync"])).out, "sync started\n");
   assert.equal(
