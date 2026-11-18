@@ -2026,7 +2026,7 @@ const SHOTS: Shot[] = [
       await at("#/")(page);
     },
   },
-  // A long title: one line in the table, two at most beside a review, cut at the second's end.
+  // A long title: one line in the table, and one beside a review too, cut short.
   {
     name: "beside-long",
     sizes: ["wide", "xl"],
@@ -2047,7 +2047,7 @@ const SHOTS: Shot[] = [
       if (table?.lines !== 1) failures.push(`beside-long: in the table, the long title reads ${JSON.stringify(table)}`);
       await review("acme/api#4127")(page);
       const cut = await title(".beside");
-      if (cut?.lines !== 2 || !cut.cut) failures.push(`beside-long: beside the review, the long title reads ${JSON.stringify(cut)}`);
+      if (cut?.lines !== 1 || !cut.cut) failures.push(`beside-long: beside the review, the long title reads ${JSON.stringify(cut)}`);
     },
     after: async (page) => {
       await unroute(page);

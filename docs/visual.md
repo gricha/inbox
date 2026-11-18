@@ -186,8 +186,9 @@ The Inbox, Blocked, Merging and the Archive.
 
 - It's the page the review was opened from (a question's is the Inbox), from the same data: its order, its groups'
   headings and its filter.
-- Two lines a row: the title, cut at two lines; then one pencil line. When that line is short of room, a long repo
-  gives way first, then a sorted-away row's why, then the last fact, each to a few letters, never to a bare ellipsis.
+- Two lines a row: the title on one line, cut short (a Merging row's wraps to two at most); then one pencil line.
+  When that line is short of room, a long repo gives way first, then a sorted-away row's why, then the last fact, each
+  to a few letters, never to a bare ellipsis.
   At most one indicator, the call to action before the age so ages end in one column.
 - **The fold.** A chevron on its right divider just under the heads (on their hairline where the list starts with a
   row, as the Inbox and Merging do). Always there, a 28px target across the divider, clear of both heads and of Back.
@@ -333,7 +334,7 @@ running past their edge, "Inbox" wrapping, a control under the traffic lights. B
 | Shot                                                                                      | Checks                                                                                                                                                      |
 | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `beside-review`, `beside-folded`, `beside-inquiry`                                        | the list beside: its width, the fold button's label, state and target, the row it marks                                                                     |
-| `beside-long`                                                                             | a long title: one line in a table, at most two beside a review                                                                                              |
+| `beside-long`                                                                             | a long title: one line in a table and beside a review, cut short                                                                                            |
 | `beside-keeps`                                                                            | the review, its typed comment and the file being read survive a fold, unfold and resize, with no refetch                                                    |
 | `beside-chat`                                                                             | the chat folds the list without touching the saved choice                                                                                                   |
 | `review-checks`                                                                           | checks closed to one line, in words and red; each check in words with a link, what's wrong first                                                            |
