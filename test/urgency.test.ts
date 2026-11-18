@@ -523,3 +523,19 @@ test(
     assert.equal(where(t, "acme/api#1")![0], "urgent", "done ends the move");
   },
 );
+
+test("the decision model's score question is in the owner's words throughout", posix, async (c) => {
+  fakeClaude(c);
+  const api = await fakeDecisions(() => ({ json: { answers: { score: { type: "choice", choice: "5", probabilities: { 5: 1 } } } } }));
+  c.after(api.close);
+  const t = await setup([reviewAsk(1)], {
+    settings: { ...QUIET, "agent.score": true, "agent.decision_key": "sk-or-v1-0000" },
+    desk: { decisions: api.url },
+  });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  await settled(t);
+  const asked = api.calls.find((x) => x.body.questions?.score)?.body.questions?.score?.instructions ?? "";
+  assert.match(asked, /a reply I owe, my PR ready to merge/);
+  assert.doesNotMatch(asked, /\b(they|them|their|theirs)\b/);
+});

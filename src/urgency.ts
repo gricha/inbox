@@ -142,6 +142,14 @@ const SCALE = [
   "- 1 to 3: worth knowing; nothing is needed of them.",
   "- 0: noise.",
 ];
+// SCALE in the owner's words, for the decision model, which is asked as them.
+const SCALE_ME = [
+  "- 9 or 10: a person is blocked on me right now, and it's mine to unblock.",
+  "- 7 or 8: someone waits on me today: asked by name, a reply I owe, my PR ready to merge.",
+  "- 4 to 6: mine to do soon; nobody is blocked yet.",
+  "- 1 to 3: worth knowing; nothing is needed of me.",
+  "- 0: noise.",
+];
 
 type Work = { kind: "ask"; items: { id: string; cs: Criterion[] }[] } | { kind: "score"; items: { id: string; key: string }[] };
 
@@ -600,7 +608,7 @@ export class Urgency {
             type: "choice",
             instructions: [
               `How much does this item need me now, from 0 to 10? Weigh where my rules placed it (its "on my desk" line) and my criteria's answers (a yes counts toward it; "counts 3 times" counts heavily).`,
-              ...SCALE.map((l) => l.replace("them", "me").replace("theirs", "mine").replace("their PR", "my PR")),
+              ...SCALE_ME,
             ].join("\n"),
             criteria: options,
           };
