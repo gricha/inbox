@@ -118,9 +118,9 @@ export class Store {
       -- Each item's log: where it stood on your desk each time that changed, and why (src/placements.ts).
       CREATE TABLE IF NOT EXISTS placements (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, item_id TEXT NOT NULL, data TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS placements_item ON placements (item_id, seq);
-      -- The desk-run coordinator's log, no longer written; the events.agent migration below still reads it.
       -- Your other devices paired over Tailscale (src/remote.ts): a token's sha256, never the token.
       CREATE TABLE IF NOT EXISTS devices (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, hash TEXT NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT);
+      -- The desk-run coordinator's log, no longer written; the events.agent migration below still reads it.
       CREATE TABLE IF NOT EXISTS coordinator_log (seq INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, run INTEGER NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL, item_id TEXT, action TEXT, bucket TEXT, undo_seq INTEGER);
     `);
     const columns = (table: string) =>

@@ -79,7 +79,6 @@ export function standings(it: Item, me: string): Standings {
   return { line: line.charAt(0).toUpperCase() + line.slice(1), changes: changes_by.length > 0, list };
 }
 
-// Who GitHub's re-request would ask again: people other than its author who reviewed it, not bots, not asked now.
 // Everyone an item involves, for the filter's involves:: its author, who it was opened for, assignees, who was asked, who
 // reviewed, commented or answered a thread; bots aside, first seen first.
 export function peopleOf(it: Item): string[] {
@@ -99,6 +98,7 @@ export function peopleOf(it: Item): string[] {
   return [...out];
 }
 
+// Who GitHub's re-request would ask again: people other than its author who reviewed it, not bots, not asked now.
 export function rerequestable(it: Item): string[] {
   const asked = new Set(it.review_requests.map((r) => lc(r.reviewer)));
   const seen = new Map<string, string>();

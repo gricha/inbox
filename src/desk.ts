@@ -299,7 +299,6 @@ interface Acted {
   seq: number;
 }
 
-// What a sort of the item holds for: the item as it is (sortKey), with its pin.
 // An automation's sort and a criterion's yes, as the judge weighs them beside the rules (docs/api.md → The judge).
 const SORT_WEIGHT = 8;
 const sortSignal = (s: Sorted): JudgeSignal => ({
@@ -315,6 +314,7 @@ const criterionSignal = (c: Criterion): JudgeSignal => ({
   weight: c.weight ?? 1,
   key: signalKey(["criterion", c.id]),
 });
+// What a sort of the item holds for: the item as it is (sortKey), with its pin.
 const sortKeyOf = (e: Entry, pin?: string) => sortKey(e.item, e.analysis.activity_at, pin, e.analysis.signals.pr.blocker);
 // No automation sorts or clears a review asked of you by name: that's the judge's to weigh, and yours.
 const ASKED_BY_NAME = "it's a review asked of you by name";
@@ -614,9 +614,9 @@ type RefError = Unavailable | NotFound | AmbiguousRef;
 type ActError = RefError | Forbidden | Conflict | BadRequest;
 // What a GitHub write the desk sends fails with, besides its own checks: the same write on its way, or GitHub refused it.
 type WriteError = ActError | Stale | Busy | Upstream;
-// What GitHub said, passed on after the desk's words. Its own error is the cause, which nothing reported: Sentry sees it.
 // How long GitHub's answer to who you can ask to review is kept.
 const REVIEWERS_KEEP_MS = 15 * 60_000;
+// What GitHub said, passed on after the desk's words. Its own error is the cause, which nothing reported: Sentry sees it.
 const upstream =
   (said: string) =>
   (err: GitHubError): Upstream =>
@@ -2837,7 +2837,6 @@ export class Desk {
     return !!this.aiPaused && Date.now() < this.aiPaused.until;
   }
 
-  // Someone else's open PR with no AI review of its head yet, nor a job for it: one that failed retries on its own, or waits for you.
   // An open PR Claude reviews ahead of time: someone else's, or yours, a draft too, while it's on your desk, not handed off.
   reviewable(e: Entry): boolean {
     const it = e.item;
@@ -2887,6 +2886,7 @@ export class Desk {
     );
   }
 
+  // A reviewable PR with no AI review of its head yet, nor a job for it: one that failed retries on its own, or waits for you.
   wantsAi(e: Entry, snap: Snapshot): boolean {
     const it = e.item;
     if (!this.reviewable(e) || this.generating.has(it.id)) return false;
@@ -4615,7 +4615,6 @@ export class Desk {
     });
   }
 
-  // GET /api/reviewers/:id?q=: who you can ask to review your PR, GitHub's suggestions first; what GitHub fails with is passed on.
   // GET /api/file/:id?path=: a file of the PR as its head commit has it, for its review's "more lines"; null when GitHub
   // won't give it (binary, too big, gone). Kept by commit, so a file is read once.
   private blobs = new Map<string, string | null>();
@@ -4633,6 +4632,7 @@ export class Desk {
     });
   }
 
+  // GET /api/reviewers/:id?q=: who you can ask to review your PR, GitHub's suggestions first; what GitHub fails with is passed on.
   reviewers(ref: string, q: string): Effect.Effect<Reviewer[], RefError | BadRequest | Conflict | Upstream> {
     return Effect.gen({ self: this }, function* () {
       const e = yield* this.pr(ref);

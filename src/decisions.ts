@@ -1,6 +1,6 @@
 // OpenRouter's Decisions API (alpha): typed questions about a `state`, answered by a decision model (TypeSafe's Jev) with
-// probabilities and no prose. Its one caller is an automation's question, and only once you've set its key in Settings:
-// with none, nothing here runs. https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request
+// probabilities and no prose. Its callers are an automation's question and the Inbox's criteria and scores, and only once
+// you've set its key in Settings: with none, nothing here runs. https://openrouter.ai/docs/api/api-reference/alphadecisions/submit-a-decisions-request
 import { Effect, Result } from "effect";
 import { DecisionModelDown, DecisionModelError } from "./errors.ts";
 import { field, fromEntries, isRecord, keysOf, str } from "./narrow.ts";
