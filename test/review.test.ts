@@ -465,7 +465,7 @@ while :; do sleep 0.1; done`);
   process.env.DESK_CODEX = f.bin;
   try {
     const e = await failure(codexRun("hi", { dir, timeout: 1000 }));
-    assert.deepEqual([e._tag, e.message], ["CommandTimeout", "no answer in 0 minutes, so it was stopped"]);
+    assert.deepEqual([e._tag, e.message], ["CommandTimeout", "no answer in 1 second, so it was stopped"]);
   } finally {
     delete process.env.DESK_CODEX;
   }

@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { Cause, Effect, Exit } from "effect";
 import { Desk } from "../src/desk.ts";
+import { CommandTimeout } from "../src/errors.ts";
 import { generateReview, runCommand } from "../src/review.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
 import { failure, run } from "./helpers/run.ts";
@@ -110,7 +111,7 @@ test("closing the desk stops the judge and an AI review, what they started, and 
 test("a call that times out takes what it started with it", posix, async (c) => {
   const fake = stuckClaude(c);
   const err = await failure(runCommand({ file: fake.bin, args: [], shell: false }, { timeout: 4000, missing: "missing" }));
-  assert.deepEqual([err._tag, err.message], ["CommandTimeout", "no answer in 0 minutes, so it was stopped"]);
+  assert.deepEqual([err._tag, err.message], ["CommandTimeout", "no answer in 4 seconds, so it was stopped"]);
   const pids = fake.pids();
   assert.equal(pids.length, 2);
   await until(() => !pids.some(running));
@@ -128,4 +129,16 @@ test("an interrupted call takes what it started with it, and ends only once it h
   assert.ok(Exit.isFailure(e) && Cause.hasInterruptsOnly(e.cause), "interrupted: nothing to store or report");
   assert.ok(!alive(pids[0]!), "the claude itself has exited when the call ends");
   await until(() => !pids.some(running));
+});
+
+test("a timeout says how long it waited, in seconds under a minute", () => {
+  const words = (ms: number) => new CommandTimeout({ command: "tailscale", timeoutMs: ms }).message;
+  assert.deepEqual(
+    [words(15_000), words(60_000), words(65 * 60_000)],
+    [
+      "no answer in 15 seconds, so it was stopped",
+      "no answer in 1 minute, so it was stopped",
+      "no answer in 65 minutes, so it was stopped",
+    ],
+  );
 });

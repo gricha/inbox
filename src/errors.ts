@@ -215,7 +215,9 @@ export class CommandTimeout extends Data.TaggedError("CommandTimeout")<{
 }> {
   override get message(): string {
     if (this.summary) return this.summary;
-    return `no answer in ${Math.round(this.timeoutMs / 60_000)} minutes, so it was stopped`;
+    const s = Math.round(this.timeoutMs / 1000);
+    const [n, unit] = s < 60 ? [s, "second"] : [Math.round(s / 60), "minute"];
+    return `no answer in ${n} ${unit}${n === 1 ? "" : "s"}, so it was stopped`;
   }
 }
 
