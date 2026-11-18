@@ -2,14 +2,13 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { cls } from "../format.ts";
 import { Splitter, type Width } from "./Splitter.tsx";
 
-// The list a review or a question was opened from, beside it: its name, its filter and its rows, scrolling on their own; or,
+// The list a review or a question was opened from, beside it: its name and its rows, scrolling on their own; or,
 // folded, a thin rail with the same button. App keeps the review where it is in the tree, so this coming and going never
 // redraws it.
 export function Beside({
   name,
   count,
   open,
-  search,
   selected,
   onFold,
   children,
@@ -17,7 +16,6 @@ export function Beside({
   name: string;
   count: number | null; // the Inbox's, as the sidebar has it
   open: boolean;
-  search: ReactNode; // its Filter; Merging has none
   selected: string | null; // the open item's row
   onFold: () => void;
   children: ReactNode;
@@ -50,7 +48,6 @@ export function Beside({
           <h2 className="beside-name">
             {name} {!!count && <span className="count">{count}</span>}
           </h2>
-          {search}
         </div>
       )}
       <button

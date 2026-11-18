@@ -28,7 +28,6 @@ export interface RowMenuProps {
   x: number;
   y: number;
   snooze?: boolean; // opened by an issue's Snooze: Snooze open, its first time focused
-  me: string;
   run: (c: Card, key: string) => void;
   act: (c: Card, action: Action, until?: string) => void;
   github: (c: Card, a: GitHubAction) => void;

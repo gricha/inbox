@@ -5,7 +5,7 @@ import { Avatar } from "./Avatar.tsx";
 import { Detail } from "./Detail.tsx";
 import { AgentIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 
-// Everything a row needs from the app; `run` takes an action id (enter close o e d m b p why comment a t).
+// Everything a row needs from the app; `run` takes an action id, as App's run() reads it.
 export interface RowCtx {
   now: number;
   me: string; // your login, so events can say "you"

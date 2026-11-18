@@ -92,8 +92,6 @@ const VERB: Partial<Record<Action, string>> = {
   done: "Done",
   mute: "Muted",
   unmute: "Unmuted",
-  pin: "Pinned",
-  unpin: "Unpinned",
   restore: "Restored",
   urgent: "Moved to Urgent",
   standard: "Moved to Standard",
@@ -1441,8 +1439,7 @@ export function App() {
   }
 
   function run(c: Card, k: string) {
-    if (k === "enter") openCard(c);
-    else if (k === "link") runUi(copyLink(c));
+    if (k === "link") runUi(copyLink(c));
     else if (k === "github-link") runUi(copyLink(c, true));
     else if (k === "log") go({ name: "log", id: c.id });
     else if (k === "close") setExpanded(null);
@@ -1462,7 +1459,6 @@ export function App() {
       runUi(seen(c));
     } else if (k === "e" || k === "d") runUi(act(c, c.status === "active" ? "done" : "restore"));
     else if (k === "m") runUi(act(c, c.status === "muted" ? "unmute" : "mute"));
-    else if (k === "p") runUi(act(c, c.pinned ? "unpin" : "pin"));
     else if (k === "comment") {
       // An issue opened in place: Comment opens the comment bar.
       setAsking(null);
@@ -1815,7 +1811,6 @@ export function App() {
           name={PAGE_NAME[listPage]}
           count={listPage === "queue" ? inbox : null}
           open={side === "open"}
-          search={null}
           selected={openSel}
           onFold={foldList}
         >
@@ -2064,7 +2059,6 @@ export function App() {
           x={menuAt.x}
           y={menuAt.y}
           {...(menuAt.snooze !== undefined && { snooze: menuAt.snooze })}
-          me={me}
           run={run}
           act={(c, a, until) => {
             runUi(act(c, a, until));

@@ -1097,7 +1097,6 @@ export function Review({
               picked={picked}
               setPicked={setPicked}
               ready={readying}
-              unasked={card.cta === "reviewers"}
             />
           )}
           {writing && (
@@ -1337,7 +1336,6 @@ export function Review({
                     picked={picked}
                     setPicked={setPicked}
                     ready={false}
-                    unasked={false}
                     compact
                     onPick={(r) => {
                       askReviewer(
