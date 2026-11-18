@@ -3315,7 +3315,7 @@ html::-webkit-scrollbar-corner,
   font-weight: 500;
 }
 
-/* Approve is green: the one call to action that says yes. */
+/* A green yes outside a review (the first run's Use, Pair a device); in a review the call to action is the accent. */
 .act.primary.go {
   border-color: var(--go);
   background: var(--go);

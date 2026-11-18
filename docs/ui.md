@@ -144,7 +144,7 @@ The desk picks it (`cta` on the card). A tinted button before the age, filled un
 - **Ready for review** on your own open draft, even with red CI (your agent fixes CI once it's ready). Marks it ready on GitHub at once and it leaves your desk.
 - **Reply** on your PR whose only action is answering someone. Opens its review with the first reply box focused.
 - **Add reviewers** on your ready PR nobody's asked to review. Opens its review with the Reviewers box focused.
-- **Hand off for merge** on your own PR that's approved, green and mergeable. It goes to Merging in one press, where your agent gets it merged. To merge it yourself now, its review's More has **Merge**.
+- **Hand off for merge** on your own PR that's approved, green and mergeable. It goes to Merging in one press, where your agent gets it merged. To merge it yourself now, its review's More has **Merge now**.
 
 Ready for review with nobody asked isn't done: the PR comes back ready, with Add reviewers as its call to action, and the toast ends "Nobody's asked to review it yet". Ten minutes later it tops your desk.
 
@@ -264,6 +264,8 @@ Esc goes back to the page it was opened from. A review has no page head: its own
 
 ### The review's sidebar
 
+Beside the diff while the page's column is 680px or wider (240px, 260px from 880px, 280px from 1000px), with no toggle; its left edge drags to resize it, and the width is kept per device. It scrolls with the page, and the steps or files stick under the review's bar. In a narrower column it lies over the diff and starts folded: one icon button at the review's top right shows and hides it ("Show checks and files", "Hide the stack, checks and files"), and it scrolls in itself. While the chat is open the chat takes its place; the same button brings the sidebar back and closes the chat.
+
 Sections, each open: its name, where it stands in one line that reads first (red when a required check fails, amber for changes requested), then its rows.
 
 - **Status** first: a row each, what it says on the left and its measure on the right; a click shows what's behind it.
@@ -271,7 +273,7 @@ Sections, each open: its name, where it stands in one line that reads first (red
   - **Checks**: "Checks passing", "Checks running", "Some checks failing" (an optional one failing or one cancelled) or "Checks failing" (a required one), and on the right how many pass of all of them ("19/22"), the first number in its colour. It opens straight to every check, with no line over them, a row each with a dot: red failing, red hollow failing but not required, yellow running, green passing, grey skipped. Shards of one check (`backend test (0)`, `(1)`, `[2/3]`, `#4`) are one row with a count and their worst dot; a click lists them. What's wrong comes first. `checkGroups()` in `web/src/view.ts`.
   - **Changes**: "Small changes" (up to 100 lines in up to 5 files), "Moderate changes" (up to 600 in up to 20) or "Lots of changes", with its + and − on the right; it opens to bullets: its files, lines added and lines removed.
 
-- **Stack** only while the PR is stacked: another open PR in its stack.
+- **Stack** only while the PR is stacked: another open PR in its stack. "Stack on main", its open PRs bottom first as a timeline like the guide's, each with only what's news (a red cross for CI failing, "changes" in amber, a green tick for approved); the PR on screen has the accent's node and its title in ink. A long stack shows four around this one and "16 more". A click opens that PR.
 - **Reviewers**: everyone, with their picture and where they stand; no line over them ("Nobody's asked" when there's no one). On your open PR each person has one icon after their state: × removes one asked who hasn't reviewed yet, ↻ asks one who reviewed to review again (`POST /api/review/:id/reviewer`, the REST unrequest or rerequest for that login alone); their verdict then reads "approved · asked again" (or "changes requested · asked again") and the ↻ goes until they review. A team's ask has none: it's the team's. On your open PR, **+ Add reviewers** (also in More) opens a box right there, under who's asked: a pick is the ask (GitHub asks them at once, `keep` on `POST /api/review/:id/reviewers`, so the PR stays on your desk), and **Done** closes it. Each change shows at once (removed off the list, "· asked again", or added as "asked") and the review is read again every 3 seconds until its review requests have it; a refusal puts the list back.
 - Sections are parted by a hairline.
 - **Merge**: a conflict. **Depends**: what it's blocked by or blocks, when it isn't in a stack (a stack has its own section).
@@ -359,10 +361,10 @@ Neighbouring hunks of a file at one level read as one. Without a ranking (none y
 
 The actions sit at the right of the review's bar, the strip stuck across its top with the three views at its left (see [The diff](#the-diff)): the call to action, 30px tall, then **More**, a narrow button of three dots, one over the other. Their corners are tighter (6px). The call to action is filled with the theme's accent whatever it does, Approve and Hand off for merge too, and its states are mixed from the theme: under the pointer the fill leans to the ink, pressed it leans further, and focus rings it in the accent.
 
-- **Approve**: only on someone else's open PR. Sends at once; the PR leaves your desk. Disabled, with the reason in its tooltip, if you already approved this commit. It approves the commit on screen; if the desk has seen a newer push, it refuses.
+- **Approve**: only on someone else's open PR. Sends at once; the PR leaves your desk. It approves the commit on screen; if the desk has seen a newer push, it refuses. Once you've approved this commit, "✓ You approved" stands in its place. Where you can't approve, it isn't filled and a press says why.
 - Or the PR's own call to action: **Ready for review** or **Ask reviewers**.
-- **Hand off for merge** on your own PR, only once it's approved or its repo needs no review. Not on a draft or a ready PR nobody's asked to review (unless its repo needs no review). One already in Merging shows **Back to desk** instead, last.
-- **More**: **Done** (or **Back on the desk**), **Copy link**, then under "On GitHub" the writes it allows: **Close**, **Request changes** (opens a box for its body).
+- **Hand off for merge** on your own PR once it's approved or its repo needs no review (not on a draft, nor on a ready PR nobody's asked to review unless its repo needs no review), and on anyone's approved open PR, which your agent only merges. One already in Merging shows **Back to desk** instead.
+- **More**: **Done** (or **Back on the desk**), **Add reviewers** on your open PR once someone's asked, **Show log**, **Copy link**, then under "On GitHub" the writes it allows: on someone else's PR **Request changes** (opens a box for its body), **Remove me as a reviewer** when you were asked by name, and **Merge now**; on yours **Close**, **Re-request review** and **Merge now**. Merge now shows only once it can merge.
 - **Your comment**: a card at the foot of the Conversation tab, as a reply's row is: your GitHub picture, "Comment on api#4127…", and the round send button. It grows as you write. ⌘↵ sends it and the PR leaves your desk until someone answers. Esc leaves it with your words kept. With words in it, the buttons take you to the tab and the box instead of acting. Unsent words are kept per PR in this window.
 
 Every GitHub write is listed in [api.md → Security model](api.md#security-model).
@@ -378,18 +380,6 @@ A line under the AI review on your draft (and on your ready PR nobody's asked), 
 - Ready for review asks them right after marking it ready. With nobody picked it only marks it ready and the PR stays for Add reviewers.
 
 On your ready PR nobody's asked to review, the same line opens with the box focused, and the filled button is **Ask reviewers**.
-
-### The review's sidebar
-
-Beside the diff it's always there (240px wide in a column under 880px), with no toggle, and it scrolls with the page: its parts go by, and **Review** sticks under the review's bar (scrolling in itself when the guide is longer than the window). In a page column under 680px it lies over the diff and starts folded; there one icon button at the review's top right shows and hides it ("Show checks and files", "Hide the stack, checks and files"), and it scrolls in itself. While the chat is open the chat takes its place; the same button brings the sidebar back and closes the chat.
-
-Top to bottom:
-
-- **The stack**, when the PR is in one: "Stack on main", its open PRs bottom first as a timeline like the guide's (a node each on one line), each with only what's news (a red cross for CI failing, "changes" in amber, a green tick for approved). The PR on screen has the accent's node and its title in ink, no fill or ring. A long stack shows four and "16 more". A click opens that PR.
-- **The checks**, when any ran on its head: one line ("CI passing · 14 checks", "2 failing of 14 checks", "3 running of 14 checks"), red while a required check fails. A click opens every check, worst first, each linking to its page. A failing check the base branch doesn't require reads "failing, not required". Fetched when the review opens; "Couldn't load the checks: …" if GitHub won't give them.
-- **The files**, in Code changes, in the PR's order with a dot when they have notes and a tick once you've viewed them ("3 viewed" by the count). A click scrolls there. The one you're reading is marked.
-- **The reviewers**, always: one line ("Approved by marco · waiting on sam and @backend", "Changes requested by kofi", "Waiting on you", "Nobody's asked"), amber on changes requested. A click lists each person or team, who holds it first. Bots and the author are left out.
-- **The merge**, only when something's in the way: "Merge conflict with main", in amber. Only asked for your own PRs.
 
 ## Blocked
 
@@ -657,7 +647,7 @@ In order:
 
 ## An item's log
 
-For tuning your rules: **Show log** on a row's right-click menu opens it (`#/log/<id>`, `ItemLog.tsx`); Esc goes back. One line per event, newest first, in columns: when, what kind (`new`, `moved`, `score`, `judge`, `rule`, `criteria`, `you moved`, `done`, `snoozed`, `muted`, `resolved`, or `github` for what happened on GitHub), then where it went (section and score), the rule that placed it (a link that opens it in Settings → GitHub → Searches and rules; its condition in the tooltip), Claude's answer, and why.
+For tuning your rules: **Show log** on a row's right-click menu, or More in a review, opens it (`#/log/<id>`, `ItemLog.tsx`); Esc goes back. One line per event, newest first, in columns: when, what kind (`new`, `moved`, `score`, `judge`, `rule`, `criteria`, `you moved`, `done`, `snoozed`, `muted`, `resolved`, or `github` for what happened on GitHub), then where it went (section and score), the rule that placed it (a link that opens it in Settings → GitHub → Searches and rules; its condition in the tooltip), Claude's answer, and why.
 
 The desk writes a line each time where an item stands changes, as it computes the Inbox (`Placements` in `src/placements.ts`): its section, a score that moved a point or more, the rule, Claude's answer, the criteria, your move. Logging started with v0.2.48: older items begin then.
 
