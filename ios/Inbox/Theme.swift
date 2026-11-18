@@ -15,12 +15,10 @@ enum Theme {
   static let rule = Color(light: 0xdcd8e5, dark: 0x2a2437)
   static let ruleStrong = Color(light: 0xc8c3d4, dark: 0x383048)
   static let red = Color(light: 0xb42318, dark: 0xffb4ab)
-  static let redWash = Color(light: 0xfcebe9, dark: 0x3b2421)
   // A line of a diff that was added or removed: green or red let into the sheet, faint enough to read code on.
   static let addWash = Color(light: 0xe4eeeb, dark: 0x151e1d)
   static let delWash = Color(light: 0xf6e8ea, dark: 0x2a141e)
   static let amber = Color(light: 0x8a4b08, dark: 0xebc076)
-  static let amberWash = Color(light: 0xfaefdf, dark: 0x33291b)
   static let green = Color(light: 0x176847, dark: 0x8dceaf)
   static let onGo = Color(light: 0xffffff, dark: 0x0e2419)  // on a button filled green (--go): Approve, Hand off for merge
   static let accent = Color(light: 0x6a3dbd, dark: 0xc4a7f5)

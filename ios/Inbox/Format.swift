@@ -156,18 +156,6 @@ enum Words {
     return s.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 
-  // What someone said, in one line: its first line with words in it, cut at 160.
-  static func firstLine(_ said: String?) -> String {
-    let line = saidText(said).split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
-    return line.count > 160 ? String(line.prefix(159)) + "…" : line
-  }
-
-  // A conversation in one line: your agent's gist of it, else the first line of its last comment.
-  static func gist(_ c: Conversation) -> String {
-    if let gist = c.take?.gist, !gist.isEmpty { return gist }
-    return firstLine(c.comments.last?.body)
-  }
-
   // Your agent's take, split at its first ": " into the call (drawn bold) and why; without one it's all plain.
   static func takeSplit(_ take: String) -> (call: String?, rest: String) {
     guard let at = take.range(of: ": ") else { return (nil, take) }
@@ -178,11 +166,6 @@ enum Words {
   static func replyTo(_ lead: String, _ c: Conversation, me: String) -> String {
     let who = c.comments.last { !($0.author ?? "").isEmpty && $0.author?.lowercased() != me.lowercased() }?.author
     return who.map { "\(lead) to \($0)" } ?? lead
-  }
-
-  // The fold over a conversation's own words: "What azulus wrote", or "What was said" once there are several comments.
-  static func saidLabel(_ c: Conversation) -> String {
-    c.comments.count > 1 ? "What was said" : "What \(c.comments.last?.author ?? "they") wrote"
   }
 
   static let sessionKind: [String: String] = ["cli": "CLI", "background": "Background", "desktop": "Desktop", "codex": "Codex"]
@@ -250,7 +233,6 @@ enum Words {
   // MARK: The AI review's words (src/sections.ts, AiSection in web/src/components/Review.tsx)
 
   static let fit: [String: String] = ["partial": "Not quite what the description says", "differs": "Not what the description says"]
-  static let jobAttempts = 3  // a job's tries before it's failed (JOB_ATTEMPTS)
 
   // A summary's first sentence and what's left, never cut inside `code`; no lead when it opens with a list or code.
   // "e.g." and the like don't end a sentence. src/prose.ts's lead(), on plain text.
@@ -280,7 +262,7 @@ enum Words {
   // promise the notes soon.
   static func reviewing(agent: String, job: Job?, now: Date) -> String {
     let run = job?.state == "running" ? job : nil
-    let tries = (run?.attempts ?? 0) > 1 ? ", try \(run?.attempts ?? 0) of \(jobAttempts)" : ""
+    let tries = (run?.attempts ?? 0) > 1 ? ", try \(run?.attempts ?? 0) of \(Work.tries)" : ""
     var so = ""
     if let started = date(run?.startedAt), now.timeIntervalSince(started) >= 120 { so = ", \(plural(minutes(run?.startedAt, now: now), "minute")) so far" }
     return so.isEmpty && tries.isEmpty
