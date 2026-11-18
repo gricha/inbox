@@ -8366,6 +8366,11 @@ p.rv-next {
   font-weight: 600;
 }
 
+/* In a step, on the step's words. */
+.rv-step .dg-head {
+  padding: 0 12px;
+}
+
 .dg-sketch {
   min-height: 40px;
 }
