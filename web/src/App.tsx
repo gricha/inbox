@@ -1543,7 +1543,7 @@ export function App() {
       return;
     }
     if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
-    if (route.name === "review" || route.name === "inquiry") return; // they read their own Esc
+    if (route.name === "review" || route.name === "inquiry" || route.name === "log") return; // they read their own Esc
     const onList = LIST_PAGES.has(route.name) || route.name === "inflight"; // where the search reads a list
     const part = route.name === "settings" ? settingsBack(route.section) : null;
     if (onList && expanded) setExpanded(null);

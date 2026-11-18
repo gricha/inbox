@@ -5626,6 +5626,13 @@ const SHOTS: Shot[] = [
       if (JSON.stringify(kinds) !== JSON.stringify(["moved", "score", "new"]))
         failures.push(`item-log: its moves read ${JSON.stringify(kinds)}`);
     },
+    // Esc goes back to the Inbox it was opened from.
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(400);
+      const hash = await page.evaluate<string>("location.hash");
+      if (hash !== "#/") failures.push(`item-log: Esc went to ${JSON.stringify(hash)}, not back to the Inbox`);
+    },
   },
   {
     // Right-click a note: what every row shares, Done, its moves and Snooze, then Change note and Copy text. Snooze's time is the
