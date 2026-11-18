@@ -1098,7 +1098,7 @@ A rule's `weight` is 0 to 10, 5 when unset (`RULE_WEIGHT`): 9 or 10 is your firm
 | 6      | a CODEOWNERS ping (FYI); new replies; new commits after you asked for changes; your drafts; your PR opened by a bot                                                     |
 | 5      | a team ask (FYI), or one in your area nobody took in a day; your repo; your PR quiet, or needing a closed PR                                                            |
 | 4      | new commits since your review; a bot added you; CI red or new activity on your PR; unresolved threads; mentions                                                         |
-| 3, 2   | a close collaborator; a CODEOWNERS or team ask in your area; your own issue; a collaborator's new PR                                                                    |
+| 3, 2   | a CODEOWNERS or team ask in your area; your own issue; a collaborator's new PR                                                                                          |
 
 A review asked of you by name is a heavy default, not a forced push: the judge can still make the call, and so can the scorer ([Urgency](#urgency)).
 
@@ -1583,7 +1583,7 @@ They sit beside `pr.waits`, `pr.waiting_on` and `me.owes_reply`. Examples: a tea
 - `pr.asked_weekday_hours` falls back to the ready time for a request made while a draft or older than the 20 request events the desk reads. It's -1 when nobody is asked by name (a team's request, a bot's and your own don't count) and whenever `pr.ready_weekday_hours` is.
 - GitHub's built-in automations Pick a reviewer and Follow up on silent reviewers read them ([Automations](#automations)).
 
-**The first-run Blocked rules** are `final`, and only on My PRs: Blocked is for your own PRs. Boards of other people's PRs (PRs to review, Mentions, Close collaborators) have no rule for it, so a blocked PR there goes where their other rules put it (a review asked of you by name is in Now, its stage "blocked"). On My PRs:
+**The first-run Blocked rules** are `final`, and only on My PRs: Blocked is for your own PRs. Boards of other people's PRs (PRs to review, Mentions) have no rule for it, so a blocked PR there goes where their other rules put it (a review asked of you by name is in Now, its stage "blocked"). On My PRs:
 
 1. `pr.blocked && pr.review != 'changes_requested' && !me.owes_reply` goes first, so a change request or a reply you owe stays yours.
 2. A root that blocks others and owes a reply goes to Today ("blocks getsentry#22982 and getsentry#22983; it waits on your reply to markstory, then …"), as does one whose need closed without merging ("needs sentry#1, closed without merging").

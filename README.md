@@ -115,7 +115,7 @@ rules = [
 - **Buckets**: `now`, `today`, `blocked`, `later`, `fyi`, `hide`. Only rules fill `blocked`. Hidden items are in the Archive under "Hidden by rules".
 - `{close_authors}` in a query expands to the people you review most.
 
-The first run writes a starting config: one space for the org with most of your open items, plus Personal. Its boards name GitHub's built-in rule sets (`builtin = "review"`, `"mine"`, `"mentions"`, `"issues"`, `"collaborators"`) instead of copying them, so a release that improves them reaches you. Your file holds only your changes:
+The first run writes a starting config: one space for the org with most of your open items, plus Personal. Its boards name GitHub's built-in rule sets (`builtin = "review"`, `"mine"`, `"mentions"`, `"issues"`) instead of copying them, so a release that improves them reaches you. Your file holds only your changes:
 
 ```toml
 builtin = "review"
