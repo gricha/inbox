@@ -117,7 +117,7 @@ Tokens live in `web/src/styles.css`:
 
 No top bar: the sidebar is the window's only global chrome, and each page has its own head.
 
-The chrome (the sidebar, a page's head and the list's head beside it) follows the theme: its own sidebar colour (`--side`, which `--chrome` is), light or dark. Its words and icons are the theme's own ink. The guided review's marker and the files' are the theme's accent (`--orb`).
+The chrome (the sidebar, a page's head and the list's head beside it) follows the theme: its own sidebar colour (`--side`, which `--chrome` is), light or dark. Its words and icons are the theme's own ink. Review's step marker and the files' are the theme's accent (`--orb`).
 
 ```
 ┌──────────┬──────────────┬────────────────────────────────┬────────────┐
