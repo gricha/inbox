@@ -79,7 +79,7 @@ final class PatchLinesTests: XCTestCase {
     XCTAssertEqual(Diff.header("@@ -10 +10,2 @@ fn").map { [$0.old, $0.oldCount, $0.new, $0.newCount] }, [10, 1, 10, 2], "a count left out is 1")
   }
 
-  func testCode changesOrderIsEachFileOnceInThePRsOrder() throws {
+  func testCodeChangesOrderIsEachFileOnceInThePRsOrder() throws {
     let r = try review()
     let (list, rest) = Diff.traditional(try XCTUnwrap(r.order))
     XCTAssertEqual(rest, list.count, "nothing folded in this one")
