@@ -1075,6 +1075,11 @@ html::-webkit-scrollbar-corner,
   font-weight: 600;
 }
 
+/* A Settings part's rows are in a sheet: its name on their labels' edge, as .s-part > .group-head. */
+.col:has(.settings:not([hidden])) .head-name {
+  padding-left: 17px;
+}
+
 .wordmark {
   display: inline-flex;
   flex: none;
