@@ -1665,7 +1665,7 @@ export function App() {
   const offline = down?._tag === "DeskUnreachable";
   const broken = down?._tag === "DeskConfigBroken" ? down : null;
   // What's wrong with the system, from what the desk reports: the bubbles at the window's edge.
-  const notices = noticesOf({
+  const conditions = {
     offline,
     source: sourceDown,
     starting: down?._tag === "DeskStarting" ? down.message : null,
@@ -1674,10 +1674,12 @@ export function App() {
     paused: view?.paused ?? null,
     page: routeHash(route),
     agent: aiName(),
-  });
+  };
+  const notices = noticesOf(conditions);
   // Only once the desk has answered and while it does: what it said isn't gone because it's loading or down for a moment.
   const deskSaid = !!overview && (!!view || !!broken) && (!down || !!broken);
-  const settled = deskSaid ? forget(notices, dismissed) : dismissed;
+  // Against every notice, the page's own too: opening the page that says it doesn't resolve it.
+  const settled = deskSaid ? forget(noticesOf({ ...conditions, page: "" }), dismissed) : dismissed;
   useEffect(() => {
     if (settled === dismissed) return;
     setDismissed(settled);

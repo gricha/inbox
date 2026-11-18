@@ -1501,6 +1501,21 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Dismissed, it stays gone after a visit to Settings → Agent, the page that says it in its place.
+    name: "queue-ai-paused-dismissed",
+    writes: true,
+    go: async (page) => {
+      await at("#/")(page);
+      await pauseAi(true)(page);
+      await page.locator(".bubble-x").click();
+      await page.locator(".bubble").waitFor({ state: "detached", timeout: 2000 });
+      await at("#/settings/agent")(page);
+      await at("#/")(page);
+      if (await page.locator(".bubble").count()) failures.push("queue-ai-paused-dismissed: back from Settings → Agent, the bubble is back");
+    },
+    after: pauseAi(false),
+  },
+  {
     // Three at once, the order they matter: Claude paused, the sync failing, then an action that failed, which fades on its
     // own. The list's last rows scroll clear of them.
     name: "bubbles-stack",
