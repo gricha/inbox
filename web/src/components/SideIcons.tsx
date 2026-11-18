@@ -1,4 +1,4 @@
-// The sidebar's icons (the owner's set, 20px), drawn in currentColor: the sidebar makes them white.
+// The sidebar's icons (the owner's set, 20px), drawn in currentColor: the sidebar makes them its ink.
 const LINE = {
   fill: "none",
   stroke: "currentColor",

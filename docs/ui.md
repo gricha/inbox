@@ -56,7 +56,7 @@ Widths, breakpoints and spacing are in [visual.md → The layout](visual.md#the-
 
 The window's only global chrome. There's no top bar.
 
-- **Brand row**: the mark and "Inbox". In the macOS app it holds the traffic lights and is the window's drag handle.
+- **Brand row**: the word "Inbox", no mark. In the macOS app the traffic lights take its place, and it's the window's drag handle.
 - **Pages**: Inbox (with its count), Blocked, Merging and Archive.
   - Inbox counts Urgent, Standard, agents' questions and sessions that need you.
   - Blocked, Merging and Archive have no count. Merging's tooltip says how many are merging.
@@ -64,15 +64,15 @@ The window's only global chrome. There's no top bar.
   - Clicking Inbox while on it scrolls to the top.
 - **Footer**, bottom up: Settings, then [Ask your agent](#asking-your-agent), then the [update line](#the-update-line) when there's a newer Inbox.
 - **In Settings**, the pages give way to Settings' parts, under **‹ Inbox** ([Settings](#settings)).
-- **Narrow windows**: the sidebar compacts (the mark alone, "Ask" for Ask your agent), then becomes one row across the top that scrolls sideways inside itself.
+- **Narrow windows**: the sidebar compacts (148px, the brand row's word gone, "Ask" for Ask your agent), then becomes one row across the top that scrolls sideways inside itself.
 
 ### A page's head
 
 Sticky, and the desktop app's drag handle. It holds only the page's own controls:
 
 - Inbox, Blocked, Archive: the page's name, the filter by person and New note; Merging: its name and the filter by person. The search is at the top of the sidebar, on every page but Settings (it searches the lists, and Settings has none): its words match a row's title, repo or author, and one query searches the Inbox, Blocked, Merging and the Archive, and the list beside a review. Esc in it clears its words. The filter by person is an icon button; a count on it says how many people it picks. It opens a popover with a box to find someone, then **Author** (who opened it; a bot's PR counts as the person it was opened for) and **Involves** (anyone on it: its author, assignees, who was asked, who reviewed, commented or answered a thread), you first in each. A click picks or unpicks a person (a tick marks who's picked); **Clear** unpicks them all. Esc or a click outside closes it. The picks and the search's words apply together.
-- Merging and a Settings part: the page's name.
-- A review has its own bar in the head's place ([The diff](#the-diff)). A question, a Settings view: the way back ("‹ Inbox", "‹ Blocked", "‹ Merging", "‹ Archive", "‹ GitHub", "‹ Agent", "‹ Automations"). Its tooltip names Esc, and for a review or question, ⌘[ and ⌘].
+- A Settings part: its name.
+- A review has its own bar in the head's place ([The diff](#the-diff)). A question, a review document, a Settings view: the way back ("‹ Inbox", "‹ Blocked", "‹ Merging", "‹ Archive", "‹ GitHub", "‹ Automations"). Its tooltip names Esc, and on a question or document, ⌘[ and ⌘].
 
 ### The list beside a review
 

@@ -121,13 +121,13 @@ The chrome (the sidebar, a page's head and the list's head beside it) follows th
 
 ```
 ┌──────────┬──────────────┬────────────────────────────────┬────────────┐
-│ ▬ Inbox  │ Inbox 21  ‹› │ ‹ Inbox                        │ Your agent │  the heads: 52px, sticky, drag handles
+│ Inbox    │ Inbox 21  ‹› │ ‹ Inbox                        │ Your agent │  the heads: 52px, sticky, drag handles
 │          ├──────────────┼────────────────────────────────┤            │
 │ Inbox 21 │ Title, two   │ api#4154 by priya              │            │
 │ Blocked  │ lines at most│ Planner: hash join stage       │            │
-│ ──────── │ PR · api#41… │ …                              │            │
-│ Merging  │              │                                │            │
+│ Merging  │ PR · api#41… │ …                              │            │
 │ Archive  │              │                                │            │
+│          │              │                                │            │
 │          │              │                                │            │
 │ Ask …    │              │                                │            │
 │ Settings │              │                                │            │
@@ -152,10 +152,10 @@ The window's scrollbar is thin (10px), a faint rounded thumb on no track, and st
 
 - The brand row: 52px, the desktop app's drag handle, 86px of left padding for the macOS traffic lights.
 - The search leads on every page, the sidebar's full width: a row like the pages until you're in it or it holds a search.
-- The pages, each with its icon (`SideIcons.tsx`, white on the chrome in every theme): Inbox with its count, Blocked, Merging, the Archive (⌘1 to ⌘4), no hairline between them. Settings has its icon too. FYI is a section of the Inbox,
+- The pages, each with its icon (`SideIcons.tsx`, in the theme's ink): Inbox with its count, Blocked, Merging, the Archive (⌘1 to ⌘4), no hairline between them. Settings has its icon too. FYI is a section of the Inbox,
   not a page. The pill marks only where you are.
-- The footer, bottom up: Settings, the update line (only when a newer Inbox exists), Ask your agent ("Ask" at
-  641–1000px).
+- The footer, bottom up: Settings, Ask your agent ("Ask" at 641–1000px), the update line (only when a newer Inbox
+  exists).
 - In Settings the sidebar lists Settings' parts in the pages' place, under a quieter **‹ Inbox**: the core's, then the
   plugins'. The part you're on has the neutral pill. No tabs.
 
@@ -163,9 +163,9 @@ The window's scrollbar is thin (10px), a faint rounded thumb on no track, and st
 
 - Sticky, 52px (as tall as the brand row and the list's head), on `--chrome`, a hairline under it. It's a drag handle,
   its controls excepted.
-- It holds only the page's own: a list's name and New note (its search is in the sidebar), Merging's or a Settings part's name (on the
-  rows' text), or Back for a review, a question or a Settings view ("‹ Inbox", "‹ Question", "‹ GitHub",
-  "‹ Your automations").
+- It holds only the page's own: a list's name, the filter by person and New note (its search is in the sidebar);
+  Merging's name and the filter by person; a Settings part's name (on the rows' text); or Back for a question, a review
+  document or a Settings view ("‹ Inbox", "‹ GitHub", "‹ Automations"). A review has its own bar in its place.
 
 ### A list page
 
@@ -212,13 +212,13 @@ What's wrong with the system (`Bubbles.tsx`; which conditions and words: `web/sr
 
 ### Widths at a glance
 
-| Window           | What changes                                                                     |
-| ---------------- | -------------------------------------------------------------------------------- |
-| 640px and below  | the sidebar is one row across the top; the page's padding is 12px                |
-| 641–1000px       | the sidebar compacts to 148px; Ask your agent reads "Ask"; the mark stands alone |
-| 1100px and below | the chat lies over the page                                                      |
-| 1160px and up    | a review or a question keeps its list beside it                                  |
-| under 1600px     | the chat folds that list away                                                    |
+| Window           | What changes                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| 640px and below  | the sidebar is one row across the top; the page's padding is 12px                    |
+| 641–1000px       | the sidebar compacts to 148px; Ask your agent reads "Ask"; the brand row's word goes |
+| 1100px and below | the chat lies over the page                                                          |
+| 1160px and up    | a review or a question keeps its list beside it                                      |
+| under 1600px     | the chat folds that list away                                                        |
 
 ### Scrolling
 
