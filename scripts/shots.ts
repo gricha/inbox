@@ -2170,10 +2170,10 @@ const SHOTS: Shot[] = [
       if (!(await page.locator(".rv-step-note").count())) bad("the first step's note is missing");
       const fig = page.locator(".rv-step .dg").first();
       if (!(await fig.count())) bad("the first step's diagram is missing");
-      else if (!(await fig.locator(".dg-svg").count())) {
+      else if (!(await fig.locator(".dg-sketch-svg, .dg-svg").count())) {
         await fig.scrollIntoViewIfNeeded();
         await page.waitForTimeout(2000);
-        if (!(await fig.locator(".dg-svg").count())) bad("the first step's diagram fell back to text");
+        if (!(await fig.locator(".dg-sketch-svg, .dg-svg").count())) bad("the first step's diagram fell back to text");
       }
     },
   },
@@ -2185,7 +2185,7 @@ const SHOTS: Shot[] = [
       await review("acme/worker#879")(page);
       const fig = page.locator(".rv-step .dg").first();
       await fig.scrollIntoViewIfNeeded();
-      await page.locator(".rv-step .dg-svg").first().waitFor({ timeout: 15_000 });
+      await page.locator(".rv-step .dg-sketch-svg").first().waitFor({ timeout: 15_000 });
       await page.evaluate(`document.querySelector("#rv-step-0").scrollIntoView({ block: "start" })`);
       await page.waitForTimeout(300);
     },
