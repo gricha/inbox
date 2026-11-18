@@ -133,7 +133,7 @@ One line, columns lining up row to row:
 
 Every icon says itself in the window's own tooltip (`Tips.tsx`, any `data-tip`): "Pull request", "By dana"; the signal's is Status and its four rows ("Approved", "CI passing", "Low risk, skip it", "Small change +120 −30"; `.tip-rich`). A row with no facts keeps the empty slot, so the columns line up.
 
-In a narrow table the bolt goes first, then who it's from; the signal stays. Who placed an item (Claude or a rule) is never on the row; it's in the opened item's facts and rule trace.
+In a narrow table the why goes first, then the bolt, then who it's from; the signal stays. Who placed an item (Claude or a rule) is never on the row; it's in [its log](#an-items-log), and in an issue's facts and rule trace when it's opened in place.
 
 A stack of PRs is one row: the lowest open member, in the most urgent place, with its place in the stack ("api#4154 3/6").
 
@@ -443,7 +443,7 @@ Empty: "Nothing in Merging yet: hand off one of your PRs for merge when you're d
 
 ## Archive
 
-`#/archive`: what's done, newest first. Three groups, each a heading with its count:
+`#/archive`: what's done, newest first. Your notes' reminders still to come lead it under **Reminders**, while there are some. Then three groups, each a heading with its count:
 
 - **Archive** (open): what you did ("done: back when someone else acts", timed when you did it) and what the world resolved ("merged", "you approved", "approved by alice", timed when it resolved). Covers the last day's items that were on the Inbox or that you opened or resolved.
 - **Snoozed or muted** (folded): "snoozed until Sat 9:00", "snoozed until CI passes".

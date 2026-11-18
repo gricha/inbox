@@ -179,7 +179,7 @@ The Inbox, Blocked, Merging and the Archive.
 - Rows, headings and the lines between them (Your agent, "n more reach you…") start on the head's padding:
   24px (12px at 640px and below; 16px beside a review). So the filter's edge, Merging's name and the rows' text make
   one line.
-- Inside a table: below 760px a row's risk and size icons go; below 620px its CI and who it's from (the stage stays).
+- Inside a table: below 900px an Inbox row's why goes; below 760px the quick bolt; below 620px who it's from (the signal stays).
   A repo keeps 6 letters' room, a why 10.
 
 ### The list beside a review
