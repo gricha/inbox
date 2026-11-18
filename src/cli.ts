@@ -1,4 +1,4 @@
-// `desk`: a thin CLI over the local desk API.
+// `inbox`: a thin CLI over the local desk API.
 
 import { spawnSync } from "node:child_process";
 import os from "node:os";
@@ -318,7 +318,7 @@ const add: Command = (x) =>
 function statusWord(cause: Cause.Cause<api.ClientError>): string {
   const e = Option.getOrUndefined(Cause.findErrorOption(cause));
   if (e?._tag !== "DeskApiError" || e.tag !== "Unavailable") return "desk offline";
-  return e.reason === "config" ? "inbox config error" : "desk starting";
+  return e.reason === "config" ? "desk config error" : "desk starting";
 }
 
 const status = Effect.fnUntraced(function* (x: Ctx) {

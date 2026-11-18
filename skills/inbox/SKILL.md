@@ -49,7 +49,7 @@ A `ref` is `owner/repo#123`, `repo#123` when unique, a GitHub URL, or an item's 
 
 `until` for a snooze: `1h`, `3h`, `2d`, `tomorrow` (09:00, the default), `monday` (09:00), `YYYY-MM-DD`, an ISO time, `activity` (until someone else acts), or an event from the card's `wake_on`: `ci` (CI passes), `push`, `approved`, `ready`, `conflict` (fixed). `done` also lasts until someone else acts.
 
-**CLI**, when the MCP tools aren't connected (`desk` is `bin/inbox` in the Inbox repo; it may not be on PATH): `inbox ls [board|focus] [--all]`, `inbox show <ref>`, `inbox add <ref> "<why>" --from "<task>"`, `inbox done|mute|unmute|pin|unpin|restore <ref>`, `inbox snooze <ref> [until]`, `inbox undo <seq>`, `inbox sync`, `inbox prompt <ref>`, `inbox brief <ref>`, `inbox render <doc.json> [-o out.html]`, `inbox fields`, `inbox config check`. Add `--json` to `ls` and `show` for raw data. `inbox help` lists the rest.
+**CLI**, when the MCP tools aren't connected (`inbox` is `bin/inbox` in the Inbox repo; it may not be on PATH): `inbox ls [board|focus] [--all]`, `inbox show <ref>`, `inbox add <ref> "<why>" --from "<task>"`, `inbox done|mute|unmute|pin|unpin|restore <ref>`, `inbox snooze <ref> [until]`, `inbox undo <seq>`, `inbox sync`, `inbox prompt <ref>`, `inbox brief <ref>`, `inbox render <doc.json> [-o out.html]`, `inbox fields`, `inbox config check`. Add `--json` to `ls` and `show` for raw data. `inbox help` lists the rest.
 
 **HTTP API** for what neither covers: JSON in and out, no auth on the desk's own machine; from another machine, `Authorization: Bearer $INBOX_TOKEN`. Reference: `docs/api.md` in the Inbox repo (https://github.com/gricha/inbox/blob/main/docs/api.md).
 

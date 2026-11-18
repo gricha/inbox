@@ -189,8 +189,8 @@ Each boundary runs an Effect and answers for whatever fails.
     only bugs.
 - **Background**: the runner, above.
 - **CLI** (`src/cli.ts`): `main` runs one Effect and maps its exit. `UsageError` exits 2 with
-  `desk: <msg>` and "run 'inbox help' for usage". `DeskDown` prints its message alone, exit 1. Anything else prints
-  `desk: <message>`, exit 1. stdout is flushed before `process.exit`. `status --short` always prints a status word,
+  `inbox: <msg>` and "run 'inbox help' for usage". `DeskDown` prints its message alone, exit 1. Anything else prints
+  `inbox: <message>`, exit 1. stdout is flushed before `process.exit`. `status --short` always prints a status word,
   exit 0.
 - **MCP** (`src/mcp.ts`): a tool's failure is its `isError` text; a defect is also logged. Tools take no signal.
 - **Electron** (`electron/main.ts`):

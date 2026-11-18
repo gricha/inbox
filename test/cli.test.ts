@@ -311,9 +311,9 @@ test("status --short prints the status text, or 'desk offline' fast", async () =
   // 503 means up but not serving yet, or the config never loaded: by its reason, or an older desk's words.
   for (const [body, out] of [
     [{ error: "desk is starting; the first sync can take a minute" }, "desk starting\n"],
-    [{ error: "config has errors: boards[0].id: missing" }, "inbox config error\n"],
-    [{ error: "config has errors: boards[0].id: missing", tag: "Unavailable", reason: "config" }, "inbox config error\n"],
-    [{ error: "the rules have errors", tag: "Unavailable", reason: "config" }, "inbox config error\n"],
+    [{ error: "config has errors: boards[0].id: missing" }, "desk config error\n"],
+    [{ error: "config has errors: boards[0].id: missing", tag: "Unavailable", reason: "config" }, "desk config error\n"],
+    [{ error: "the rules have errors", tag: "Unavailable", reason: "config" }, "desk config error\n"],
     [{ error: "the config is loading", tag: "Unavailable", reason: "starting" }, "desk starting\n"],
   ] as const) {
     assert.equal((await answering(503, body, () => run(["status", "--short"]))).out, out, JSON.stringify(body));
