@@ -2104,7 +2104,7 @@ html::-webkit-scrollbar-corner,
   position: relative;
   z-index: 1;
   flex: none;
-  align-self: center;
+  align-self: baseline;
   height: 22px;
   margin: -2px 0 -2px auto;
   padding: 0 8px;
