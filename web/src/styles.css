@@ -1214,10 +1214,6 @@ html::-webkit-scrollbar-corner,
   stroke-linejoin: round;
 }
 
-.spin {
-  animation: spin 0.9s linear infinite;
-}
-
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -3342,7 +3338,6 @@ html::-webkit-scrollbar-corner,
 
 /* Tinted, so each row's action shows without shouting; filled under the pointer, the one you're about to press. */
 .line .line-cta:not(.primary),
-.s-cta,
 .bubble-fix {
   border-color: transparent;
   background: var(--accent-wash);
@@ -3351,7 +3346,6 @@ html::-webkit-scrollbar-corner,
 }
 
 .line .line-cta:not(.primary):hover:not(:disabled),
-.s-cta:hover:not(:disabled),
 .bubble-fix:hover:not(:disabled) {
   border-color: transparent;
   background: var(--accent);
@@ -4780,13 +4774,6 @@ html::-webkit-scrollbar-corner,
 .chat-wait .act {
   height: 26px;
   padding: 0 8px;
-}
-
-.chat-empty {
-  margin: 0;
-  padding: 16px 12px;
-  color: var(--pencil);
-  font-size: 13px;
 }
 
 .chat-box {
@@ -6362,10 +6349,6 @@ a.rv-part-row:hover {
   color: var(--ink);
 }
 
-.rv-part-err {
-  padding: 0 8px;
-}
-
 .rv-dot {
   flex: none;
   align-self: center;
@@ -6793,21 +6776,6 @@ a.rv-part-row:hover {
 /* A long why wraps without leaving one word on a line of its own. */
 .rv-meta > .why {
   text-wrap: pretty;
-}
-
-/* "CI failing" opens the sidebar at its checks: the fact's own words and colour, underlined under the pointer. */
-.rv-fact-btn {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.rv-fact-btn:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 .rv-meta > span::before,
@@ -8170,11 +8138,6 @@ p.rv-next {
 
 .rv-meta .sk {
   width: 24em;
-  max-width: 100%;
-}
-
-.sk-short .sk {
-  width: 16em;
   max-width: 100%;
 }
 
