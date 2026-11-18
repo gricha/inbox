@@ -3354,6 +3354,27 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
+    // With your comment unsent, Hand off for merge goes back to it first, as Approve and Done do.
+    name: "handoff-unsent",
+    go: async (page) => {
+      const sent: unknown[] = [];
+      await page.route("**/api/act", (route) => {
+        sent.push(field(route.request().postDataJSON(), "action"));
+        stall(route);
+      });
+      await review("acme/worker#875")(page);
+      await talk(page);
+      await page.locator(".rv-comment-input").fill("Not sent yet");
+      await page.getByRole("button", { name: "Hand off for merge" }).click();
+      await page.waitForTimeout(300);
+      if (sent.length) failures.push(`handoff-unsent: with a comment unsent, Hand off for merge sent ${JSON.stringify(sent)}`);
+    },
+    after: async (page) => {
+      await page.locator(".rv-comment-input").fill("");
+      await drop(page);
+    },
+  },
+  {
     // An agent's question leads the Inbox; a click opens its page: what it's about, all it said, its links, the answers.
     name: "inquiry",
     go: async (page) => {

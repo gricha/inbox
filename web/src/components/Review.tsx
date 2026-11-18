@@ -190,7 +190,7 @@ export function Review({
   me: string; // your login: Hand off for merge and Back to desk are for your own PRs
   now: number;
   flash: (text: string, error?: boolean) => void;
-  onCard: (c: Card, key: string) => void; // d Done, m Hand off for merge, b Back to desk: as in its row's menu
+  onCard: (c: Card, key: string) => void; // d Done, handoff Hand off for merge, b Back to desk: as in its row's menu
   onGithub: (c: Card, action: GitHubAction, head: string, body?: string) => Effect.Effect<boolean>; // the More menu's writes, and Request changes
   acted: Acted | undefined; // what you did on it from here: shown in place of the button you pressed
   row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
@@ -715,7 +715,7 @@ export function Review({
 
   function run(k: string) {
     // With your comment unsent, what acts on the PR goes back to it first.
-    if (comment.trim() && "admb.".includes(k)) {
+    if (comment.trim() && ["a", "d", "handoff", "b", "."].includes(k)) {
       setTalking(true); // its box is the Conversation tab's
       requestAnimationFrame(() => {
         document.querySelector<HTMLTextAreaElement>(".rv-comment textarea")?.focus();
