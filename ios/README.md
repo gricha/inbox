@@ -145,7 +145,7 @@ copy back, so an upload always has today's mock; the committed one is what tests
 
 Not tried on a phone yet: v0 has only run in the Simulator, and the project has no signing team set. When you do:
 
-1. On the desk's computer: Settings → Tailscale → **Use it from your other devices** (or `inbox serve --tailscale`).
+1. On the desk's computer: Settings → Network → **Use it from your other devices** (or `inbox serve --tailscale`).
    The desk then answers at `https://<machine>.<tailnet>.ts.net` on your tailnet only. It needs the `tailscale` command
    on the desk's PATH.
 2. On the phone: Tailscale on, signed in with the **same login** that owns the desk's computer.
@@ -270,9 +270,9 @@ merge, where Snooze does); More is its three dots only where it doesn't fit even
   where that's news); a long stack shows four around this PR and "16 more" (Fewer), and the
   stack's other branches come under "Other branches" (`Stack.around()`). A press opens that PR.
 - **Review, Code changes and Conversation.** Tabs under the stack, as words, the one you're on in ink with a
-  rule under it: a review with steps reads two ways, the choice kept on this phone (`review.view`), Guided first; a
+  rule under it: a review with steps reads two ways, the choice kept on this phone (`review.view`), Review first; a
   review without steps has Code changes and Conversation. Conversation (with how many wait on your reply) holds what
-  reviewers said in the diff's place; a PR opened to reply, and the bar's Reply, open on it. Guided is only the review's steps: "2 of 4" and the
+  reviewers said in the diff's place; a PR opened to reply, and the bar's Reply, open on it. Review is only the guide's steps: "2 of 4" and the
   step's title, its words, "Check:", its note, its diagram, then its sections, each under Look or Skim and why; at its
   foot "Next: …", which goes to the next step, and after the last "End of the guide. 3 more files change outside it:
   read every file in Code changes". A potential bug no step covers still shows, under "Potential bugs outside the
@@ -284,7 +284,7 @@ merge, where Snooze does); More is its three dots only where it doesn't fit even
   correctness hinges; a review of an earlier commit marks nothing.
 - **Its files, to go to.** The diff's heading ("5 files changed") opens the window's list of files in place: each
   file once in reading order, its level (Look, Skim), a dot where the AI review has notes in it and a tick once
-  you've viewed it ("5 files changed · 2 viewed"), then "Not worth reviewing · N files"; a press goes to it. In Guided the same heading lists the guide's steps ("2 of 4" and the
+  you've viewed it ("5 files changed · 2 viewed"), then "Not worth reviewing · N files"; a press goes to it. In Review the same heading lists the guide's steps ("2 of 4" and the
   title) instead, as the window's steps take the files' place (`DiffModel.stops`).
 - **A PR's diff.** Under its State and stack, every file once in the PR's order (the window's Code changes), each under
   a header that folds it and stays at the top while its lines scroll: the name with its folder cut from the head, the
@@ -293,7 +293,7 @@ merge, where Snooze does); More is its three dots only where it doesn't fit even
   sign, the text, a faint green or red behind what was added or removed. At the header's right, **Viewed** (a 44pt
   box), as GitHub's: ticked, the file folds and every one of its hunks' marks goes to the desk (`Store.markViewed()`,
   kept in the desk, nothing on GitHub); a file all of whose marks are viewed opens folded, and a press on its header
-  opens it for now; unticked, it opens. A push that rewrites one of its hunks unticks it. In Guided the box is on each
+  opens it for now; unticked, it opens. A push that rewrites one of its hunks unticks it. In Review the box is on each
   section of a step, as the window's. The tick shows at once and stays until a read agrees (`ItemPage.marking`). Then the files the desk folded away, under
   "Not worth reviewing · N files", each with why (a lockfile; no text diff). A file's first 400 lines are drawn, the
   rest are on GitHub; past about 3,000 lines in all, every file starts folded. A review thread sits under its line
@@ -436,7 +436,7 @@ and makes a converted draft ready again.
 What it calls: reads (`/api/overview`, `/api/queue`, `/api/inflight`, `/api/item`, `/api/inquiries/:id`,
 `/api/reviewers/:id`, `/api/asks`, `/api/setup`, `/api/events`, `/health`), `POST /api/act` (done, snooze, mute, unmute, restore, seen, inflight,
 takeback, and urgent, standard, fyi), `/api/undo`, `/api/sync`, `/api/notes`, `/api/notes/:id`, `/api/notes/:id/done`,
-`/api/coordinator/wake` and `/api/ask` (each a turn of your agent: only on a press), the writes above (`/api/review/:id/approve|comment|inline|reply|ready|reviewers|ai`,
+`/api/coordinator/wake` and `/api/ask` (each a turn of your agent: only on a press), the writes above (`/api/review/:id/approve|comment|inline|reply|ready|reviewers|reviewer|viewed|ai`, `PUT /api/settings` (the chat's menus),
 `/api/issue/:id/analyze|fix|block|unblock`, `/api/github`, `/api/inquiries/:id/answer`, `/api/sessions/:id/kick`) and,
 once, `/api/pair`. And, not the desk: `https://avatars.githubusercontent.com/<login>?s=40` for a person's picture.
 
@@ -497,6 +497,8 @@ Left out on purpose, each said here once.
 - **Diagrams drawn as figures** (ELK layout, Excalidraw): a diagram is its lines as text, the window's own fallback.
 - **"Open the drawn review"** (the desk's rendered review document, in a web view): cheap, not built; it's a second
   way to read the same review.
+- **An item's log** (the window's Show log, on a row's menu and a review's More): it's for tuning rules, which is done
+  on the computer.
 - **The rule trace on an item**: a fold for tuning rules, which is done in Settings on the computer. Where an issue
   sits, from which board and why it moved are on its page ("FYI, from the Mentions board, sorted by Claude: …", "The
   rule said today; it moved to fyi because …"), as the window's; the other boards' placements are in the trace.
@@ -514,6 +516,8 @@ Left out on purpose, each said here once.
 - **Links in your agent's answers**: a URL in the chat is text to read, not a link to follow.
 - **The chat following your agent's words as they come** (the window's, unless you've scrolled up): the page stays on
   the newest turn's top, so a long answer being written never pulls the page from under your reading.
+- **New chat** (the chat's head: a fresh session with your agent or another one, and examples under the empty box): not
+  built; the desk takes `POST /api/asks/new` from a phone.
 - **Go to the top of the conversation** (an answer's third tool): the status bar's tap does it. The chat's Close icon
   and its keys (Enter, Shift+Enter, Esc) are the window's; here it's Back, the swipe back and Send.
 
