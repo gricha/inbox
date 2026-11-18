@@ -263,7 +263,7 @@ export class UnsafeArgument extends Data.TaggedError("UnsafeArgument")<{ readonl
 export type CommandError = CommandNotFound | CommandTimeout | CommandOutputTooLarge | CommandFailed | UnsafeArgument;
 
 // Serving over Tailscale can't start: no tailscale, not signed in, no HTTPS names, or `tailscale serve` refused; the
-// message is what Settings → This device says.
+// message is what Settings → Network → Tailscale says.
 export class TailscaleError extends Data.TaggedError("TailscaleError")<{ readonly message: string; readonly cause?: unknown }> {}
 
 // ---------------------------------------------------------------- Claude Code

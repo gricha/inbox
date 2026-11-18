@@ -518,7 +518,7 @@ const connectTo = Effect.fnUntraced(function* (x: Ctx) {
     );
     x.out(`export ${agents.TOKEN_VAR}=${token}`);
   }
-  x.out(`# Revoke it on the desk's machine: Settings → This device`);
+  x.out(`# Revoke it on the desk's machine: Settings → Network → Tailscale`);
   return 0;
 });
 
