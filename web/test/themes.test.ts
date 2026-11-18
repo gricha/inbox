@@ -23,8 +23,9 @@ function block(selector: string, from = 0): Map<string, string> | null {
 }
 const tokensOf = (id: string) => block(id === "light" ? ":root" : `:root[data-theme="${id}"]`);
 const BASE = tokensOf("light")!;
-const SHARED = new Set(["--sans", "--mono", "--title-size", "--meta-size", "color-scheme"]); // type, the same in every theme
-const TOKENS = [...BASE.keys()].filter((k) => !SHARED.has(k));
+const SHARED = new Set(["--sans", "--mono", "color-scheme"]); // type, the same in every theme
+const shared = (k: string) => SHARED.has(k) || k.startsWith("--text-"); // the type scale too
+const TOKENS = [...BASE.keys()].filter((k) => !shared(k));
 
 // WCAG 2.x contrast of two sRGB hex colours.
 function luminance(hex: string): number {
@@ -131,7 +132,7 @@ test("an Omarchy theme the desk hasn't got, made into tokens, sets every token a
   for (const [name, text] of Object.entries(OMARCHY)) {
     const colors = colorsOf(text);
     const tokens = tokensFrom(colors, colors.mode === "light" ? "light" : "dark");
-    assert.deepEqual(Object.keys(tokens).sort(), [...BASE.keys()].filter((k) => k === "color-scheme" || !SHARED.has(k)).sort(), name);
+    assert.deepEqual(Object.keys(tokens).sort(), [...BASE.keys()].filter((k) => k === "color-scheme" || !shared(k)).sort(), name);
     for (const [fg, bg, min, max] of TARGETS) {
       const ratio = contrast(tokens[fg]!, tokens[bg]!);
       if (ratio < min || (max !== undefined && ratio > max))

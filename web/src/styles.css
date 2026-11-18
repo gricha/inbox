@@ -41,9 +41,19 @@
   --sans: -apple-system, blinkmacsystemfont, "Segoe UI", system-ui, sans-serif;
   --mono: "SF Mono", ui-monospace, menlo, consolas, monospace;
 
-  /* A row's type: compact, so a table of them reads at a glance. */
-  --title-size: 14px;
-  --meta-size: 12.5px;
+  /* The type scale: each step visibly apart, so a size says how much a thing matters. */
+  --text-xs: 11.5px;
+  --text-sm: 12.5px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: clamp(22px, 18px + 0.5vw, 26px);
+
+  /* A review's reading sizes grow with the window, since it's read at length. */
+  --text-read-sm: clamp(13px, 11.5px + 0.2vw, 14.5px);
+  --text-read-md: clamp(13.5px, 12px + 0.2vw, 15px);
+  --text-read-lg: clamp(14.5px, 13px + 0.2vw, 16px);
+  --text-read-xl: clamp(16px, 14.5px + 0.25vw, 17.5px);
 
   color-scheme: light;
 }
@@ -622,7 +632,7 @@ p {
 }
 
 .small {
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .grow {
@@ -756,7 +766,7 @@ html::-webkit-scrollbar-corner,
 .side-group {
   padding: 10px 10px 4px;
   color: var(--pencil);
-  font: 600 11px var(--sans);
+  font: 600 var(--text-xs) var(--sans);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -772,7 +782,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 7px;
   background: none;
   color: var(--ink-2);
-  font: 13.5px var(--sans);
+  font: var(--text-md) var(--sans);
   text-align: left;
   cursor: pointer;
 }
@@ -817,7 +827,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 9px;
   background: var(--chrome-pill);
   color: #fff;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   line-height: 18px;
@@ -865,7 +875,7 @@ html::-webkit-scrollbar-corner,
   outline: none;
   background: var(--wash);
   color: var(--ink);
-  font: 12.5px var(--sans);
+  font: var(--text-sm) var(--sans);
 }
 
 .people-find:focus {
@@ -883,12 +893,12 @@ html::-webkit-scrollbar-corner,
   gap: 7px;
   height: 26px;
   padding: 0 7px;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .people-pop .pop-title {
   padding: 6px 7px 2px;
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .people-who {
@@ -915,7 +925,7 @@ html::-webkit-scrollbar-corner,
   margin: 0;
   padding: 2px 7px 4px;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .people-clear {
@@ -1039,7 +1049,7 @@ html::-webkit-scrollbar-corner,
   align-items: center;
   padding: 0 12px;
   color: var(--pencil);
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -1071,7 +1081,7 @@ html::-webkit-scrollbar-corner,
   margin: 0;
   padding: 0;
   color: var(--ink);
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -1086,7 +1096,7 @@ html::-webkit-scrollbar-corner,
   align-items: center;
   gap: 9px;
   color: var(--ink);
-  font-size: 14.5px;
+  font-size: var(--text-md);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -1152,7 +1162,7 @@ html::-webkit-scrollbar-corner,
 .side-search .search input,
 .side-search .search input::placeholder {
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: var(--text-md);
 }
 
 /* Focused, the box is yours to type in: its placeholder goes. */
@@ -1198,7 +1208,7 @@ html::-webkit-scrollbar-corner,
   outline: none;
   background: none;
   color: var(--ink);
-  font: 13.5px var(--sans);
+  font: var(--text-md) var(--sans);
 }
 
 .search input::placeholder {
@@ -1253,7 +1263,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 10px;
   background: var(--amber-wash);
   color: var(--amber);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .notice > span {
@@ -1312,7 +1322,7 @@ html::-webkit-scrollbar-corner,
 .queue-empty {
   padding: 24px var(--pad) 10px;
   color: var(--pencil);
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 /* A new desk's first minutes: one quiet line where the empty line would be, above the rows once they come. */
@@ -1320,12 +1330,12 @@ html::-webkit-scrollbar-corner,
   margin: 0;
   padding: 24px var(--pad) 10px;
   color: var(--pencil);
-  font-size: 16px;
+  font-size: var(--text-lg);
 }
 
 .queue-first.above {
   padding: 16px var(--pad) 0;
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 /* One line each, as one table: a sheet with a hairline between rows. Selected, a neutral fill. */
@@ -1379,19 +1389,19 @@ html::-webkit-scrollbar-corner,
   z-index: 5;
   margin: 0;
   padding: 8px var(--pad);
-  font-size: 13px;
+  font-size: var(--text-md);
   background: var(--paper);
 }
 
 .queue .group-head .count {
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* Beside a review the same small band on the paper's colour, pinned to the list's top. */
 .beside .queue .group-head {
   top: 0;
   padding: 8px var(--pad);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 /* A tight table drops the quick bolt, then who it's from, before a repo or a why is cut to a few letters; the signal stays,
@@ -1433,7 +1443,7 @@ html::-webkit-scrollbar-corner,
 
 .log-title {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -1493,7 +1503,7 @@ html::-webkit-scrollbar-corner,
   border: 1px solid var(--rule);
   border-radius: 10px;
   background: var(--sheet);
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 /* Its words on the review's left edge, 12px in, so opening its review from here doesn't move the column; its sheets (what
@@ -1533,7 +1543,7 @@ html::-webkit-scrollbar-corner,
   display: grid;
   gap: 12px;
   color: var(--ink);
-  font-size: 15px;
+  font-size: var(--text-md);
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -1557,14 +1567,14 @@ html::-webkit-scrollbar-corner,
   align-items: baseline;
   gap: 2px 10px;
   min-width: 0;
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .inq-link-where {
   min-width: 0;
   overflow: hidden;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1630,20 +1640,20 @@ html::-webkit-scrollbar-corner,
 }
 
 .inq-option-answer {
-  font-size: 15px;
+  font-size: var(--text-md);
   font-weight: 550;
 }
 
 .inq-pick {
   margin-left: 10px;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 400;
 }
 
 .inq-next {
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   line-height: 1.5;
 }
 
@@ -1855,7 +1865,7 @@ html::-webkit-scrollbar-corner,
 .sig-head {
   margin-bottom: 2px;
   color: var(--ink-2);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 550;
 }
 
@@ -1935,7 +1945,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 7px;
   background: color-mix(in oklab, var(--accent) 8%, var(--sheet));
   color: var(--ink);
-  font: 500 12px/1.4 var(--sans);
+  font: 500 var(--text-sm)/1.4 var(--sans);
   box-shadow: var(--shadow);
   pointer-events: none;
   animation: tip-in 90ms ease-out;
@@ -1953,7 +1963,7 @@ html::-webkit-scrollbar-corner,
   min-width: calc-size(max-content, min(size, 40%, 24ch));
   overflow: hidden;
   color: var(--ink);
-  font-size: var(--title-size);
+  font-size: var(--text-md);
   font-weight: 500;
   letter-spacing: -0.008em;
   text-overflow: ellipsis;
@@ -1968,7 +1978,7 @@ html::-webkit-scrollbar-corner,
 .line-note,
 .line-age {
   color: var(--pencil);
-  font-size: var(--meta-size);
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -2110,7 +2120,7 @@ html::-webkit-scrollbar-corner,
   margin: -2px 0 -2px auto;
   padding: 0 8px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .dim .line-title {
@@ -2157,7 +2167,7 @@ html::-webkit-scrollbar-corner,
 
 .d-why {
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 /* PRs held back until Claude has reviewed them: said once, under the queue, quietly. */
@@ -2170,7 +2180,7 @@ html::-webkit-scrollbar-corner,
   margin: 0;
   padding: 14px var(--pad) 0;
   color: var(--pencil);
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 /* Later's groups open and close on their heading. */
@@ -2281,13 +2291,13 @@ html::-webkit-scrollbar-corner,
   gap: 8px;
   margin: 0;
   color: var(--ink);
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
 .beside-name .count {
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 450;
   font-variant-numeric: tabular-nums;
 }
@@ -2407,19 +2417,19 @@ html::-webkit-scrollbar-corner,
 /* Its rows as a list page's (its --pad narrower), a step smaller. */
 .beside .group-head {
   padding-top: 18px;
-  font-size: 13.5px;
+  font-size: var(--text-md);
 }
 
 .beside .queue-empty,
 .beside .queue-first,
 .beside .quiet-note {
   padding: 16px;
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .beside .queue-reviewing {
   padding-top: 14px;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .beside .lane-stack {
@@ -2485,7 +2495,7 @@ html::-webkit-scrollbar-corner,
   padding-right: 10px;
   overflow: hidden;
   color: var(--pencil);
-  font-size: var(--meta-size);
+  font-size: var(--text-sm);
   white-space: nowrap;
 }
 
@@ -2560,7 +2570,7 @@ html::-webkit-scrollbar-corner,
   border: 0;
   background: none;
   color: var(--accent-ink);
-  font: 600 var(--meta-size) var(--sans);
+  font: 600 var(--text-sm) var(--sans);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -2591,7 +2601,7 @@ html::-webkit-scrollbar-corner,
 .c-line .c-row .c-top .line-title {
   display: block;
   flex: 1 1 auto;
-  font-size: 13.5px;
+  font-size: var(--text-md);
   line-height: 1.4;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -2602,14 +2612,14 @@ html::-webkit-scrollbar-corner,
   grid-area: 1 / 2;
   margin: -4px 0 -4px 10px;
   padding: 4px 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .line-row.c-row .c-meta {
   grid-area: 2 / 1 / 3 / -1;
   align-items: center;
   padding: 0 0 0 24px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .line-row.c-row .c-meta > :not(.line-note)::before {
@@ -2651,7 +2661,7 @@ html::-webkit-scrollbar-corner,
 }
 
 .line-row.c-row .c-meta > .line-age {
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 /* Loading ------------------------------------------------------------------ */
@@ -2719,7 +2729,7 @@ html::-webkit-scrollbar-corner,
   display: flex;
   align-items: center;
   gap: 14px;
-  height: calc(17px + 1.5 * var(--title-size));
+  height: calc(17px + 1.5 * var(--text-md));
   padding: 0 var(--pad, 14px);
 }
 
@@ -2753,7 +2763,7 @@ html::-webkit-scrollbar-corner,
   margin: 0 0 6px;
   padding: 0 15px; /* on the rows' first column: their 14px inside the sheet's 1px edge */
   color: var(--ink);
-  font-size: var(--title-size);
+  font-size: var(--text-md);
   font-weight: 650;
   letter-spacing: -0.01em;
   scroll-margin-top: 64px;
@@ -2761,7 +2771,7 @@ html::-webkit-scrollbar-corner,
 
 .group-head .count {
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 450;
   font-variant-numeric: tabular-nums;
 }
@@ -2775,7 +2785,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 10px;
   background: none;
   color: var(--pencil);
-  font-size: 13.5px;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
 }
@@ -2803,7 +2813,7 @@ html::-webkit-scrollbar-corner,
 .ref {
   overflow: hidden;
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 550;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.005em;
@@ -2841,7 +2851,7 @@ html::-webkit-scrollbar-corner,
 .title {
   overflow: hidden;
   color: var(--ink);
-  font-size: 14.5px;
+  font-size: var(--text-md);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2911,7 +2921,7 @@ html::-webkit-scrollbar-corner,
   gap: 2px 0;
   margin: -8px 0 0;
   color: var(--pencil);
-  font-size: var(--meta-size);
+  font-size: var(--text-sm);
 }
 
 .card-keys {
@@ -2923,7 +2933,7 @@ html::-webkit-scrollbar-corner,
   display: grid;
   gap: 12px;
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .more.opened .trace-toggle {
@@ -2942,13 +2952,13 @@ html::-webkit-scrollbar-corner,
 
 .pre-sum {
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-md);
 }
 
 .pre-from,
 .pre-label {
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .pre-field {
@@ -3007,7 +3017,7 @@ html::-webkit-scrollbar-corner,
   margin: 0;
   padding: 20px var(--pad) 14px;
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .lane-coord a,
@@ -3039,7 +3049,7 @@ html::-webkit-scrollbar-corner,
   flex: none;
   gap: 14px;
   width: 7.5em;
-  font-size: var(--meta-size);
+  font-size: var(--text-sm);
 }
 
 .lane-row .line-note {
@@ -3062,7 +3072,7 @@ html::-webkit-scrollbar-corner,
   margin: 0;
   padding: 8px var(--pad) 0;
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .lane .group {
@@ -3081,7 +3091,7 @@ html::-webkit-scrollbar-corner,
 .lane-why {
   margin: 4px 0 0;
   color: var(--ink-2);
-  font-size: var(--meta-size);
+  font-size: var(--text-sm);
 }
 
 /* Claude's work, in Merging's columns: a long reason wraps rather than lose why it failed, two lines at most. */
@@ -3104,13 +3114,13 @@ html::-webkit-scrollbar-corner,
   display: grid;
   gap: 18px;
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .d-head {
   margin: 0 0 6px;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 550;
 }
 
@@ -3136,7 +3146,7 @@ html::-webkit-scrollbar-corner,
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .trace li {
@@ -3259,7 +3269,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 9px;
   background: var(--sheet);
   color: var(--ink);
-  font: 500 13px var(--sans);
+  font: 500 var(--text-md) var(--sans);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -3304,7 +3314,7 @@ html::-webkit-scrollbar-corner,
   min-height: 34px;
   margin: 0 8px 0 0;
   color: var(--green);
-  font: 600 14px var(--sans);
+  font: 600 var(--text-md) var(--sans);
 }
 
 .rv-acted-dot {
@@ -3412,7 +3422,7 @@ html::-webkit-scrollbar-corner,
 
 .trace-toggle summary {
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -3428,7 +3438,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 8px;
   background: var(--sheet);
   color: var(--ink);
-  font: 550 13px var(--sans);
+  font: 550 var(--text-md) var(--sans);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -3447,7 +3457,7 @@ html::-webkit-scrollbar-corner,
   padding: 0;
   border: 0;
   background: none;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -3465,7 +3475,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 8px;
   background: var(--sheet);
   color: var(--ink);
-  font: 13.5px var(--sans);
+  font: var(--text-md) var(--sans);
 }
 
 .input:focus {
@@ -3588,7 +3598,7 @@ html::-webkit-scrollbar-corner,
 .pop-title {
   padding: 6px 8px;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* The More menu's writes on GitHub, under a rule: a heading over them, not an item greyed out. */
@@ -3596,7 +3606,7 @@ html::-webkit-scrollbar-corner,
   margin-top: 4px;
   padding-top: 10px;
   border-top: 1px solid var(--rule);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -3610,7 +3620,7 @@ html::-webkit-scrollbar-corner,
   border: 0;
   border-radius: 7px;
   background: none;
-  font-size: 13.5px;
+  font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
 }
@@ -3660,7 +3670,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 6px;
   background: none;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-md);
   white-space: nowrap;
   text-align: left;
   cursor: pointer;
@@ -3717,7 +3727,7 @@ html::-webkit-scrollbar-corner,
   background: var(--ink);
   color: var(--paper);
   box-shadow: var(--shadow);
-  font-size: 13px;
+  font-size: var(--text-sm);
   transform: translateX(-50%);
   animation: rise 160ms ease-out;
 }
@@ -3771,7 +3781,7 @@ html::-webkit-scrollbar-corner,
   background: var(--sheet);
   box-shadow: var(--shadow);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.45;
   pointer-events: auto;
   animation: rise-in 160ms ease-out;
@@ -3929,7 +3939,7 @@ html::-webkit-scrollbar-corner,
   flex-wrap: wrap;
   gap: 0 6px;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .composer-about > span {
@@ -4041,7 +4051,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 4px;
   background: color-mix(in oklab, var(--ink) 10%, transparent);
   color: var(--ink-2);
-  font: 500 11px/16px var(--sans);
+  font: 500 var(--text-xs)/16px var(--sans);
   white-space: nowrap;
   opacity: 0;
   transition:
@@ -4122,7 +4132,7 @@ html::-webkit-scrollbar-corner,
   border: 0;
   background: none;
   color: var(--ink);
-  font: 15px/1.5 var(--sans);
+  font: var(--text-md)/1.5 var(--sans);
   field-sizing: content;
   resize: none;
 }
@@ -4151,7 +4161,7 @@ html::-webkit-scrollbar-corner,
   gap: 6px;
   align-items: center;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* The reminder's own controls: a small pill saying what's picked, its choices in a popover under it. */
@@ -4170,7 +4180,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 7px;
   background: color-mix(in oklab, var(--ink) 5%, transparent);
   color: var(--ink-2);
-  font: 500 12.5px var(--sans);
+  font: 500 var(--text-sm) var(--sans);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -4195,7 +4205,7 @@ html::-webkit-scrollbar-corner,
 .nt-pop .pop-item {
   height: 28px;
   color: var(--ink-2);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .nt-pop .pop-item.on {
@@ -4233,7 +4243,7 @@ html::-webkit-scrollbar-corner,
   align-items: center;
   justify-content: space-between;
   color: var(--ink);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 600;
 }
 
@@ -4269,7 +4279,7 @@ html::-webkit-scrollbar-corner,
 
 .nt-cal-dow {
   color: var(--faint);
-  font-size: 10.5px;
+  font-size: var(--text-xs);
   line-height: 20px;
   text-align: center;
 }
@@ -4281,7 +4291,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 7px;
   background: none;
   color: var(--ink-2);
-  font: 12px var(--sans);
+  font: var(--text-sm) var(--sans);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
 }
@@ -4364,7 +4374,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 8px;
   background: var(--sheet);
   color: var(--ink);
-  font: 14px var(--sans);
+  font: var(--text-md) var(--sans);
 }
 
 /* The comment bar's box: a few lines, growing as you write. */
@@ -4459,7 +4469,7 @@ html::-webkit-scrollbar-corner,
   gap: 7px;
   margin: 0;
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -4535,7 +4545,7 @@ html::-webkit-scrollbar-corner,
   margin: 0;
   padding: 6px 10px 4px;
   color: var(--pencil);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 400;
 }
 
@@ -4543,14 +4553,14 @@ html::-webkit-scrollbar-corner,
   gap: 8px;
   height: 30px;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 400;
 }
 
 .chat-new-yours {
   margin-left: auto;
   color: var(--pencil);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .chat-split + .chat-close {
@@ -4564,7 +4574,7 @@ html::-webkit-scrollbar-corner,
   gap: 10px;
   padding: 16px 12px;
   overflow-y: auto;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .chat-setup-title {
@@ -4573,7 +4583,7 @@ html::-webkit-scrollbar-corner,
   gap: 7px;
   margin: 0;
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-md);
   font-weight: 600;
 }
 
@@ -4619,7 +4629,7 @@ html::-webkit-scrollbar-corner,
 .chat-examples-title {
   margin: 0;
   color: var(--pencil);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .chat-examples ul {
@@ -4647,7 +4657,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 13px;
   background: var(--wash);
   color: var(--pencil);
-  font: 12.5px var(--sans);
+  font: var(--text-sm) var(--sans);
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
@@ -4695,7 +4705,7 @@ html::-webkit-scrollbar-corner,
   min-width: 0;
   overflow: hidden;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4732,14 +4742,14 @@ html::-webkit-scrollbar-corner,
   border-radius: 10px;
   background: var(--wash);
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-md);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .chat-meta {
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .chat-meta.mine {
@@ -4757,7 +4767,7 @@ html::-webkit-scrollbar-corner,
   align-items: center;
   gap: 4px 8px;
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 /* What it's doing, as its transcript says: its latest step, each new one rising in over the last. */
@@ -4852,7 +4862,7 @@ html::-webkit-scrollbar-corner,
   border: 0;
   background: none;
   color: var(--ink);
-  font: 14px/1.45 var(--sans);
+  font: var(--text-md)/1.45 var(--sans);
   field-sizing: content;
   resize: none;
 }
@@ -4924,7 +4934,7 @@ html::-webkit-scrollbar-corner,
   border-radius: 6px;
   background: none;
   color: var(--pencil);
-  font: 12.5px var(--sans);
+  font: var(--text-sm) var(--sans);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -4957,7 +4967,7 @@ html::-webkit-scrollbar-corner,
   gap: 6px;
   height: 30px;
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .chat-tick {
@@ -5011,7 +5021,7 @@ html::-webkit-scrollbar-corner,
 .chat-hint,
 .chat-note {
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* The spot the next ask carries, and your agent's open questions, by the box they go with: one line each, cut short. */
@@ -5041,7 +5051,7 @@ html::-webkit-scrollbar-corner,
   gap: 8px;
   min-width: 0;
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
@@ -5084,7 +5094,7 @@ html::-webkit-scrollbar-corner,
   margin: -4px 0 0 auto;
   padding: 0 6px;
   color: var(--ink-2);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* Wrapped, not scrolled: no part of a command hides past the block's edge. */
@@ -5130,7 +5140,7 @@ html::-webkit-scrollbar-corner,
 /* No colour of its own, so the errors' head is red and Moved to Settings' amber. */
 .s-sub {
   margin: 0 0 10px;
-  font-size: 14px;
+  font-size: var(--text-md);
   font-weight: 650;
 }
 
@@ -5164,7 +5174,7 @@ html::-webkit-scrollbar-corner,
 .s-label {
   margin: 0;
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--text-md);
   font-weight: 550;
   line-height: 1.35;
 }
@@ -5172,7 +5182,7 @@ html::-webkit-scrollbar-corner,
 .s-help {
   max-width: 64ch;
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.4;
   text-wrap: pretty;
 }
@@ -5209,7 +5219,7 @@ html::-webkit-scrollbar-corner,
 
 .s-unit {
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 /* A short unit takes the longest short one's room, so the number fields on a sheet share their edges. */
@@ -5219,7 +5229,7 @@ html::-webkit-scrollbar-corner,
 
 .setting.st-list .input.area {
   width: 240px;
-  font: 13.5px/1.5 var(--sans); /* repos and logins, written as the window writes them everywhere else */
+  font: var(--text-md)/1.5 var(--sans); /* repos and logins, written as the window writes them everywhere else */
 }
 
 /* Free text: the label and its help, then the field across the row. */
@@ -5249,7 +5259,7 @@ html::-webkit-scrollbar-corner,
   top: 100%;
   right: 0;
   margin-top: 2px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1;
   white-space: nowrap;
 }
@@ -5328,7 +5338,7 @@ html::-webkit-scrollbar-corner,
 .s-live {
   max-width: 72ch;
   margin-top: 8px;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 /* A quiet row of its own at a sheet's end: New automation, New criterion. */
@@ -5340,7 +5350,7 @@ html::-webkit-scrollbar-corner,
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--text-sm);
   text-decoration: none;
 }
 
@@ -5353,7 +5363,7 @@ html::-webkit-scrollbar-corner,
   border: 0;
   background: none;
   color: var(--accent-ink);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   font-weight: 600;
   cursor: pointer;
 }
@@ -5373,7 +5383,7 @@ button.s-edit:hover:not(:disabled) {
   margin: 0;
   padding: 0 17px;
   color: var(--ink);
-  font-size: 18px;
+  font-size: var(--text-xl);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -5383,7 +5393,7 @@ button.s-edit:hover:not(:disabled) {
   margin-top: 4px;
   padding: 0 17px;
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .hotkey {
@@ -5501,7 +5511,7 @@ button.s-edit:hover:not(:disabled) {
   gap: 8px 18px;
   margin-top: 10px;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* The rules editor's foot stays on the window's bottom edge while the editor runs past it (a short window, or dragged
@@ -5527,14 +5537,14 @@ button.s-edit:hover:not(:disabled) {
 .s-path {
   min-width: 0;
   color: var(--pencil);
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
 .editor.prose {
   height: 240px;
   min-height: 160px;
-  font: 14px/1.6 var(--sans);
+  font: var(--text-md)/1.6 var(--sans);
   white-space: pre-wrap;
 }
 
@@ -5578,7 +5588,7 @@ button.s-edit:hover:not(:disabled) {
   margin: 14px 0 0;
   padding: 0 17px;
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 /* The Inbox's sections, each a table under its heading. */
@@ -5605,7 +5615,7 @@ button.s-edit:hover:not(:disabled) {
 .au-note {
   margin: 0;
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .au-runs-head {
@@ -5622,14 +5632,14 @@ button.s-edit:hover:not(:disabled) {
 }
 
 .au-resume {
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .au-prompt,
 .au-summary {
   margin: 0;
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -5652,13 +5662,13 @@ button.s-edit:hover:not(:disabled) {
   gap: 8px;
   margin: 0;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 550;
 }
 
 .au-run-error {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .au-found {
@@ -5668,7 +5678,7 @@ button.s-edit:hover:not(:disabled) {
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 /* Each item is a row of the list's one grid, so its outcome, its ref and its why start in one column, a long why wrapping in
@@ -5704,7 +5714,7 @@ button.s-edit:hover:not(:disabled) {
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 4px 14px;
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--text-md);
   line-height: 1.5;
 }
 
@@ -5777,7 +5787,7 @@ fieldset.au-field > legend {
   align-items: center;
   gap: 8px;
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   cursor: pointer;
 }
 
@@ -5811,7 +5821,7 @@ fieldset.au-field > legend {
 .side-block {
   padding-bottom: 20px;
   border-bottom: 1px solid var(--rule);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .side-block:last-child {
@@ -5915,7 +5925,7 @@ fieldset.au-field > legend {
 }
 
 .pv-moved .title {
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 
 .pv-same {
@@ -5954,13 +5964,13 @@ fieldset.au-field > legend {
 
 .field .type {
   color: var(--pencil);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
 }
 
 .field .doc {
   grid-column: 1 / -1;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .cheat {
@@ -5968,7 +5978,7 @@ fieldset.au-field > legend {
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 6px 14px;
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .cheat dt {
@@ -6092,7 +6102,7 @@ fieldset.au-field > legend {
   gap: 18px;
   align-content: start;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* The guided review's steps stick under the page's head as the rest of the sidebar scrolls away; a long guide scrolls in
@@ -6185,7 +6195,7 @@ fieldset.au-field > legend {
   margin: 0 0 6px;
   padding: 0 8px;
   color: var(--ink-2);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 550;
 }
 
@@ -6219,7 +6229,7 @@ fieldset.au-field > legend {
   padding: 0 8px 0 10px;
   border-radius: 6px;
   color: var(--ink-2);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .rv-member:hover {
@@ -6283,7 +6293,7 @@ fieldset.au-field > legend {
 .rv-stack .rv-more {
   position: relative;
   padding: 4px 8px 4px 25px;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 /* A part of the sidebar (the checks, the reviewers, the merge): its name, where it stands in one line that reads first,
@@ -6295,7 +6305,7 @@ fieldset.au-field > legend {
   padding: 4px 8px;
   border-radius: 7px;
   color: var(--ink-2);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 a.rv-part-row:hover {
@@ -6350,7 +6360,7 @@ a.rv-part-row:hover {
 .rv-part-line {
   margin: 0 0 4px;
   padding: 0 8px;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 450;
   line-height: 1.35;
 }
@@ -6414,7 +6424,7 @@ a.rv-part-row:hover {
   background: none;
   color: var(--pencil);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -6427,7 +6437,7 @@ a.rv-part-row:hover {
   align-items: center;
   gap: 6px;
   color: var(--ink-2);
-  font-size: 13.5px;
+  font-size: var(--text-md);
   font-weight: 500;
 }
 
@@ -6453,7 +6463,7 @@ a.rv-part-row:hover {
   align-items: center;
   gap: 6px 8px;
   padding: 0 12px;
-  font-size: 13.5px;
+  font-size: var(--text-sm);
 }
 
 /* In the sidebar, under who's asked: the box takes the section's width, and so does its list. */
@@ -6503,7 +6513,7 @@ a.rv-part-row:hover {
   border-radius: 50%;
   background: var(--rule-strong);
   color: var(--ink-2);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
 }
 
@@ -6511,7 +6521,7 @@ a.rv-part-row:hover {
   margin: 0;
   padding: 8px 8px 4px;
   color: var(--pencil);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 
 .rv-reviewers-label {
@@ -6568,7 +6578,7 @@ a.rv-part-row:hover {
 .rv-reviewer-name,
 .rv-reviewer-why {
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 400;
 }
 
@@ -6657,7 +6667,7 @@ a.rv-part-row:hover {
 
 /* As quiet as the review's other empty lines. */
 .rv-nofiles {
-  font-size: 13.5px;
+  font-size: var(--text-md);
 }
 
 .rv-changes {
@@ -6686,7 +6696,7 @@ a.rv-part-row:hover {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 10px;
-  font-size: clamp(13px, 11.5px + 0.2vw, 14.5px);
+  font-size: var(--text-read-sm);
 }
 
 /* The header has room for the whole ref, so nothing truncates. */
@@ -6758,7 +6768,7 @@ a.rv-part-row:hover {
 .rv-title {
   margin: 0;
   color: var(--ink);
-  font-size: clamp(22px, 18px + 0.5vw, 26px);
+  font-size: var(--text-2xl);
   font-weight: 650;
   line-height: 1.25;
   letter-spacing: -0.015em;
@@ -6775,7 +6785,7 @@ a.rv-part-row:hover {
   margin-left: -18px;
   clip-path: inset(0 0 0 18px);
   color: var(--ink-2);
-  font-size: clamp(13px, 11.5px + 0.2vw, 14.5px);
+  font-size: var(--text-read-sm);
 }
 
 .rv-meta > span {
@@ -6839,7 +6849,7 @@ a.rv-part-row:hover {
   display: grid;
   gap: 6px;
   color: var(--ink-2);
-  font-size: clamp(13px, 11.5px + 0.2vw, 14.5px);
+  font-size: var(--text-read-sm);
 }
 
 .rv-verdict {
@@ -6874,14 +6884,14 @@ a.rv-part-row:hover {
 
 .rv-summary {
   color: var(--ink);
-  font-size: clamp(14.5px, 13px + 0.2vw, 16px);
+  font-size: var(--text-read-lg);
   line-height: 1.5;
 }
 
 /* The goal leads, in ink and a step larger; the rest a step quieter, at the section's size. */
 .rv-gist {
   color: var(--ink);
-  font-size: clamp(16px, 14.5px + 0.25vw, 17.5px);
+  font-size: var(--text-read-xl);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -6945,7 +6955,7 @@ a.rv-part-row:hover {
   border-radius: 7px;
   background: none;
   color: var(--ink-2);
-  font: 12.5px var(--sans);
+  font: var(--text-sm) var(--sans);
   text-align: left;
   cursor: pointer;
 }
@@ -6999,7 +7009,7 @@ a.rv-part-row:hover {
   margin: 0;
   padding: 0 8px 4px;
   color: var(--pencil);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -7066,7 +7076,7 @@ ul.rv-status-why {
   gap: 12px;
   padding: 0 12px;
   color: var(--ink-2);
-  font-size: clamp(13.5px, 12px + 0.2vw, 15px);
+  font-size: var(--text-read-md);
 }
 
 .rv-convo .d-head {
@@ -7091,7 +7101,7 @@ ul.rv-status-why {
   gap: 0 6px;
   margin: 0;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .cv-who > span + span::before {
@@ -7129,7 +7139,7 @@ ul.rv-status-why {
   padding: 9px 14px;
   color: var(--pencil);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   text-align: left;
   cursor: pointer;
 }
@@ -7186,7 +7196,7 @@ ul.rv-status-why {
   flex-wrap: wrap;
   gap: 14px;
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .cv-links a,
@@ -7255,7 +7265,7 @@ ul.rv-status-why {
   border: 0;
   background: none;
   color: var(--ink);
-  font: 13.5px/20px var(--sans);
+  font: var(--text-md)/20px var(--sans);
   resize: none;
   field-sizing: content;
 }
@@ -7335,7 +7345,7 @@ ul.rv-status-why {
   border-radius: 8px;
   background: var(--sheet);
   color: var(--ink);
-  font: 13.5px/1.5 var(--sans);
+  font: var(--text-md)/1.5 var(--sans);
   resize: vertical;
 
   /* All of it in view before Send twice: Claude's draft was written from untrusted comments. */
@@ -7640,7 +7650,7 @@ ul.rv-status-why {
   border: 0;
   background: none;
   font-family: inherit;
-  font-size: 13.5px;
+  font-size: var(--text-md);
   font-weight: 400;
   cursor: pointer;
 }
@@ -7736,7 +7746,7 @@ ul.rv-status-why {
 .rv-step-head {
   margin: 0;
   color: var(--ink);
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -7768,7 +7778,7 @@ ul.rv-status-why {
 }
 
 p.rv-next {
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 /* minmax(0, 1fr): a long file name in the header wraps instead of widening the track, and the page, past the window. */
@@ -7792,7 +7802,7 @@ p.rv-next {
   padding: 10px 2px 6px 12px;
   background: var(--paper);
   color: var(--ink);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 500;
 }
 
@@ -7854,7 +7864,7 @@ p.rv-next {
   border-left: 2px solid var(--rule-strong);
   border-radius: 0 6px 6px 0;
   background: var(--paper);
-  font: 13px/1.5 var(--sans);
+  font: var(--text-md)/1.5 var(--sans);
   white-space: normal;
 }
 
@@ -7933,7 +7943,7 @@ p.rv-next {
 
 .said-small {
   color: var(--pencil);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 
 .rv-tc-acts {
@@ -8288,7 +8298,7 @@ p.rv-next {
   border-radius: 0 6px 6px 0;
   background: var(--paper);
   color: var(--ink-2);
-  font: 13px/1.5 var(--sans);
+  font: var(--text-md)/1.5 var(--sans);
   white-space: normal;
 }
 
@@ -8654,7 +8664,7 @@ pre,
 .hard-rules li {
   display: grid;
   gap: 2px;
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .hard-rules code {
@@ -8744,21 +8754,21 @@ pre,
   gap: 10px;
   margin: 24px 0 16px;
   padding: 0 14px; /* the mark's tray on the heads' text edge: its viewBox leaves 3px of room */
-  font-size: 22px;
+  font-size: var(--text-2xl);
   font-weight: 650;
 }
 
 .setup-head {
   margin: 20px 0 0;
   padding: 0 17px;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 650;
 }
 
 .setup-help {
   padding: 0 17px;
   color: var(--pencil);
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.4;
 }
 

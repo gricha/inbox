@@ -81,18 +81,23 @@ Tokens live in `web/src/styles.css`:
   does; diagrams keep the bundled Instrument Sans their boxes are measured in. Sentence case, no all-caps, no monospace
   outside code.
 
-  | Text                                  | Size                     |
-  | ------------------------------------- | ------------------------ |
-  | a row's title (`--title-size`)        | 14px                     |
-  | a row's facts (`--meta-size`)         | 12.5px                   |
-  | the sidebar's items                   | 13.5px                   |
-  | a row's icons, its call to action     | 16px; 22px tall, 12px    |
-  | a head's name                         | 15px semibold            |
-  | a plugin part's Automations heading   | 15px/650                 |
-  | a Settings view's name                | 18px/650                 |
-  | a Settings label, its help            | 14px/550, 13px           |
-  | the heads in Searches and rules' rail | 14px/650                 |
-  | a review's title                      | 22–26px, with the window |
+  Sizes come from the scale on `:root`; a new size is one of these, never a value of its own. Code, diagrams and the
+  page's default keep theirs; `web/test/type-scale.test.ts` lists the few that do and fails on a new one.
+
+  | Token            | Size                       | Text                                                                                            |
+  | ---------------- | -------------------------- | ----------------------------------------------------------------------------------------------- |
+  | `--text-xs`      | 11.5px                     | counts in pills, a key's chip, the sidebar's group names, the calendar's days of the week       |
+  | `--text-sm`      | 12.5px                     | a row's facts and its call to action, help and hints, bubbles and toasts, the review's sidebar  |
+  | `--text-md`      | 14px                       | a row's title, a section's heading, what you read and type, buttons, menus, the sidebar's items |
+  | `--text-lg`      | 16px                       | a head's name, a step's heading, the review's lead, the empty Inbox                             |
+  | `--text-xl`      | 18px                       | a Settings view's name                                                                          |
+  | `--text-2xl`     | 22–26px, with the window   | a review's title, the first run's title                                                         |
+  | `--text-read-sm` | 13–14.5px, with the window | a review's ref and meta, the AI review                                                          |
+  | `--text-read-md` | 13.5–15px, with the window | a review's conversation                                                                         |
+  | `--text-read-lg` | 14.5–16px, with the window | a review's summary                                                                              |
+  | `--text-read-xl` | 16–17.5px, with the window | a review's goal, its lead line                                                                  |
+
+  A row's icons are 16px; its call to action is 22px tall.
 
 - **Selection.** The table row you opened, right-clicked or Tab-focused gets a quiet fill (Light and Dark: `--side-on`
   mixed into `--sheet`; other themes: `--ink` mixed into it) and a 2px `--accent` mark at its leading edge, down the
