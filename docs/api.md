@@ -186,7 +186,7 @@ Every write here is own page only, logged, and answers 502 with GitHub's reason 
 | POST   | `/api/review/:id/reviewer`  | `{ login, act: "remove" \| "rerequest" }` → `{ ok }`: one reviewer of your open PR, from its review's sidebar: remove takes off one asked who hasn't reviewed yet (the REST unrequest), rerequest asks one who reviewed to review again (that login alone; not on a draft). The PR stays where it is. 409 for someone else's PR, a team, or a reviewer it doesn't fit     | ✓   |
 | POST   | `/api/review/:id/viewed`    | `{ marks, viewed }` → `{ ok }`: marks hunks viewed, or not, by `ReviewHunk.mark` (`ReviewRest.mark` for a file with no hunks); `ReviewView.viewed` lists them. A mark is a hunk's path and changed lines, so a rebase that moves it keeps it and a push that rewrites it doesn't. Nothing goes to GitHub, but a mark folds code away, so own page only. 400 without marks | ✓   |
 | GET    | `/api/reviewers/:id`        | `?q=` → `Reviewer[]` (`id login name team suggested`): GitHub's suggestions matching `q` first, then people with access and the org's teams, never you. Kept 15 minutes; fetched with each sync for your PRs that need reviewers. 409 unless it's your PR. Read only                                                                                                      |     |
-| POST   | `/api/github`               | `{ id, action, head_oid?, body? }` → `{ ok, url }`: a [More menu](#the-more-menu) write (`close`, `draft`, `ready`, `merge`, `reopen`, `request_changes` with `body`); refreshes the item first. 409 unless the card offers it now, or for new commits since `head_oid` on a merge or change request                                                                      | ✓   |
+| POST   | `/api/github`               | `{ id, action, head_oid?, body? }` → `{ ok, url }`: a [More menu](#the-more-menu) write (`close`, `draft`, `ready`, `merge`, `reopen`, `request_changes` with `body`, `rerequest`, `unrequest`); refreshes the item first. 409 unless the card offers it now, or for new commits since `head_oid` on a merge or change request                                            | ✓   |
 
 ### Settings and rules
 
@@ -282,7 +282,7 @@ Trimmed from [src/types.ts](../src/types.ts); the file is the source of truth. T
 ```ts
 type Bucket = "now" | "today" | "blocked" | "later" | "fyi" | "hide";
 type Until = "ci" | "push" | "approved" | "ready" | "conflict"; // what a snooze can wait on
-type GitHubAction = "close" | "draft" | "ready" | "merge" | "reopen" | "request_changes";
+type GitHubAction = "close" | "draft" | "ready" | "merge" | "reopen" | "request_changes" | "rerequest" | "unrequest";
 
 interface Card {
   id: string; // "owner/repo#123"
@@ -1726,7 +1726,7 @@ Your open PR that isn't a draft, that nobody is asked to review, and that nobody
 
 ### The More menu
 
-The desk decides which GitHub actions an item offers (`Desk.actions()`, `actions` on its card) and refuses any other with 409. The window shows three of them: **Close** (a review's More and a row's right-click menu), **Re-request review** (both), **Remove me as a reviewer** (both) and **Request changes** (a review's More). A click sends it, through `POST /api/github`, a GitHub write like approve ([Security model](#security-model)).
+The desk decides which GitHub actions an item offers (`Desk.actions()`, `actions` on its card) and refuses any other with 409. A review's More shows **Close**, **Merge now**, **Re-request review**, **Remove me as a reviewer** and **Request changes**; a row's right-click menu shows only **Close**. A click sends it, through `POST /api/github`, a GitHub write like approve ([Security model](#security-model)).
 
 | Item                                                                          | Offers                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
