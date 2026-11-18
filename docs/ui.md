@@ -22,7 +22,7 @@ The pages:
 
 ## Principles
 
-- **Mouse first, plain words.** Every action is a button, a link or a row's right-click menu, named for what it does. The window names no key: no key chips, no key in a label, placeholder or flash. A button's tooltip may name its own key. Only platform keys work ([Keys](#keys)).
+- **Mouse first, plain words.** Every action is a button, a link or a row's right-click menu, named for what it does. No key in a label, placeholder or flash: a button's tooltip may name its own key, and holding ⌘ shows it as a chip by the button. Only platform keys work ([Keys](#keys)).
 - **Nothing selected on open.** A page opens with no row selected.
 - **One line per item, as a table.** No AI gist, verdict or chips on a row. A click opens the review, where all that is.
 - **What you do takes it off.** Approve, a comment, Ready for review, Request changes, Close, Merge and Hand off for merge each take the item off its list at once. It goes to the Archive (Merging for a hand-off). A toast spins until GitHub has it. If GitHub refuses, the item comes back and a bubble says why. Nothing asks for a second press.
@@ -725,7 +725,7 @@ The desk checks the latest GitHub Release every 6 hours, only in the packaged ap
 
 Holding ⌘ (Ctrl elsewhere) alone for a moment shows each shortcut as a small chip by its button, growing out of nothing: ⌘1 to ⌘4 on the sidebar's pages, / on the search, ⌘N on New note, ⌘J on Ask your agent, ⌘↵ over a conversation's send button. Letting go, or pressing another key, puts them away (`data-key` on the button, `[data-key]` in `styles.css`, the hold in `App.tsx`).
 
-The window names no key; a button's tooltip names its own. Only platform keys work, and / for the filter, as on GitHub. Nothing outside a box you're typing in writes to GitHub or changes an item.
+Otherwise the window names no key, but in a button's own tooltip. Only platform keys work, and / for the filter, as on GitHub. Nothing outside a box you're typing in writes to GitHub or changes an item.
 
 | Key                             | Does                                                                                                                                                                                                                                                                                                      |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -739,6 +739,7 @@ The window names no key; a button's tooltip names its own. Only platform keys wo
 | /                               | Puts you in the search at the top of the sidebar, when you're not typing; not in Settings.                                                                                                                                                                                                                |
 | ⌘1–⌘4                           | Inbox, Blocked, Merging, Archive (Ctrl elsewhere). Each page's tooltip names its key.                                                                                                                                                                                                                     |
 | ⌘] / ⌘[                         | The item after / before the open one in its list (else the selected one; with neither, the first or last), opened as a click would. On Merging, its PRs. Stops at the list's ends and at a fold. Works from a box; does nothing in Settings.                                                              |
+| ⌘N                              | New note, from any page.                                                                                                                                                                                                                                                                                  |
 | ⌘J                              | Ask your agent, as its button in the sidebar; with the chat open, back to its box. Its tooltip names the key.                                                                                                                                                                                             |
 | ⌘,                              | Settings (desktop app).                                                                                                                                                                                                                                                                                   |
 | Control+Alt+D                   | Shows or hides the window from any app (desktop app; settable in This device).                                                                                                                                                                                                                            |
