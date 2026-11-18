@@ -1055,7 +1055,7 @@ export interface ReviewView {
   conversation_error: string | null; // it couldn't be fetched
   reading: boolean; // Claude is reading the ones waiting on you
   reading_error: string | null; // its last try on this PR failed
-  asks: Ask[]; // yours to the coordinator about it, oldest first
+  asks: Ask[]; // yours to your agent about it, oldest first
   viewed: string[]; // the marks of hunks (or of files without one) you marked viewed; a mark a push rewrote matches nothing on screen
 }
 

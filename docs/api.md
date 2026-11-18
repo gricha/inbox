@@ -115,7 +115,7 @@ A page's link (`inbox://blocked`), a question's link (`inbox://question/<id>`) o
 | `inbox_hand_back`   | `ref`, `why` (one line, ≤300)                                                                                                                                                   | The PR leaves Merging for the top of the queue as "handed back: <why>"; the owner is notified. Only on the owner's open PR in Merging                                                                                                                                                                                                              |
 | `inbox_note`        | `ref`, `text` (one line, ≤300)                                                                                                                                                  | `noted on <ref>`: the PR's status line on its row in Merging, with its age; only the latest shows. Only on the owner's open PR in Merging                                                                                                                                                                                                          |
 | `inbox_config`      | `action` (`get` `preview` `save`), `text?` (the whole config.toml), `base?` (save)                                                                                              | get: config.toml fenced, its hash and errors, the judge's status, each board's built-in rules by id with their weights. preview: errors, counts per board before → after, items that would move; saves nothing. save: valid text only; a stale `base` is an error                                                                                  |
-| `inbox_answer`      | `ask_id` (from the wake message), `text` (≤6,000, paragraphs, answer first)                                                                                                     | `answered ask <id>`: the coordinator's answer to the owner's ask, shown in their chat; the owner is notified                                                                                                                                                                                                                                       |
+| `inbox_answer`      | `ask_id` (from the wake message), `text` (≤6,000, paragraphs, answer first)                                                                                                     | `answered ask <id>`: your agent's answer to the owner's ask, shown in their chat; the owner is notified                                                                                                                                                                                                                                            |
 | `inbox_ask`         | `ask_id` (from a wake that says `inbox_ask <id> says where`)                                                                                                                    | Where the owner's ask is: their words, whose the item is and its state, the thread or the lines (side, numbers, commit read, head now), and `Push: yes` only on their own open PR (else `Push: no` and why). File name, `file_arg`, base and branch are fenced                                                                                     |
 | `inbox_inquire`     | `question`, `context` (200–6,000), `options?` (≤6 `{ answer, next }`), `links?` (≤12 `{ label, url }`), `item?`, `from`                                                         | `asked as inquiry <id>`: a question for the owner, a row on their main page with its own page, and a notification. Beside the chat, not instead of it. Its description says when to ask and what the page needs. Poll `inbox_inquiry` for the answer                                                                                               |
 | `inbox_inquiry`     | `id?` (or the question's `inbox://question/<id>` link), `wait?` (0–60 s)                                                                                                        | The answer, "no answer yet", or that it was dismissed. Giving the answer by `id` marks it picked up (`POST /api/inquiries/:id/read`). By link it also shows the question itself (fenced) and doesn't count as a pickup. With no `id`: the answers nobody has picked up yet, picking none up                                                        |
@@ -214,7 +214,7 @@ Every write here is own page only, logged, and answers 502 with GitHub's reason 
 | POST   | `/api/inflight/:id/note`     | `{ text }` → `{ ok, text }` (`inbox_note`), flattened to one line. 400 when empty; 409 unless your open PR in Merging                                                                                                                                                                                                                                                            | ✓   |
 | POST   | `/api/inflight/:id/handback` | `{ why }` → `{ ok, reason }` (`inbox_hand_back`): the PR leaves Merging for the top of the queue. 409 unless your open PR in Merging                                                                                                                                                                                                                                             | ✓   |
 | POST   | `/api/coordinator/wake`      | Starts the coordinator, or has it look at Merging now (Start it now, Wake it). 409 while `agent.coordinator` is off                                                                                                                                                                                                                                                              | ✓   |
-| POST   | `/api/ask`                   | `{ text, item_id?, thread_id?, thread_url?, lines? }` → `{ ok, ask }`: your words to the coordinator ([Asks](#asks)), up to 2,000 characters. Own page only. 409 while `agent.coordinator` is off; 502 when it didn't start                                                                                                                                                      | ✓   |
+| POST   | `/api/ask`                   | `{ text, item_id?, thread_id?, thread_url?, lines? }` → `{ ok, ask }`: your words to your agent ([Asks](#asks)), up to 2,000 characters. Own page only. 409 while `agent.coordinator` is off; 502 when it didn't start                                                                                                                                                           | ✓   |
 | GET    | `/api/asks`                  | `{ on, asks, coordinator, options, models? }`: whether it's on, this chat's asks (since the last new chat) oldest first with their answers, what your agent is doing (`saying`: its words so far this turn), how it runs (`AgentOptions`), and the models and efforts its own command lists (`models`, absent until read)                                                        |     |
 | POST   | `/api/asks/new`              | `{ agent? }` → as `GET /api/asks`, empty: a new chat. Your agent's session is let go (the next ask starts one with no history), answered asks are kept out of the chat and unanswered ones dropped. With another `agent` it becomes your agent first, as `POST /api/setup` does. Own page only. 409 while `agent.coordinator` is off or that agent isn't installed and logged in | ✓   |
 | GET    | `/api/asks/:id`              | `AskPlace` (`inbox_ask`): where the ask is. Agents may read it. 404 for an unknown ask                                                                                                                                                                                                                                                                                           | ✓   |
@@ -234,7 +234,7 @@ Every write here is own page only, logged, and answers 502 with GitHub's reason 
 
 A question's limits: `question` one line (300), `from` one line (60), `context` 200 to 6,000 characters (paragraphs kept), at most 6 `options` (`answer` 80, `next` 400: what the agent does if you pick it), at most 12 `links` with https URLs, and an `item` or at least one link. Text over a limit is refused, never cut; bidi marks are dropped.
 
-After you answer, the question leaves the main page and is owed to whoever asked until they read it: an `answer` job in Claude's work, with one notification if it's unread after 30 minutes. A dismissal owes nothing. A question the coordinator asked (`from` "Inbox coordinator") wakes it with your answer, which counts as its read.
+After you answer, the question leaves the main page and is owed to whoever asked until they read it: an `answer` job in Claude's work, with one notification if it's unread after 30 minutes. A dismissal owes nothing. A question the coordinator or your agent asked (`from` "Inbox coordinator" or "Inbox agent") wakes that one with your answer, which counts as its read.
 
 ### Sessions, automations and criteria
 
@@ -470,7 +470,7 @@ interface ReviewView {
   conversation_error: string | null;
   reading: boolean; // your agent is reading the ones waiting on you
   reading_error: string | null;
-  asks: Ask[]; // yours to the coordinator about it
+  asks: Ask[]; // yours to your agent about it
 }
 
 interface Conversation {
@@ -1009,7 +1009,7 @@ An open issue on your desk gets a pre-review (`IssueReview` in `ItemDetail.issue
 - `fixable`: it said so, it's a bug, it read the code, and some evidence held. That's **Make PR with fix**.
 - `~/.inbox/issue.md` changes its instructions as `review.md` does a PR's: text under no heading is yours, added after the defaults; `## <id>` replaces that part (`goal`, `kind`, `problem`, `cause`, `fix`, `fixable`, `steps`).
 
-**Make PR with fix** (`POST /api/issue/:id/fix`, own page only) needs an open issue whose pre-review is `fixable` and not flagged. It's an ask ([Asks](#asks)) with `fix: true`, its text the desk's own: the analysis's problem, cause, places and fix, and that the issue's text is untrusted. The wake line adds `Make PR with fix: open a draft PR with this fix (inbox_ask <id> says where)`, and `inbox_ask`'s `fix` is `{ repo, base }` while the issue is open and the pre-review still has the fix. The coordinator opens a draft PR from a new branch off `base` (skill: "Make PR with fix"); the desk writes nothing.
+**Make PR with fix** (`POST /api/issue/:id/fix`, own page only) needs an open issue whose pre-review is `fixable` and not flagged. It's an ask ([Asks](#asks)) with `fix: true`, its text the desk's own: the analysis's problem, cause, places and fix, and that the issue's text is untrusted. The wake line adds `Make PR with fix: open a draft PR with this fix (inbox_ask <id> says where)`, and `inbox_ask`'s `fix` is `{ repo, base }` while the issue is open and the pre-review still has the fix. Your agent opens a draft PR from a new branch off `base` (skill: "Make PR with fix"); the desk writes nothing.
 
 ### What reviewers said
 
@@ -1080,7 +1080,7 @@ Your agent triages everything that reaches the desk, after the rules.
 - The first matching rule's bucket and why (or the board's `default` when none matched) is the judge's **hint**, and holds until it answers. `bucket = "judge"` hints the board default.
 - `hard = true` is a **floor**: what it matches never sorts below the rule's bucket (Today for a Now rule), whatever the judge, the quiet rule (`queue.quiet_days`) or caps say. Now's cap still sends overflow to Today. GitHub's rules set it on your fresh drafts.
 - `final = true` takes the item away from the judge: it stays in the rule's bucket (your pin's floor still lifts it; `bucket = "judge"` can't be final).
-- **Your pin** is a floor too: Today or above. A pin from the coordinator's `inbox_add` (`from` "Inbox coordinator") isn't: the judge sees "pinned by the coordinator" and weighs it like a signal of weight 5. A pin or unpin sorts the item again.
+- **Your pin** is a floor too: Today or above. A pin from the coordinator's or your agent's `inbox_add` (`from` "Inbox coordinator" or "Inbox agent") isn't: the judge sees "pinned by the coordinator" and weighs it like a signal of weight 5. A pin or unpin sorts the item again.
 - Resolution still applies: a PR that's merged, closed, or approved by someone else (`github.resolve_on_others_approval`) leaves the desk ([Resolved](#resolved)).
 
 **Signals.** For each item the judge gets every signal about it (`JudgeSignal`), not just the first rule:
@@ -1255,7 +1255,7 @@ It never posts comments or replies as you.
 
 - a hand-off;
 - on a PR in Merging: CI finishing (green or red), a review, a comment, a conflict;
-- your [asks](#asks), and your answers to its questions;
+- your answers to its questions (your [asks](#asks) wake your agent, a session of its own);
 - `POST /api/coordinator/wake` (Start it now, Wake it in Merging).
 
 News is queued one entry per PR. A minute after the first, the desk delivers it as one line of ids, URLs and kinds of change, never PR text. Queued news stays in kv `coordinator_news` until a start or resume succeeds, so a restart or a failed start keeps it. News on a merged or closed PR doesn't wake it, and a second Wake it while one runs adds nothing.
@@ -1340,7 +1340,7 @@ For example:
 
 `Wake it` re-sends the ask with the item's state now (handed off since, merged since, or off the desk).
 
-**Its job.** Each ask is a job in [Claude's work](architecture.md#claudes-work-srcjobsts), from when the coordinator is handed it until `inbox_answer`. One it stopped without answering (idle or stopped, nothing in flight, not about to be told again) goes to it again 5 and then 15 minutes after it last went. 30 minutes after the third it's failed ("your agent stopped without answering it, 3 times"). An answered ask still waiting to go is dropped from `coordinator_asks`, so it's never asked twice.
+**Its job.** Each ask is a job in [Claude's work](architecture.md#claudes-work-srcjobsts), from when your agent is handed it until `inbox_answer`. One it stopped without answering (idle or stopped, nothing in flight, not about to be told again) goes to it again 5 and then 15 minutes after it last went. 30 minutes after the third it's failed ("your agent stopped without answering it, 3 times"). An answered ask still waiting to go is dropped from `agent_asks`, so it's never asked twice.
 
 **Lines** (`lines: { path, line, side, start?, head, note? }`) need a PR, and an ask is on a thread or on lines, not both. Each of these is a 400, and nothing is kept or sent:
 
@@ -1375,7 +1375,7 @@ Any shape it doesn't know gives no item. Nothing it reads is kept but a one-line
 
 **Asking you something.** A turn that ended normally with a question, in a terminal still open (or Codex's `task_complete`), goes to your agent (`askAgent()`, tool-less, the message's last 2 KB, at most 3 a pass), once per session and last event. It reaches the Inbox only if it's blocking; a directional question ("Want me to also…?") never does. With `sessions.ask` off, none reaches the Inbox. The desktop app's and background sessions' own reads stand instead.
 
-**Left out:** the coordinator (`Inbox coordinator`) and anything working under the desk's home (the judge, reviews, automations).
+**Left out:** the coordinator (`Inbox coordinator`), your agent (`Inbox agent`) and anything working under the desk's home (the judge, reviews, automations).
 
 **Actions** (`SessionCard.actions`):
 
@@ -1599,7 +1599,7 @@ A config with the earlier rule, which left out a conflicted PR, gets today's onc
 - **Pinning.** Either way it's pinned. One done, snoozed or muted comes back too, logged as one `pin`: the returned `undo_seq` undoes both.
 - **Pre-review.** For a PR the desk starts what opening its review would: its diff and conversations, your agent's read of what waits on you, and its AI review (with `review.auto_ai`, on someone else's PR with none for this commit). These queue with the background ones, `review.at_once` at a time, so an agent adding many doesn't start an agent run for each.
 - **The Added board.** Your pins that no board places sit on a board of their own, `added` (why "you added it", Today by default). The judge sorts them like anything else, and your pin's floor keeps them in Today or above. They don't notify; you put them there.
-- **From the coordinator.** A `inbox_add` with `from` exactly "Inbox coordinator" (or "Review Desk coordinator") is the coordinator's opinion, not your pin: no floor, so the judge weighs it with the item's signals (and a rule's Blocked keeps it there). One no board places is on `added` too, with its why.
+- **From the coordinator.** A `inbox_add` with `from` exactly "Inbox coordinator", "Inbox agent" (or "Review Desk coordinator") is the coordinator's opinion, not your pin: no floor, so the judge weighs it with the item's signals (and a rule's Blocked keeps it there). One no board places is on `added` too, with its why.
 - **Keeping it fresh.** While a pinned item is open and no search returns it, each sync refreshes it (every 3 minutes), probes its stack, and keeps it from the 14-day prune. Once merged or closed it resolves and goes like anything else.
 - **The hand-off.** `why` (one plain line) and `from` are the card's `handoff` (`{ why, from }`), shown in the review's header and the opened item ("From seer write gate: …") and given to agents in `inbox_item`. They're kept in kv `added:<id>` by the seq of that pin, and shown while that pin is the item's latest and you haven't acted on the item since (undoing your action brings the hand-off back). The card's `why` stays whatever placed it.
 - `inbox_add` requires both `why` and `from`; `inbox add <ref> [why] --from <task>` and the HTTP route take them optionally.
