@@ -937,7 +937,7 @@ It also writes one for any PR whose review you open.
 
 **Failures and retries.** Each review is a job in the ledger of [Claude's work](architecture.md#claudes-work-srcjobsts), which outlives a restart.
 
-- A failed try (in the agent's words, or a run past 15 minutes, which the loop stops) is retried 2 and then 10 minutes later, before anything new.
+- A failed try (in the agent's words, or a run past 65 minutes, which the loop stops; each agent call stops at 30) is retried 2 and then 10 minutes later, before anything new.
 - After three it's failed for that commit until you ask (Try again, Ask Claude for one, `inbox brief`). Opening it or a sync doesn't restart it. With `review.auto_ai` off, a failed try is failed at once.
 - Two failures in a row on different PRs (an expired login fails every PR) pause the background reviews for 30 minutes. The queue says so once (`paused`; "Claude is paused" when the cause is the login, which stops the judge too). Asking in the review still runs one.
 - A success or a change to `review.auto_ai` resumes them; a settings change also retries the PRs that failed. One call that works after a login failure (a review or the judge) retries everything else that failed on the login at once.
