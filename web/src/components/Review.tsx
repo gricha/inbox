@@ -1042,7 +1042,7 @@ export function Review({
     <>
       {/* Across the review's top, stuck there: its three views as pills, then what finishes it and More. */}
       <div className="rv-bar">
-        <nav className="rv-views" aria-label="Guided review, every file, or the conversation">
+        <nav className="rv-views" aria-label="Review, Code changes or Conversation">
           {guided &&
             tab("Review", !talking && walking, () => {
               pickOrder(true);
@@ -1503,7 +1503,7 @@ function StepList({
   onGo: (i: number, el: string) => void;
 }) {
   return (
-    <nav className="rv-files rv-steps" aria-label="Steps of the guided review">
+    <nav className="rv-files rv-steps" aria-label="Steps of the review">
       <h2 className="rv-side-head">
         <span>Review</span>
       </h2>

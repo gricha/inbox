@@ -2875,8 +2875,7 @@ const SHOTS: Shot[] = [
         if (drawn.join() !== files.join()) bad(`Code changes draws ${drawn.join()}, not every file in order: ${files.join()}`);
         if ((await page.evaluate<string | null>(`localStorage.getItem("desk.review.view")`)) !== "traditional")
           bad("the choice isn't kept");
-        if (await page.locator(".rv-next, .rv-files[aria-label='Steps of the guided review']").count())
-          bad("Code changes still shows the steps");
+        if (await page.locator(".rv-next, .rv-files[aria-label='Steps of the review']").count()) bad("Code changes still shows the steps");
         await page.locator(".rv-views").scrollIntoViewIfNeeded();
         // The sidebar's files, as folders: the file you're in is marked, its folders ringed; a folded one is marked in its place,
         // and scrolling into a folded folder's file opens it.
