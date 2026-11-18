@@ -397,9 +397,10 @@ merge, where Snooze does); More is its three dots only where it doesn't fit even
   Settings → Agent (`agent.coordinator_bypass`, `_model`, `_effort`), each saved the moment it's picked
   (`Store.setAgentOption()`, `PUT /api/settings`) with the one in force ticked: how freely it runs in its own words
   (Ask first or Bypass permissions; Codex: Workspace only or Full access; OpenCode: Refuse what asks or Approve what
-  asks), its model ("Model" while it's the agent's default; Claude Code lists Fable, Opus, Sonnet and Haiku; **Another
-  model…** opens a field for any name its command takes) and its effort ("Effort" while default; Low to Max, Xhigh on
-  Codex; none on OpenCode). A pick shows at once; one the desk refuses goes back, its words in red under the box. Where
+  asks), its model ("Model" while it's the agent's default; what its own command lists once the desk has read it
+  (`AsksView.models`), until then Claude Code's Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5; **Another model…** opens
+  a field for any name its command takes) and its effort ("Effort" while default; its levels, from the same list; none
+  on OpenCode). A pick shows at once; one the desk refuses goes back, its words in red under the box. Where
   they don't fit beside Send (a long model's name, large text) they take a line of their own above Back and Send. What
   you typed and didn't send is kept per item. A refusal puts your words back with the desk's own in red
   (`Store.askFailed`), before anything you typed meanwhile; if you'd left the chat by then, a bubble says why and its

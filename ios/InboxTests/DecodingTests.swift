@@ -621,6 +621,15 @@ final class DecodingTests: XCTestCase {
     XCTAssertEqual(v.options?.agent, "claude-code")
     XCTAssertEqual([v.options?.bypass], [true])
     XCTAssertEqual([v.options?.model, v.options?.effort], ["", ""])
+    XCTAssertNil(v.models, "the mock reads no agent's models")
+  }
+
+  // What your agent's own command lists, once the desk has read it (AsksView.models).
+  func testAsksWithTheAgentsModels() throws {
+    let json = #"{"on":true,"asks":[],"models":{"models":[{"value":"gpt-6","label":"GPT-6"},{"value":7}],"efforts":[{"value":"xhigh","label":"Extra high"}]}}"#
+    let v = try DeskJSON.decoder().decode(AsksView.self, from: Data(json.utf8))
+    XCTAssertEqual(v.models?.models, [.init(value: "gpt-6", label: "GPT-6")], "a bad row is skipped")
+    XCTAssertEqual(v.models?.efforts, [.init(value: "xhigh", label: "Extra high")])
   }
 
   // An older desk sends a coordinator without status, queued or activity, and an ask's lines may be a range.

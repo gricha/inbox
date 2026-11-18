@@ -423,8 +423,8 @@ struct ChatPage: View {
       let bypass = picked["bypass"].map { $0 == "1" } ?? (o.bypass ?? false)
       let model = picked["model"] ?? o.model ?? ""
       let effort = picked["effort"] ?? o.effort ?? ""
-      let models = kind.models(model)
-      let efforts = kind.efforts(effort)
+      let models = kind.models(model, read: store.asks?.models?.models ?? [])
+      let efforts = kind.efforts(effort, read: store.asks?.models?.efforts ?? [])
       pick(
         "How freely \(kind.name) runs", tip: "How freely \(kind.name) runs; it can't post as you either way", said: kind.run[bypass ? 1 : 0],
         choices: [.init(value: "0", label: kind.run[0]), .init(value: "1", label: kind.run[1])], value: bypass ? "1" : "0"
@@ -432,7 +432,7 @@ struct ChatPage: View {
       pick("\(kind.name)'s model", tip: "\(kind.name)'s model", said: AgentKind.said(models, value: model, none: "Model"), choices: models, value: model, other: true) {
         save("agent.coordinator_model", "model", .text($0), shown: $0)
       }
-      if !kind.efforts.isEmpty {
+      if efforts.count > 1 {
         pick("\(kind.name)'s effort", tip: "How hard \(kind.name) thinks", said: AgentKind.said(efforts, value: effort, none: "Effort"), choices: efforts, value: effort) {
           save("agent.coordinator_effort", "effort", .text($0), shown: $0)
         }

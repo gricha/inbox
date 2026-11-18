@@ -715,6 +715,12 @@ final class FormatTests: XCTestCase {
     XCTAssertEqual(AgentKind.said(typed, value: "claude-opus-5-5", none: "Model"), "Opus 5.5")
     XCTAssertEqual(AgentKind.said(typed, value: "", none: "Model"), "Model")
     XCTAssertEqual(AgentKind.said(codex.efforts("high"), value: "high", none: "Effort"), "High")
+    // What the agent's own command lists, once the desk has read it, takes the place of the few the phone knows.
+    let read: [AgentKind.Choice] = [.init(value: "gpt-6", label: "GPT-6"), .init(value: "gpt-6-mini", label: "GPT-6 mini")]
+    XCTAssertEqual(codex.models("", read: read).map(\.label), ["Default model", "GPT-6", "GPT-6 mini"])
+    XCTAssertEqual(codex.models("o9", read: read).last, .init(value: "o9", label: "o9"), "one it doesn't list, as typed")
+    XCTAssertEqual(codex.models("gpt-6", read: read).count, 3)
+    XCTAssertEqual(codex.efforts("", read: [.init(value: "xhigh", label: "Extra high")]).map(\.label), ["Default effort", "Extra high"])
   }
 
   // Each agent's mark is drawn from the window's path in its 24×24 box.

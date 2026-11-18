@@ -441,6 +441,12 @@ struct AsksView: Decodable, Sendable {
   @Lossy var asks: [Ask]
   var coordinator: InflightView.Coordinator?
   var options: AgentOptions?
+  var models: AgentModels?  // what your agent's own command lists (src/models.ts); absent until the desk has read it
+
+  struct AgentModels: Decodable, Sendable {
+    @Lossy var models: [AgentKind.Choice]
+    @Lossy var efforts: [AgentKind.Choice]
+  }
 
   // How your agent runs, as the chat's own controls set it (Settings → Agent's settings).
   struct AgentOptions: Decodable, Sendable {

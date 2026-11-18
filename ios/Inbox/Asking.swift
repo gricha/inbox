@@ -188,7 +188,8 @@ enum Asking {
 }
 
 // How your agent runs, as the chat's menus offer it (Chat.tsx's AGENT): its name, how freely it runs in its own words,
-// the models it lists and its levels of effort (none on OpenCode). Every agent takes a typed model.
+// and the models and levels of effort it lists until the desk has read the agent's own (no effort on OpenCode). Every
+// agent takes a typed model.
 struct AgentKind: Equatable, Sendable {
   let name: String
   let run: [String]  // bypass off, then on
@@ -207,16 +208,17 @@ struct AgentKind: Equatable, Sendable {
     }
   }
 
-  struct Choice: Equatable, Sendable {
+  struct Choice: Equatable, Sendable, Decodable {
     let value: String
     let label: String
   }
 
-  // A menu's choices: its own default ("") first, then what it lists, then the value in force if it lists none such.
-  static func choices(_ known: [String], current: String, none: String) -> [Choice] {
-    let values = known + (current.isEmpty || known.contains(current) ? [] : [current])
-    return [Choice(value: "", label: none)]
-      + values.map { Choice(value: $0, label: known.contains($0) ? label($0) : $0) }
+  // A menu's choices: its own default ("") first, then what its command lists (`read`, once the desk has read it; until
+  // then the few it knows), then the value in force if it lists none such.
+  static func choices(_ known: [String], read: [Choice], current: String, none: String) -> [Choice] {
+    let list = read.isEmpty ? known.map { Choice(value: $0, label: label($0)) } : read
+    return [Choice(value: "", label: none)] + list
+      + (current.isEmpty || list.contains { $0.value == current } ? [] : [Choice(value: current, label: current)])
   }
 
   // Claude Code's models by version, as the desk's Settings names them (CLAUDE_VERSIONS in src/settings.ts); an effort, capitalized.
@@ -232,6 +234,10 @@ struct AgentKind: Equatable, Sendable {
     value.isEmpty ? none : choices.first { $0.value == value }?.label ?? value
   }
 
-  func models(_ current: String) -> [Choice] { AgentKind.choices(models, current: current, none: "Default model") }
-  func efforts(_ current: String) -> [Choice] { AgentKind.choices(efforts, current: current, none: "Default effort") }
+  func models(_ current: String, read: [Choice] = []) -> [Choice] {
+    AgentKind.choices(models, read: read, current: current, none: "Default model")
+  }
+  func efforts(_ current: String, read: [Choice] = []) -> [Choice] {
+    AgentKind.choices(efforts, read: read, current: current, none: "Default effort")
+  }
 }
