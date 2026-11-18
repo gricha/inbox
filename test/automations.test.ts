@@ -1945,3 +1945,31 @@ test("a rule's sort lets go of an item its check no longer passes, as when a rel
   t.desk.changed();
   assert.equal(card().bucket, before, "its check no longer passes: back where the rules put it");
 });
+
+test("a scheduled question your agent answered while the decision model was down asks the decision model again once it's back", async (c) => {
+  if (unixOnly(c)) return; // it falls back to your agent's fake CLI
+  const fake = fakeClaude(c);
+  let down = true;
+  const api = await fakeDecisions(() =>
+    down
+      ? { status: 402, json: { error: { message: "Insufficient credits" } } }
+      : { json: { answers: { decision: { type: "noul", noul: 0.1 } } } },
+  );
+  c.after(api.close);
+  const t = await setup([teamPing(4)], {
+    settings: { "policy.judge": false, "notify.quiet": "", "agent.decision_key": "sk-or-v1-0000" },
+    desk: { decisions: api.url },
+  });
+  c.after(t.cleanup);
+  await runFx(t.desk.sync());
+  const q = { name: "Pings", schedule: "daily 09:00", when: "true", decide: "ask", prompt: "Hide the noise.", can: ["hide"] };
+  const a = runSync(t.desk.automations.set("p", q, true));
+  fake.answer("", []);
+  const fell = await t.desk.automations.run(a, "schedule").p;
+  assert.equal(fell.summary, "Asked Claude about 1 item; it left 1 as it is.");
+  await api.quiet();
+  down = false;
+  api.calls.length = 0;
+  const back = await t.desk.automations.run(a, "schedule").p;
+  assert.equal(api.calls.length, 1, back.summary);
+});

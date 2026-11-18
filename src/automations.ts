@@ -800,7 +800,7 @@ export class Automations {
         },
       );
       if (!this.all().some((x) => x.id === a.id)) return false; // deleted while it ran
-      this.asked(a, who, asked);
+      this.asked(a, by, asked);
       const seen = new Set<string>();
       for (const x of said) {
         if (!asked.includes(x.ref) || seen.has(x.ref)) continue;
