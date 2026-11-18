@@ -5126,6 +5126,11 @@ html::-webkit-scrollbar-corner,
   padding: 0 17px; /* on its labels' edge: a row's 16px inside the sheet's 1px */
 }
 
+/* A part that opens with a heading starts where a sheet would: the page's padding is its gap. */
+.s-part:nth-child(1 of :not([hidden])) > .group-head:first-child {
+  margin-top: 0;
+}
+
 .s-skel .sk-lines {
   width: min(360px, 70%);
 }
