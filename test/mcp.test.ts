@@ -96,6 +96,15 @@ test("inbox_automations lists each one with its last runs, fenced; one it writes
   });
   assert.equal(set.text, "saved warden; it's on, weekdays 09:00");
   assert.deepEqual([lastCall().body.can, lastCall().body.when], [undefined, undefined], "left out, it adds and has no check");
+  const off = await call("inbox_automations", {
+    action: "set",
+    id: "warden",
+    name: "W",
+    schedule: "weekdays 09:00",
+    prompt: "look",
+    on: false,
+  });
+  assert.deepEqual([off.text, lastCall().body.on], ["saved warden (weekdays 09:00); it's off", false], "saved off when it says so");
   await call("inbox_automations", {
     action: "set",
     id: "warden",

@@ -805,10 +805,11 @@ export function createMcpServer(
           .optional()
           .describe("set, with decide rule: what each item gets; do must be in can, until is a snooze's (tomorrow when left out)"),
         can: z.array(z.enum(VERBS)).optional().describe('set: what it may do with an item; left out: ["add"]'),
+        on: z.boolean().optional().describe("set: false saves it off; left out: on, or as it was"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    ({ action, id, name, schedule, events, prompt, when, decide, rule, can }) =>
+    ({ action, id, name, schedule, events, prompt, when, decide, rule, can, on }) =>
       run(
         Effect.gen(function* () {
           if (action === "list") return automationsText(yield* api.automations());
@@ -816,7 +817,7 @@ export function createMcpServer(
           if (action === "run") return (yield* api.runAutomation(id), `running ${id}; its result shows in Settings`);
           if (name === undefined || (prompt === undefined && decide !== "rule") || (schedule === undefined && !events?.length))
             return yield* new ToolInputError({ message: "set needs id, name, prompt (but for a rule) and a schedule or events" });
-          const { automation: a } = yield* api.setAutomation(id, { name, schedule, events, prompt, when, decide, rule, can });
+          const { automation: a } = yield* api.setAutomation(id, { name, schedule, events, prompt, when, decide, rule, can, on });
           const starts = startsOn(a);
           return a.on ? `saved ${a.id}; it's on, ${starts}` : `saved ${a.id} (${starts}); it's off`;
         }),
