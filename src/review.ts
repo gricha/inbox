@@ -44,6 +44,7 @@ import type {
   ReviewFile,
   ReviewGuide,
   ReviewHunk,
+  HunkTag,
   ReviewNote,
   ReviewOrder,
   ReviewRest,
@@ -70,6 +71,8 @@ const MAX_OUTPUT = 64 * 1024 * 1024;
 // Lockfiles and snapshots eat the budget and say nothing a reviewer reads.
 const NOISE =
   /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock|uv\.lock|Cargo\.lock|go\.sum|Gemfile\.lock|composer\.lock)$|\.(snap|min\.js|min\.css)$/;
+// A lockfile or generated file: the prompt leaves its diff out, and the review folds it away.
+export const isGeneratedPath = (p: string): boolean => NOISE.test(p);
 
 const anchored = (extra: Record<string, unknown> = {}, more: string[] = []) => ({
   type: "object",
@@ -469,14 +472,14 @@ export function numberPatch(patch: string): string {
     .join("\n");
 }
 
-type Hunk = Omit<ReviewHunk, "level" | "rank" | "why" | "notes">;
+export type Hunk = Omit<ReviewHunk, "level" | "rank" | "why" | "notes">;
 
 // A short fingerprint of what's marked viewed.
 const markOf = (parts: (string | null | undefined)[]): string =>
   createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
 
 // h1, h2, … across the files in order: the ids the prompt shows, the ranking names and the review view orders by.
-function hunksOf(files: ReviewFile[]): Hunk[] {
+export function hunksOf(files: ReviewFile[]): Hunk[] {
   const out: Hunk[] = [];
   for (const [file, f] of files.entries()) {
     const parts: string[][] = [];
@@ -1666,7 +1669,13 @@ function noteSpots(hunks: Hunk[], notes: Pick<ReviewNote, "path" | "side" | "lin
 
 // Every hunk once, in reading order: ranked, unread, what Claude left out, then what the desk folds away by file; without a
 // ranking for this commit, file by file.
-export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boolean): ReviewOrder {
+// `tags`: your tags on each hunk, by its mark (Tags.of()).
+export function reviewOrder(
+  files: ReviewFile[],
+  ai: AiReview | null,
+  stale: boolean,
+  tags: ReadonlyMap<string, HunkTag[]> = new Map(),
+): ReviewOrder {
   const hunks = hunksOf(files);
   const fresh = ai && !stale ? ai : null;
   const byId = new Map(hunks.map((h) => [h.id, h]));
@@ -1695,12 +1704,14 @@ export function reviewOrder(files: ReviewFile[], ai: AiReview | null, stale: boo
     if (spot) looks.set(spot.hunk.id, [...(looks.get(spot.hunk.id) ?? []), i]);
   const view = (h: Hunk, level: ReviewHunk["level"], rank: number | null, why: string | null): ReviewHunk => {
     const hunkLooks = looks.get(h.id);
+    const hunkTags = tags.get(h.mark);
     return {
       ...h,
       level,
       rank,
       why,
       ...(hunkLooks && { looks: hunkLooks }),
+      ...(hunkTags && { tags: hunkTags }),
       notes: take(
         h.path,
         (onHunk.get(h.id) ?? []).toSorted((a, b) => a.at - b.at || a.note - b.note).map((x) => x.note),

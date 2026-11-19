@@ -30,6 +30,7 @@ import {
 import type { Checkout } from "./checkout.ts";
 import { Automations, canOf } from "./automations.ts";
 import { Urgency } from "./urgency.ts";
+import { Tags } from "./tags.ts";
 import { Light } from "./light.ts";
 import { Attributions } from "./attribution.ts";
 import { Placements } from "./placements.ts";
@@ -684,6 +685,7 @@ export class Desk {
   opener: (url: string) => Effect.Effect<void, CommandError>;
   automations: Automations;
   urgency: Urgency; // the Inbox's sections and order: criteria and scores
+  tags: Tags; // your tags on a review's hunks (config.toml's [[tags]])
   light: Light; // the light model: what sorts, scores, answers your rules' questions and reads small facts
   attributions: Attributions; // the light model's read of whom a bot's PR is for, where no line says
   placements: Placements; // each item's log: where it stood and why, each time that changed
@@ -764,6 +766,7 @@ export class Desk {
     this.opener = opts.open ?? openLink;
     this.automations = new Automations(this);
     this.urgency = new Urgency(this);
+    this.tags = new Tags(this);
     this.updates = new Updates({
       latest: () => this.gh.api.latestRelease(`${RELEASES.owner}/${RELEASES.repo}`),
       app: opts.app ?? null,
@@ -1093,6 +1096,7 @@ export class Desk {
       if (this.settings["agent.decision_key"] + this.settings["agent.decision_model"] !== decider) {
         this.automations.held.clear();
         this.urgency.held = null;
+        this.tags.held = null;
       }
       for (const seat of [this.coordinator, this.yourAgent]) {
         if (coordinator && !this.settings["agent.coordinator"]) seat.stop();
@@ -1144,6 +1148,7 @@ export class Desk {
       this.urgency.held = null;
       any = true;
     }
+    if (this.tags.held && hit(this.tags.held.why)) this.tags.held = null; // asked again when a review is next drawn
     if (!any || !only) return; // a settings change pumps everything itself
     this.log("the agent works again: retrying what failed on its login");
     this.changed();
@@ -2545,6 +2550,7 @@ export class Desk {
       const snap = this.snapshot();
       const e = snap.entries.get(id)!;
       if (!ahead && this.autoAi() && this.wantsAi(e, snap)) this.startAi(id);
+      if (!ahead) this.tags.start(id, got.files, true);
       const d = yield* this.item(id);
       const job = this.jobs.get("ai_review", id);
       const running = job?.state === "running";
@@ -2558,7 +2564,7 @@ export class Desk {
         files: got.files,
         diff_head: got.head ?? e.item.head_oid,
         files_error: got.error,
-        order: reviewOrder(got.files, d.ai, d.ai_stale),
+        order: reviewOrder(got.files, d.ai, d.ai_stale, this.tags.of(id, got.files)),
         ai: d.ai,
         ai_stale: d.ai_stale,
         ai_error: running ? null : (own ?? paused),
@@ -2734,6 +2740,7 @@ export class Desk {
           skill: own.hash,
           ...(ctx && { said: saidOf(ctx) }),
         };
+        this.tags.start(id, pr.files); // alongside the review: they read the same diff, and neither waits on the other
         const code = this.review.checkout ? yield* this.review.checkout(e.item) : null;
         const written = yield* this.review
           .generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir(), this.agent(), code?.dir)

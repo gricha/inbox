@@ -19,14 +19,14 @@ import { checksView } from "../../src/checks.ts";
 import { catchAllOf, resolveRules, spaceOf } from "../../src/config.ts";
 import { GITHUB_RULES } from "../../src/connectors/github-rules.ts";
 import { compile, renderTemplate } from "../../src/expr.ts";
-import { CLAUDE_PAUSED, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
+import { CLAUDE_PAUSED, hunksOf, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
 import { parseDiagram } from "../../src/diagram.ts";
 import { docOf } from "../../src/doc.ts";
 import { renderDoc } from "../../src/render.ts";
 import { capText, floorOf, placedBy, queueOrder, quietText, weightOf } from "../../src/rules.ts";
 import { blockedOrder } from "../../src/deps.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "../../src/stacks.ts";
-import { FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
+import { CHUNK_FIELDS, FIELDS, plainWhy, waitable, weekdayHours } from "../../src/signals.ts";
 import { mergeLine, peopleOf, stage, standings } from "../../src/stage.ts";
 import { CLAUDE_MODELS, type AgentModels } from "../../src/models.ts";
 import { agentDefs, agentName, checkSetting, DEFAULTS, LEGACY_TABLES, masked, SECTIONS, settingDef } from "../../src/settings.ts";
@@ -81,6 +81,7 @@ import type {
   Rule,
   ReviewDecision,
   ReviewFile,
+  HunkTag,
   Inquiry,
   Note,
   NotesView,
@@ -225,6 +226,7 @@ function fromSettings(): Pick<Config, "poll_seconds" | "signals" | "handoff"> {
 
 let config: Config = {
   ...fromSettings(),
+  tags: [],
   spaces: [
     { id: "work", name: "Work", scope: "org:acme" },
     { id: "personal", name: "Personal", scope: "-org:acme" },
@@ -3581,6 +3583,42 @@ function cannedChecks(s: Seed): Check[] {
 
 // Like the desk, opening an open PR with no AI review asks for one; a merged or closed one can't be approved.
 // ahead: fetched before it's opened, so no AI review starts, as on the desk.
+// Your tags, as a desk with a set of them would draw them: red asks for more attention, green for less, as the verdict's
+// colours do. Each file gets what fits its canned diff; the test file has one of each.
+const JEV = "typesafe/jev-1.14";
+const MORE = { bg: "#fce8e6", fg: "#b42318" };
+const LESS = { bg: "#e6f4ea", fg: "#176847" };
+const asked = (id: string, name: string, look: typeof MORE, p: number): HunkTag => ({ id, name, ...look, p, by: JEV });
+const TAG = {
+  clever: asked("overly-clever", "Overly clever", MORE, 0.82),
+  concurrency: asked("concurrency", "Concurrency", MORE, 0.88),
+  long: asked("long-function", "Long function", MORE, 0.84),
+  signature: asked("signature-change", "Signature change", MORE, 0.97),
+  default: asked("new-default", "New default", MORE, 0.91),
+  unchecked: asked("unchecked-input", "Unchecked input", MORE, 0.94),
+  api: asked("public-api", "Public API", MORE, 0.89),
+  errors: asked("error-handling", "Error handling", MORE, 0.86),
+  timing: asked("timing-based", "Timing-based test", MORE, 0.83),
+  tests: { id: "tests-only", name: "Tests only", ...LESS, by: "rule" },
+  docs: { id: "docs-only", name: "Docs only", ...LESS, by: "rule" },
+  low: asked("low-risk", "Low risk", LESS, 0.93),
+} satisfies Record<string, HunkTag>;
+const TAGGED: [RegExp, HunkTag[]][] = [
+  [/planner\/stream\.ts$/, [TAG.clever, TAG.concurrency, TAG.long]],
+  [/planner\/plan\.ts$/, [TAG.signature, TAG.default]],
+  [/routes\/query\.ts$/, [TAG.unchecked, TAG.api, TAG.errors]],
+  [/planner\/stream\.test\.ts$/, [TAG.timing, TAG.tests]],
+  [/\.md$/, [TAG.docs, TAG.low]],
+];
+function tagsOf(files: ReviewFile[]): Map<string, HunkTag[]> {
+  const out = new Map<string, HunkTag[]>();
+  for (const h of hunksOf(files)) {
+    const on = TAGGED.find(([re]) => re.test(h.path))?.[1] ?? [];
+    if (on.length) out.set(h.mark, on);
+  }
+  return out;
+}
+
 function reviewView(r: Rec, ahead = false): ReviewView {
   const d = detail(r);
   if (d.item.kind !== "pr") throw new HttpError(400, `${r.id} is an issue; reviews are for pull requests`);
@@ -3599,7 +3637,7 @@ function reviewView(r: Rec, ahead = false): ReviewView {
     files,
     diff_head: d.item.head_oid,
     files_error: null,
-    order: reviewOrder(files, d.ai, d.ai_stale),
+    order: reviewOrder(files, d.ai, d.ai_stale, tagsOf(files)),
     ai: d.ai,
     ai_stale: d.ai_stale,
     ai_error: generating.has(r.id)
@@ -4561,7 +4599,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     sync();
     return { ok: true, errors: [] };
   }
-  if (route === "GET /api/fields") return FIELDS;
+  if (route === "GET /api/fields") return [...FIELDS, ...CHUNK_FIELDS];
   if (route === "GET /api/settings") return settingsView();
   if (route === "PUT /api/settings") {
     const body = await readBody(req);

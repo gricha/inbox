@@ -45,7 +45,7 @@ import { dropHostSession, fetchPr, generateReview, installed, loggedIn } from ".
 import { fetchIssue, findClone, generateIssueReview } from "./issue.ts";
 import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
-import { FIELDS } from "./signals.ts";
+import { CHUNK_FIELDS, FIELDS } from "./signals.ts";
 import { field as fieldOf, isRecord, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
 import { GITHUB_ACTIONS, type Action, type AskLines, type InlineAt, type RemoteView } from "./types.ts";
 
@@ -954,7 +954,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, put, { log });
   });
-  app.get("/api/fields", (c) => total(c, () => FIELDS));
+  app.get("/api/fields", (c) => total(c, () => [...FIELDS, ...CHUNK_FIELDS]));
   app.get("/api/settings", (c) => total(c, () => desk.getSettings()));
   app.put("/api/settings", (c) => {
     const put = Effect.gen(function* () {

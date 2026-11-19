@@ -876,6 +876,48 @@ test("Code changes is every file in the PR's order, all its hunks in diff order,
   assert.equal(t.rest, 2);
 });
 
+test("your tags: hunks with different tags never share a section, and a file in Code changes shows only what all its hunks have", () => {
+  const TYPES = { id: "types-only", name: "Types only", bg: "#e6f4ea", fg: "#176847", by: "jev" };
+  const COMMENTS = { id: "comments-only", name: "Comments only", by: "jev" };
+  const hunk = (id: string, tags?: ReviewHunk["tags"]): ReviewHunk => ({
+    id,
+    path: "a.ts",
+    file: 0,
+    header: "@@ -1,3 +1,4 @@",
+    patch: "@@ -1,3 +1,4 @@\n+x",
+    mark: `m-${id}`,
+    additions: 1,
+    deletions: 0,
+    level: "skim",
+    rank: null,
+    why: "w",
+    notes: [],
+    ...(tags && { tags }),
+  });
+  const o: ReviewOrder = {
+    ranked: true,
+    chunks: [
+      hunk("h1", [{ ...TYPES, p: 0.95 }]),
+      hunk("h2", [{ ...TYPES, p: 0.85 }]),
+      hunk("h3", [{ ...TYPES, p: 0.9 }, COMMENTS]),
+      hunk("h4"),
+    ],
+    unread: [],
+    skipped: [],
+    rest: [],
+    notes: [],
+  };
+  const tagsOf = (list: { hunks: ReviewHunk[]; tags: NonNullable<ReviewHunk["tags"]> }[]) =>
+    list.map((s) => [s.hunks.map((h) => h.id), s.tags.map((t) => `${t.id}${t.p === undefined ? "" : ` ${t.p}`}`)]);
+  assert.deepEqual(tagsOf(sections(o).list), [
+    [["h1", "h2"], ["types-only 0.85"]],
+    [["h3"], ["types-only 0.9", "comments-only"]],
+    [["h4"], []],
+  ]);
+  assert.deepEqual(tagsOf(traditional(o).list), [[["h1", "h2", "h3", "h4"], []]], "h4 has none: the file doesn't");
+  assert.deepEqual(tagsOf(traditional({ ...o, chunks: o.chunks.slice(0, 3) }).list), [[["h1", "h2", "h3"], ["types-only 0.85"]]]);
+});
+
 test("test files are told apart from the code they test", () => {
   for (const p of [
     "test/review.test.ts",

@@ -272,6 +272,28 @@ export interface Config {
   handoff: { prompt: string; mine: string; issue: string }; // review someone's PR / move your PR along / an issue
   spaces: SpaceConfig[];
   boards: BoardConfig[];
+  tags: TagConfig[];
+}
+
+// One of your tags (config.toml's [[tags]]): a kind of hunk, drawn as a pill on the review's sections. `when` picks the hunks
+// (the rules' language plus CHUNK_FIELDS); `ask` is a yes-or-no a model answers of each hunk `when` passes.
+export interface TagConfig {
+  id: string;
+  name: string;
+  bg?: string; // #rgb or #rrggbb
+  fg?: string;
+  when?: string;
+  ask?: string;
+}
+
+// A tag on a hunk, as the review draws it.
+export interface HunkTag {
+  id: string;
+  name: string;
+  bg?: string;
+  fg?: string;
+  p?: number; // the decision model's probability of yes; absent for a rule or the light model's answer
+  by: string; // "rule", or who answered
 }
 
 // ---------------------------------------------------------------------------
@@ -932,6 +954,7 @@ export interface ReviewHunk {
   why: string | null; // look and skim: Claude's few words ("" on a hunk it noted but didn't rank); unread: which was too long, the PR or its file
   notes: number[]; // indices into ai.notes to show with it, in reading order: the file's own notes (line 0) on its first hunk in the order
   looks?: number[]; // indices into ai.look that start on it
+  tags?: HunkTag[]; // your tags on it, in config.toml's order; absent: none
 }
 
 // The order the review view reads in, decided by the desk: what to look at across files, then the rest; only the desk's own

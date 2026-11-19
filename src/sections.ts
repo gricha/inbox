@@ -1,7 +1,7 @@
 // A review's reading order (src/review.ts's reviewOrder) as the stretches a page draws: by importance, the guided review's
 // steps, or traditional file order. The window's review (web/src/components/Review.tsx) and a rendered review document
 // (src/render.ts) both read it.
-import type { AiReview, ReviewFile, ReviewHunk, ReviewNote, ReviewOrder } from "./types.ts";
+import type { AiReview, HunkTag, ReviewFile, ReviewHunk, ReviewNote, ReviewOrder } from "./types.ts";
 
 // The review's words for what it is.
 export const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
@@ -16,8 +16,12 @@ export const FIT: Partial<Record<NonNullable<AiReview["intent"]>["fit"], string>
   partial: "Not quite what the description says",
   differs: "Not what the description says",
 };
+// A tag's tooltip: who put it there, and how sure the model was.
+export const tagTip = (t: HunkTag): string =>
+  `${t.name} · ${t.by === "rule" ? "your rule" : t.p === undefined ? t.by : `${Math.round(t.p * 100)}% sure (${t.by})`}`;
 
-// One stretch of the review: a file's hunks next to each other in the desk's order, at one level and for one reason.
+// One stretch of the review: a file's hunks next to each other in the desk's order, at one level, for one reason and with the
+// same tags.
 export interface Section {
   key: string;
   path: string;
@@ -27,6 +31,20 @@ export interface Section {
   hunks: ReviewHunk[]; // none for a file with no text diff
   notes: number[]; // indices into ai.notes, in reading order
   marks: string[]; // what marking it viewed marks: its hunks', or a file's own without any
+  tags: HunkTag[]; // the tags every one of its hunks has
+}
+
+const tagIds = (h: ReviewHunk) => (h.tags ?? []).map((t) => t.id).join(" ");
+
+// The tags every one of these hunks has, each as sure as its least sure hunk.
+function shared(hunks: ReviewHunk[]): HunkTag[] {
+  const [first, ...more] = hunks;
+  return (first?.tags ?? []).flatMap((t) => {
+    const all = [t, ...more.map((h) => h.tags?.find((x) => x.id === t.id))];
+    if (!all.every(Boolean)) return [];
+    const ps = all.flatMap((x) => (x?.p === undefined ? [] : [x.p]));
+    return [ps.length === all.length ? { ...t, p: Math.min(...ps) } : t];
+  });
 }
 
 // A file's neighbouring hunks at one level and for one reason, as one section.
@@ -34,12 +52,23 @@ function grouped(hunks: ReviewHunk[], list: Section[] = []): Section[] {
   const from = list.length;
   for (const h of hunks) {
     const last = list.length > from ? list.at(-1) : undefined;
-    if (last?.path === h.path && last.level === h.level && last.why === h.why) {
+    if (last?.path === h.path && last.level === h.level && last.why === h.why && tagIds(last.hunks[0]!) === tagIds(h)) {
       last.hunks.push(h);
       last.notes.push(...h.notes);
       last.marks.push(h.mark);
+      last.tags = shared(last.hunks);
     } else
-      list.push({ key: h.id, path: h.path, file: h.file, level: h.level, why: h.why, hunks: [h], notes: [...h.notes], marks: [h.mark] });
+      list.push({
+        key: h.id,
+        path: h.path,
+        file: h.file,
+        level: h.level,
+        why: h.why,
+        hunks: [h],
+        notes: [...h.notes],
+        marks: [h.mark],
+        tags: h.tags ?? [],
+      });
   }
   return list;
 }
@@ -54,6 +83,7 @@ const restOf = (o: ReviewOrder): Section[] =>
     hunks: r.hunks,
     notes: [...r.notes, ...r.hunks.flatMap((h) => h.notes)],
     marks: r.hunks.length ? r.hunks.map((h) => h.mark) : [r.mark],
+    tags: shared(r.hunks),
   }));
 
 // The desk's reading order as sections: ranked, unread, skipped, then from `rest` on, the files the desk folds away.
@@ -72,7 +102,17 @@ export function traditional(o: ReviewOrder): { list: Section[]; rest: number } {
     .map(([file, hs]): Section => {
       const hunks = hs.toSorted((x, y) => Number(x.id.slice(1)) - Number(y.id.slice(1)));
       const notes = hunks.flatMap((h) => h.notes);
-      return { key: `file:${file}`, path: hunks[0]!.path, file, level: null, why: null, hunks, notes, marks: hunks.map((h) => h.mark) };
+      return {
+        key: `file:${file}`,
+        path: hunks[0]!.path,
+        file,
+        level: null,
+        why: null,
+        hunks,
+        notes,
+        marks: hunks.map((h) => h.mark),
+        tags: shared(hunks),
+      };
     });
   return { list: [...list, ...restOf(o)], rest: list.length };
 }

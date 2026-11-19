@@ -54,7 +54,7 @@ const USAGE = `usage: inbox <command>
   settings [--json]                   every setting by section; * = changed from the default
   settings set <key> <value>          change one; lists: a,b or a JSON array; booleans: true/false, yes/no, on/off
   settings reset <key>                back to the default
-  fields                              the fields rules can use
+  fields                              the fields rules and tags can use
   mcp [--url <address>]               MCP server on stdio (the desk also serves MCP over HTTP at /mcp); --url or DESK_URL,
                                       with DESK_TOKEN, for a desk on another machine
   setup [claude|codex|opencode]       the first-run page: GitHub and each agent, what to run; naming one sets it as your

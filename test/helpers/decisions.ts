@@ -9,7 +9,7 @@ export interface DecisionCall {
   contentType: string;
   body: {
     model?: unknown;
-    state?: { note?: string; item?: string[] };
+    state?: { note?: string; item?: string[]; path?: string; status?: string; patch?: string }; // an item's, or a tag's hunk
     questions?: Record<string, { type: string; instructions: string; criteria: Record<string, string> }>;
   };
 }

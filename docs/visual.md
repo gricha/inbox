@@ -75,8 +75,10 @@ Tokens live in `web/src/styles.css`:
 
 - **Colour carries information.** Red fails, amber cautions, green is done or fine, always with words ("CI failing",
   "changes requested"). An AI review's verdict tag is filled with the colour of how much it asks, as risk is: "Look closely" red,
-  "Skim it" amber, "Skip it" green. The brand colour never stands in for them. Everything else is ink and pencil,
-  including what a Merging row waits on and an AI review's or the judge's failure (it's about the agent, not the PR).
+  "Skim it" amber, "Skip it" green. The brand colour never stands in for them. Your tags on a review's sections are in the
+  colours config.toml gives them (`bg`, `fg`): the meaning is yours, and so is reading well in every theme. Everything else
+  is ink and pencil, including what a Merging row waits on and an AI review's or the judge's failure (it's about the agent,
+  not the PR).
 - **Type.** The system's font for the UI (SF Pro on a Mac, Segoe UI on Windows) and SF Mono for code, as the Claude app
   does; diagrams keep the bundled Instrument Sans their boxes are measured in. Sentence case, no all-caps, no monospace
   outside code.

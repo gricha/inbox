@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Result } from "effect";
-import { compile, renderTemplate } from "../src/expr.ts";
+import { compile, renderTemplate, TAG_FIELDS } from "../src/expr.ts";
 import { analyze } from "../src/signals.ts";
 import { parseConfig, defaultConfigText } from "../src/config.ts";
 import { makeContext, makeItem, NOW } from "./helpers/items.ts";
@@ -82,4 +82,16 @@ test("a count of 1 takes the singular", () => {
   assert.equal(renderTemplate("{pr.unresolved_threads} unresolved threads", one), "1 unresolved thread");
   assert.equal(renderTemplate("{pr.unresolved_threads} threads, {author.engaged_90d} of their PRs", one), "1 thread, 12 of their PRs");
   assert.equal(renderTemplate("{pr.unresolved_threads} unresolved threads", sig), `${sig.pr.unresolved_threads} unresolved threads`);
+});
+
+test("a tag's when reads its hunk beside the item's fields; other expressions can't name chunk.*", () => {
+  const c = Result.getOrThrow(compile("any(chunk.path, '*.lock') && chunk.additions > 2 && !item.draft", TAG_FIELDS));
+  const at = (path: string, additions: number) => {
+    const s = { ...sig, chunk: { path, status: "modified", additions, deletions: 0 } };
+    return Result.getOrThrow(c.eval(s));
+  };
+  assert.equal(at("web/yarn.lock", 3), true);
+  assert.equal(at("web/yarn.lock", 1), false);
+  assert.equal(at("src/a.ts", 3), false);
+  assert.match(syntaxError("chunk.path == 'x'").message, /unknown field "chunk.path"/);
 });

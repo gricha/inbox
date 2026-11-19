@@ -1727,6 +1727,35 @@ const SHOTS: Shot[] = [
       await faces(page, "review", ".rv-ref .rv-by:has(.avatar), .cv-author");
     },
   },
+  {
+    // Your tags (the mock: red for more attention, green for less, the test file one of each): each section's on its own
+    // line under the header, which stays one line that fits its column however many there are.
+    name: "review-tags",
+    go: async (page) => {
+      await review("acme/api#4127")(page);
+      const bad = (m: string) => failures.push(`review-tags: ${m}`);
+      for (const [file, n] of [
+        ["src/planner/stream.ts", 3],
+        ["src/planner/plan.ts", 2],
+        ["src/routes/query.ts", 3],
+        ["test/planner/stream.test.ts", 2],
+        ["docs/api/query.md", 2],
+      ] as const) {
+        const got = await page.locator(`.rv-file-sec[aria-label="${file}"] .rv-ttags .rv-ttag`).count();
+        if (got !== n) bad(`${file} shows ${got} tags, not ${n}`);
+      }
+      const spills = await page.evaluate<string[]>(
+        `[...document.querySelectorAll(".rv-fhead")].filter((h) => h.scrollWidth > h.clientWidth + 1).map((h) => h.closest("section")?.getAttribute("aria-label") ?? "?")`,
+      );
+      if (spills.length) bad(`a header spills out of its column: ${spills.join(", ")}`);
+      await page
+        .locator('.rv-file-sec[aria-label="src/planner/plan.ts"]')
+        .evaluate((el: { scrollIntoView: (o: { block: "start" }) => void }) => {
+          el.scrollIntoView({ block: "start" });
+        });
+      await page.waitForTimeout(200);
+    },
+  },
   // The verdict's tag filled with its level's colour, in every theme: Look closely red, Skim it amber, Skip it green.
   {
     name: "review-verdict",

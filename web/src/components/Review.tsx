@@ -79,7 +79,7 @@ import {
   type Dot,
   type PathNode,
 } from "../view.ts";
-import { FIT, isTestPath, LEVEL, onLines, STATUS, traditional, VERDICT, walk, type Section } from "../../../src/sections.ts";
+import { FIT, isTestPath, LEVEL, onLines, STATUS, tagTip, traditional, VERDICT, walk, type Section } from "../../../src/sections.ts";
 import "../diffThemes.ts";
 import { getStored, setStored } from "../storage.ts";
 import { diffTheme, omarchyTheme, onOmarchy } from "../theme.ts";
@@ -2715,6 +2715,20 @@ function SectionView({
           Viewed
         </label>
       </h3>
+      {!shut && x.tags.length > 0 && (
+        <div className="rv-ttags">
+          {x.tags.map((t) => (
+            <span
+              key={t.id}
+              className="rv-tag rv-ttag"
+              title={tagTip(t)}
+              style={{ ...(t.bg && { background: t.bg }), ...(t.fg && { color: t.fg }) }}
+            >
+              {t.name}
+            </span>
+          ))}
+        </div>
+      )}
       {!shut && mine.filter((n) => !n.inline).map((n) => <Note key={n.index} index={n.index} body={n.note.body} bug={n.index < bugs} />)}
       {!shut && fileDiff && (
         <FileDiff<Meta>

@@ -13,7 +13,7 @@ The CLI, `inbox mcp` and the web UI are all clients of it. Types live in [src/ty
 
 - **Reference:** [The first run](#the-first-run) · [Connect an agent](#connect-an-agent) · [MCP tools](#mcp-tools) · [HTTP routes](#http-routes) · [Main types](#main-types) · [Events](#events)
 - **Agents and models:** [Your own agent](#your-own-agent) · [The light model](#the-light-model) · [The decision model](#the-decision-model-openrouter)
-- **Reviews:** [The AI review](#the-ai-review) · [What reviewers said](#what-reviewers-said)
+- **Reviews:** [The AI review](#the-ai-review) · [Your tags](#your-tags) · [What reviewers said](#what-reviewers-said)
 - **Sorting:** [Rules: built in and your own](#rules-built-in-and-your-own) · [The judge](#the-judge) · [Your areas](#your-areas) · [Urgency](#urgency)
 - **Working for you:** [The coordinator](#the-coordinator) · [Asks](#asks) · [Sessions](#sessions) · [Automations](#automations)
 - **Items:** [Stacks](#stacks) · [Dependencies](#dependencies) · [Adding](#adding) · [Resolved](#resolved) · [Opened for you](#opened-for-you)
@@ -155,7 +155,7 @@ JSON in and out. Errors are `{ error: string, candidates?: string[] }`:
 | POST   | `/api/issue/:id/fix`               | `{ ok, ask }`: Make PR with fix, an ask to your agent. Own page only. 409 unless open with a fixable pre-review                                                                                             | ✓   |
 | POST   | `/api/issue/:id/block`, `/unblock` | `{ ok, author }`: the author on or off the desk's blocklist. Own page only; nothing on GitHub                                                                                                               | ✓   |
 | GET    | `/api/status`                      | `{ now, today, new, text }`; `text` is e.g. `desk 7 +3` (7 in the queue, 3 new), `""` when 0/0                                                                                                              | ✓   |
-| GET    | `/api/fields`                      | `FieldDoc[]`: every field rules can use                                                                                                                                                                     |     |
+| GET    | `/api/fields`                      | `FieldDoc[]`: every field rules can use, then the ones only a tag's `when` may (`chunk.*`)                                                                                                                  |     |
 
 `Action` is one of:
 
@@ -868,7 +868,7 @@ Both settings are kept per agent, like your agent's model. `agent.rules_model`, 
 
 ### The decision model (OpenRouter)
 
-With `agent.decision_key` set (Settings → Agent → More; an OpenRouter key), an automation's question (`decide: "ask"`) and [Urgency](#urgency)'s criteria and scores go to OpenRouter's Decisions API instead of your agent. With no key, nothing in the desk calls OpenRouter.
+With `agent.decision_key` set (Settings → Agent → More; an OpenRouter key), an automation's question (`decide: "ask"`), [Urgency](#urgency)'s criteria and scores, and [your tags](#your-tags)' questions go to OpenRouter's Decisions API instead of your agent. With no key, nothing in the desk calls OpenRouter.
 
 **The request** (`src/decisions.ts`): one per item, `POST https://openrouter.ai/api/alpha/decisions` with `Authorization: Bearer <key>` and a body of `{ model, state, questions }`, nothing else. Plain `fetch`, 30 s timeout, four at once. `model` is `agent.decision_model`, default `typesafe/jev-1.14`, pinned because each release's probabilities differ.
 
@@ -882,6 +882,8 @@ With `agent.decision_key` set (Settings → Agent → More; an OpenRouter key), 
 - where it is on your desk (bucket, board, why), and on an event's run what just happened ("CI went from green to red; dana commented").
 
 It leaves out the AI review's first sentence and the directories the PR touches. The key's help in Settings says this in short.
+
+A tag's `ask` is the one question that sends code: each hunk it's asked about, as `{ note, path, status, patch }` (its file's path and status, and its own lines with their context), and nothing else of the PR or its AI review ([Your tags](#your-tags)). A tag with only a `when` sends nothing.
 
 **The question:** `questions` is one question, `decision`, whose `instructions` are the automation's instruction word for word. It's a `noul` (yes or no) when the automation may do one thing, with `criteria` saying what yes means; else a `choice` of its `can` verbs and `leave`.
 
@@ -994,6 +996,27 @@ Opening a PR (`GET /api/review/:id`) asks for its AI review and has your agent r
 **Merge line:** `ReviewView.merge` is one line when something stands in an open PR's way ("Merge conflict with main", from `mergeable`, which the desk asks only of your own PRs), else `null`.
 
 `activity` keeps the PR's recent events; a resolved PR's head line reads them.
+
+### Your tags
+
+Tags name kinds of hunk ("Types only", "Comments only", "Lockfile"), so a review says how much attention each section needs. Each is a `[[tags]]` table in config.toml (`parseConfig()`, `src/tags.ts`):
+
+```toml
+[[tags]]
+id = "types-only"                   # letters, digits, - and _
+name = "Types only"                 # the pill's words
+bg = "#e6f4ea"                      # optional: #rgb or #rrggbb, the same in every theme
+fg = "#176847"                      # optional
+when = "any(chunk.path, '*.ts')"    # optional: the hunks it's about; every hunk when absent
+ask = "Does this hunk change only type annotations or type definitions, with no runtime behaviour?"  # optional
+```
+
+A tag needs a `when`, an `ask` or both.
+
+- **`when`** is the rules' language with a hunk's own fields too: `chunk.path`, `chunk.status` (its file's), `chunk.additions`, `chunk.deletions`, beside every field a rule has (`repo.name`, `pr.*`, `me.*`, …). Only a tag's `when` may name `chunk.*`: in a board's rule it's an unknown field. It never reads the AI review: tags are asked alongside it, as a second read. A tag with only a `when` is free, checked each time the review is drawn.
+- **`ask`** is a yes-or-no about each hunk its `when` passes. When the AI review starts (it has the diff), and again when a review is drawn with a question unanswered (an edited tag, a model that was down), the desk asks: one [decision model](#the-decision-model-openrouter) request a hunk, with every question it has, four at once; a yes counts at 0.8 or more, and a refusal is a no. Without a key, or with OpenRouter down, your agent's light model answers 20 hunks a call (`Light.chain()`), with no probability. Nothing is asked about a lockfile's or generated file's hunks; a `when`-only tag still applies to them. Tagging never fails or holds up the AI review: when nobody can answer, the questions wait 30 minutes before a drawn review asks again.
+- **Answers** are kept per PR (kv `tags:<item>`) by hunk mark (`ReviewHunk.mark`: its path and changed lines) and tag, with a hash of the question: a rebase asks nothing, a push asks only about the hunks it rewrote, and an edited question only its own tag.
+- **In the review**, `ReviewHunk.tags` holds each hunk's, in config.toml's order, with the name and colours (`HunkTag`): `p` is the decision model's probability, and `by` who answered (`"rule"` for a `when`-only tag). A tag taken out of config.toml is gone at once. Neighbouring hunks with different tags never share a section (`grouped()` in `src/sections.ts`); in Code changes a file shows the tags every one of its hunks has, each as sure as its least sure hunk.
 
 ### Issues
 
