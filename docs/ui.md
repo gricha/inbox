@@ -325,7 +325,9 @@ The desk's reading order (`ReviewView.order`), which the guide's steps are built
 3. What Claude left out: "Skip", with no why, still in view (anyone can write a diff, so it can't hide code).
 4. One pencil line, "Not worth reviewing · 2 files": lockfiles, generated files, files with no text diff. A click opens them in place.
 
-Neighbouring hunks of a file at one level read as one. Without a ranking (none yet, or an earlier commit's) it keeps file order. A PR with no changes says "No files changed."
+Neighbouring hunks of a file at one level, with the same tags, read as one. Without a ranking (none yet, or an earlier commit's) it keeps file order. A PR with no changes says "No files changed."
+
+**Your tags** (config.toml's `[[tags]]`, [api.md → Your tags](api.md#your-tags)) are small pills on a line of their own under a section's header, in the colours you gave them or the plain tag's wash. They wrap onto as many lines as they need, so the header stays one line however many there are; a folded section hides them. The tooltip says who put each there: "Types only · the AI review", "Lockfile · your rule". In Code changes a file shows the tags every one of its hunks has. They're on the review only, never on a row.
 
 **Review, Code changes and Conversation.** Three pills (rounded rectangles, regular weight, the one you're on filled a little more and in ink) at the left of the review's bar, which is flush with the window's top, stuck there, as tall as a page's head, and a drag handle. The title, the AI review and the view you picked are under it. The first two are the diff's orders: a PR opens on Review whenever its review has steps, and picking Code changes holds for that PR only; Conversation is what reviewers said and your comment's box, in the diff's place. A review without steps (`order.steps`: none yet, or an earlier commit's) shows Code changes and Conversation. A click on a step, a file or a line the AI review names goes back to the diff.
 

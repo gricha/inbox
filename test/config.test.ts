@@ -76,6 +76,73 @@ rules = [ { when = "pr.cii == 'red'", bucket = "urgent" }, { bucket = "now" } ]
   assert.match(errors.find((e) => e.path === "boards[0].rules[0].when")!.message, /did you mean "pr.ci"/);
 });
 
+// A board to hang [[tags]] off: config.toml needs one to load.
+const BOARD = `
+[[spaces]]
+id = "w"
+[[boards]]
+id = "a"
+query = "is:pr"
+`;
+
+test("tags: a rule, a question, colours; loaded in config.toml's order with their rules compiled", () => {
+  const { loaded, errors } = parseConfig(`${BOARD}
+[[tags]]
+id = "lockfile"
+name = "Lockfile"
+when = "any(chunk.path, '*.lock')"
+[[tags]]
+id = "types-only"
+name = "Types only"
+bg = "#e6f4ea"
+fg = "#176"
+ask = "Does this hunk change only types?"
+`);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(loaded!.config.tags, [
+    { id: "lockfile", name: "Lockfile", when: "any(chunk.path, '*.lock')" },
+    { id: "types-only", name: "Types only", bg: "#e6f4ea", fg: "#176", ask: "Does this hunk change only types?" },
+  ]);
+  assert.ok(loaded!.tags[0]!.when, "a rule is compiled once, as the config loads");
+  assert.equal(loaded!.tags[1]!.when, null, "no when: every hunk is asked");
+});
+
+test("tags: a bad colour, neither when nor ask, a duplicate id and a bad when are errors at their paths", () => {
+  const { loaded, errors } = parseConfig(`${BOARD}
+[[tags]]
+id = "a"
+name = "A"
+bg = "green"
+ask = "?"
+[[tags]]
+id = "b"
+name = "B"
+[[tags]]
+id = "a"
+name = "A again"
+ask = "?"
+[[tags]]
+id = "c"
+name = "C"
+when = "chunk.paht == 'x'"
+`);
+  assert.equal(loaded, null);
+  assert.deepEqual(errors.map((e) => e.path).sort(), ["tags[0].bg", "tags[1]", "tags[2].id", "tags[3].when"]);
+  assert.match(errors.find((e) => e.path === "tags[0].bg")!.message, /hex colour/);
+  assert.match(errors.find((e) => e.path === "tags[2].id")!.message, /duplicate tag id "a"/);
+  assert.match(errors.find((e) => e.path === "tags[3].when")!.message, /did you mean "chunk.path"/);
+});
+
+test("a board's rules can't read a hunk: chunk.* is a tag's", () => {
+  const { errors } = parseConfig(`${BOARD}rules = [ { when = "chunk.additions > 10", bucket = "fyi" } ]
+`);
+  assert.deepEqual(
+    errors.map((e) => e.path),
+    ["boards[0].rules[0].when"],
+  );
+  assert.match(errors[0]!.message, /unknown field "chunk.additions"/);
+});
+
 test("duplicate ids and missing queries", () => {
   const { errors } = parseConfig(`
 [[spaces]]

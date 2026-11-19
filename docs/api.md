@@ -13,7 +13,7 @@ The CLI, `inbox mcp` and the web UI are all clients of it. Types live in [src/ty
 
 - **Reference:** [The first run](#the-first-run) · [Connect an agent](#connect-an-agent) · [MCP tools](#mcp-tools) · [HTTP routes](#http-routes) · [Main types](#main-types) · [Events](#events)
 - **Agents and models:** [Your own agent](#your-own-agent) · [The light model](#the-light-model) · [The decision model](#the-decision-model-openrouter)
-- **Reviews:** [The AI review](#the-ai-review) · [What reviewers said](#what-reviewers-said)
+- **Reviews:** [The AI review](#the-ai-review) · [Your tags](#your-tags) · [What reviewers said](#what-reviewers-said)
 - **Sorting:** [Rules: built in and your own](#rules-built-in-and-your-own) · [The judge](#the-judge) · [Your areas](#your-areas) · [Urgency](#urgency)
 - **Working for you:** [The coordinator](#the-coordinator) · [Asks](#asks) · [Sessions](#sessions) · [Automations](#automations)
 - **Items:** [Stacks](#stacks) · [Dependencies](#dependencies) · [Adding](#adding) · [Resolved](#resolved) · [Opened for you](#opened-for-you)
@@ -155,7 +155,7 @@ JSON in and out. Errors are `{ error: string, candidates?: string[] }`:
 | POST   | `/api/issue/:id/fix`               | `{ ok, ask }`: Make PR with fix, an ask to your agent. Own page only. 409 unless open with a fixable pre-review                                                                                             | ✓   |
 | POST   | `/api/issue/:id/block`, `/unblock` | `{ ok, author }`: the author on or off the desk's blocklist. Own page only; nothing on GitHub                                                                                                               | ✓   |
 | GET    | `/api/status`                      | `{ now, today, new, text }`; `text` is e.g. `desk 7 +3` (7 in the queue, 3 new), `""` when 0/0                                                                                                              | ✓   |
-| GET    | `/api/fields`                      | `FieldDoc[]`: every field rules can use                                                                                                                                                                     |     |
+| GET    | `/api/fields`                      | `FieldDoc[]`: every field rules can use, then the ones only a tag's `when` may (`chunk.*`)                                                                                                                  |     |
 
 `Action` is one of:
 
@@ -922,6 +922,7 @@ Your agent writes each PR's AI review:
 - concerns: what goes wrong, when, and what would fix it;
 - notes anchored to lines of the diff;
 - a ranking of the diff's hunks, and a walk-through;
+- with [your tags](#your-tags)' questions, the hunks each is yes for;
 - on a re-review, `since`.
 
 The review document parts (`risk_reasons`, `intent`, `look`, …) are in [review-format.md](review-format.md).
@@ -1005,6 +1006,27 @@ Opening a PR (`GET /api/review/:id`) asks for its AI review and has your agent r
 **Merge line:** `ReviewView.merge` is one line when something stands in an open PR's way ("Merge conflict with main", from `mergeable`, which the desk asks only of your own PRs), else `null`.
 
 `activity` keeps the PR's recent events; a resolved PR's head line reads them.
+
+### Your tags
+
+Tags name kinds of hunk ("Types only", "Comments only", "Lockfile"), so a review says how much attention each section needs. Each is a `[[tags]]` table in config.toml (`parseConfig()`, `src/tags.ts`):
+
+```toml
+[[tags]]
+id = "types-only"                   # letters, digits, - and _
+name = "Types only"                 # the pill's words
+bg = "#e6f4ea"                      # optional: #rgb or #rrggbb, the same in every theme
+fg = "#176847"                      # optional
+when = "any(chunk.path, '*.ts')"    # optional: the hunks it's about; every hunk when absent
+ask = "Does this hunk change only type annotations or type definitions, with no runtime behaviour?"  # optional
+```
+
+A tag needs a `when`, an `ask` or both.
+
+- **`when`** is the rules' language with a hunk's own fields too: `chunk.path`, `chunk.status` (its file's), `chunk.additions`, `chunk.deletions`, beside every field a rule has (`repo.name`, `pr.*`, `me.*`, …). Only a tag's `when` may name `chunk.*`: in a board's rule it's an unknown field. It never reads the AI review. A tag with only a `when` is free, checked each time the review is drawn, before any AI review too.
+- **`ask`** is a yes-or-no about a hunk, answered by [the AI review](#the-ai-review) in the same answer: its prompt lists each question by id in your words (config.toml is yours, so outside the PR's fence), and its schema gains `tags`, the hunks any question is yes for, each with the ids that are yes, naming only your tags (`reviewSchema()`). It costs no extra call and sends nothing anywhere the review doesn't go. Only hunks the prompt showed can be tagged: not a lockfile's, nor what's past the diff's length budget. With no `ask` in config.toml, the prompt and schema are as before.
+- **Answers** are kept on the review (`AiReview.tags`) by hunk mark (`ReviewHunk.mark`: its path and changed lines), so a push keeps them on the hunks it didn't touch until the next review. A tag shows where the review said yes and its `when` passes now. An edited question applies from the next review; a tag taken out of config.toml, or that lost its `ask`, is gone at once.
+- **In the review**, `ReviewHunk.tags` holds each hunk's, in config.toml's order, with the name and colours (`HunkTag`); `by` is `"rule"` for a `when`-only tag, else `"review"`. Neighbouring hunks with different tags never share a section (`grouped()` in `src/sections.ts`); in Code changes a file shows the tags every one of its hunks has.
 
 ### Issues
 

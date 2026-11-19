@@ -8,6 +8,7 @@ import type {
   PlacedEntry,
   Check,
   Conversation,
+  HunkTag,
   JudgeStatus,
   QueueView,
   ReviewHunk,
@@ -89,7 +90,7 @@ import {
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
 import { bulkMenu, filterOf, filterPeople, filterRest, parseFilter, logLine, pickRange, pickToggle } from "../src/view.ts";
-import { isTestPath, onLines, sections, traditional, walk } from "../../src/sections.ts";
+import { isTestPath, onLines, sections, tagTip, traditional, walk } from "../../src/sections.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
 
 const card = (id: string, extra: Partial<Card> = {}): Card => {
@@ -874,6 +875,45 @@ test("Code changes is every file in the PR's order, all its hunks in diff order,
     ],
   );
   assert.equal(t.rest, 2);
+});
+
+test("your tags: hunks with different tags never share a section, and a file in Code changes shows only what all its hunks have", () => {
+  const TYPES: HunkTag = { id: "types-only", name: "Types only", bg: "#e6f4ea", fg: "#176847", by: "review" };
+  const COMMENTS: HunkTag = { id: "comments-only", name: "Comments only", by: "rule" };
+  const hunk = (id: string, tags?: ReviewHunk["tags"]): ReviewHunk => ({
+    id,
+    path: "a.ts",
+    file: 0,
+    header: "@@ -1,3 +1,4 @@",
+    patch: "@@ -1,3 +1,4 @@\n+x",
+    mark: `m-${id}`,
+    additions: 1,
+    deletions: 0,
+    level: "skim",
+    rank: null,
+    why: "w",
+    notes: [],
+    ...(tags && { tags }),
+  });
+  const o: ReviewOrder = {
+    ranked: true,
+    chunks: [hunk("h1", [TYPES]), hunk("h2", [TYPES]), hunk("h3", [TYPES, COMMENTS]), hunk("h4")],
+    unread: [],
+    skipped: [],
+    rest: [],
+    notes: [],
+  };
+  const tagsOf = (list: { hunks: ReviewHunk[]; tags: NonNullable<ReviewHunk["tags"]> }[]) =>
+    list.map((s) => [s.hunks.map((h) => h.id), s.tags.map((t) => t.id)]);
+  assert.deepEqual(tagsOf(sections(o).list), [
+    [["h1", "h2"], ["types-only"]],
+    [["h3"], ["types-only", "comments-only"]],
+    [["h4"], []],
+  ]);
+  assert.deepEqual(tagsOf(traditional(o).list), [[["h1", "h2", "h3", "h4"], []]], "h4 has none: the file doesn't");
+  assert.deepEqual(tagsOf(traditional({ ...o, chunks: o.chunks.slice(0, 3) }).list), [[["h1", "h2", "h3"], ["types-only"]]]);
+  assert.equal(tagTip(TYPES), "Types only · the AI review");
+  assert.equal(tagTip(COMMENTS), "Comments only · your rule");
 });
 
 test("test files are told apart from the code they test", () => {

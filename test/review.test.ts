@@ -42,6 +42,7 @@ import {
   fetchPr,
   generateReview,
   filesHead,
+  hunksOf,
   makeAgentDir,
   numberPatch,
   parseFiles,
@@ -1060,6 +1061,52 @@ test(
       const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]!) as { required: string[] };
       assert.deepEqual(schema.required, ["comments"], "the check answers in its own shape");
       assert.equal(fs.readFileSync(path.join(f.dir, "calls"), "utf8").split("\n").filter(Boolean).length, 2);
+    } finally {
+      process.env.DESK_CLAUDE = was;
+      fs.rmSync(f.dir, { recursive: true });
+      fs.rmSync(home, { recursive: true });
+    }
+  },
+);
+
+test(
+  "your tags' questions are one more field of the review: listed in its prompt, only their ids in its schema, kept by hunk",
+  posix,
+  async () => {
+    const review = {
+      structured_output: {
+        summary: "Caps planner rows.",
+        tags: [
+          { id: "h1", tags: ["types-only", "types-only"] },
+          { id: "h1", tags: ["comments-only"] },
+          { id: "h9", tags: ["types-only"] },
+          { id: "h2", tags: [] },
+        ],
+      },
+    };
+    const f = fakeAgent("claude", `echo '${JSON.stringify(review)}'`);
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+    const was = process.env.DESK_CLAUDE;
+    process.env.DESK_CLAUDE = f.bin;
+    try {
+      const item = makeItem({ head_oid: "c0ffee" });
+      const tags = [
+        { id: "types-only", ask: "Does it change\nonly types?" },
+        { id: "comments-only", ask: "Only comments?" },
+      ];
+      const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE], tags }, agentDir(home)));
+      const prompt = fs.readFileSync(path.join(f.dir, "stdin"), "utf8");
+      assert.match(prompt, /^- tags: me's own labels for hunks/m);
+      assert.match(prompt, /^ {2}- types-only: Does it change only types\?$/m);
+      assert.match(prompt, /^ {2}- comments-only: Only comments\?$/m);
+      const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
+      const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]!) as {
+        required: string[];
+        properties: { tags: { items: { properties: { tags: { items: { enum: string[] } } } } } };
+      };
+      assert.ok(schema.required.includes("tags"));
+      assert.deepEqual(schema.properties.tags.items.properties.tags.items.enum, ["types-only", "comments-only"]);
+      assert.deepEqual(ai.tags, { [hunksOf([FILE])[0]!.mark]: ["types-only"] }, "each hunk once, only hunks it was shown");
     } finally {
       process.env.DESK_CLAUDE = was;
       fs.rmSync(f.dir, { recursive: true });

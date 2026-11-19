@@ -12,7 +12,9 @@ import {
   type Rule,
   type RuleBucket,
   type SpaceConfig,
+  type TagConfig,
 } from "./types.ts";
+import { compile, TAG_FIELDS, type Compiled } from "./expr.ts";
 import { compileBoard, type CompiledBoard } from "./rules.ts";
 import { field, isRecord, oneOf, strings } from "./narrow.ts";
 import { DEFAULTS, LEGACY_TABLES, type Settings } from "./settings.ts";
@@ -21,7 +23,16 @@ import { GITHUB_RULES } from "./connectors/github-rules.ts";
 export interface LoadedConfig {
   config: Config;
   boards: CompiledBoard[];
+  tags: CompiledTag[];
 }
+
+// A tag as the desk checks it: its `when` compiled, null when it has none (every hunk).
+export interface CompiledTag {
+  config: TagConfig;
+  when: Compiled | null;
+}
+
+const HEX = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 type Raw = Record<string, unknown>;
 
@@ -132,7 +143,7 @@ export function parseConfig(
   const warnings: ConfigError[] = ["poll_seconds", ...LEGACY_TABLES]
     .filter((k) => k in raw)
     .map((k) => ({ path: k, message: `"${k}" moved to Settings (settings.json); delete it here` }));
-  known(raw, "", ["spaces", "boards", "poll_seconds", ...LEGACY_TABLES]);
+  known(raw, "", ["spaces", "boards", "tags", "poll_seconds", ...LEGACY_TABLES]);
 
   const spaces: SpaceConfig[] = [];
   const rawSpaces = Array.isArray(raw.spaces) ? raw.spaces : (raw.spaces !== undefined && err("spaces", "must be [[spaces]] tables"), []);
@@ -274,6 +285,34 @@ export function parseConfig(
   });
   if (boards.length === 0 && errors.length === 0) err("boards", "add at least one [[boards]] table");
 
+  const tags: CompiledTag[] = [];
+  const rawTags = Array.isArray(raw.tags) ? raw.tags : (raw.tags !== undefined && err("tags", "must be [[tags]] tables"), []);
+  rawTags.forEach((x, i) => {
+    const path = `tags[${i}]`;
+    const t = table(x, path);
+    known(t, path, ["id", "name", "bg", "fg", "when", "ask"]);
+    const id = str(t.id, `${path}.id`, "");
+    if (!id) err(`${path}.id`, "is required");
+    else if (tags.some((y) => y.config.id === id)) err(`${path}.id`, `duplicate tag id "${id}"`);
+    else if (!/^[A-Za-z0-9_-]+$/.test(id)) err(`${path}.id`, "use letters, digits, - and _ only");
+    const name = str(t.name, `${path}.name`, "");
+    if (!name) err(`${path}.name`, "is required");
+    const colour = (k: "bg" | "fg") => {
+      const v = str(t[k], `${path}.${k}`, "");
+      if (v && !HEX.test(v)) err(`${path}.${k}`, 'must be a hex colour like "#e6f4ea"');
+      return v;
+    };
+    const bg = colour("bg");
+    const fg = colour("fg");
+    const when = str(t.when, `${path}.when`, "");
+    const ask = str(t.ask, `${path}.ask`, "").trim();
+    if (!when && !ask) err(path, "needs a when, an ask, or both");
+    const c = when ? compile(when, TAG_FIELDS) : null;
+    if (c && Result.isFailure(c)) err(`${path}.when`, c.failure.message);
+    const config: TagConfig = { id, name, ...(bg && { bg }), ...(fg && { fg }), ...(when && { when }), ...(ask && { ask }) };
+    tags.push({ config, when: c && Result.isSuccess(c) ? c.success : null });
+  });
+
   const config: Config = {
     poll_seconds: settings["github.poll_seconds"],
     signals: {
@@ -285,8 +324,9 @@ export function parseConfig(
     handoff: { prompt: settings["handoff.prompt"], mine: settings["handoff.mine"], issue: settings["handoff.issue"] },
     spaces,
     boards,
+    tags: tags.map((t) => t.config),
   };
-  return { loaded: errors.length ? null : { config, boards: compiled }, errors, warnings };
+  return { loaded: errors.length ? null : { config, boards: compiled, tags }, errors, warnings };
 }
 
 const toml = (s: string) => JSON.stringify(s);
@@ -435,6 +475,9 @@ export function defaultConfigText(opts: { workOrgs: string[]; expanded?: boolean
     `# Fields (me.requested_direct, author.close, pr.ci, ...) are listed beside the editor in Searches and rules and by \`inbox fields\`.`,
     `# Within a bucket, cards sort by rule order (earlier rules first), then \`priority\`, then \`sort\`.`,
     `# \`why\` texts can include fields: "{author.login} asked you".`,
+    `# [[tags]] name kinds of hunk on a review's sections ("Types only"): id, name, optional hex bg and fg, and a \`when\``,
+    `# (the fields plus chunk.path, chunk.status, chunk.additions, chunk.deletions), an \`ask\` (a yes-or-no about each hunk)`,
+    `# or both. The AI review answers each ask as it reads the diff.`,
     `# Sync interval, bots, notifications and agents' prompts are in Settings (settings.json).`,
   ];
   const spaces: { id: string; name: string; scope: string }[] = orgs.map((o) => ({ id: o, name: o, scope: `org:${o}` }));

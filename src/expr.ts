@@ -3,7 +3,7 @@ import { Result } from "effect";
 import type { Signals } from "./types.ts";
 import { ExprEvalError, ExprSyntaxError } from "./errors.ts";
 import { field, messageOf } from "./narrow.ts";
-import { FIELDS } from "./signals.ts";
+import { CHUNK_FIELDS, FIELDS } from "./signals.ts";
 import { andMore } from "./stage.ts";
 
 // A field's value (FIELDS leaves are strings, numbers, booleans or string lists) or a computed one.
@@ -22,7 +22,9 @@ type Token = { k: "num" | "str" | "id" | "op" | "end"; v: string; pos: number };
 
 const KEYWORD_OPS: Record<string, string> = { and: "&&", or: "||", not: "!", in: "in", matches: "matches" };
 const FUNCS: Record<string, number> = { len: 1, lower: 1, contains: 2, startswith: 2, any: 2 };
-const FIELD_PATHS = new Set(FIELDS.map((f) => f.path));
+const FIELD_PATHS: ReadonlySet<string> = new Set(FIELDS.map((f) => f.path));
+// A tag's `when` (config.toml's [[tags]]) reads its hunk too.
+export const TAG_FIELDS: ReadonlySet<string> = new Set([...FIELD_PATHS, ...CHUNK_FIELDS.map((f) => f.path)]);
 
 // What the parser and the evaluator throw to unwind from deep in their recursion. compile and eval each catch it once, at
 // their edge, and answer with a Result: what's wrong with the expression, or with an item's values for it.
@@ -216,26 +218,29 @@ function parse(src: string): Node {
   return node;
 }
 
-function check(node: Node): void {
+function check(node: Node, paths: ReadonlySet<string>): void {
+  const sub = (n: Node) => {
+    check(n, paths);
+  };
   switch (node.t) {
     case "lit":
       return;
     case "name":
-      if (!FIELD_PATHS.has(node.path)) {
-        const hint = suggest(node.path);
+      if (!paths.has(node.path)) {
+        const hint = suggest(node.path, paths);
         throw new Bad(`unknown field "${node.path}"${hint ? `; did you mean "${hint}"?` : ""}`, hint ? { hint } : {});
       }
       return;
     case "list":
-      node.items.forEach(check);
+      node.items.forEach(sub);
       return;
     case "not":
     case "neg":
-      check(node.x);
+      sub(node.x);
       return;
     case "bin":
-      check(node.a);
-      check(node.b);
+      sub(node.a);
+      sub(node.b);
       if (node.op === "matches" && node.b.t === "lit") {
         const re = regex(String(node.b.v));
         if (Result.isFailure(re)) throw new Bad(`bad regex: ${re.failure}`);
@@ -245,14 +250,14 @@ function check(node: Node): void {
     case "call":
       if (!(node.fn in FUNCS)) throw new Bad(`unknown function "${node.fn}"; have ${Object.keys(FUNCS).join(", ")}`);
       if (node.args.length !== FUNCS[node.fn]) throw new Bad(`${node.fn}() takes ${FUNCS[node.fn]} argument(s)`);
-      node.args.forEach(check);
+      node.args.forEach(sub);
   }
 }
 
-function suggest(path: string): string | null {
+function suggest(path: string, paths: ReadonlySet<string>): string | null {
   let best: string | null = null,
     bestD = Infinity;
-  for (const f of FIELD_PATHS) {
+  for (const f of paths) {
     const d = distance(path, f);
     if (d < bestD) {
       bestD = d;
@@ -279,7 +284,7 @@ function distance(a: string, b: string): number {
 const isValue = (v: unknown): v is Value =>
   v === null || v === undefined || ["string", "number", "boolean"].includes(typeof v) || (Array.isArray(v) && v.every(isValue));
 
-// Callers only pass FIELD_PATHS, whose leaves are Values.
+// Callers only pass paths compile() allowed, whose leaves are Values.
 function lookup(s: Signals, path: string): Value {
   let v: unknown = s;
   for (const k of path.split(".")) v = field(v, k);
@@ -394,11 +399,12 @@ export interface Compiled {
   eval(s: Signals): Result.Result<unknown, ExprEvalError>;
 }
 
-export function compile(source: string): Result.Result<Compiled, ExprSyntaxError> {
+// `fields`: the paths it may name; a tag's `when` passes TAG_FIELDS.
+export function compile(source: string, fields: ReadonlySet<string> = FIELD_PATHS): Result.Result<Compiled, ExprSyntaxError> {
   return Result.try({
     try: (): Compiled => {
       const node = parse(source);
-      check(node);
+      check(node, fields);
       return { eval: (s) => Result.try({ try: () => evaluate(node, s), catch: evalError }) };
     },
     catch: (e) => {

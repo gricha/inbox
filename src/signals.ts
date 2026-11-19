@@ -170,6 +170,18 @@ export const FIELDS: FieldDoc[] = [
   { path: "repo.my_prs_90d", type: "number", doc: "PRs you opened in this repo in the last 90 days" },
 ];
 
+// What a tag's `when` reads of one hunk, beside FIELDS. Rules, filters and priorities can't: they're about the whole item.
+export const CHUNK_FIELDS: FieldDoc[] = [
+  { path: "chunk.path", type: "string", doc: "tags only: the hunk's file: any(chunk.path, '*.lock')" },
+  {
+    path: "chunk.status",
+    type: "string",
+    doc: 'tags only: its file\'s status: "added", "removed", "modified", "renamed", "copied" or "changed"',
+  },
+  { path: "chunk.additions", type: "number", doc: "tags only: lines the hunk adds" },
+  { path: "chunk.deletions", type: "number", doc: "tags only: lines the hunk removes" },
+];
+
 export interface Analysis {
   signals: Signals;
   attribution?: Attribution; // a bot's PR: who it was opened for (attributionOf())
