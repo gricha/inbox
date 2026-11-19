@@ -2,6 +2,7 @@ import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, byOf, clearedText, cls } from "../format.ts";
 import type { Guide, Variant } from "../view.ts";
 import { Avatar } from "./Avatar.tsx";
+import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
 import { Detail } from "./Detail.tsx";
 import { AgentIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 
@@ -21,6 +22,7 @@ export interface RowCtx {
   picked?: Set<string>; // rows picked by shift- or ⌘-click, for one right-click on all of them
   pick?: (c: Card, range: boolean) => void; // shift-click (range) or ⌘-click
   compact?: boolean; // the list beside a review: two lines a row
+  chains?: ChainCtx; // a chain's head: its steps, open under it on this device
 }
 
 const TREE_STEP = 20; // px a level, as .tree's steps are wide
@@ -45,7 +47,8 @@ function noteOf(card: Card, variant: Variant): string {
 // One line: an icon for a PR or an issue, the title, quietly its repo#number, its one call to action, then its facts as
 // icons (risk, size, CI, stage), who it's from as their picture, and its age, in columns on the right. Each icon says
 // itself in a tip. Beside a review (compact), the same on two lines: icon, title and call to action, then the rest.
-// A click opens an issue in place under it. On Blocked, `tree` indents it under the PR it needs, with a quiet guide.
+// A click opens an issue in place under it. On Blocked, `tree` indents it under the PR it needs, with a quiet guide. A chain's
+// head says how many steps wait on it after its why, and opens them under it.
 export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean; tree?: Guide[] }) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id || !!ctx.picked?.has(card.id);
@@ -91,6 +94,8 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
       {age(since, ctx.now)}
     </span>
   );
+  const steps = ctx.compact ? [] : stepsOf(card.waiting, ctx.chains);
+  const chained = ctx.chains && steps.length > 0 ? ctx.chains : null;
   const cta = card.cta && !why && (
     // Tinted, and filled under the pointer; beside a review, accent text.
     <button
@@ -106,82 +111,88 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
     </button>
   );
   return (
-    <div
-      className={cls(
-        "line",
-        ctx.compact && "c-line",
-        sel && "sel",
-        open && "open",
-        ctx.leaving.has(card.id) && "leaving",
-        variant !== "active" && variant !== "blocked" && "dim",
-        variant === "blocked" && "blocked-row",
-      )}
-      data-id={card.id}
-    >
-      {/* The row's button reaches over the whole line (CSS), so its call to action can be a button of its own. */}
+    <>
       <div
-        className={cls("line-main line-row", ctx.compact && "c-row")}
-        style={tree?.length ? { paddingLeft: `calc(var(--pad, 14px) + ${tree.length * TREE_STEP}px)` } : undefined}
-      >
-        {!!tree?.length && (
-          <span className="tree" aria-hidden="true">
-            {tree.map((g, i) => (
-              // oxlint-disable-next-line react/no-array-index-key -- a step is its level: its place is all that tells it apart
-              <span key={i} className={`tree-${g}`} />
-            ))}
-          </span>
+        className={cls(
+          "line",
+          ctx.compact && "c-line",
+          sel && "sel",
+          open && "open",
+          ctx.leaving.has(card.id) && "leaving",
+          variant !== "active" && variant !== "blocked" && "dim",
+          variant === "blocked" && "blocked-row",
         )}
-        {/* Focus selects (Tab); not on mousedown, so a click opens without selecting first. */}
-        <button
-          type="button"
-          className="row-main line-btn"
-          aria-expanded={open}
-          onMouseDown={(e) => {
-            e.preventDefault();
-          }}
-          onClick={(e) => {
-            if (ctx.pick && (e.shiftKey || e.metaKey || e.ctrlKey)) ctx.pick(card, e.shiftKey);
-            else ctx.click(card);
-          }}
-          onFocus={() => {
-            ctx.select(card);
-          }}
+        data-id={card.id}
+      >
+        {/* The row's button reaches over the whole line (CSS), so its call to action can be a button of its own. */}
+        <div
+          className={cls("line-main line-row", ctx.compact && "c-row", chained && "has-chain")}
+          style={tree?.length ? { paddingLeft: `calc(var(--pad, 14px) + ${tree.length * TREE_STEP}px)` } : undefined}
         >
-          {ctx.compact ? (
-            <>
-              <span className="c-top">
+          {!!tree?.length && (
+            <span className="tree" aria-hidden="true">
+              {tree.map((g, i) => (
+                // oxlint-disable-next-line react/no-array-index-key -- a step is its level: its place is all that tells it apart
+                <span key={i} className={`tree-${g}`} />
+              ))}
+            </span>
+          )}
+          {/* Focus selects (Tab); not on mousedown, so a click opens without selecting first. */}
+          <button
+            type="button"
+            className="row-main line-btn"
+            aria-expanded={open}
+            onMouseDown={(e) => {
+              e.preventDefault();
+            }}
+            onClick={(e) => {
+              if (ctx.pick && (e.shiftKey || e.metaKey || e.ctrlKey)) ctx.pick(card, e.shiftKey);
+              else ctx.click(card);
+            }}
+            onFocus={() => {
+              ctx.select(card);
+            }}
+          >
+            {ctx.compact ? (
+              <>
+                <span className="c-top">
+                  {kindIcon}
+                  {title}
+                </span>
+                <span className="c-meta">
+                  <span className="c-ref">{ref}</span>
+                  {noteEl}
+                  <span className="c-gap" />
+                  <RowFacts card={card} stage={!why} />
+                  {face}
+                  {ageEl}
+                </span>
+              </>
+            ) : (
+              <>
                 {kindIcon}
                 {title}
-              </span>
-              <span className="c-meta">
-                <span className="c-ref">{ref}</span>
+                {ref}
                 {noteEl}
-                <span className="c-gap" />
-                <RowFacts card={card} stage={!why} />
-                {face}
-                {ageEl}
-              </span>
-            </>
-          ) : (
+              </>
+            )}
+          </button>
+          {chained && <ChainButton head={card.id} steps={steps} ctx={chained} />}
+          {cta}
+          {/* Columns on the right, so who and what stage line up from row to row. */}
+          {!ctx.compact && (
             <>
-              {kindIcon}
-              {title}
-              {ref}
-              {noteEl}
+              <RowFacts card={card} stage={!why} />
+              {face}
+              {ageEl}
             </>
           )}
-        </button>
-        {cta}
-        {/* Columns on the right, so who and what stage line up from row to row. */}
-        {!ctx.compact && (
-          <>
-            <RowFacts card={card} stage={!why} />
-            {face}
-            {ageEl}
-          </>
-        )}
+        </div>
+        {open && <Detail card={card} detail={ctx.details[card.id]} ctx={ctx} />}
       </div>
-      {open && <Detail card={card} detail={ctx.details[card.id]} ctx={ctx} />}
-    </div>
+      {chained?.open.has(card.id) && (
+        <WaitingRows steps={steps} head={tree ?? []} ctx={chained} me={ctx.me} now={ctx.now} selected={ctx.selected} />
+      )}
+    </>
   );
 }

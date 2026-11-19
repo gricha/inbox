@@ -1302,6 +1302,35 @@ const SHOTS: Shot[] = [
   },
   // What can't move yet: a chain's rows together, the first saying what its blocker waits on, then a review wait.
   { name: "blocked", go: at("#/blocked") },
+  // An "after" chain is one row, its head's: worker#882, asked of you, says how many steps wait on it; opened, they hang under
+  // it in the order they run, each saying what it comes after (a draft says so), and its button says Hide.
+  {
+    // A chain folded, as it starts: one row, its mark and how many steps wait after it.
+    name: "queue-chain-folded",
+    go: async (page) => {
+      await at("#/")(page);
+      const button = page.locator('[data-id="acme/worker#882"] .line-chain').first();
+      const words = (await button.textContent())?.trim() ?? "";
+      if (!words.includes("5 after this")) failures.push(`queue-chain-folded: the chain's button says "${words}"`);
+    },
+  },
+  {
+    name: "queue-chain",
+    go: chainOpen("#/", "acme/worker#882", [
+      "After worker#882",
+      "After infra#2410 \u00b7 Draft",
+      "After options-automator#10657",
+      "After infra#2411",
+      "After infra#2412",
+    ]),
+    after: chainFold("acme/worker#882"),
+  },
+  // A chain whose next step waits on someone else waits on Blocked: web#2292, which you approved for marco to merge, says so.
+  {
+    name: "blocked-chain",
+    go: chainOpen("#/blocked", "acme/web#2292", ["After web#2292", "After infra#2398"]),
+    after: chainFold("acme/web#2292"),
+  },
   // The PR a chain waits on: what it blocks, and what it waits on. Opened from the queue, where it is.
   {
     name: "review-blocker",
@@ -6100,6 +6129,29 @@ const SHOTS: Shot[] = [
     },
   },
 ];
+// A chain's head on `hash`, its steps opened: its button says Hide, and each step what it comes after, in order.
+function chainOpen(hash: string, head: string, afters: string[]) {
+  return async (page: Page) => {
+    await at(hash)(page);
+    const row = `.line[data-id="${head}"]`;
+    const said = (await page.textContent(`${row} .line-chain`))?.trim();
+    if (said !== `${afters.length} after this`) failures.push(`chain ${head}: its button says ${JSON.stringify(said)}`);
+    await page.click(`${row} .line-chain`);
+    await page.evaluate(`document.querySelector('${row}').scrollIntoView({ block: "center" })`);
+    await page.waitForTimeout(200);
+    const rows = await page.evaluate<string[]>(`[...document.querySelectorAll(".wait-line .wait-after")].map((x) => x.textContent)`);
+    if (rows.join(" | ") !== afters.join(" | ")) failures.push(`chain ${head}: its steps say ${JSON.stringify(rows)}`);
+    const hide = (await page.textContent(`${row} .line-chain`))?.trim();
+    if (hide !== "Hide") failures.push(`chain ${head}: open, its button says ${JSON.stringify(hide)}`);
+  };
+}
+// Folded again, as the next shot expects it (the page keeps it per device).
+function chainFold(head: string) {
+  return async (page: Page) => {
+    await page.click(`.line[data-id="${head}"] .line-chain`);
+  };
+}
+
 const SIZES: { name: string; width: number; height: number; mac: boolean; asked?: true }[] = [
   { name: "wide", width: 1280, height: 820, mac: false },
   { name: "mid", width: 900, height: 700, mac: false },

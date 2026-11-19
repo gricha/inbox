@@ -60,6 +60,12 @@ export interface AddResult {
   item: ItemDetail;
   undo_seq: number;
 }
+// What a step now waits on, as ids: an item's ("getsentry/ops#25732") or a note's ("note:1a2b3c4d").
+export interface AfterResult {
+  ok: true;
+  item: string;
+  after: string[];
+}
 export interface StatusInfo {
   now: number;
   today: number;
@@ -181,8 +187,14 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     item: (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`),
     act: (id: string, action: Action, until?: string) => call<ActResult>("POST", "/api/act", { id, action, until }),
     undo: (seq?: number) => call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", { seq }),
-    add: (ref: string, why?: string, from?: string) =>
-      call<AddResult>("POST", "/api/add", { id: ref, ...(why !== undefined && { why }), ...(from !== undefined && { from }) }),
+    add: (ref: string, why?: string, from?: string, after?: string[]) =>
+      call<AddResult>("POST", "/api/add", {
+        id: ref,
+        ...(why !== undefined && { why }),
+        ...(from !== undefined && { from }),
+        ...(after?.length && { after }),
+      }),
+    after: (item: string, after: string[]) => call<AfterResult>("POST", "/api/after", { item, after }),
     sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
     getConfig: () => call<ConfigDoc>("GET", "/api/config"),
     previewConfig: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),
@@ -249,6 +261,7 @@ export const {
   act,
   undo,
   add,
+  after,
   sync,
   getConfig,
   previewConfig,

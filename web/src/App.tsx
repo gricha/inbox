@@ -17,6 +17,7 @@ import type {
   Reviewer,
   SettingsView,
   SetupView,
+  WaitingStep,
   Work,
 } from "../../src/types.ts";
 import { permalink } from "../../src/links.ts";
@@ -48,6 +49,9 @@ import {
   routeHash,
   PAGE_GROUPS,
   settingsBack,
+  settleSteps,
+  stepOf,
+  toggled,
   type Acted,
   type ListPage,
   stops,
@@ -64,7 +68,8 @@ import { Beside } from "./components/Beside.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
-import { BulkMenu, NoteMenu, QuestionMenu, RowMenu, SessionMenu } from "./components/RowMenu.tsx";
+import { BulkMenu, NoteMenu, QuestionMenu, RowMenu, SessionMenu, StepMenu } from "./components/RowMenu.tsx";
+import type { ChainCtx } from "./components/Chain.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import type { SessionCtx } from "./components/Session.tsx";
 import { PeopleFilter } from "./components/PeopleFilter.tsx";
@@ -118,6 +123,12 @@ const isDown = (e: ApiError): e is Down => e._tag === "DeskUnreachable" || e._ta
 const LIST = "desk.list"; // this device's choice: the list beside a review open or folded
 const CHAT = "desk.chat"; // the chat open in this window, about this item ("" for nothing): kept through a reload
 const DISMISSED = "desk.notices"; // this device's: the notices you dismissed, each as it was then
+const CHAINS = "desk.chains"; // this device's: the chains whose steps you opened under their head, by the head's id
+function chainsAtStart(): Set<string> {
+  const raw = getStored(CHAINS);
+  const parsed = raw ? parseJson(Schema.Array(Schema.String), raw) : null;
+  return new Set(parsed && Result.isSuccess(parsed) ? parsed.success : []);
+}
 function dismissedAtStart(): Dismissed {
   const raw = getStored(DISMISSED);
   const parsed = raw ? parseJson(Schema.Record(Schema.String, Schema.String), raw) : null;
@@ -172,6 +183,8 @@ export function App() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, ItemDetail | string>>({});
   const [noting, setNoting] = useState<Note | "new" | null>(null); // the note tray: a new note, or one you opened
+  const [chainsOpen, setChainsOpen] = useState(chainsAtStart);
+  const [unwaited, setUnwaited] = useState<ReadonlySet<string>>(new Set()); // Stop waiting, until the desk's view has it
   const [noteEdits, setNoteEdits] = useState<NoteEdits>({});
   const newNotes = useRef(0);
   const noteClose = useRef<(() => void) | null>(null); // the open tray's way out, for Esc
@@ -632,6 +645,8 @@ export function App() {
   );
   useEffect(() => {
     if (view) setNoteEdits((e) => settleNoteEdits(view.notes, e));
+    // A step you stopped waiting that's off every chain in the desk's view: the view has it where it goes.
+    if (view) setUnwaited((u) => (u.size ? settleSteps(view, u) : u));
   }, [view]);
   // Your notes, wherever their rows are (the Inbox, or the Archive while a reminder waits): each has a right-click menu.
   const notes = useMemo(
@@ -705,7 +720,8 @@ export function App() {
         onScreen.some((c) => c.id === id) ||
         inquiries.some((q) => inquiryOf(q.id) === id) ||
         sessions.some((s) => s.id === id) ||
-        notes.some((n) => noteOf(n.id) === id)
+        notes.some((n) => noteOf(n.id) === id) ||
+        stepOf(id, [...onScreen, ...notes])
       )
     ) {
       stay.current = null;
@@ -747,14 +763,15 @@ export function App() {
   const menuQuestion = menuAt ? inquiries.find((q) => inquiryOf(q.id) === menuAt.id) : undefined;
   const menuSession = menuAt ? sessions.find((x) => x.id === menuAt.id) : undefined;
   const menuNote = menuAt ? notes.find((n) => noteOf(n.id) === menuAt.id) : undefined;
+  const menuStep = menuAt ? stepOf(menuAt.id, [...onScreen, ...notes]) : undefined;
   const closeMenu = useCallback(() => {
     stay.current = null;
     setMenuAt(null);
   }, []);
   // Its row left the page (sorted away, resolved, acted on elsewhere): the menu goes with it, for good.
   useEffect(() => {
-    if (menuAt && ((!menuCard && !menuQuestion && !menuSession && !menuNote) || (menuAt.bulk && bulkLeft < 2))) closeMenu();
-  }, [menuAt, menuCard, menuQuestion, menuSession, menuNote, bulkLeft, closeMenu]);
+    if (menuAt && ((!menuCard && !menuQuestion && !menuSession && !menuNote && !menuStep) || (menuAt.bulk && bulkLeft < 2))) closeMenu();
+  }, [menuAt, menuCard, menuQuestion, menuSession, menuNote, menuStep, bulkLeft, closeMenu]);
 
   // The PR row you rest on, by Tab or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
   const onRow =
@@ -1050,6 +1067,42 @@ export function App() {
       ),
     );
   }
+  // A chain's steps, open under its head or folded, as you left them on this device; a step opens as its row would.
+  const chains: ChainCtx = {
+    open: chainsOpen,
+    toggle: (head) => {
+      const next = toggled(chainsOpen, head);
+      setChainsOpen(next);
+      setStored(CHAINS, next.size ? JSON.stringify([...next]) : null);
+    },
+    step: (s) => {
+      if (s.note) setNoting(s.note);
+      else if (s.kind === "issue") window.open(s.url, "_blank", "noopener,noreferrer");
+      else {
+        setSelected(s.id);
+        go({ name: "review", id: s.id });
+      }
+    },
+    gone: unwaited,
+  };
+  // Stop waiting: off its chain at once, onto your desk where its own placement puts it once the desk answers.
+  function stopWaiting(s: WaitingStep) {
+    setUnwaited((u) => new Set([...u, s.id]));
+    runUi(
+      api.after(s.id, []).pipe(
+        Effect.match({
+          onSuccess: () => {
+            flash(`Stopped waiting: ${s.ref || s.title}`);
+          },
+          onFailure: (e) => {
+            setUnwaited((u) => new Set([...u].filter((x) => x !== s.id)));
+            flash(e.message, true);
+          },
+        }),
+        Effect.tap(refreshNow),
+      ),
+    );
+  }
   const note: NoteCtx = {
     now,
     selected,
@@ -1057,6 +1110,8 @@ export function App() {
       setNoting(n);
     },
     done: doneNote,
+    chains,
+    me: overview?.me ?? "",
   };
 
   // Your answer to an agent's question (or leaving it unanswered): it leaves the main page at once while its page stays,
@@ -1777,6 +1832,7 @@ export function App() {
     },
     run,
     menu: openRowMenu,
+    chains,
     picked: new Set(pickedOn),
     ...(LIST_PAGES.has(route.name) && { pick: picker(selected, true) }),
   };
@@ -2261,6 +2317,17 @@ export function App() {
                 ),
               );
           }}
+          reopen={reopenMenu}
+          onClose={closeMenu}
+        />
+      )}
+      {menuAt && menuStep && (
+        <StepMenu
+          key={`${menuAt.id} ${menuAt.x} ${menuAt.y}`}
+          s={menuStep}
+          x={menuAt.x}
+          y={menuAt.y}
+          stop={stopWaiting}
           reopen={reopenMenu}
           onClose={closeMenu}
         />

@@ -38,6 +38,7 @@ import {
   type Inquiry,
   type ItemDetail,
   type JudgeStatus,
+  type Note,
   type Overview,
   type Placement,
   type PreviewResult,
@@ -107,14 +108,18 @@ const compact = (c: Card) => ({
   ...(c.snooze_when && { snooze_when: c.snooze_when }),
   ...(c.wake_on && { wake_on: c.wake_on }), // what inbox_act's snooze can wait on now
   ...(c.stack && { stack: c.stack }),
+  ...(c.waiting && { after_this: c.waiting.map((w) => w.id) }), // the steps that wait on it, in the order they run
 });
+
+// The head of an "after" chain stands for its waiting steps, which get no line of their own.
+const afterNote = (waiting: unknown[] | undefined) => (waiting?.length ? ` (${waiting.length} after this)` : "");
 
 // A stack is one line on the queue: it says how many of its PRs that line stands for.
 const stackNote = (c: Card) =>
   c.stack ? ` (stack ${c.stack.pos}/${c.stack.size}${c.stack.folded?.length ? `, stands for ${c.stack.folded.join(", ")} too` : ""})` : "";
 
 const cardLine = (c: Card) =>
-  `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (merging)" : ""}${aiPending(c.preflight) ? ` (${aiPending(c.preflight)})` : ""}${stackNote(c)}`;
+  `${c.bucket.padEnd(5)}  ${c.id}  ${oneLine(c.title)}  [${oneLine(c.why)}]${c.new ? " (new)" : ""}${c.inflight ? " (merging)" : ""}${aiPending(c.preflight) ? ` (${aiPending(c.preflight)})` : ""}${stackNote(c)}${afterNote(c.waiting)}`;
 
 const stackLines = (s: Stack) => [
   `stack ${s.id}, bottom first on ${s.base}:`,
@@ -215,6 +220,7 @@ type ListBucket = (typeof LIST_BUCKETS)[number];
 const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | undefined, buckets: ListBucket[], limit: number) {
   let pools: [ListBucket, Card[]][];
   let sessions: SessionCard[] = [];
+  let notes: Note[] = [];
   if (!board || board === "focus") {
     if (!buckets.some((b) => b === "now" || b === "today"))
       return yield* new ToolInputError({
@@ -222,6 +228,7 @@ const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | u
       });
     const f = yield* api.focus();
     sessions = f.sessions;
+    notes = f.notes ?? [];
     pools = [
       ["now", f.sections.now],
       ["today", f.sections.today],
@@ -242,9 +249,29 @@ const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | u
   const cards = all.slice(0, limit);
   let head = `${board && board !== "focus" ? `board ${board}` : "focus"} · buckets ${buckets.join(",")} · ${cards.length} of ${all.length} shown`;
   if (sessions.length) head += ` · ${sessions.length} session${sessions.length === 1 ? "" : "s"} first`;
-  if (!cards.length && !sessions.length) return head;
-  return head + "\n" + untrusted([...sessions.map(sessionLine), ...cards.map(cardLine), json([...sessions, ...cards.map(compact)])]);
+  if (notes.length) head += ` · ${notes.length} note${notes.length === 1 ? "" : "s"} last`;
+  if (!cards.length && !sessions.length && !notes.length) return head;
+  return (
+    head +
+    "\n" +
+    untrusted([
+      ...sessions.map(sessionLine),
+      ...cards.map(cardLine),
+      ...notes.map(noteLine),
+      json([...sessions, ...cards.map(compact), ...notes.map(noteJson)]),
+    ])
+  );
 });
+
+// The user's note to themselves, by the id inbox_after names it with.
+const noteJson = (n: Note) => ({
+  id: `note:${n.id}`,
+  text: n.text,
+  at: n.at,
+  remind_at: n.remind_at,
+  ...(n.waiting && { waiting: n.waiting.map((w) => w.id) }),
+});
+const noteLine = (n: Note) => `note   note:${n.id}  ${oneLine(n.text)}${afterNote(n.waiting)}`;
 
 // A Claude Code or Codex session that needs the user: its name and its reason are what it said or was named, so untrusted.
 const sessionLine = (s: SessionCard) =>
@@ -322,7 +349,8 @@ function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[number],
   });
 }
 
-const addText = (api: DeskClient, ref: string, why: string, from: string) => Effect.map(api.add(ref, why, from), addedLines);
+const addText = (api: DeskClient, ref: string, why: string, from: string, after?: string[]) =>
+  Effect.map(api.add(ref, why, from, after), (r) => (after?.length ? `after ${after.join(", ")}: it waits on them\n` : "") + addedLines(r));
 
 function addedLines(r: AddResult): string {
   const d = r.item;
@@ -487,10 +515,36 @@ export function createMcpServer(
             'One line: what it needs from the user and why now ("needs your call on the token transport before it merges", "you asked to review it")',
           ),
         from: z.string().min(1).max(60).describe('Your task in a few words, so they know which session sent it ("seer region fix")'),
+        after: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe(`What it comes after, as inbox_after takes them: adding steps in order, each after the one before, builds a chain`),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    ({ ref, why, from }) => run(addText(api, ref, why, from)),
+    ({ ref, why, from, after }) => run(addText(api, ref, why, from, after)),
+  );
+
+  server.registerTool(
+    "inbox_after",
+    {
+      description:
+        "Put work that must happen in order into a chain, kept by the desk (never sent to GitHub, any org): `item` comes after every ref in `after`, replacing what it came after before; [] clears it. A PR is complete once merged, an issue once closed, a note once done; a PR closed without merging never is, and the chain stops there. A step with one still to complete is waiting: it leaves the Inbox (no row, count or notification) and hangs under the nearest step that isn't (its head), which shows \"N after this\". The head is on the Inbox while its next move is the user's, else on Blocked; when it completes, the next step comes onto the Inbox and notifies. Items must be on the desk (inbox_add them first, or pass `after` there); a note is note:<id>, as inbox_list shows it. A loop is refused.",
+      inputSchema: {
+        item: z.string().describe(`${REF}, or note:<id>`),
+        after: z.array(z.string()).max(20).describe("What it waits on, each as item takes it; [] for nothing"),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    ({ item, after }) =>
+      run(
+        Effect.map(api.after(item, after), (r) =>
+          r.after.length
+            ? `${r.item} now comes after ${r.after.join(", ")}. Local only; nothing was sent to GitHub.`
+            : `${r.item} waits on nothing now. Local only; nothing was sent to GitHub.`,
+        ),
+      ),
   );
 
   server.registerTool(

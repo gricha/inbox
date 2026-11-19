@@ -2130,6 +2130,53 @@ html::-webkit-scrollbar-corner,
   font-size: var(--text-sm);
 }
 
+/* A chain's head: its quiet button follows its why, and what's on the right stays in its columns. */
+.line-row.has-chain > .line-btn {
+  flex: 0 1 auto;
+}
+
+.line-row.has-chain > .line-cta,
+.line-row.has-chain > .line-age {
+  margin-left: 0;
+}
+
+.line .line-chain {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  flex: none;
+  align-items: baseline;
+  align-self: baseline;
+  gap: 4px;
+  margin-right: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--pencil);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.line .line-chain:hover {
+  color: var(--ink);
+}
+
+.line-chain > .i {
+  align-self: center;
+}
+
+/* A waiting step's "After …" is its point, as a Blocked row's why: quiet, kept in a tight table, its title giving way first. */
+.wait-line .line-title {
+  flex-shrink: 10000;
+  min-width: calc-size(max-content, min(size, 30%, 16ch));
+}
+
+.wait-line .wait-after {
+  flex: 0 1 auto;
+  opacity: 0.7;
+}
+
 .dim .line-title {
   color: var(--ink-2);
   font-weight: 400;

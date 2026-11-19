@@ -615,6 +615,10 @@ export class Store {
     }
   }
 
+  unset(key: string): void {
+    this.db.prepare("DELETE FROM kv WHERE key = ?").run(key);
+  }
+
   set(key: string, value: unknown): void {
     this.db
       .prepare("INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")

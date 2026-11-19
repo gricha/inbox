@@ -8,17 +8,17 @@ A tour of the window, page by page: what's on each and what each control does.
 
 The pages:
 
-| Page                                    | Route               | What it holds                                            |
-| --------------------------------------- | ------------------- | -------------------------------------------------------- |
-| [Inbox](#the-inbox)                     | `#/`                | What needs you, in three sections: Urgent, Standard, FYI |
-| [A review](#the-review-view)            | `#/review/<id>`     | One PR, read and acted on in the Inbox's place           |
-| [A question](#an-agents-question)       | `#/inquiry/<id>`    | An agent's question for you                              |
-| [Blocked](#blocked)                     | `#/blocked`         | Your PRs that can't move yet                             |
-| [Merging](#merging)                     | `#/inflight`        | Your PRs handed off to your agent to merge               |
-| [Archive](#archive)                     | `#/archive`         | What's done, snoozed, muted or hidden by rules           |
-| [A review document](#a-review-document) | `#/doc/<id>`        | A review document the desk rendered                      |
-| [Settings](#settings)                   | `#/settings/<part>` | Configuration, one part at a time                        |
-| [The first run](#the-first-run)         | any                 | GitHub and your agent, once, before the Inbox            |
+| Page                                    | Route               | What it holds                                              |
+| --------------------------------------- | ------------------- | ---------------------------------------------------------- |
+| [Inbox](#the-inbox)                     | `#/`                | What needs you, in three sections: Urgent, Standard, FYI   |
+| [A review](#the-review-view)            | `#/review/<id>`     | One PR, read and acted on in the Inbox's place             |
+| [A question](#an-agents-question)       | `#/inquiry/<id>`    | An agent's question for you                                |
+| [Blocked](#blocked)                     | `#/blocked`         | Your PRs that can't move yet, and chains waiting on others |
+| [Merging](#merging)                     | `#/inflight`        | Your PRs handed off to your agent to merge                 |
+| [Archive](#archive)                     | `#/archive`         | What's done, snoozed, muted or hidden by rules             |
+| [A review document](#a-review-document) | `#/doc/<id>`        | A review document the desk rendered                        |
+| [Settings](#settings)                   | `#/settings/<part>` | Configuration, one part at a time                          |
+| [The first run](#the-first-run)         | any                 | GitHub and your agent, once, before the Inbox              |
 
 ## Principles
 
@@ -137,6 +137,16 @@ In a narrow table the why goes first, then the bolt, then who it's from; the sig
 
 A stack of PRs is one row: the lowest open member, in the most urgent place, with its place in the stack ("api#4154 3/6").
 
+### A chain of steps
+
+Work that must happen in order, often other people's PRs across repos and a note, is one row: an "after" chain that an agent sets up ([api.md → After](api.md#after-chains)). A step waits until each step it comes after is complete (a PR merged, an issue closed, a note done; a PR closed without merging never is). A waiting step has no row of its own anywhere, isn't counted in a section, the Inbox's count or the badge, and doesn't notify, whatever its pin or section; those hold again once it no longer waits.
+
+The chain's row is its head, the first step that isn't waiting, drawn as any row, with one thing after its why: a quiet chain mark and **5 after this** in pencil. Pressing it opens the waiting steps under the row, in the order they run, and the button says **Hide**; it's folded by default, and each chain stays open or folded on this device (`desk.chains` in localStorage). The title still opens the head. Beside a review a head shows no button.
+
+A waiting step's row is one level in, under a quiet guide as on Blocked: its title, its ref, its author's picture and age, and in place of a why "After ops#25732" ("After ops#25732 · Draft" for a draft; a note's words when it comes after a note). It has no call to action and isn't dimmed. A click opens it as its own row would (a PR's review, an issue on GitHub, a note's tray). Its menu has one entry, **Stop waiting**: it leaves the chain at once and lands where its own placement puts it (no Undo).
+
+Where the row sits is where the head needs you: a review asked of you, your own PR with a next step, the note itself, or anything the desk places on the Inbox unpinned and unmoved. Its section is the head's own. A head that doesn't need you (approved by you, for its author to merge; someone else's draft; done or snoozed) puts the chain on [Blocked](#blocked), even pinned or moved. When the head completes, the next step is the head: it comes onto the Inbox by its own placement and notifies once, "ops#25732 is next · seer#9693 merged". A chain whose head moves onto the Inbox notifies once; one moving to Blocked never does.
+
 ### Calls to action
 
 The desk picks it (`cta` on the card). A tinted button before the age, filled under the pointer:
@@ -185,7 +195,7 @@ Right-click any row (Inbox, Blocked, Merging, Archive) for a menu at the pointer
 - **Show log**: the item's log (below).
 - **Copy link**, **Copy GitHub link** (the PR or issue on GitHub).
 
-On Merging the menu is **Back to the desk**, **Copy link** and **Copy GitHub link**. A question's is **Answer**, **Copy link**, **Dismiss**. A session's is **Done**, **Snooze** and its call to action. A note's is **Done**, its moves (**Move to Urgent**, **Move to Standard**, **Move to FYI**, one section up or down as a row's; a due reminder counts as Urgent, and a move drops the reminder), **Snooze** (a time, which becomes its reminder), **Change note** and **Copy text**. Every kind of row starts with Done and Snooze, from one place in `RowMenu.tsx`. Arrows move, → opens Snooze, Enter picks, Esc closes.
+On Merging the menu is **Back to the desk**, **Copy link** and **Copy GitHub link**. A chain's waiting step's is **Stop waiting**. A question's is **Answer**, **Copy link**, **Dismiss**. A session's is **Done**, **Snooze** and its call to action. A note's is **Done**, its moves (**Move to Urgent**, **Move to Standard**, **Move to FYI**, one section up or down as a row's; a due reminder counts as Urgent, and a move drops the reminder), **Snooze** (a time, which becomes its reminder), **Change note** and **Copy text**. Every kind of row starts with Done and Snooze, from one place in `RowMenu.tsx`. Arrows move, → opens Snooze, Enter picks, Esc closes.
 
 On the Inbox, Blocked and the Archive, and in their list beside a review, shift-click picks the PRs and issues from the selected row (beside a review, the open one) to the one you click, and ⌘-click (Ctrl-click off the Mac) adds or drops one. Right-click a picked row for what all of them allow, done to each: **Done with 3** (or **Back on the desk**), **Snooze** with the options they share, the moves when they're in one section, and **Close 3 on GitHub** when each can be closed. One Undo takes back all of a Done, Snooze or move. A plain click, Esc, a right-click on an unpicked row or leaving the page drops the picks.
 
@@ -392,6 +402,8 @@ On your ready PR nobody's asked to review, the same line opens with the box focu
 - Your PRs that need another PR merged first (its description says "Requires …", or it's stacked on it), down the chain.
 - Your PRs waiting on reviewers ("waits on a review from dana and @backend").
 - Your PRs in Merging that another PR blocks ("in Merging · needs …").
+
+The desk adds the chains you're following whose next step waits on someone else ([A chain of steps](#a-chain-of-steps)): the head's row says what it waits on ("is approved, for octo to merge", "is a draft"), with **N after this** after it. A head that resolved for you stays here, not in the Archive, while the chain has steps left; a PR closed without merging breaks the chain, and its head goes to the Archive with its steps still under it until you Stop waiting on them.
 
 Someone else's blocked PR isn't here: a review asked of you is yours to give, so it stays on the Inbox with stage "blocked". A rule can still send one here (`pr.blocked`, `pr.blocker_mine`).
 
@@ -757,6 +769,7 @@ Code: `onKey` and `onCapture` (`SIDE_PAGES`, `stepTo()`) in `web/src/App.tsx`, p
 | `web/src/notices.ts`, `components/Bubbles.tsx`                                    | the bubbles: which, in what words, dismissals                                        |
 | `web/src/components/Sidebar.tsx`, `PageHead.tsx`                                  | the sidebar (pages, Ask your agent, the update line, Settings); each page's head     |
 | `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx`                       | the Inbox, Blocked and the Archive: rows, an item opened in place                    |
+| `web/src/components/Chain.tsx`                                                    | a chain's head button (N after this) and its waiting steps' rows                     |
 | `web/src/components/Inquiry.tsx`, `Session.tsx`                                   | agents' questions (rows and page); sessions that need you                            |
 | `web/src/components/RowMenu.tsx`, `More.tsx`                                      | a row's right-click menu; a review's More                                            |
 | `web/src/components/Beside.tsx`                                                   | the list beside a review or a question                                               |

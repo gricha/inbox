@@ -45,8 +45,9 @@ import { linkRef, permalink } from "./links.ts";
 import { renderDoc, renderText } from "./render.ts";
 import { resolution, type Resolution } from "./resolve.ts";
 import { buildStacks, grouped, oneLinePerStack, stackRef, stackView, type Seat, type Stacks } from "./stacks.ts";
-import { askedAt, mergeLine, owesReply, peopleOf, reviewOptional, rerequestable, stage, standings, verdicts } from "./stage.ts";
+import { andMore, askedAt, mergeLine, owesReply, peopleOf, reviewOptional, rerequestable, stage, standings, verdicts } from "./stage.ts";
 import { blockedOrder, dependencies, type DepFacts } from "./deps.ts";
+import { chains, loopThrough, NOTE, type Chains, type NodeState } from "./after.ts";
 import type {
   DocSaved,
   InlineAt,
@@ -110,6 +111,7 @@ import type {
   Status,
   UpdateView,
   UsageView,
+  WaitingStep,
   Work,
 } from "./types.ts";
 import {
@@ -275,6 +277,10 @@ export interface Snapshot {
   handed: Map<string, Handoff>; // an agent's hand-off: why it's on your desk, until you act on it
   stacks: Stacks;
   deps: Map<string, DepFacts>; // open PRs' dependency facts (src/deps.ts)
+  links: Map<string, string[]>; // your "after" links: each step's prerequisites (src/after.ts)
+  chains: Chains; // what waits on them, and under which head
+  steps: Map<string, WaitingStep[]>; // each head's waiting steps, as its Card or Note carries them
+  parked: Set<string>; // heads that don't need you now: Blocked lists them with their chain, whatever their pin or section
   judging: Map<string, { signals: JudgeSignal[]; key: string }>; // while the judge is on: what it weighs for each item, and its answer's key
 }
 
@@ -579,7 +585,7 @@ const KeptInquirySchema = Schema.Struct({
     Schema.Struct({ text: Schema.String, at: Schema.String, dismissed: Schema.Boolean, read_at: opt(Schema.NullOr(Schema.String)) }),
   ),
 });
-const NoteSchema = schemaOf<Note>()(
+const NoteSchema = schemaOf<Omit<Note, "waiting">>()(
   Schema.Struct({
     id: Schema.String,
     at: Schema.String,
@@ -1507,6 +1513,7 @@ export class Desk {
     this.store.pruneKv("score:", kept);
     this.store.pruneKv("attribution:", kept);
     this.store.pruneKv("pushed:", kept);
+    this.store.pruneKv("after:", new Set([...kept, ...this.notes().map((n) => `${NOTE}${n.id}`)])); // a step gone is in no chain
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
     if (this.loaded) {
       const top = this.top(this.snapshot(), new Set());
@@ -1692,6 +1699,14 @@ export class Desk {
     const snap = this.snapshot();
     const { now, today } = this.top(snap, new Set());
     const me = this.me().toLowerCase();
+    // A chain's step coming onto the Inbox notifies once, pinned or not: what finished before it says it's next.
+    const notes = this.notesView(snap);
+    const shown = [...now, ...today].map((c) => c.id);
+    shown.push(...[...notes.due, ...notes.urgent, ...notes.open, ...notes.fyi].map((n) => `${NOTE}${n.id}`));
+    const chained = new Set([...snap.links.keys(), ...[...snap.links.values()].flat()]);
+    const was = strings(this.store.get("shown_chain")) ?? null;
+    this.store.set("shown_chain", shown);
+    const next = was === null ? [] : shown.filter((id) => chained.has(id) && !was.includes(id));
     const queued = [...now, ...today]
       .filter(
         (c) =>
@@ -1708,12 +1723,43 @@ export class Desk {
       "notified_queue",
       queued.map((x) => x.id),
     );
-    const fresh = prev === null ? [] : queued.filter((x) => !prev.includes(x.id));
+    const fresh = prev === null ? [] : queued.filter((x) => !prev.includes(x.id) && !next.includes(x.id));
+    if (next.length && this.mayNotify()) for (const id of next) this.notify("Inbox", this.nextText(id, snap, notes));
     if (!fresh.length || !this.mayNotify()) return;
     const [only] = fresh;
     const body =
       fresh.length === 1 && only ? `${only.ref} · ${only.why}` : `${fresh.length} need you: ${fresh.map((x) => x.ref).join(", ")}`;
     this.notify("Inbox", body);
+  }
+
+  // A chain's next step, in its notification: what it is, and what finished before it when that's known.
+  nextText(id: string, snap: Snapshot, notes: NotesView): string {
+    const e = snap.entries.get(id);
+    const n = [...notes.due, ...notes.urgent, ...notes.open, ...notes.fyi].find((x) => `${NOTE}${x.id}` === id);
+    const what = e ? shortRef(e.item) : (n?.text.split("\n")[0] ?? "your note");
+    const done = (state: Item["state"]) =>
+      (snap.links.get(id) ?? []).flatMap((p) => {
+        const it = snap.entries.get(p)?.item;
+        return it?.state === state ? [shortRef(it)] : [];
+      });
+    const merged = done("merged");
+    const closed = done("closed");
+    const finished = [
+      ...(merged.length ? [`${andMore(merged)} merged`] : []),
+      ...(closed.length ? [`${andMore(closed)} closed`] : []),
+      ...((snap.links.get(id) ?? []).some((p) => p.startsWith(NOTE)) ? ["your note is done"] : []),
+    ];
+    if (finished.length) return `${what} is next \u00b7 ${finished.join(", ")}`;
+    const why = e ? (snap.needs.get(id) ?? snap.best.get(id)?.why ?? "") : "";
+    return why ? `${what} \u00b7 ${why}` : what;
+  }
+
+  // A step you just set waiting: its coming back is news. One you stopped waiting isn't, as you put it on the Inbox yourself.
+  shown(id: string, waits: boolean): void {
+    for (const key of waits ? ["shown_chain"] : ["notified_queue", "shown_chain"]) {
+      const was = strings(this.store.get(key));
+      if (was) this.store.set(key, waits ? was.filter((x) => x !== id) : [...was.filter((x) => x !== id), id]);
+    }
   }
 
   // ---------------------------------------------------------------- classification
@@ -1788,6 +1834,19 @@ export class Desk {
         pr.blocker_mine = chain(id).some((y) => onYou(entries.get(y)!));
       }
     }
+    // Your "after" chains: a PR completes once merged, an issue once closed, a note once done; one closed unmerged never does.
+    const notes = this.notes();
+    const noteIds = new Set(notes.map((n) => `${NOTE}${n.id}`));
+    const nodeState = (id: string): NodeState => {
+      if (id.startsWith(NOTE)) return noteIds.has(id) ? "open" : "complete";
+      const it = entries.get(id)?.item;
+      if (!it) return "complete"; // the desk no longer holds it: nothing left to wait on
+      if (it.state === "open") return "open";
+      return it.kind === "pr" && it.state === "closed" ? "broken" : "complete";
+    };
+    const links = this.afterLinks();
+    const after = chains(links, nodeState);
+    const steps = new Map([...after.steps].map(([h, ids]) => [h, ids.map((id) => this.waitingStep(id, after, entries, notes))]));
 
     // A recently resolved item still in a search (you approved: reviewed-by:@me) passes its board's filter, to show under Resolved.
     // Only one that says when: updated_at moves with every bot or CI touch, so it would never age out.
@@ -1968,6 +2027,24 @@ export class Desk {
       const board = [...boards.values()].map((b) => b.result.placements.get(it.id)?.board).find(Boolean) ?? "";
       best.set(it.id, { board, bucket: "now", rule_bucket: "now", rule: null, why: UNASKED, trace: [] });
     }
+    // A waiting step is on no list: its chain's head carries it.
+    for (const id of after.head.keys()) {
+      best.delete(id);
+      needs.delete(id);
+    }
+    // A head shows its chain where it needs you: where the desk places it, or, pinned or moved, when its next step is yours.
+    // Otherwise the chain waits on someone else, on Blocked; a broken one shows where its head does.
+    const parked = new Set<string>();
+    for (const id of after.steps.keys()) {
+      const e = entries.get(id);
+      if (!e || nodeState(id) === "broken" || needs.has(id)) continue;
+      const p = best.get(id);
+      const me = e.analysis.signals.me;
+      const next = e.item.kind === "pr" ? onYou(e) || me.merge_owed : me.assignee || me.author;
+      if (p && p.bucket !== "blocked" && p.bucket !== "hide" && (next || (!e.state.pinned && !e.state.section))) continue;
+      best.delete(id);
+      parked.add(id);
+    }
     return {
       rev,
       at: now.getTime(),
@@ -1983,8 +2060,86 @@ export class Desk {
       handed,
       stacks,
       deps,
+      links,
+      chains: after,
+      steps,
+      parked,
       judging,
     };
+  }
+
+  // Your "after" links (kv `after:<step>`, its prerequisites' ids): kept by the desk, never sent to GitHub.
+  afterLinks(): Map<string, string[]> {
+    return new Map([...this.store.prefixed("after:", arrayOf(Schema.String))].filter(([, v]) => v.length > 0));
+  }
+
+  // A waiting step as its chain's head carries it.
+  waitingStep(id: string, after: Chains, entries: Map<string, Entry>, notes: Note[]): WaitingStep {
+    const said = (x: string) => {
+      if (!x.startsWith(NOTE)) {
+        const it = entries.get(x)?.item;
+        return it ? shortRef(it) : x.slice(x.indexOf("/") + 1);
+      }
+      const words = notes.find((n) => `${NOTE}${n.id}` === x)?.text.split("\n")[0] ?? "your note";
+      return words.length > 40 ? `${words.slice(0, 39)}\u2026` : words;
+    };
+    const waits = andMore(after.waits.get(id)!.map(said));
+    const n = id.startsWith(NOTE) ? notes.find((x) => `${NOTE}${x.id}` === id) : undefined;
+    if (n) return { id, kind: "note", ref: "", repo: "", title: n.text, url: "", by: "", since: n.at, after: waits, note: n };
+    const e = entries.get(id)!;
+    const it = e.item;
+    const person = e.analysis.attribution?.person;
+    const by = e.analysis.signals.me.author ? "you" : person ? person.replace(/^@/, "") : it.author;
+    return {
+      id,
+      kind: it.kind,
+      ref: shortRef(it),
+      repo: it.repo,
+      title: it.title,
+      url: it.url,
+      by,
+      since: e.analysis.waiting_since,
+      after: waits,
+      ...(it.draft && { draft: true as const }),
+    };
+  }
+
+  // A step of an "after" chain: an item the desk holds, or a note as note:<id>.
+  node(ref: string): Effect.Effect<string, RefError> {
+    const r = ref.trim();
+    if (!r.startsWith(NOTE)) return this.resolve(r);
+    return this.notes().some((n) => `${NOTE}${n.id}` === r)
+      ? Effect.succeed(r)
+      : Effect.fail(new NotFound({ message: `no note "${r}": inbox_list lists your notes with their ids` }));
+  }
+
+  // POST /api/after (inbox_after, `inbox after`): what `ref` waits on, replacing what it did; none clears it. Only items the
+  // desk holds and your notes, and never a loop.
+  setAfter(ref: string, after: readonly string[]): Effect.Effect<{ item: string; after: string[] }, RefError | BadRequest> {
+    return Effect.gen({ self: this }, function* () {
+      const id = yield* this.node(ref);
+      const ids: string[] = [];
+      for (const r of after) {
+        const p = yield* this.node(r);
+        if (!ids.includes(p)) ids.push(p);
+      }
+      const links = this.afterLinks();
+      const loop = loopThrough(links, id, ids);
+      if (loop !== null) {
+        const what = (x: string) => (x.startsWith(NOTE) ? x : x.slice(x.indexOf("/") + 1));
+        return yield* new BadRequest({
+          message:
+            loop === id
+              ? `${what(id)} can't come after itself`
+              : `${what(id)} after ${what(loop)} would make a loop: ${what(loop)} already comes after ${what(id)}`,
+        });
+      }
+      this.shown(id, ids.length > 0);
+      if (ids.length) this.store.set(`after:${id}`, ids);
+      else this.store.unset(`after:${id}`);
+      this.changed();
+      return { item: id, after: ids };
+    });
   }
 
   // The rule a placement matched, as config.toml has it: yours by its path, a built-in by its id.
@@ -2096,6 +2251,7 @@ export class Desk {
         needs: sig.blocked_by,
       }),
       ...(sig.blocks.length > 0 && { blocks: sig.blocks }),
+      ...(snap.steps.has(it.id) && { waiting: snap.steps.get(it.id)! }),
     };
   }
 
@@ -2263,9 +2419,11 @@ export class Desk {
       const snap = this.snapshot();
       const sections = this.top(snap, new Set());
       oneLinePerStack(sections, ["now", "today"], snap.stacks);
+      const notes = this.notesView(snap);
       return {
         sessions: this.sessions.active(),
         sections,
+        notes: [...notes.due, ...notes.urgent, ...notes.open, ...notes.fyi],
         reviewing: 0, // nothing waits on its review now: kept for older clients
         paused: this.paused(),
       };
@@ -2327,14 +2485,26 @@ export class Desk {
       };
       // Your PRs in Merging that another PR blocks: Merging has them, and Blocked lists them in their chain too.
       const merging = [...snap.entries.values()]
-        .filter((e) => laneOwned(e) && e.analysis.signals.pr.blocked)
+        .filter((e) => laneOwned(e) && e.analysis.signals.pr.blocked && !snap.chains.head.has(e.item.id) && !snap.parked.has(e.item.id))
         .map((e) => {
           const pr = e.analysis.signals.pr;
           const c = this.card(e, this.shownAt(e, snap), snap);
           c.why = `in Merging \u00b7 blocked by ${pr.blocker}, which ${pr.blocker_waits}`;
           return c;
         });
-      sections.blocked = blockedOrder([...sections.blocked, ...merging].map(aged), (id) => snap.deps.get(id)?.needs ?? []);
+      // Chains whose next step waits on someone else: their head says on what.
+      const parked = [...snap.parked].map((id) => {
+        const e = snap.entries.get(id)!;
+        const c = this.card(e, this.shownAt(e, snap), snap);
+        const waits = e.analysis.signals.pr.waits;
+        c.why = e.inflight
+          ? "is in Merging"
+          : waits !== ""
+            ? waits
+            : (e.resolved?.reason ?? (e.status === "active" ? "is open" : `is ${e.status}`));
+        return c;
+      });
+      sections.blocked = blockedOrder([...sections.blocked, ...merging, ...parked].map(aged), (id) => snap.deps.get(id)?.needs ?? []);
       const cleared: Card[] = [];
       const resolved: Card[] = [];
       // Resolved is what was in front of you (Now, Today), asked of you, or what you touched, from the last day: FYI and hidden
@@ -2350,19 +2520,20 @@ export class Desk {
       for (const board of boardsOf(loaded)) {
         const b = snap.boards.get(board.config.id)!;
         for (const id of b.result.inactive) {
-          if (seen.has(id)) continue;
+          if (seen.has(id) || snap.chains.head.has(id) || snap.parked.has(id)) continue;
           seen.add(id);
           const e = snap.entries.get(id)!;
           if (laneOwned(e)) continue; // Merging shows it
           if (e.resolved) {
             const p = this.placementOf(id, snap);
-            if (yours(e, p)) resolved.push(this.card(e, p, snap));
+            // A broken chain stays in sight under its head until you stop its steps waiting.
+            if (yours(e, p) || snap.steps.has(id)) resolved.push(this.card(e, p, snap));
           } else cleared.push(this.card(e, b.result.placements.get(id)!, snap));
         }
       }
       const view: QueueView = {
         inquiries: this.inquiries().filter((q) => !q.answer),
-        notes: this.notesView(),
+        notes: this.notesView(snap),
         sessions: this.sessions.cards(),
         sections,
         reviewing: 0, // as in focus()
@@ -2433,7 +2604,9 @@ export class Desk {
       if (!loaded.config.boards.some((b) => b.id === id)) return yield* new NotFound({ message: `no board "${id}"` });
       const snap = this.snapshot();
       const b = snap.boards.get(id)!;
-      const cards = (ids: string[]) => ids.map((x) => this.card(snap.entries.get(x)!, b.result.placements.get(x)!, snap));
+      // A waiting step's line is its chain's head's.
+      const cards = (ids: string[]) =>
+        ids.filter((x) => !snap.chains.head.has(x)).map((x) => this.card(snap.entries.get(x)!, b.result.placements.get(x)!, snap));
       return {
         board: { ...this.summary(id, snap), queries: b.queries },
         sections: {
@@ -3561,11 +3734,19 @@ export class Desk {
   }
 
   // `why` and `from`: an agent's hand-off, what needs you and which task sends it; the item's why while this pin stays.
-  add(ref: string, why?: string, from?: string): Effect.Effect<{ item: ItemDetail; undo_seq: number }, RefError | BadRequest | Upstream> {
+  // `after`: what it waits on (setAfter), checked before it's added, so adding steps in order builds a chain.
+  add(
+    ref: string,
+    why?: string,
+    from?: string,
+    after?: readonly string[],
+  ): Effect.Effect<{ item: ItemDetail; undo_seq: number }, RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
       const note = why === undefined ? null : yield* this.line(why, "why");
       const who = note === null || !from?.trim() ? "" : yield* this.line(from, "from", MAX_FROM);
+      for (const r of after ?? []) yield* this.node(r);
       const id = yield* this.hold(ref);
+      if (after?.length) yield* this.setAfter(id, after);
       // A pin alone leaves a done, snoozed or muted item hidden; one undo seq takes back both.
       const before = this.store.state(id);
       this.store.putState({ ...before, ...ACTIVE, pinned: true });
@@ -4380,8 +4561,24 @@ export class Desk {
     return decodeEach(NoteSchema, this.store.get("notes"));
   }
 
-  notesView(): NotesView {
-    return placeNotes(this.notes(), this.now().toISOString());
+  // A note waiting in an "after" chain is on no list; one at a chain's head carries it.
+  notesView(snap: Snapshot): NotesView {
+    const v = placeNotes(
+      this.notes().filter((n) => !snap.chains.head.has(`${NOTE}${n.id}`)),
+      this.now().toISOString(),
+    );
+    const withSteps = (ns: Note[]) =>
+      ns.map((n) => {
+        const waiting = snap.steps.get(`${NOTE}${n.id}`);
+        return waiting ? { ...n, waiting } : n;
+      });
+    return {
+      due: withSteps(v.due),
+      urgent: withSteps(v.urgent),
+      open: withSteps(v.open),
+      fyi: withSteps(v.fyi),
+      later: withSteps(v.later),
+    };
   }
 
   // POST /api/notes and /api/notes/:id: a note to yourself, written or changed. Its reminder is a time ("1h", "tomorrow",
@@ -4421,7 +4618,9 @@ export class Desk {
         "notes",
         this.notes().filter((n) => n.id !== id),
       );
+      this.store.unset(`after:${NOTE}${id}`);
       this.changed();
+      this.notifyNew(); // what came after it is next
       return Effect.void;
     });
   }

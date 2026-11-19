@@ -267,6 +267,38 @@ test("add posts the ref and says what it started", async () => {
   assert.deepEqual(lastCall().body, { id: "seer#8949", why: "your call on the timeout", from: "flags fix" });
 });
 
+test("add --after joins a chain; after sets what a step waits on, and no prereqs clears it", async () => {
+  const r = await run(["add", "seer#8949", "--after", "sentry#101", "--after", "note:1a2b3c4d"]);
+  assert.equal(r.code, 0);
+  assert.deepEqual(lastCall().body, { id: "seer#8949", after: ["sentry#101", "note:1a2b3c4d"] });
+  assert.match(r.out, /^✓ added getsentry\/seer#8949 to your desk, pinned, after sentry#101, note:1a2b3c4d, AI review started/);
+  const a = await run(["after", "seer#8949", "sentry#101"]);
+  assert.equal(a.code, 0);
+  assert.deepEqual(lastCall(), { method: "POST", path: "/api/after", body: { item: "seer#8949", after: ["sentry#101"] } });
+  assert.equal(a.out, "✓ getsentry/seer#8949 now comes after getsentry/sentry#101\n");
+  const none = await run(["after", "note:1a2b3c4d"]);
+  assert.deepEqual(lastCall().body, { item: "note:1a2b3c4d", after: [] });
+  assert.equal(none.out, "✓ note:1a2b3c4d waits on nothing now\n");
+  const loop = await run(["after", "sentry#101", "loop"]);
+  assert.deepEqual([loop.code, loop.err], [1, "inbox: sentry#101 after loop would make a loop: loop already comes after sentry#101\n"]);
+  assert.equal((await run(["after"])).code, 2);
+  assert.match((await run(["after", "--help"])).out, /after <ref> \[<prereq>\.\.\.\]/);
+});
+
+test("ls gives a chain one line, its head's, with how many come after it, and lists your notes by their ids", async (c) => {
+  fake.chained = true;
+  c.after(() => {
+    fake.chained = false;
+  });
+  const r = await run(["ls"]);
+  assert.match(
+    r.out,
+    /\n◐ sentry#101  Fix the flaky snuba test that only fails on Tuesdays  your team was asked · 1d {2}\(2 after this\)\n/,
+  );
+  assert.match(r.out, /\nNOTES 1\n· note:1a2b3c4d {2}Run the Seer load test {2}\(1 after this\)\n/);
+  assert.doesNotMatch(r.out, /ops#25732/);
+});
+
 test("snooze defaults to tomorrow and passes an explicit until", async () => {
   const r = await run(["snooze", "seer#8949"]);
   assert.equal(r.code, 0);

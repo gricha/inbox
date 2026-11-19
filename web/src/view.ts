@@ -19,6 +19,7 @@ import type {
   SettingDef,
   SettingValue,
   SettingsView,
+  WaitingStep,
   Where,
 } from "../../src/types.ts";
 import { onLines, type Section } from "../../src/sections.ts";
@@ -548,6 +549,44 @@ export function treeGuides(depths: number[]): Guide[][] {
     Array.from({ length: d }, (_, l): Guide => (l + 1 === d ? (more(i, d) ? "tee" : "end") : more(i, l + 1) ? "rail" : "gap")),
   );
 }
+
+// A chain's waiting steps hang one level under its head, wherever the head hangs: the head's guide goes on past them.
+export function stepGuides(head: Guide[], n: number): Guide[][] {
+  const above = head.map((g, i): Guide => (i < head.length - 1 ? g : g === "tee" ? "rail" : "gap"));
+  return Array.from({ length: n }, (_, i): Guide[] => [...above, i === n - 1 ? "end" : "tee"]);
+}
+
+// A waiting step's why, in place of its own: what it comes after.
+export const afterText = (s: WaitingStep) => `After ${s.after}${s.draft ? " \u00b7 Draft" : ""}`;
+
+// A chain head's button: how many steps wait on it, or Hide while they're open.
+export const chainLabel = (n: number, open: boolean) => (open ? "Hide" : `${n} after this`);
+
+export const WAIT = "wait:"; // a waiting step's row id, as its right-click reads it
+
+// The waiting step a row id names, among the heads on screen.
+export function stepOf(id: string, heads: readonly { waiting?: WaitingStep[] | undefined }[]): WaitingStep | undefined {
+  if (!id.startsWith(WAIT)) return undefined;
+  return heads.flatMap((h) => h.waiting ?? []).find((s) => `${WAIT}${s.id}` === id);
+}
+
+// Steps you stopped waiting that a chain in the view still has; the same set when that's all of them.
+export function settleSteps(view: QueueView, gone: ReadonlySet<string>): ReadonlySet<string> {
+  const n = view.notes;
+  const heads = [...Object.values(view.sections).flat(), ...view.resolved, ...view.cleared, ...view.hidden];
+  const still = new Set(
+    [...heads, ...n.due, ...n.urgent, ...n.open, ...n.fyi, ...n.later].flatMap((h) => h.waiting ?? []).map((s) => s.id),
+  );
+  const kept = [...gone].filter((id) => still.has(id));
+  return kept.length === gone.size ? gone : new Set(kept);
+}
+
+// This device's open chains: a head's id in the set or out of it.
+export const toggled = (open: ReadonlySet<string>, id: string): Set<string> => {
+  const next = new Set(open);
+  if (!next.delete(id)) next.add(id);
+  return next;
+};
 
 // The same fact in other words, as rules write whys: "conflicts with main", "red CI", "you requested changes", "2 approvals".
 const MEANINGS = [

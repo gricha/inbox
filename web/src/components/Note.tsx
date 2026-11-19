@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { InboxSection, Note } from "../../../src/types.ts";
 import { runUi } from "../api.ts";
 import { age, cls, when } from "../format.ts";
+import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
 import { ClockIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 
 export const noteOf = (id: string) => `note:${id}`; // its row's id, as the right-click and the cursor read it
@@ -13,6 +14,8 @@ export interface NoteCtx {
   selected: string | null;
   open: (n: Note) => void; // into the note tray, to change it
   done: (n: Note) => void;
+  chains?: ChainCtx; // a chain's head: its steps, open under it on this device
+  me?: string; // your login, for a step of yours
 }
 
 // A note to yourself as a row: Note, its words, Done; when it reminds (or reminded) you where a PR's author goes.
@@ -41,56 +44,64 @@ export function NoteRow({ n, ctx }: { n: Note; ctx: NoteCtx }) {
       {age(n.remind_at && !later ? n.remind_at : n.at, ctx.now)}
     </span>
   );
+  const steps = ctx.compact ? [] : stepsOf(n.waiting, ctx.chains);
+  const chained = ctx.chains && steps.length > 0 ? ctx.chains : null;
   return (
-    <div className={cls("line memo", ctx.compact && "c-line", ctx.selected === id && "sel")} data-id={id}>
-      <div className={cls("line-main line-row", ctx.compact && "c-row")}>
-        <button
-          type="button"
-          className="row-main line-btn"
-          onMouseDown={(e) => {
-            e.preventDefault();
-          }}
-          onClick={() => {
-            ctx.open(n);
-          }}
-        >
-          {ctx.compact ? (
-            <>
-              <span className="c-top">
+    <>
+      <div className={cls("line memo", ctx.compact && "c-line", ctx.selected === id && "sel")} data-id={id}>
+        <div className={cls("line-main line-row", ctx.compact && "c-row", chained && "has-chain")}>
+          <button
+            type="button"
+            className="row-main line-btn"
+            onMouseDown={(e) => {
+              e.preventDefault();
+            }}
+            onClick={() => {
+              ctx.open(n);
+            }}
+          >
+            {ctx.compact ? (
+              <>
+                <span className="c-top">
+                  {kindIcon}
+                  {title}
+                </span>
+                <span className="c-meta">
+                  {by}
+                  <span className="c-gap" />
+                  {ageEl}
+                </span>
+              </>
+            ) : (
+              <>
                 {kindIcon}
                 {title}
-              </span>
-              <span className="c-meta">
-                {by}
-                <span className="c-gap" />
-                {ageEl}
-              </span>
-            </>
-          ) : (
+              </>
+            )}
+          </button>
+          {chained && <ChainButton head={id} steps={steps} ctx={chained} />}
+          <button
+            type="button"
+            className={ctx.compact ? "c-cta" : "act line-cta line-reply"}
+            onClick={() => {
+              ctx.done(n);
+            }}
+          >
+            Done
+          </button>
+          {!ctx.compact && (
             <>
-              {kindIcon}
-              {title}
+              <RowFacts />
+              {face}
+              {ageEl}
             </>
           )}
-        </button>
-        <button
-          type="button"
-          className={ctx.compact ? "c-cta" : "act line-cta line-reply"}
-          onClick={() => {
-            ctx.done(n);
-          }}
-        >
-          Done
-        </button>
-        {!ctx.compact && (
-          <>
-            <RowFacts />
-            {face}
-            {ageEl}
-          </>
-        )}
+        </div>
       </div>
-    </div>
+      {chained?.open.has(id) && (
+        <WaitingRows steps={steps} head={[]} ctx={chained} me={ctx.me ?? ""} now={ctx.now} selected={ctx.selected} />
+      )}
+    </>
   );
 }
 

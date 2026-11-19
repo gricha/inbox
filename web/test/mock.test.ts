@@ -282,9 +282,9 @@ test("resolved items sit apart from the queue's groups and boards; items carry t
   assert.deepEqual(
     q.resolved.map((c) => [c.id, c.why, c.resolved]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
     // What was in Now or Today, asked of you, or yours to resolve: the hidden one and your in-flight PR resolve silently.
+    // web#2292, which you approved, heads a chain: Blocked has it while its steps wait.
     [
       ["acme/web#2284", "merged", "merged"],
-      ["acme/web#2292", "you approved", "you approved"],
       ["acme/worker#868", "no longer requested", "no longer requested"],
     ],
   );
@@ -557,7 +557,7 @@ test("Merging: what each waits on and the coordinator's note, handed back at the
   assert.equal((await act("acme/web#2295", "inflight")).status, 200);
 });
 
-test("Blocked as a tree: api#1294's chain, 3 deep under billing#2300, saying once what it waits on, Merging's marked; dana's api#1301; web#2306 and a diamond on it", async () => {
+test("Blocked as a tree: api#1294's chain, 3 deep under billing#2300, saying once what it waits on, Merging's marked; a chain you approved; dana's api#1301; web#2306 and a diamond on it", async () => {
   const silo = "waits on your reply to dana, then a review from sam, kai and 6 more";
   const { data: q } = await call<QueueView>("GET", "/api/queue");
   assert.deepEqual(
@@ -569,6 +569,7 @@ test("Blocked as a tree: api#1294's chain, 3 deep under billing#2300, saying onc
       ["acme/billing#2302", "needs billing#2300", 1, false],
       ["acme/billing#2303", "needs billing#2302", 2, false],
       ["acme/billing#2301", "in Merging \u00b7 needs api#1294", 0, true],
+      ["acme/web#2292", "is approved, for marco to merge", 0, false], // a chain's head you approved: its steps wait on marco
       ["acme/api#1301", "needs api#1299, which waits on a review from kai", 0, false],
       ["acme/web#2306", "waits on a review from sam, @backend and 1 more", 0, false],
       ["acme/web#2307", "needs web#2306", 1, false],

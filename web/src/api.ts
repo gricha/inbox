@@ -264,6 +264,8 @@ export const api = {
   saveNote: (id: string | null, b: { text: string; remind: string; section?: InboxSection }) =>
     call<{ ok: true; note: Note }>("POST", id ? `/api/notes/${encodeURIComponent(id)}` : "/api/notes", b),
   doneNote: (id: string) => call<{ ok: true }>("POST", `/api/notes/${encodeURIComponent(id)}/done`),
+  // What a step of an "after" chain waits on; [] is Stop waiting.
+  after: (item: string, after: string[]) => call<{ ok: true; item: string; after: string[] }>("POST", "/api/after", { item, after }),
   // Your answer to an agent's question, or leaving it unanswered.
   answerInquiry: (id: string, b: { text: string } | { dismiss: true }) =>
     call<{ ok: true; inquiry: Inquiry }>("POST", `/api/inquiries/${encodeURIComponent(id)}/answer`, b),

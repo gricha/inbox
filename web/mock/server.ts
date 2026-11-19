@@ -50,6 +50,7 @@ import type {
   BoardView,
   Bucket,
   Card,
+  WaitingStep,
   CriteriaView,
   Criterion,
   InboxSection,
@@ -2109,6 +2110,53 @@ function focus(): FocusView {
   };
 }
 
+// Your "after" chains, as the desk keeps them (src/after.ts): each head's waiting steps, off every list but its head's row.
+// worker#882 is asked of you, so its chain is on the Inbox; web#2292 you approved, for its author to merge, so its chain
+// waits on Blocked.
+const step = (id: string, title: string, by: string, h: number, after: string, o: Partial<WaitingStep> = {}): WaitingStep => {
+  const [repo = "", n = ""] = id.split("#");
+  return {
+    id,
+    kind: "pr",
+    ref: `${repo.split("/")[1]}#${n}`,
+    repo,
+    title,
+    url: `https://github.com/${repo}/pull/${n}`,
+    by,
+    since: iso(h),
+    after,
+    ...o,
+  };
+};
+const LOAD_TEST: Note = { id: "n9", at: iso(20), text: "Run the worker load test against staging", remind_at: null, reminded_at: null };
+const CHAINS: Record<string, WaitingStep[]> = {
+  "acme/worker#882": [
+    step("acme/infra#2410", "Roll the jittered retry config out to every region", "kai", 22, "worker#882"),
+    step("acme/options-automator#10657", "Raise the dead-letter retry budget", "dana", 20, "infra#2410", { draft: true }),
+    step("acme/infra#2411", "Turn the new retry path on in the EU cluster", "kai", 19, "options-automator#10657"),
+    step("acme/infra#2412", "Remove the old retry flag", "kai", 18, "infra#2411"),
+    {
+      id: "note:n9",
+      kind: "note",
+      ref: "",
+      repo: "",
+      title: LOAD_TEST.text,
+      url: "",
+      by: "",
+      since: LOAD_TEST.at,
+      after: "infra#2412",
+      note: LOAD_TEST,
+    },
+  ],
+  "acme/web#2292": [
+    step("acme/infra#2398", "Serve the settings bundle from the edge cache", "sam", 30, "web#2292"),
+    step("acme/infra#2399", "Drop the old settings bundle's routes", "sam", 29, "infra#2398"),
+  ],
+};
+// A chain's head you approved, for its author to merge: on Blocked with its chain, not in the Archive, saying what it waits on.
+const PARKED: Record<string, string> = { "acme/web#2292": "is approved, for marco to merge" };
+const chained = (c: Card): Card => (CHAINS[c.id]?.length ? { ...c, waiting: CHAINS[c.id]! } : c);
+
 function queue(): QueueView {
   const best = new Map<string, Card>();
   const cleared = new Map<string, Card>();
@@ -2152,7 +2200,9 @@ function queue(): QueueView {
       ? [{ ...cardOf(r, shownAt(r, bestPlacement(r))), why: `in Merging \u00b7 blocked by ${pr.blocker}, which ${pr.blocker_waits}` }]
       : [];
   });
-  sections.blocked = blockedOrder([...sections.blocked, ...merging], (id) => {
+  const parked = [...resolved.values()].flatMap((c) => (PARKED[c.id] ? [{ ...c, why: PARKED[c.id]!, waiting: CHAINS[c.id] ?? [] }] : []));
+  for (const c of parked) resolved.delete(c.id);
+  sections.blocked = blockedOrder([...sections.blocked, ...merging, ...parked], (id) => {
     const r = recs.find((x) => x.id === id);
     return r ? needsOf(r.seed).map((ref) => `${r.seed.repo.split("/")[0]}/${ref}`) : [];
   });
@@ -2170,7 +2220,7 @@ function queue(): QueueView {
     resolved: resolvedCards,
     paused: aiPaused ? { who: "claude", why: CLAUDE_PAUSED } : null,
     stacks: stacksOf([...leads, ...hidden, ...clearedCards, ...resolvedCards]),
-    inbox: inboxOf([...byPart([...sections.now, ...sections.today]), ...sections.later, ...sections.fyi]),
+    inbox: inboxOf([...byPart([...sections.now, ...sections.today]), ...sections.later, ...sections.fyi].map(chained)),
     first_pass: null,
   };
 }
@@ -4579,6 +4629,13 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     throw new HttpError(404, `no criterion "${id}"`);
   }
   if (route === "POST /api/notes") return { ok: true, note: saveNote(null, await readBody(req)) };
+  // Stop waiting: the step leaves its chain (the mock doesn't put it on a list).
+  if (route === "POST /api/after") {
+    const b = await readBody(req);
+    for (const [head, steps] of Object.entries(CHAINS)) CHAINS[head] = steps.filter((x) => x.id !== b.item);
+    bump();
+    return { ok: true, item: b.item, after: [] };
+  }
   const note = /^\/api\/notes\/([^/]+)(\/done)?$/.exec(url.pathname);
   if (note && req.method === "POST" && note[2]) {
     const i = NOTES.findIndex((n) => n.id === note[1]);

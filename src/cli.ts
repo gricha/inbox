@@ -40,8 +40,13 @@ const USAGE = `usage: inbox <command>
   status [--short]                    counts per board; --short prints the status-line text
   ls [board|focus] [--all] [--json]   list cards (default focus); --all adds blocked, later and fyi
   show <ref> [--json]                 one item: why, facts, rule trace
-  add <ref> [why] [--from <task>]     put a PR or issue on your desk (fetched if new, pinned) and start its pre-review;
-                                      why: the line it shows as why it's there
+  add <ref> [why] [--from <task>] [--after <ref>]...
+                                      put a PR or issue on your desk (fetched if new, pinned) and start its pre-review;
+                                      why: the line it shows as why it's there; --after: what it comes after (see after)
+  after <ref> [<prereq>...]           <ref> waits until each <prereq> is complete (a PR merged, an issue closed, a note
+                                      done), replacing what it waited on; none clears it. Meanwhile it's off your Inbox,
+                                      under the first step that isn't waiting ("N after this"). Kept by the desk, never
+                                      sent to GitHub; a note is note:<id>, as ls lists it
   done|mute|unmute|pin|unpin|restore <ref>
   urgent|standard|fyi <ref>           move it to that section of the Inbox, until you're done with it, snooze or mute it
   snooze <ref> [until]                1h, 3h, tomorrow (default), monday, activity, ISO time, or ci|push|approved|ready|conflict
@@ -105,7 +110,7 @@ const OPTIONS: Record<string, ParseArgsConfig["options"]> = {
   connect: { apply: { type: "boolean" }, code: { type: "string" } },
   pair: { print: { type: "boolean" }, name: { type: "string" } },
   mcp: { url: { type: "string" } },
-  add: { from: { type: "string" } },
+  add: { from: { type: "string" }, after: { type: "string", multiple: true } },
   render: { out: { type: "string", short: "o" } },
 };
 
@@ -132,6 +137,7 @@ const ARITY: Record<string, [number, number]> = {
   install: [0, 0],
   uninstall: [0, 0],
   add: [1, 2],
+  after: [1, 20],
   done: [1, 1],
   mute: [1, 1],
   unmute: [1, 1],
@@ -199,9 +205,10 @@ function printCards(x: Ctx, groups: [Bucket, Card[], string?][]): void {
             : aiPending(k.preflight)
               ? `  (${aiPending(k.preflight)})`
               : "";
-      const [t, w] = fit(plain(k.title), plain(k.why), x.width - refW - 4 - note.length); // the note fits too
+      const steps = k.waiting?.length ? `  (${k.waiting.length} after this)` : "";
+      const [t, w] = fit(plain(k.title), plain(k.why), x.width - refW - 4 - note.length - steps.length); // the notes fit too
       x.out(
-        `${x.glyph(b)} ${shortRef(k).padEnd(refW)}  ${k.new ? x.c.bold(t) : t}${w ? "  " + x.c.dim(w) : ""}${note ? x.c.dim(note) : ""}`,
+        `${x.glyph(b)} ${shortRef(k).padEnd(refW)}  ${k.new ? x.c.bold(t) : t}${w ? "  " + x.c.dim(w) : ""}${note ? x.c.dim(note) : ""}${steps}`,
       );
     }
   });
@@ -232,6 +239,16 @@ const ls = Effect.fnUntraced(function* (x: Ctx) {
   if (groups.every(([, cs]) => !cs.length)) x.out(`Nothing in ${groups.map(([b]) => b.toUpperCase()).join(" or ")}.`);
   if (x.opts.all) groups.push(["hide", v.hidden, "HIDDEN BY RULES"], ["hide", v.cleared, "CLEARED (done, snoozed, muted)"]);
   printCards(x, groups);
+  // Your notes on the Inbox, by the id `inbox after` takes.
+  const kept = "notes" in v ? v.notes : null;
+  const notes = kept ? [...kept.due, ...kept.urgent, ...kept.open, ...kept.fyi] : [];
+  if (notes.length) {
+    x.out("\n" + x.c.bold(`NOTES ${notes.length}`));
+    for (const m of notes) {
+      const steps = m.waiting?.length ? `  (${m.waiting.length} after this)` : "";
+      x.out(`${GLYPH.fyi} ${clip(`note:${m.id}  ${plain(m.text.split("\n")[0] ?? "")}`, x.width - steps.length)}${steps}`);
+    }
+  }
   const counts: [number, string][] = x.opts.all
     ? []
     : [
@@ -308,11 +325,24 @@ const act =
     });
   };
 
-const add: Command = (x) =>
-  Effect.map(api.add(x.args[0]!, x.args[1], typeof x.opts.from === "string" ? x.opts.from : undefined), (r) => {
+const add: Command = (x) => {
+  const after = strings(x.opts.after) ?? [];
+  return Effect.map(api.add(x.args[0]!, x.args[1], typeof x.opts.from === "string" ? x.opts.from : undefined, after), (r) => {
     const d = r.item;
     const ai = d.generating ? ", AI review started" : "";
-    x.out(`${x.c.green("✓")} added ${d.card.id} to your desk, pinned${ai}  ${x.c.dim(`(inbox undo ${r.undo_seq} to revert)`)}`);
+    const then = after.length ? `, after ${after.join(", ")}` : "";
+    x.out(`${x.c.green("✓")} added ${d.card.id} to your desk, pinned${then}${ai}  ${x.c.dim(`(inbox undo ${r.undo_seq} to revert)`)}`);
+    return 0;
+  });
+};
+
+const after: Command = (x) =>
+  Effect.map(api.after(x.args[0]!, x.args.slice(1)), (r) => {
+    x.out(
+      r.after.length
+        ? `${x.c.green("✓")} ${r.item} now comes after ${r.after.join(", ")}`
+        : `${x.c.green("✓")} ${r.item} waits on nothing now`,
+    );
     return 0;
   });
 
@@ -641,6 +671,7 @@ const COMMANDS: Record<string, Command> = {
   setup,
   pair,
   add,
+  after,
   done: act("done"),
   mute: act("mute"),
   unmute: act("unmute"),

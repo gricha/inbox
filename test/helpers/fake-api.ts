@@ -17,11 +17,13 @@ import type {
   Inquiry,
   ItemDetail,
   ItemState,
+  Note,
   Overview,
   QueueView,
   SettingsView,
   SetupView,
   SettingValue,
+  WaitingStep,
 } from "../../src/types.ts";
 
 const NOW = Date.now();
@@ -313,8 +315,31 @@ export interface FakeApi {
   calls: { method: string; path: string; body: any }[];
   configPath: string;
   settings: Record<string, SettingValue>; // overrides, as in settings.json
+  chained: boolean; // Focus and the queue with an "after" chain: CARDS.today and a note at its heads
   close(): Promise<void>;
 }
+
+// An "after" chain: two steps wait on CARDS.today, and one on the note.
+const STEP: WaitingStep = {
+  id: "getsentry/ops#25732",
+  kind: "pr",
+  ref: "ops#25732",
+  repo: "getsentry/ops",
+  title: "Roll the new region out",
+  url: "https://github.com/getsentry/ops/pull/25732",
+  by: "octo",
+  since: ago(5),
+  after: "sentry#101",
+};
+const CHAIN = { ...CARDS.today, waiting: [STEP, { ...STEP, id: "getsentry/ops#25733", ref: "ops#25733", after: "ops#25732" }] };
+const NOTE: Note = {
+  id: "1a2b3c4d",
+  at: ago(1),
+  text: "Run the Seer load test",
+  remind_at: null,
+  reminded_at: null,
+  waiting: [{ ...STEP, id: "getsentry/ops#25646", ref: "ops#25646", after: "Run the Seer load test" }],
+};
 
 // Real defs and validation, so CLI tests exercise the actual schema.
 function settingsView(overrides: Record<string, SettingValue>): SettingsView {
@@ -423,9 +448,25 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
     case "GET /api/overview":
       return reply(200, overview);
     case "GET /api/focus":
-      return reply(200, focus);
+      return reply(200, api.chained ? { ...focus, sections: { ...focus.sections, today: [CHAIN] }, notes: [NOTE] } : focus);
     case "GET /api/queue":
-      return reply(200, queueView);
+      return reply(
+        200,
+        api.chained
+          ? { ...queueView, sections: { ...queueView.sections, today: [CHAIN] }, notes: { ...queueView.notes, open: [NOTE] } }
+          : queueView,
+      );
+    case "POST /api/after": {
+      if (body.after.includes("loop"))
+        return reply(400, { error: "sentry#101 after loop would make a loop: loop already comes after sentry#101", tag: "BadRequest" });
+      const ids = [body.item, ...body.after].map((x: string) =>
+        x.startsWith("note:") ? { status: 200, id: x } : Object.assign(resolve(x), { id: "" }),
+      );
+      const bad = ids.find((r) => r.status !== 200);
+      if (bad && "body" in bad) return reply(bad.status, bad.body);
+      const id = (r: { id: string; body?: unknown }) => r.id || (r.body as ItemDetail).card.id;
+      return reply(200, { ok: true, item: id(ids[0]!), after: ids.slice(1).map(id) });
+    }
     case "GET /api/boards/reviews":
       return reply(200, boardView);
     case "GET /api/item": {
@@ -597,6 +638,7 @@ export async function startFakeApi(opts: { configPath?: string } = {}): Promise<
     calls: [],
     configPath: opts.configPath ?? "/nonexistent/config.toml",
     settings: { "github.poll_seconds": 120 },
+    chained: false,
     close: async () => {},
   };
   const server = createServer((req, res) => {

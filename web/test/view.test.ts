@@ -90,6 +90,8 @@ import {
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
 import { bulkMenu, filterOf, filterPeople, filterRest, githubRef, parseFilter, logLine, pickRange, pickToggle } from "../src/view.ts";
+import { afterText, chainLabel, settleSteps, stepGuides, stepOf, toggled } from "../src/view.ts";
+import type { WaitingStep } from "../../src/types.ts";
 import { isTestPath, onLines, sections, tagTip, traditional, walk } from "../../src/sections.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
 
@@ -1315,6 +1317,61 @@ test("treeGuides draws Blocked's tree from its depths: a branch with more under 
   // web#1; web#2 and web#3 under it, web#4 under web#3 and web#5 under web#2; then a chain of its own.
   assert.deepEqual(treeGuides([0, 1, 2, 1, 2, 0, 1]), [[], ["tee"], ["rail", "end"], ["end"], ["gap", "end"], [], ["end"]]);
   assert.deepEqual(treeGuides([0, 0]), [[], []], "rows of their own draw nothing");
+});
+
+test("a chain's steps hang one level under its head, wherever the head hangs, each saying what it comes after", () => {
+  assert.deepEqual(stepGuides([], 3), [["tee"], ["tee"], ["end"]]);
+  // A head on Blocked with more rows under its own parent after it, and one that's the last.
+  assert.deepEqual(stepGuides(["rail", "tee"], 2), [
+    ["rail", "rail", "tee"],
+    ["rail", "rail", "end"],
+  ]);
+  assert.deepEqual(stepGuides(["end"], 1), [["gap", "end"]]);
+  const s: WaitingStep = {
+    id: "getsentry/ops#25732",
+    kind: "pr",
+    ref: "ops#25732",
+    repo: "getsentry/ops",
+    title: "t",
+    url: "",
+    by: "octo",
+    since: "",
+    after: "seer#9693",
+  };
+  assert.equal(afterText(s), "After seer#9693");
+  assert.equal(afterText({ ...s, draft: true }), "After seer#9693 \u00b7 Draft");
+  assert.equal(chainLabel(5, false), "5 after this");
+  assert.equal(chainLabel(5, true), "Hide");
+  const heads = [{ waiting: [s] }, {}];
+  assert.equal(stepOf("wait:getsentry/ops#25732", heads), s);
+  assert.equal(stepOf("getsentry/ops#25732", heads), undefined, "a row of its own isn't a step");
+  assert.deepEqual([...toggled(toggled(new Set(["a"]), "b"), "a")], ["b"]);
+});
+
+test("a step you stopped waiting stays off its chain until the desk's view drops it", () => {
+  const s: WaitingStep = {
+    id: "acme/api#2",
+    kind: "pr",
+    ref: "api#2",
+    repo: "acme/api",
+    title: "t",
+    url: "",
+    by: "",
+    since: "",
+    after: "api#1",
+  };
+  const notes = { due: [], urgent: [], open: [], fyi: [], later: [] };
+  const view = (waiting: WaitingStep[]) =>
+    ({
+      sections: { now: [{ waiting }], today: [], blocked: [], later: [], fyi: [] },
+      resolved: [],
+      cleared: [],
+      hidden: [],
+      notes,
+    }) as unknown as QueueView;
+  const gone = new Set(["acme/api#2"]);
+  assert.equal(settleSteps(view([s]), gone), gone, "still on its chain: the same set");
+  assert.deepEqual([...settleSteps(view([]), gone)], []);
 });
 
 test("Hand off for merge waits for the review: not a PR whose review is required or asks for changes, a draft, or one nobody's asked", () => {

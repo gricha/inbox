@@ -247,3 +247,10 @@ export const ClockIcon = () => (
     <path d="M8 4.75V8l2.1 1.3" />
   </Icon>
 );
+
+// A chain's head: steps wait on it, in order.
+export const ChainIcon = () => (
+  <Icon>
+    <path d="M7 9l2-2M6.25 5.75l1.2-1.2a2.475 2.475 0 0 1 3.5 3.5l-1.2 1.2M9.75 10.25l-1.2 1.2a2.475 2.475 0 0 1-3.5-3.5l1.2-1.2" />
+  </Icon>
+);

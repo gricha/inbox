@@ -10,7 +10,7 @@ Rules sort each item into a bucket, the user's agent (the judge) weighs every ru
 
 ## The desk in brief
 
-- **Pages.** The Inbox (sections Urgent, Standard, FYI; agents' questions and sessions that need the user lead Urgent). Blocked: the user's own PRs that wait on another PR or on reviewers. Merging: their PRs handed off to the coordinator, never on the Inbox. The Archive: done, resolved, snoozed, muted and hidden items.
+- **Pages.** The Inbox (sections Urgent, Standard, FYI; agents' questions and sessions that need the user lead Urgent). Blocked: the user's own PRs that wait on another PR or on reviewers, and chains whose next step waits on someone else. Merging: their PRs handed off to the coordinator, never on the Inbox. The Archive: done, resolved, snoozed, muted and hidden items.
 - **Rules.** `~/.inbox/config.toml` holds boards (GitHub searches) with ordered rules; the first rule whose `when` matches sets the bucket (`now`, `today`, `blocked`, `later`, `fyi`, `hide`) and a `why`. A plugin's built-in rules come after the board's own. An item on several boards shows once, at its most urgent placement. Caps (`caps = { now = 3 }`) push overflow down a bucket. Flags: `hard` (a floor: never sorted below its bucket), `final` (the judge never re-sorts it), `nocap`, and `weight` (0 to 10, 5 unless set: how much the judge counts it).
 - **The judge.** The user's agent sorts each item, starting from where the first rule put it and weighing every signal: each matching rule with its weight, an automation's sort, a criterion's yes. Its instructions are fixed in the desk. The user's say is rules and weights: to change how something sorts, change or reweigh a rule.
 - **Urgency.** Criteria are yes-or-no questions about each Inbox item. With a score out of 10 they place it in Urgent, Standard or FYI. They only order; they never act on an item.
@@ -24,32 +24,33 @@ A `ref` is `owner/repo#123`, `repo#123` when unique, a GitHub URL, or an item's 
 
 **MCP tools** (preferred):
 
-| Tool                | Use                                                                                                                                                                           |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inbox_overview`    | Counts per board, sync status, config errors, how many PRs are in Merging. Start here when unsure.                                                                            |
-| `inbox_list`        | The queue in order (`now`, `today`), sessions that need the user first. Pass `board` and `buckets` for `blocked`, `later`, `fyi`, `hide`, `cleared`.                          |
-| `inbox_item`        | One item: facts, bucket and why per board, the rule trace, its AI review, the hand-off prompt, its `inbox://` link.                                                           |
-| `inbox_act`         | Local triage: `done`, `snooze` (with `until`), `mute`, `unmute`, `pin`, `unpin`, `restore`; `urgent`, `standard`, `fyi` move it to that Inbox section. Returns an undo `seq`. |
-| `inbox_add`         | Put a PR or issue on the user's desk with `why` and `from`; pins it and starts a PR's pre-review. Returns an undo `seq`.                                                      |
-| `inbox_undo`        | Undo by `seq`. Always pass it: without one it undoes the latest action from anyone.                                                                                           |
-| `inbox_brief`       | A PR's AI review (look/skim/skip, risk, summary, concerns, notes). Cached per commit; otherwise a model call of a minute or two.                                              |
-| `inbox_doc`         | Render a review document (`doc` or `path`), or a PR's own AI review (`ref`), as one HTML page.                                                                                |
-| `inbox_sync`        | Start a GitHub sync now (read only). The desk also syncs every minute or two.                                                                                                 |
-| `inbox_events`      | The event log (asked, reviewed, pushed, CI, commented, merged, …). Pass `last_seq` back as `after`; `wait` up to 60 s; `item` to filter.                                      |
-| `inbox_config`      | `get` config.toml (with its hash and the built-in rules), `preview` a full new text, `save` it with `base` = the hash.                                                        |
-| `inbox_criteria`    | Urgency criteria: `list`, `set`, `delete`.                                                                                                                                    |
-| `inbox_automations` | The user's automations: `list`, `set` (writes or changes one, on once saved), `run` (one that's on, now).                                                                     |
-| `inbox_inquire`     | Ask the user a question in their desk. See "Asking in the desk".                                                                                                              |
-| `inbox_inquiry`     | The answer to your `inbox_inquire` (`id`, `wait` up to 60 s). No `id`: answers nobody has picked up yet.                                                                      |
-| `inbox_merging`     | Coordinator: the PRs in Merging with CI, reviews, threads, mergeability, base, blockers, merge method, last note.                                                             |
-| `inbox_note`        | Coordinator: a status line on a PR in Merging (`ref`, `text`). Only the latest shows.                                                                                         |
-| `inbox_hand_back`   | Coordinator: give a PR in Merging back to the user (`ref`, `why`); it goes to the top of the Inbox.                                                                           |
-| `inbox_ask`         | Coordinator: where the user's ask is (their words, the item, the thread or diff lines, whether a push is allowed).                                                            |
-| `inbox_answer`      | Coordinator: answer the user's ask (`ask_id`, `text`).                                                                                                                        |
+| Tool                | Use                                                                                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `inbox_overview`    | Counts per board, sync status, config errors, how many PRs are in Merging. Start here when unsure.                                                                                   |
+| `inbox_list`        | The queue in order (`now`, `today`), sessions that need the user first, their notes (`note:<id>`) last. Pass `board` and `buckets` for `blocked`, `later`, `fyi`, `hide`, `cleared`. |
+| `inbox_item`        | One item: facts, bucket and why per board, the rule trace, its AI review, the hand-off prompt, its `inbox://` link.                                                                  |
+| `inbox_act`         | Local triage: `done`, `snooze` (with `until`), `mute`, `unmute`, `pin`, `unpin`, `restore`; `urgent`, `standard`, `fyi` move it to that Inbox section. Returns an undo `seq`.        |
+| `inbox_add`         | Put a PR or issue on the user's desk with `why` and `from`; pins it and starts a PR's pre-review. `after` puts it in a chain. Returns an undo `seq`.                                 |
+| `inbox_after`       | Order work: `item` waits until each of `after` is complete (`[]` clears). See "Work in order".                                                                                       |
+| `inbox_undo`        | Undo by `seq`. Always pass it: without one it undoes the latest action from anyone.                                                                                                  |
+| `inbox_brief`       | A PR's AI review (look/skim/skip, risk, summary, concerns, notes). Cached per commit; otherwise a model call of a minute or two.                                                     |
+| `inbox_doc`         | Render a review document (`doc` or `path`), or a PR's own AI review (`ref`), as one HTML page.                                                                                       |
+| `inbox_sync`        | Start a GitHub sync now (read only). The desk also syncs every minute or two.                                                                                                        |
+| `inbox_events`      | The event log (asked, reviewed, pushed, CI, commented, merged, …). Pass `last_seq` back as `after`; `wait` up to 60 s; `item` to filter.                                             |
+| `inbox_config`      | `get` config.toml (with its hash and the built-in rules), `preview` a full new text, `save` it with `base` = the hash.                                                               |
+| `inbox_criteria`    | Urgency criteria: `list`, `set`, `delete`.                                                                                                                                           |
+| `inbox_automations` | The user's automations: `list`, `set` (writes or changes one, on once saved), `run` (one that's on, now).                                                                            |
+| `inbox_inquire`     | Ask the user a question in their desk. See "Asking in the desk".                                                                                                                     |
+| `inbox_inquiry`     | The answer to your `inbox_inquire` (`id`, `wait` up to 60 s). No `id`: answers nobody has picked up yet.                                                                             |
+| `inbox_merging`     | Coordinator: the PRs in Merging with CI, reviews, threads, mergeability, base, blockers, merge method, last note.                                                                    |
+| `inbox_note`        | Coordinator: a status line on a PR in Merging (`ref`, `text`). Only the latest shows.                                                                                                |
+| `inbox_hand_back`   | Coordinator: give a PR in Merging back to the user (`ref`, `why`); it goes to the top of the Inbox.                                                                                  |
+| `inbox_ask`         | Coordinator: where the user's ask is (their words, the item, the thread or diff lines, whether a push is allowed).                                                                   |
+| `inbox_answer`      | Coordinator: answer the user's ask (`ask_id`, `text`).                                                                                                                               |
 
 `until` for a snooze: `1h`, `3h`, `2d`, `tomorrow` (09:00, the default), `monday` (09:00), `YYYY-MM-DD`, an ISO time, `activity` (until someone else acts), or an event from the card's `wake_on`: `ci` (CI passes), `push`, `approved`, `ready`, `conflict` (fixed). `done` also lasts until someone else acts.
 
-**CLI**, when the MCP tools aren't connected (`inbox` is `bin/inbox` in the Inbox repo; it may not be on PATH): `inbox ls [board|focus] [--all]`, `inbox show <ref>`, `inbox add <ref> "<why>" --from "<task>"`, `inbox done|mute|unmute|pin|unpin|restore <ref>`, `inbox snooze <ref> [until]`, `inbox undo <seq>`, `inbox sync`, `inbox prompt <ref>`, `inbox brief <ref>`, `inbox render <doc.json> [-o out.html]`, `inbox fields`, `inbox config check`. Add `--json` to `ls` and `show` for raw data. `inbox help` lists the rest.
+**CLI**, when the MCP tools aren't connected (`inbox` is `bin/inbox` in the Inbox repo; it may not be on PATH): `inbox ls [board|focus] [--all]`, `inbox show <ref>`, `inbox add <ref> "<why>" --from "<task>" [--after <ref>]`, `inbox after <ref> [<prereq>...]`, `inbox done|mute|unmute|pin|unpin|restore <ref>`, `inbox snooze <ref> [until]`, `inbox undo <seq>`, `inbox sync`, `inbox prompt <ref>`, `inbox brief <ref>`, `inbox render <doc.json> [-o out.html]`, `inbox fields`, `inbox config check`. Add `--json` to `ls` and `show` for raw data. `inbox help` lists the rest.
 
 **HTTP API** for what neither covers: JSON in and out, no auth on the desk's own machine; from another machine, `Authorization: Bearer $INBOX_TOKEN`. Reference: `docs/api.md` in the Inbox repo (https://github.com/gricha/inbox/blob/main/docs/api.md).
 
@@ -129,6 +130,16 @@ When the user says what matters ("PRs about service accounts", "anything from da
 - `name`: a few words the row shows ("Service accounts"). `id`: lowercase letters, digits and `-`.
 
 `inbox_criteria list` shows each one and how many items it says yes to, the built-in ones included. Delete one only when the user asks.
+
+## Work in order ("after" chains)
+
+When the user's work must happen in a strict order (other people's PRs across repos, often ending with something they do themselves, like "run the load test"), make it one chain instead of pinning each step:
+
+1. `inbox_add` each PR or issue in order, each with `after: [the one before]` (the first with none). The desk keeps the order; GitHub never sees it. Any org works.
+2. A step the user does themselves is a note they write in the desk (agents can't write notes). `inbox_list` shows their notes as `note:<id>`; `inbox_after` with `item: "note:<id>"` and `after: [the last PR]` puts it in.
+3. A PR is complete once merged, an issue once closed, a note once done. A PR closed without merging never is: the chain stops there until someone changes it.
+
+Only the first step that isn't waiting shows, as one row with "5 after this"; the rest wait under it, off the Inbox, uncounted and silent. When it needs the user (a review asked of them, their own PR with a next step, a note) the row is on the Inbox; otherwise on Blocked, saying what it waits on. When it completes, the next step comes onto the Inbox and notifies: "ops#25732 is next · seer#9693 merged". `inbox_after` with `after: []` takes a step out (the user's row menu says Stop waiting); a loop, a ref the desk doesn't hold or an unknown note is refused in words. Report the chain in order: "seer#9693 → ops#25732 → automator#10657 → your note".
 
 ## Is my PR moving? (Merging)
 

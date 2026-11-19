@@ -409,15 +409,29 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.post("/api/add", (c) => {
     const add = Effect.gen(function* () {
       yield* up;
-      const { id, why, from } = yield* bodyOf(c);
+      const { id, why, from, after } = yield* bodyOf(c);
       if (typeof id !== "string" || !id) return yield* new BadRequest({ message: "need { id }: owner/repo#123 or a GitHub URL" });
       const line = (v: unknown): Effect.Effect<string | undefined, BadRequest> =>
         v === undefined || typeof v === "string"
           ? Effect.succeed(v)
           : Effect.fail(new BadRequest({ message: "why and from are lines of text" }));
-      return { ok: true, ...(yield* desk.add(id, yield* line(why), yield* line(from))) };
+      const refs = after === undefined ? [] : stringsOf(after);
+      if (!refs) return yield* new BadRequest({ message: "after is a list of refs" });
+      return { ok: true, ...(yield* desk.add(id, yield* line(why), yield* line(from), refs)) };
     });
     return respond(c, add, { log });
+  });
+  // inbox_after and `inbox after`: your order for steps, kept by the desk, so agents may call it.
+  app.post("/api/after", (c) => {
+    const set = Effect.gen(function* () {
+      yield* up;
+      const { item, after } = yield* bodyOf(c);
+      const refs = stringsOf(after);
+      if (typeof item !== "string" || !item || !refs)
+        return yield* new BadRequest({ message: "need { item, after }: a ref and the refs it comes after ([] for none)" });
+      return { ok: true, ...(yield* desk.setAfter(item, refs)) };
+    });
+    return respond(c, set, { log });
   });
   // Who you can ask to review your PR, as you type: a path of its own, since the review's GET takes any id.
   app.get("/api/reviewers/:id{.+}", (c) =>

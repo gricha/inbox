@@ -152,6 +152,7 @@ test("lists the tools", async () => {
   assert.deepEqual(tools.map((t) => t.name).sort(), [
     "inbox_act",
     "inbox_add",
+    "inbox_after",
     "inbox_answer",
     "inbox_ask",
     "inbox_automations",
@@ -304,6 +305,44 @@ test("inbox_add says what it started and how to undo it, then the item as inbox_
   assert.equal(missing.isError, true);
   const bare = await call("inbox_add", { ref: "seer#8949" });
   assert.equal(bare.isError, true, "no why: refused before it reaches the desk");
+});
+
+test("inbox_add with after says the chain it joins and passes the refs", async () => {
+  const r = await call("inbox_add", { ref: "seer#8949", why: "rolls out after the fix", from: "seer rollout", after: ["sentry#101"] });
+  assert.equal(r.isError, false);
+  assert.deepEqual(lastCall().body, { id: "seer#8949", why: "rolls out after the fix", from: "seer rollout", after: ["sentry#101"] });
+  assert.match(r.text, /^after sentry#101: it waits on them\nadded getsentry\/seer#8949/);
+});
+
+test("inbox_after sets what a step waits on, clears it with [], and says a refusal in the desk's words", async () => {
+  const r = await call("inbox_after", { item: "seer#8949", after: ["sentry#101", "note:1a2b3c4d"] });
+  assert.equal(r.isError, false);
+  assert.deepEqual(lastCall(), { method: "POST", path: "/api/after", body: { item: "seer#8949", after: ["sentry#101", "note:1a2b3c4d"] } });
+  assert.equal(r.text, "getsentry/seer#8949 now comes after getsentry/sentry#101, note:1a2b3c4d. Local only; nothing was sent to GitHub.");
+  const cleared = await call("inbox_after", { item: "note:1a2b3c4d", after: [] });
+  assert.equal(cleared.text, "note:1a2b3c4d waits on nothing now. Local only; nothing was sent to GitHub.");
+  const loop = await call("inbox_after", { item: "sentry#101", after: ["loop"] });
+  assert.deepEqual(loop, { isError: true, text: "sentry#101 after loop would make a loop: loop already comes after sentry#101" });
+  const unknown = await call("inbox_after", { item: "nope#1", after: [] });
+  assert.deepEqual(unknown, { isError: true, text: "unknown item nope#1" });
+});
+
+test("inbox_list gives a chain one line, its head's, saying how many come after it, and lists notes by their ids", async (c) => {
+  fake.chained = true;
+  c.after(() => {
+    fake.chained = false;
+  });
+  const r = await call("inbox_list");
+  assert.match(r.text, /^focus · buckets now,today · 2 of 2 shown · 1 note last\n/);
+  assert.match(
+    r.text,
+    /today {2}getsentry\/sentry#101 {2}Fix the flaky snuba test that only fails on Tuesdays {2}\[your team was asked · 1d\] \(2 after this\)\n/,
+  );
+  assert.match(r.text, /\nnote {3}note:1a2b3c4d {2}Run the Seer load test \(1 after this\)\n/);
+  assert.doesNotMatch(r.text, /ops#25732 {2}/, "a waiting step has no line of its own");
+  const json = jsonBlock(r.text);
+  assert.deepEqual(json[1].after_this, ["getsentry/ops#25732", "getsentry/ops#25733"]);
+  assert.deepEqual([json[2].id, json[2].waiting], ["note:1a2b3c4d", ["getsentry/ops#25646"]]);
 });
 
 test("inbox_config: get, preview with moved titles fenced, save with the hash", async () => {
@@ -519,7 +558,7 @@ test("`inbox mcp` serves over stdio", async () => {
   const c = new Client({ name: "stdio-test", version: "0" });
   await c.connect(transport);
   try {
-    assert.equal((await c.listTools()).tools.length, 20);
+    assert.equal((await c.listTools()).tools.length, 21);
     const r = await c.callTool({ name: "inbox_list", arguments: { limit: 1 } });
     assert.match((r.content as { text: string }[])[0]?.text ?? "", /^focus · buckets now,today · 1 of 2 shown\n/);
   } finally {

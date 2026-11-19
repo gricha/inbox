@@ -1,5 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Action, Card, GitHubAction, InboxSection, Inquiry, Note, SessionAction, SessionCard } from "../../../src/types.ts";
+import type {
+  Action,
+  Card,
+  GitHubAction,
+  InboxSection,
+  Inquiry,
+  Note,
+  SessionAction,
+  SessionCard,
+  WaitingStep,
+} from "../../../src/types.ts";
 import { cls, fromName, SNOOZE, snoozeOptions } from "../format.ts";
 import { useKeyedLayout } from "../keyed.ts";
 import { MORE, rowActions } from "./More.tsx";
@@ -184,6 +194,38 @@ export function SessionMenu({
         if ("snooze" in d) act(s, "snooze", d.snooze);
         else if ("act" in d) act(s, "done");
         else if ("key" in d && isKeyOf(SESSION_ACTION, d.key)) start(s, d.key);
+      }}
+      reopen={reopen}
+      onClose={onClose}
+    />
+  );
+}
+
+// A waiting step's menu: Stop waiting takes it out of its chain, onto your desk by its own placement.
+export function StepMenu({
+  s,
+  x,
+  y,
+  stop,
+  reopen,
+  onClose,
+}: {
+  s: WaitingStep;
+  x: number;
+  y: number;
+  stop: (s: WaitingStep) => void;
+  reopen: (x: number, y: number) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Menu
+      label={`Step ${s.ref || s.title}`}
+      groups={[[{ label: "Stop waiting", do: { key: "stop" } }]]}
+      snoozes={[]}
+      x={x}
+      y={y}
+      pick={() => {
+        stop(s);
       }}
       reopen={reopen}
       onClose={onClose}

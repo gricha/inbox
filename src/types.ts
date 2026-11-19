@@ -671,6 +671,24 @@ export interface Card {
   score?: number; // on the Inbox: 0 to 10, a model's or the desk's own (src/urgency.ts); its section's order
   reason?: string; // on the Inbox: why it's there, quietly on its row
   quick?: string; // quick to review, and why ("low risk, 24 lines"): someone else's PR you can unblock cheaply, a bolt on its row
+  waiting?: WaitingStep[]; // the head of an "after" chain: the steps that wait on it, in the order they run (docs/api.md → After)
+}
+
+// One step of an owner-set "after" chain that waits on a step before it: it leaves every list and hangs under its chain's
+// head, the nearest step that doesn't wait. On the head's Card or Note, in the order the steps run; a step that waits on
+// several comes after the last of them.
+export interface WaitingStep {
+  id: string; // an item's id ("getsentry/ops#25732"), or a note's "note:<id>"
+  kind: "pr" | "issue" | "note";
+  ref: string; // "ops#25732"; "" for a note
+  repo: string; // "getsentry/ops"; "" for a note
+  title: string; // an item's title (untrusted), or a note's text
+  url: string; // "" for a note
+  by: string; // as a Card's by: "you", the person a bot opened it for, else its author; "" for a note
+  since: string; // when it was opened, or the note written
+  after: string; // what it waits on, as its row says it: "ops#25732", "ops#25732 and seer#9693", a note's first words
+  draft?: true;
+  note?: Note; // a note's own, to open it
 }
 
 // ---------------------------------------------------------------------------
@@ -789,6 +807,7 @@ export interface BoardView {
 export interface FocusView {
   sessions: SessionCard[]; // sessions that need you, after agents' questions: blocked, then stalled
   sections: { now: Card[]; today: Card[] }; // one list on screen: now first, then today
+  notes?: Note[]; // your notes on the Inbox (not the ones whose reminder is still to come); an agent names one as note:<id>
   reviewing: number; // always 0: nothing waits off the queue for its review now; kept for older clients
   paused: Paused | null; // said once above the queue instead of on every card
 }
@@ -1352,6 +1371,7 @@ export interface Note {
   remind_at: string | null;
   reminded_at: string | null; // when its reminder notified
   section?: InboxSection; // where you put it on the Inbox; none, Standard
+  waiting?: WaitingStep[]; // on QueueView.notes: the head of an "after" chain, as on a Card; never stored
 }
 
 // QueueView.notes, placed by the desk: due reminders lead Urgent, notes without one lead the section you put them in, the
