@@ -1709,6 +1709,19 @@ export function App() {
     };
   }, []);
 
+  // Shift- or ⌘-click on a list's row, from the anchor: the selected row on a list page, the open review beside one.
+  const picker = (anchor: string | null, selects: boolean) => (c: Card, range: boolean) => {
+    const order = onScreen.map((x) => x.id);
+    if (range) {
+      setPicked(pickRange(order, anchor, c.id));
+      return;
+    }
+    // The anchor is the first pick, so ⌘-clicking a second row picks both.
+    const from = pickedOn.length || !anchor || anchor === c.id || !order.includes(anchor) ? pickedOn : [anchor];
+    const next = pickToggle(from, c.id);
+    setPicked(next);
+    if (selects) setSelected(next.includes(c.id) ? c.id : null);
+  };
   const ctx: RowCtx = {
     now,
     me: overview?.me ?? "",
@@ -1724,25 +1737,7 @@ export function App() {
     run,
     menu: openRowMenu,
     picked: new Set(pickedOn),
-    ...(LIST_PAGES.has(route.name) && {
-      pick: (c: Card, range: boolean) => {
-        if (range) {
-          setPicked(
-            pickRange(
-              onScreen.map((x) => x.id),
-              selected,
-              c.id,
-            ),
-          );
-          return;
-        }
-        // The selected row is the first pick, so ⌘-clicking a second one picks both.
-        const from = pickedOn.length || !selected || selected === c.id || !onScreen.some((x) => x.id === selected) ? pickedOn : [selected];
-        const next = pickToggle(from, c.id);
-        setPicked(next);
-        setSelected(next.includes(c.id) ? c.id : null);
-      },
-    }),
+    ...(LIST_PAGES.has(route.name) && { pick: picker(selected, true) }),
   };
   const configErrors = overview?.config_errors.length ?? 0;
   const inbox = view ? inboxCount(view, leaving, answered) : null;
@@ -1826,7 +1821,13 @@ export function App() {
   // The rows beside a review or a question: its list page's, two lines a row, the open item marked (the row whose menu is open,
   // while it is); focusing a row leaves the selection on it.
   const listSel = menuAt?.id ?? openSel;
-  const compact: RowCtx = { ...ctx, compact: true, selected: listSel, select: ignore };
+  const compact: RowCtx = {
+    ...ctx,
+    compact: true,
+    selected: listSel,
+    select: ignore,
+    ...(listPage && LIST_PAGES.has(listPage) && { pick: picker(openSel, false) }),
+  };
   const besideRows =
     side !== "open" || !listPage ? null : listPage === "queue" ? (
       <Queue
