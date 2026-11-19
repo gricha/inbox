@@ -42,6 +42,8 @@ import {
   navigable,
   pageOf,
   parseRoute,
+  pickRange,
+  pickToggle,
   removeCard,
   routeHash,
   PAGE_GROUPS,
@@ -62,7 +64,7 @@ import { Beside } from "./components/Beside.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
-import { NoteMenu, QuestionMenu, RowMenu, SessionMenu } from "./components/RowMenu.tsx";
+import { BulkMenu, NoteMenu, QuestionMenu, RowMenu, SessionMenu } from "./components/RowMenu.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import type { SessionCtx } from "./components/Session.tsx";
 import { PeopleFilter } from "./components/PeopleFilter.tsx";
@@ -208,7 +210,8 @@ export function App() {
   }, []);
   const [commenting, setCommenting] = useState<Card | null>(null); // the issue whose comment bar is open (its Comment, opened in place)
   // A row's menu: at a right-click, or under an issue's Snooze with Snooze open.
-  const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number; snooze?: boolean } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ id: string; x: number; y: number; snooze?: boolean; bulk?: boolean } | null>(null);
+  const [picks, setPicked] = useState<string[]>([]); // rows picked by shift- or ⌘-click on a list page
   const stay = useRef<string | null>(null); // a row selected by a right-click: the page doesn't scroll to it under its menu
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
   const [answered, setAnswered] = useState<Set<string>>(new Set()); // agents' questions you answered, gone at once
@@ -261,7 +264,7 @@ export function App() {
   const loadSeq = useRef(0);
   const refreshTimer = useRef(0);
   const toastTimer = useRef(0);
-  const undoSeq = useRef<number | null>(null);
+  const undoSeq = useRef<number[]>([]); // the desk's actions this window's Undo takes back, several after a bulk action
   const undoWrite = useRef<{ id: string; to: "reopen" | "ready" } | null>(null); // Undo after a close or a draft, instead
   const settingsSeq = useRef(0); // a GET that started before a save must not undo it
   const setupDone = useRef(false); // asked once the desk says the first-run page is done
@@ -645,6 +648,11 @@ export function App() {
     () => (laneList ? laneRows.map((r) => r.card) : page.flatMap((g) => (g.open ? g.cards : []))),
     [laneList, laneRows, page],
   );
+  // What's picked of the rows on screen: a row that left, or a group you closed, isn't.
+  const pickedOn = useMemo(() => picks.filter((id) => onScreen.some((c) => c.id === id && !leaving.has(id))), [picks, onScreen, leaving]);
+  useEffect(() => {
+    setPicked([]);
+  }, [route.name]);
   // A right-click on a row, wherever it is (the queue, Later, the Archive, Merging), selects it and opens its menu, an
   // agent's question's too; beside a review it only marks the row while its menu is open, so the page's own selection is
   // the one you left it with.
@@ -664,11 +672,14 @@ export function App() {
       return false;
     }
     stay.current = id;
+    // On one of several picked rows: the menu for all of them. Anywhere else drops the picks.
+    const bulk = pickedOn.length > 1 && pickedOn.includes(id);
+    if (!bulk) setPicked([]);
     if (!target?.closest(".beside")) {
       if (laneList) setLaneSel(id);
       else setSelected(id);
     }
-    setMenuAt({ id, x, y });
+    setMenuAt({ id, x, y, bulk });
     return true;
   }
   const rowMenuRef = useRef(rowMenu);
@@ -690,6 +701,8 @@ export function App() {
     rowMenu(x, y, under ?? null);
   };
   const menuCard = menuAt ? onScreen.find((c) => c.id === menuAt.id) : undefined;
+  const pickedCards = onScreen.filter((c) => pickedOn.includes(c.id));
+  const bulkLeft = pickedCards.length;
   const menuQuestion = menuAt ? inquiries.find((q) => inquiryOf(q.id) === menuAt.id) : undefined;
   const menuSession = menuAt ? sessions.find((x) => x.id === menuAt.id) : undefined;
   const menuNote = menuAt ? notes.find((n) => noteOf(n.id) === menuAt.id) : undefined;
@@ -699,8 +712,8 @@ export function App() {
   }, []);
   // Its row left the page (sorted away, resolved, acted on elsewhere): the menu goes with it, for good.
   useEffect(() => {
-    if (menuAt && !menuCard && !menuQuestion && !menuSession && !menuNote) closeMenu();
-  }, [menuAt, menuCard, menuQuestion, menuSession, menuNote, closeMenu]);
+    if (menuAt && ((!menuCard && !menuQuestion && !menuSession && !menuNote) || (menuAt.bulk && bulkLeft < 2))) closeMenu();
+  }, [menuAt, menuCard, menuQuestion, menuSession, menuNote, bulkLeft, closeMenu]);
 
   // The PR row you rest on, by Tab or the pointer, has its review fetched ahead, so opening it doesn't wait on GitHub.
   const onRow =
@@ -817,7 +830,7 @@ export function App() {
       if (leaves) hide(c);
       const started = Date.now();
       const res = yield* api.act(c.id, action, until);
-      undoSeq.current = res.undo_seq || null; // before the animation, so a quick Undo undoes this action
+      undoSeq.current = res.undo_seq ? [res.undo_seq] : []; // before the animation, so a quick Undo undoes this action
       undoWrite.current = null;
       if (leaves) {
         yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
@@ -830,6 +843,41 @@ export function App() {
       Effect.ensuring(
         Effect.sync(() => {
           if (leaves) unhide(c.id);
+          refresh(0);
+        }),
+      ),
+    );
+  }
+
+  // One action on several picked rows: each leaves at once as it would alone, and one Undo takes them all back.
+  function actAll(cs: Card[], action: Action, until?: string): Effect.Effect<void> {
+    const leaves = cs.filter((c) => LEAVES.has(action) && c.status === "active" && !c.resolved);
+    return Effect.gen(function* () {
+      setPicked([]);
+      leaves.forEach(hide);
+      const started = Date.now();
+      const results = yield* Effect.forEach(
+        cs,
+        (c) =>
+          api.act(c.id, action, until).pipe(
+            Effect.map((r) => ({ c, seq: r.undo_seq })),
+            Effect.catch((e) => Effect.as(failed(e), null)),
+          ),
+        { concurrency: 4 },
+      );
+      const ok = results.filter((r) => r !== null);
+      undoSeq.current = ok.flatMap((r) => (r.seq ? [r.seq] : []));
+      undoWrite.current = null;
+      yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
+      setView((v) => v && ok.reduce((w, r) => (leaves.includes(r.c) ? removeCard(w, r.c.id) : w), v));
+      const first = cs[0];
+      const verb =
+        action === "snooze" && first ? `Snoozed ${snoozeOptions(first).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
+      if (ok.length) flash(`${verb}: ${ok.length} ${ok.length === 1 ? "item" : "items"}`, false, true);
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          for (const c of leaves) unhide(c.id);
           refresh(0);
         }),
       ),
@@ -851,7 +899,7 @@ export function App() {
       api.act(s.id, action, action === "snooze" ? until : undefined).pipe(
         Effect.tap((res) =>
           Effect.sync(() => {
-            undoSeq.current = res.undo_seq || null;
+            undoSeq.current = res.undo_seq ? [res.undo_seq] : [];
             undoWrite.current = null;
             // Off the list before it's unhidden, so it doesn't flash back until the refresh lands.
             const status = action === "done" ? "done" : action === "snooze" ? "snoozed" : "muted";
@@ -1077,14 +1125,18 @@ export function App() {
         );
       }
       // Only what this window did: it must not walk back yesterday's history.
-      if (undoSeq.current === null) {
+      const seqs = undoSeq.current;
+      const [first, ...rest] = seqs;
+      if (first === undefined) {
         flash("Nothing to undo in this window");
         return Effect.void;
       }
-      return api.undo(undoSeq.current).pipe(
+      undoSeq.current = [];
+      // The latest first; the last one undone is the one that's selected and said.
+      return Effect.forEach(rest.toReversed(), (seq) => api.undo(seq)).pipe(
+        Effect.andThen(api.undo(first)),
         Effect.match({
           onSuccess: (r) => {
-            undoSeq.current = null;
             markActed(r.id, null);
             pending.current = { id: r.id, until: Date.now() + 2000 };
             setSelected(r.id);
@@ -1092,7 +1144,7 @@ export function App() {
             setTimeout(() => {
               setTick((t) => t + 1);
             }, 2100);
-            flash(`Undid ${r.action ?? "that"} on ${shortId(r.id)}`);
+            flash(`Undid ${r.action ?? "that"} on ${seqs.length > 1 ? `${seqs.length} items` : shortId(r.id)}`);
             refresh(0);
           },
           onFailure: (e) => {
@@ -1124,6 +1176,7 @@ export function App() {
 
   // A PR opens its review in place of the queue; an issue opens in place.
   function openCard(c: Card) {
+    setPicked([]);
     if (c.kind !== "pr") {
       toggle(c);
       return;
@@ -1137,7 +1190,7 @@ export function App() {
   function handOff(c: Card) {
     const write = api.act(c.id, "inflight").pipe(
       Effect.map(() => {
-        undoSeq.current = null;
+        undoSeq.current = [];
         return { text: `Handed off for merge: ${shortRef(c)}. Your agent gets it merged.` };
       }),
     );
@@ -1178,7 +1231,7 @@ export function App() {
       return api.act(c.id, "takeback").pipe(
         Effect.match({
           onSuccess: () => {
-            undoSeq.current = null;
+            undoSeq.current = [];
             undoWrite.current = null;
             markActed(c.id, null);
             flash(`Back on your desk: ${shortRef(c)}`);
@@ -1279,6 +1332,20 @@ export function App() {
     setMenuAt({ id: c.id, x: r.left, y: r.bottom + 4, snooze });
   }
 
+  // A More menu write on several picked rows, each as it would be alone; the toast counts the ones GitHub took.
+  function githubAll(cs: Card[], action: GitHubAction): Effect.Effect<void> {
+    setPicked([]);
+    return Effect.forEach(cs, (c) => github(c, action), { concurrency: 4 }).pipe(
+      Effect.tap((oks) =>
+        Effect.sync(() => {
+          const n = oks.filter(Boolean).length;
+          if (n) flash(`${DID[action]}: ${n} ${n === 1 ? "item" : "items"}`);
+        }),
+      ),
+      Effect.asVoid,
+    );
+  }
+
   // A More menu write, from a row's menu or a review (head: the commit the review showed; body: Request changes' words). Close,
   // merge and Request changes finish your part, so it leaves your desk at once; draft and reopen keep it where it is.
   function github(c: Card, action: GitHubAction, head?: string, body?: string): Effect.Effect<boolean> {
@@ -1286,7 +1353,7 @@ export function App() {
     if (action === "ready") return ready(c);
     const write = api.github(c.id, action, { ...(head ? { head_oid: head } : {}), ...(body ? { body } : {}) }).pipe(
       Effect.map(() => {
-        undoSeq.current = null;
+        undoSeq.current = [];
         const to = action === "close" && c.kind === "pr" ? "reopen" : action === "draft" ? "ready" : null;
         undoWrite.current = to && { id: c.id, to };
         return { text: `${DID[action]}: ${shortRef(c)}`, undo: !!to };
@@ -1542,7 +1609,8 @@ export function App() {
     if (route.name === "review" || route.name === "inquiry" || route.name === "log") return; // they read their own Esc
     const onList = LIST_PAGES.has(route.name) || route.name === "inflight"; // where the search reads a list
     const part = route.name === "settings" ? settingsBack(route.section) : null;
-    if (onList && expanded) setExpanded(null);
+    if (onList && pickedOn.length) setPicked([]);
+    else if (onList && expanded) setExpanded(null);
     else if (onList && filter) setFilter("");
     else if (part) go({ name: "settings", section: part });
     else if (route.name !== "queue") go({ name: "queue" });
@@ -1655,6 +1723,26 @@ export function App() {
     },
     run,
     menu: openRowMenu,
+    picked: new Set(pickedOn),
+    ...(LIST_PAGES.has(route.name) && {
+      pick: (c: Card, range: boolean) => {
+        if (range) {
+          setPicked(
+            pickRange(
+              onScreen.map((x) => x.id),
+              selected,
+              c.id,
+            ),
+          );
+          return;
+        }
+        // The selected row is the first pick, so ⌘-clicking a second one picks both.
+        const from = pickedOn.length || !selected || selected === c.id || !onScreen.some((x) => x.id === selected) ? pickedOn : [selected];
+        const next = pickToggle(from, c.id);
+        setPicked(next);
+        setSelected(next.includes(c.id) ? c.id : null);
+      },
+    }),
   };
   const configErrors = overview?.config_errors.length ?? 0;
   const inbox = view ? inboxCount(view, leaving, answered) : null;
@@ -2054,7 +2142,23 @@ export function App() {
           )}
         </div>
       )}
-      {menuAt && menuCard && (
+      {menuAt?.bulk && pickedCards.length > 1 && (
+        <BulkMenu
+          key={`${menuAt.id} ${menuAt.x} ${menuAt.y}`}
+          cards={pickedCards}
+          x={menuAt.x}
+          y={menuAt.y}
+          act={(cs, a, until) => {
+            runUi(actAll(cs, a, until));
+          }}
+          github={(cs, a) => {
+            runUi(githubAll(cs, a));
+          }}
+          reopen={reopenMenu}
+          onClose={closeMenu}
+        />
+      )}
+      {menuAt && !menuAt.bulk && menuCard && (
         <RowMenu
           key={`${menuAt.id} ${menuAt.x} ${menuAt.y}`}
           card={menuCard}

@@ -7,6 +7,7 @@ import type {
   Card,
   Check,
   Conversation,
+  InboxSection,
   InlineAt,
   JudgeStatus,
   JudgeStep,
@@ -21,7 +22,7 @@ import type {
   Where,
 } from "../../src/types.ts";
 import { onLines, type Section } from "../../src/sections.ts";
-import { ago, BUCKET_LABEL, shortRef, aiName } from "./format.ts";
+import { ago, BUCKET_LABEL, shortRef, aiName, snoozeOptions } from "./format.ts";
 import { SETTINGS_PARTS } from "./settings-parts.ts";
 
 // The Inbox (`queue`: Urgent, Standard and FYI), a PR's review in its place, Blocked, your PRs in Merging, the Archive
@@ -933,4 +934,41 @@ export function logLine(e: PlacedEntry): { kind: string; where: string; judge: s
   // Claude's why when it gave one: it's what moved the item; else the row's.
   const said = e.judge?.why ?? "";
   return { kind, where, judge, note, why: said.length > 0 ? said : e.reason };
+}
+
+// Shift-click: the rows from the anchor (the row you last clicked) to this one, in the order they're on screen. With no
+// anchor on screen, this one alone.
+export function pickRange(order: string[], anchor: string | null, id: string): string[] {
+  const to = order.indexOf(id);
+  if (to < 0) return [];
+  const from = anchor === null ? -1 : order.indexOf(anchor);
+  if (from < 0) return [id];
+  return order.slice(Math.min(from, to), Math.max(from, to) + 1);
+}
+
+// ⌘-click: this one added, or dropped if it's picked already.
+export const pickToggle = (picked: string[], id: string): string[] =>
+  picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];
+
+// What a right-click on several picked rows offers: only what every one of them allows.
+export interface BulkMenu {
+  done: "done" | "restore" | null; // Done for rows on the Inbox, Back on the desk for the Archive's
+  section: InboxSection | null; // all in one section: its moves
+  snoozes: ReturnType<typeof snoozeOptions>;
+  close: boolean; // all can be closed on GitHub
+}
+
+export function bulkMenu(cards: Card[]): BulkMenu {
+  const active = cards.every((c) => c.status === "active" && !c.inflight);
+  const away = cards.every((c) => c.status !== "active" && !c.inflight);
+  const [first] = cards;
+  const section = active && first?.section && cards.every((c) => c.section === first.section) ? first.section : null;
+  const snoozes =
+    active && first ? snoozeOptions(first).filter((o) => cards.every((c) => snoozeOptions(c).some((x) => x.until === o.until))) : [];
+  return {
+    done: active ? "done" : away ? "restore" : null,
+    section,
+    snoozes,
+    close: cards.length > 0 && cards.every((c) => (c.actions ?? []).includes("close")),
+  };
 }

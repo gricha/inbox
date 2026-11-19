@@ -5,6 +5,7 @@ import { useKeyedLayout } from "../keyed.ts";
 import { MORE, rowActions } from "./More.tsx";
 import { isKeyOf } from "../../../src/narrow.ts";
 import { SESSION_ACTION } from "./Session.tsx";
+import { bulkMenu } from "../view.ts";
 
 // Where a row on the Inbox can move: one section up or down.
 const MOVES: Record<InboxSection, InboxSection[]> = { urgent: ["standard"], standard: ["urgent", "fyi"], fyi: ["standard"] };
@@ -70,6 +71,50 @@ export function RowMenu({ card, x, y, snooze, run, act, github, reopen, onClose 
       y={y}
       snooze={snooze}
       pick={pick}
+      reopen={reopen}
+      onClose={onClose}
+    />
+  );
+}
+
+// The menu of several picked rows: what every one of them allows, done to all of them.
+export function BulkMenu({
+  cards,
+  x,
+  y,
+  act,
+  github,
+  reopen,
+  onClose,
+}: {
+  cards: Card[];
+  x: number;
+  y: number;
+  act: (cs: Card[], action: Action, until?: string) => void;
+  github: (cs: Card[], a: GitHubAction) => void;
+  reopen: (x: number, y: number) => void;
+  onClose: () => void;
+}) {
+  const m = bulkMenu(cards);
+  const n = cards.length;
+  const groups: Entry[][] = [
+    m.done === "done" ? [{ label: `Done with ${n}`, do: { act: "done" } }] : [],
+    m.done === "restore" ? [{ label: `Back on the desk: ${n}`, do: { act: "restore" } }] : [],
+    m.section ? MOVES[m.section].map((to) => ({ label: `Move ${n} to ${SECTION_NAME[to]}`, do: { act: to } })) : [],
+    m.close ? [{ label: `Close ${n} on GitHub`, do: { github: "close" } }] : [],
+  ];
+  return (
+    <Menu
+      label={`${n} items`}
+      groups={groups}
+      snoozes={m.snoozes}
+      x={x}
+      y={y}
+      pick={(d) => {
+        if ("act" in d) act(cards, d.act);
+        else if ("github" in d) github(cards, d.github);
+        else if ("snooze" in d) act(cards, "snooze", d.snooze);
+      }}
       reopen={reopen}
       onClose={onClose}
     />
@@ -299,7 +344,7 @@ function Menu({
     } else if (e.key === "Enter" || e.key === " ") {
       // Nothing picked yet: Enter is the row's own, its first entry.
       if (at >= 0) items[at]?.click();
-      else if (e.key === "Enter") choose(entries[0]!.do);
+      else if (e.key === "Enter" && entries[0]) choose(entries[0].do);
     }
   };
   const keyRef = useRef(onKey);

@@ -18,6 +18,8 @@ export interface RowCtx {
   select: (c: Card) => void;
   run: (c: Card, key: string) => void;
   menu: (c: Card, at: HTMLElement, snooze?: boolean) => void; // its row's menu, at a button
+  picked?: Set<string>; // rows picked by shift- or ⌘-click, for one right-click on all of them
+  pick?: (c: Card, range: boolean) => void; // shift-click (range) or ⌘-click
   compact?: boolean; // the list beside a review: two lines a row
 }
 
@@ -46,7 +48,7 @@ function noteOf(card: Card, variant: Variant): string {
 // A click opens an issue in place under it. On Blocked, `tree` indents it under the PR it needs, with a quiet guide.
 export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean; tree?: Guide[] }) {
   const open = ctx.expanded === card.id;
-  const sel = ctx.selected === card.id;
+  const sel = ctx.selected === card.id || !!ctx.picked?.has(card.id);
   const reason = card.reason ?? "";
   const note = why ? noteOf(card, variant) : reason.charAt(0).toUpperCase() + reason.slice(1);
   // A resolved item isn't waiting any more: its time is when it resolved.
@@ -137,8 +139,9 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
           onMouseDown={(e) => {
             e.preventDefault();
           }}
-          onClick={() => {
-            ctx.click(card);
+          onClick={(e) => {
+            if (ctx.pick && (e.shiftKey || e.metaKey || e.ctrlKey)) ctx.pick(card, e.shiftKey);
+            else ctx.click(card);
           }}
           onFocus={() => {
             ctx.select(card);

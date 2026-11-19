@@ -88,7 +88,7 @@ import {
   wholeFor,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
-import { filterOf, filterPeople, filterRest, parseFilter, logLine } from "../src/view.ts";
+import { bulkMenu, filterOf, filterPeople, filterRest, parseFilter, logLine, pickRange, pickToggle } from "../src/view.ts";
 import { isTestPath, onLines, sections, traditional, walk } from "../../src/sections.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
 
@@ -1454,4 +1454,35 @@ test("an item's log line: the kind of change, where it went, Claude's answer, an
     [logLine(e({ changed: ["where", "resolved"], where: "resolved", resolved: "approved by dana" }))].map((x) => [x.kind, x.note]),
     [["resolved", "approved by dana"]],
   );
+});
+
+test("shift-click picks the rows between the anchor and the click, either way; ⌘-click adds or drops one", () => {
+  const order = ["a", "b", "c", "d"];
+  assert.deepEqual(pickRange(order, "b", "d"), ["b", "c", "d"]);
+  assert.deepEqual(pickRange(order, "d", "b"), ["b", "c", "d"]);
+  assert.deepEqual(pickRange(order, null, "c"), ["c"]);
+  assert.deepEqual(pickRange(order, "gone", "c"), ["c"]);
+  assert.deepEqual(pickRange(order, "a", "gone"), []);
+  assert.deepEqual(pickToggle(["a"], "c"), ["a", "c"]);
+  assert.deepEqual(pickToggle(["a", "c"], "a"), ["c"]);
+});
+
+test("the menu of several picked rows offers only what all of them allow", () => {
+  const a = card("o/r#1", { status: "active", section: "standard", actions: ["close"], wake_on: ["ci"] });
+  const b = card("o/r#2", { status: "active", section: "standard", actions: ["close", "draft"] });
+  const both = bulkMenu([a, b]);
+  assert.equal(both.done, "done");
+  assert.equal(both.section, "standard");
+  assert.equal(both.close, true);
+  assert.ok(!both.snoozes.some((o) => o.until === "ci"), "only one waits on CI");
+  assert.ok(both.snoozes.length > 0);
+
+  const split = bulkMenu([a, card("o/r#3", { status: "active", section: "fyi" })]);
+  assert.equal(split.section, null);
+  assert.equal(split.close, false);
+
+  assert.equal(bulkMenu([card("o/r#4", { status: "done" }), card("o/r#5", { status: "snoozed" })]).done, "restore");
+  const mixed = bulkMenu([a, card("o/r#6", { status: "done" })]);
+  assert.equal(mixed.done, null);
+  assert.deepEqual(mixed.snoozes, []);
 });
