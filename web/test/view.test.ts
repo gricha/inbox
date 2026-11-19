@@ -89,7 +89,7 @@ import {
   wholeFor,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
-import { bulkMenu, filterOf, filterPeople, filterRest, parseFilter, logLine, pickRange, pickToggle } from "../src/view.ts";
+import { bulkMenu, filterOf, filterPeople, filterRest, githubRef, parseFilter, logLine, pickRange, pickToggle } from "../src/view.ts";
 import { isTestPath, onLines, sections, tagTip, traditional, walk } from "../../src/sections.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
 
@@ -1432,6 +1432,32 @@ test("the filter's people: author: and involves: as pills once a space follows, 
     { login: "marco", author: false },
     { login: "me", author: true },
   ]);
+});
+
+test("a pasted GitHub link to a PR or an issue is its id, and as the search it finds only that row", () => {
+  for (const link of [
+    "https://github.com/getsentry/sentry/pull/131869",
+    "https://github.com/getsentry/sentry/pull/131869/changes",
+    "https://github.com/getsentry/sentry/pull/131869/files#diff-abc",
+    "http://www.github.com/getsentry/sentry/pull/131869?w=1",
+    "  https://github.com/getsentry/sentry/pull/131869/  ",
+  ])
+    assert.equal(githubRef(link), "getsentry/sentry#131869", link);
+  assert.equal(githubRef("https://github.com/acme/web/issues/8"), "acme/web#8");
+  for (const not of [
+    "https://github.com/acme/web",
+    "https://github.com/acme/web/pull/",
+    "https://gitlab.com/acme/web/pull/8",
+    "acme/web#8 fix",
+  ])
+    assert.equal(githubRef(not), null, not);
+
+  const rows = [card("acme/api#1"), card("acme/web#8"), card("acme/web#80")];
+  const view = { ...queue(), inbox: { urgent: rows, standard: [], fyi: [] } };
+  const ids = (f: string) => navigable(main(groupsOf(view, DEFAULT_OPEN, f, "me")), new Set()).map((c) => c.id);
+  assert.deepEqual(ids("https://github.com/acme/web/pull/8/files"), ["acme/web#8"]);
+  assert.deepEqual(ids("https://github.com/Acme/Web/issues/8"), ["acme/web#8"], "GitHub's names ignore case");
+  assert.deepEqual(ids("https://github.com/acme/web/pull/9"), []);
 });
 
 test("pathTree nests a review's files in their folders, in reading order, a lone folder in a folder as one", () => {

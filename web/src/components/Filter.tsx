@@ -1,5 +1,5 @@
-import { useRef, type KeyboardEvent } from "react";
-import { filterOf, filterRest, parseFilter } from "../view.ts";
+import { useRef, type ClipboardEvent, type KeyboardEvent } from "react";
+import { filterOf, filterRest, githubRef, parseFilter } from "../view.ts";
 import { SearchIcon } from "./SideIcons.tsx";
 
 export interface FilterPerson {
@@ -9,7 +9,8 @@ export interface FilterPerson {
 
 // The search at the top of the sidebar: words that match a row's title, repo or author. Who it's by or who's on it is the
 // Filter button's (PeopleFilter.tsx); its picks stay in the query as author:/involves: terms, kept as you type here.
-export function Filter({ filter, setFilter }: { filter: string; setFilter: (s: string) => void }) {
+// A pasted GitHub link to a PR or an issue is the whole search, and `onLink` adds it when the desk doesn't have it.
+export function Filter({ filter, setFilter, onLink }: { filter: string; setFilter: (s: string) => void; onLink: (ref: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const pills = parseFilter(filter).terms.filter((t) => t.done);
   const rest = filterRest(filter);
@@ -19,6 +20,16 @@ export function Filter({ filter, setFilter }: { filter: string; setFilter: (s: s
       setFilter(filterOf(pills, ""));
       e.currentTarget.blur();
     } else if (e.key === "Enter" || e.key === "ArrowDown") e.currentTarget.blur();
+  }
+
+  // Only a paste: a link typed by hand would add PR #1 on its way to #131869.
+  function onPaste(e: ClipboardEvent<HTMLInputElement>) {
+    const link = e.clipboardData.getData("text").trim();
+    const ref = githubRef(link);
+    if (!ref) return;
+    e.preventDefault();
+    setFilter(link);
+    onLink(ref);
   }
 
   return (
@@ -36,6 +47,7 @@ export function Filter({ filter, setFilter }: { filter: string; setFilter: (s: s
             setFilter(filterOf(pills, e.target.value));
           }}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
         />
       </label>
     </div>

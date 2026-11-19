@@ -1630,7 +1630,7 @@ A config with the earlier rule, which left out a conflicted PR, gets today's onc
 
 ### Adding
 
-`inbox_add` (`POST /api/add`, `inbox add <ref>`) is "add X to my review" from any session. Nothing is written to GitHub, so agents may call it.
+`inbox_add` (`POST /api/add`, `inbox add <ref>`) is "add X to my review" from any session, and what pasting a GitHub link into the window's search does for one the desk doesn't have ([ui.md](ui.md)). Nothing is written to GitHub, so agents may call it.
 
 - **Fetching.** A PR or issue the desk doesn't hold is fetched read only (`GitHub.lookup`, then the usual details query) and stored with its events, `new` first, so the notifications feed follows it from then on. One it holds (a quietly stored stack member included) is used as it is.
 - **Pinning.** Either way it's pinned. One done, snoozed or muted comes back too, logged as one `pin`: the returned `undo_seq` undoes both.

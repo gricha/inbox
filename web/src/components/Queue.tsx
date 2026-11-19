@@ -12,6 +12,21 @@ const FYI_SHOWN = 5; // FYI's first rows; the rest wait behind Show more until y
 
 // The main page: what's on your Inbox, in its sections, each in the desk's order: Urgent (agents' questions and the sessions
 // that need you first, since one waits on each), Standard and FYI. Each row says why it's there, quietly.
+// Rows on their way under a heading's placeholder, so the rows land where these were.
+function SkSection({ rows, label }: { rows?: number; label?: string }) {
+  return (
+    <section className="group" {...(label && { "aria-label": label, "aria-busy": true })}>
+      <h2 className="group-head" aria-hidden="true">
+        <span className="group-toggle">
+          <span className="sk sk-head" />
+          {"\u200b"}
+        </span>
+      </h2>
+      <SkRows {...(rows && { count: rows })} />
+    </section>
+  );
+}
+
 export function Queue({
   view,
   overview,
@@ -23,6 +38,7 @@ export function Queue({
   ses,
   note,
   filter,
+  adding = null,
   toggle,
 }: {
   view: QueueView | null;
@@ -35,29 +51,13 @@ export function Queue({
   ses?: SessionCtx;
   note: NoteCtx; // your notes: due reminders lead Urgent, the rest lead the section you put them in
   filter: string;
+  adding?: string | null; // a pasted link's PR or issue the desk is adding: a placeholder row in place of "No matches."
   toggle: (k: GroupKey) => void;
 }) {
   const [allFyi, setAllFyi] = useState(false);
   if (!view) {
     const first = !!overview && !overview.synced_at;
-    return (
-      <div className="queue">
-        {first ? (
-          <p className="quiet-note">Getting your PRs from GitHub…</p>
-        ) : (
-          // Under a heading's placeholder, so the first section's rows land where these were.
-          <section className="group">
-            <h2 className="group-head" aria-hidden="true">
-              <span className="group-toggle">
-                <span className="sk sk-head" />
-                {"\u200b"}
-              </span>
-            </h2>
-            <SkRows />
-          </section>
-        )}
-      </div>
-    );
+    return <div className="queue">{first ? <p className="quiet-note">Getting your PRs from GitHub…</p> : <SkSection />}</div>;
   }
   const shown = ses ? (sessions ?? []) : [];
   const words = filter.trim().toLowerCase();
@@ -142,7 +142,9 @@ export function Queue({
             </section>
           );
         })
-      ) : first ? null : (
+      ) : first ? null : adding ? ( // A pasted link's row on its way: a placeholder where it will land, as on the first load.
+        <SkSection rows={1} label={`Adding ${adding} to your desk`} />
+      ) : (
         <p className="queue-empty">{filter.trim() ? "No matches." : "Nothing needs you right now."}</p>
       )}
     </div>

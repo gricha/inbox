@@ -5774,6 +5774,43 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
+    // A pasted GitHub link is the whole search: one the desk has is focused on its page; one it hasn't is added, a placeholder
+    // row standing where it will land before the desk answers (here it never does).
+    name: "paste-adds",
+    writes: true,
+    go: async (page) => {
+      await at("#/")(page);
+      const paste = (link: string) =>
+        page.evaluate(`(() => {
+          const data = new DataTransfer();
+          data.setData("text/plain", ${JSON.stringify(link)});
+          document.querySelector(".side-search .search input").dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+        })()`);
+      const focused = () => page.evaluate<string | null>(`document.activeElement?.closest("[data-id]")?.getAttribute("data-id") ?? null`);
+      await paste("https://github.com/acme/api/pull/4127/changes");
+      await page.waitForTimeout(200);
+      const ids: (string | null)[] = [];
+      for (const row of await page.locator(".queue .line[data-id]").all()) ids.push(await row.getAttribute("data-id"));
+      if (ids.join(" ") !== "acme/api#4127") failures.push(`paste-adds: a link the desk has shows ${JSON.stringify(ids)}`);
+      if ((await focused()) !== "acme/api#4127") failures.push(`paste-adds: a link the desk has focuses ${String(await focused())}`);
+      if ((await page.locator(".queue .line.sel").getAttribute("data-id")) !== "acme/api#4127")
+        failures.push("paste-adds: a link the desk has leaves its row unselected");
+      await page.route("**/api/add", stall);
+      const link = "https://github.com/acme/api/pull/5000";
+      await paste(link);
+      const landing = page.locator('.queue section[aria-label="Adding acme/api#5000 to your desk"] .sk-row');
+      await landing
+        .first()
+        .waitFor({ timeout: 2000 })
+        .catch(() => {});
+      if ((await landing.count()) !== 1) failures.push(`paste-adds: ${String(await landing.count())} placeholder rows while it's added`);
+      const words = await page.locator(".side-search .search input").inputValue();
+      if (words !== link) failures.push(`paste-adds: the search box reads ${JSON.stringify(words)}`);
+      await page.waitForTimeout(400); // the placeholder's bars in, not fading in
+    },
+    after: drop,
+  },
+  {
     // ↓ and ↑ on the Inbox move between rows (focus selects), from the first; the page scrolls only to keep the row in view.
     name: "rows-by-arrows",
     go: async (page) => {

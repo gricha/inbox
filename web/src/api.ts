@@ -214,6 +214,8 @@ export const api = {
   overview: () => call<Overview>("GET", "/api/overview"),
   queue: () => call<QueueView>("GET", "/api/queue"),
   item: (id: string) => call<ItemDetail>("GET", `/api/item?id=${encodeURIComponent(id)}`),
+  // A PR or an issue the desk doesn't have, from a pasted link: fetched and pinned (inbox add). Nothing goes to GitHub.
+  add: (id: string) => call<{ ok: true; item: ItemDetail; undo_seq: number }>("POST", "/api/add", { id }),
   act: (id: string, action: Action, until?: string) =>
     call<{ ok: true; state: ItemState; undo_seq: number }>("POST", "/api/act", { id, action, until }),
   // ahead: before you open it, so the desk starts no AI review or read for it.

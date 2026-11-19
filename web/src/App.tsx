@@ -28,7 +28,7 @@ import { restOn } from "./reviews.ts";
 import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop, loadOmarchy, OmarchyAnswer, omarchyIs } from "./theme.ts";
 import { getStored, setStored } from "./storage.ts";
-import { useKeyed } from "./keyed.ts";
+import { useKeyed, useKeyedLayout } from "./keyed.ts";
 import { dropKey, settleNoteEdits, withNoteEdits, type NoteEdits } from "./pending.ts";
 import {
   attachCommand,
@@ -221,6 +221,8 @@ export function App() {
   // Later's groups other than its own open on a click on their heading, and close again on reload.
   const [open, setOpen] = useState(DEFAULT_OPEN);
   const [filter, setFilter] = useState("");
+  const [adding, setAdding] = useState<string | null>(null); // a pasted link's PR or issue, on its way to the desk
+  const [landing, setLanding] = useState<string | null>(null); // a pasted link's row, focused once it's drawn
   const [toast, setToast] = useState<Toast | null>(null);
   const [failures, setFailures] = useState<Notice[]>([]); // actions that failed, as bubbles that fade
   const [dismissed, setDismissed] = useState<Dismissed>(dismissedAtStart);
@@ -554,7 +556,46 @@ export function App() {
     setFilter(s);
     if (s.trim() && !SEARCHED.has(route.name)) go({ name: "queue" });
   };
-  const search = <Filter filter={filter} setFilter={searchFor} />;
+  // A pasted link: the page that lists it when the desk has it, else it's added (pinned, as inbox add does) and the Inbox says
+  // so until the desk's list has it.
+  const pasted = (ref: string) => {
+    const id = [...known.keys()].find((k) => k.toLowerCase() === ref.toLowerCase());
+    if (id) {
+      const at = view && whereIs(view, id);
+      if (lane?.rows.some((r) => r.card.id === id)) go({ name: "inflight" });
+      else if (at) go({ name: at.page });
+      setLanding(id);
+      return;
+    }
+    go({ name: "queue" });
+    setAdding(ref);
+    runUi(
+      Effect.gen(function* () {
+        const res = yield* api.add(ref);
+        yield* load();
+        setLanding(res.item.card.id);
+        undoSeq.current = res.undo_seq ? [res.undo_seq] : [];
+        undoWrite.current = null;
+        flash(`Added: ${shortRef(res.item.card)}`, false, true);
+      }).pipe(
+        Effect.catch(failed),
+        Effect.ensuring(
+          Effect.sync(() => {
+            setAdding(null);
+          }),
+        ),
+      ),
+    );
+  };
+  const search = <Filter filter={filter} setFilter={searchFor} onLink={pasted} />;
+  // Focusing the row selects it, as a click or ↓ would; tried again as its page and the desk's state arrive.
+  useKeyedLayout(landing === null ? null : `${landing} ${route.name} ${loads}`, () => {
+    const row = document.querySelector(`.main [data-id="${CSS.escape(landing ?? "")}"]`);
+    const at = row?.querySelector<HTMLElement>(".row-main") ?? (row instanceof HTMLElement ? row : null);
+    if (!at) return;
+    at.focus();
+    setLanding(null);
+  });
   const peopleFilter = <PeopleFilter filter={filter} setFilter={setFilter} people={people} me={me} />;
   // The selection goes through the page on screen: the queue, or Later's groups; in a review, the page it came from.
   const list = route.name === "review" ? reviewFrom : route.name;
@@ -1934,6 +1975,7 @@ export function App() {
               ses={ses}
               note={note}
               filter={filter}
+              adding={adding}
               toggle={toggleGroup}
             />
           )}

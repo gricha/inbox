@@ -396,9 +396,17 @@ export function filterOf(terms: { key: FilterKey; who: string }[], rest: string)
 
 const isYou = (who: string) => who === "you" || who === "me";
 
+// A GitHub link to a PR or an issue (any tab of it) as the desk's id, owner/repo#123; null for anything else.
+export function githubRef(s: string): string | null {
+  const m = /^https?:\/\/(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+)\/(?:pull|issues)\/(\d+)(?:[/?#]\S*)?$/i.exec(s.trim());
+  return m ? `${m[1]!}/${m[2]!}#${m[3]!}` : null;
+}
+
 export function matches(c: Card, q: string, me: string): boolean {
   if (!q.trim()) return true;
   const { terms, text } = parseFilter(q);
+  const ref = githubRef(text);
+  if (ref) return c.id.toLowerCase() === ref.toLowerCase();
   const has = (login: string, who: string) => login.toLowerCase().includes(who);
   const fits = terms.every((t) => {
     const who = t.who.toLowerCase();

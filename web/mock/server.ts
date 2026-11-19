@@ -1583,7 +1583,7 @@ const TALK = new Map<string, Conversation[]>([
   ],
 ]);
 
-const recs: Rec[] = SEEDS.map((s) => {
+const recOf = (s: Seed): Rec => {
   const id = `${s.repo}#${s.n}`;
   const rec: Rec = {
     seed: s,
@@ -1611,7 +1611,8 @@ const recs: Rec[] = SEEDS.map((s) => {
       .files.map((f) => f.path)
       .slice(0, 50);
   return rec;
-});
+};
+const recs: Rec[] = SEEDS.map(recOf);
 
 // ---------------------------------------------------------------------------
 // Signals, items, placements
@@ -4246,6 +4247,39 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return boardView(b);
   }
   if (route === "GET /api/item") return detail(resolve(url.searchParams.get("id") ?? ""));
+  // inbox add, from a pasted link: one the mock has comes back pinned; any other is a PR it makes up, pinned in Today. It takes a
+  // second, as fetching it from GitHub does.
+  if (route === "POST /api/add") {
+    const given = (await readBody(req)).id;
+    const raw = typeof given === "string" ? given.trim() : "";
+    const m =
+      /^https?:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:pull|issues)\/(\d+)(?:[/?#]\S*)?$/i.exec(raw) ??
+      /^([\w.-]+\/[\w.-]+)#(\d+)$/.exec(raw);
+    if (!m) throw new HttpError(400, "need { id }: owner/repo#123 or a GitHub URL");
+    await new Promise((done) => {
+      setTimeout(done, 1000);
+    });
+    const id = `${m[1]!}#${m[2]!}`;
+    let r = recs.find((x) => x.id.toLowerCase() === id.toLowerCase());
+    if (!r) {
+      r = recOf({
+        repo: m[1]!,
+        n: Number(m[2]),
+        title: "Cache the planner's cost estimates",
+        author: "dana",
+        age: 2,
+        wait: 2,
+        by: "dana",
+        direct: true,
+        on: { "work-review": ["direct"] },
+      });
+      recs.push(r);
+      stacksMemo = null;
+    }
+    Object.assign(r.state, { pinned: true, done_at: null, snooze_until: null, snooze_on_activity: false, snooze_when: null, muted: false });
+    bump();
+    return { ok: true, item: detail(r), undo_seq: 0 };
+  }
   if (route === "POST /api/act") {
     const body = await readBody(req);
     const session = SESSIONS.find((x) => x.id === body.id);
