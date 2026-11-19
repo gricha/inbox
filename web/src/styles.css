@@ -3581,6 +3581,7 @@ html::-webkit-scrollbar-corner,
   position: fixed;
   inset: 0;
   z-index: 20;
+  -webkit-app-region: no-drag; /* over the heads' drag regions, so a click there closes the menu */
 }
 
 .popover {
