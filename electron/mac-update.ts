@@ -26,7 +26,9 @@ const exec = (what: string, cmd: string, args: string[]) =>
       resume(e ? Effect.fail(failed(what)(e)) : Effect.succeed(stdout));
     });
   });
-const remove = (p: string) => Effect.ignore(attempt("clearing up", () => fs.rm(p, { recursive: true, force: true })));
+// rm, not fs.rm: inside Electron, fs reads an app's app.asar as a folder it can't delete, and the old app left behind would
+// stop the next update moving this one aside.
+const remove = (p: string) => Effect.ignore(exec("clearing up", "rm", ["-rf", p]));
 // Beside the app, so moving it into place is a rename on one volume.
 const aside = (bundle: string, what: string) => path.join(path.dirname(bundle), `.${path.basename(bundle)}.${what}`);
 

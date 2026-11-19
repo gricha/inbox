@@ -14,6 +14,9 @@ import { bundleOf, macDmg, selfUpdates } from "../electron/lib.ts";
 import { download, release, swap } from "../electron/mac-update.ts";
 import { failure, run } from "./helpers/run.ts";
 
+// The Mac updater runs only on a Mac: its rm is the system's.
+const posix = { skip: process.platform === "win32" };
+
 test("newer compares x.y.z, a v allowed, a prerelease before its release", () => {
   assert.equal(newer("v0.2.0", "0.1.0"), true);
   assert.equal(newer("0.10.0", "0.9.9"), true);
@@ -247,19 +250,26 @@ test("a Mac's update is this Mac's dmg from the latest release, refused unless i
   fs.rmSync(dir, { recursive: true });
 });
 
-test("the new app takes the old one's place and the old one is deleted; a swap that fails puts the old one back", async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "inbox-test-"));
-  const bundle = path.join(dir, "Inbox.app");
-  const staged = path.join(dir, ".Inbox.app.update");
-  fs.mkdirSync(bundle);
-  fs.writeFileSync(path.join(bundle, "v"), "old");
-  fs.mkdirSync(staged);
-  fs.writeFileSync(path.join(staged, "v"), "new");
-  await run(swap(bundle, staged));
-  assert.equal(fs.readFileSync(path.join(bundle, "v"), "utf8"), "new");
-  assert.deepEqual(fs.readdirSync(dir), ["Inbox.app"]);
-  assert.match((await failure(swap(bundle, staged))).message, /moving the new app in/);
-  assert.equal(fs.readFileSync(path.join(bundle, "v"), "utf8"), "new");
-  assert.deepEqual(fs.readdirSync(dir), ["Inbox.app"]);
-  fs.rmSync(dir, { recursive: true });
-});
+test(
+  "the new app takes the old one's place and the old one is deleted, app.asar and all; a swap that fails puts the old one back",
+  posix,
+  async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "inbox-test-"));
+    const bundle = path.join(dir, "Inbox.app");
+    const staged = path.join(dir, ".Inbox.app.update");
+    // What an earlier update left: the old app's app.asar, which Electron's fs couldn't delete.
+    fs.mkdirSync(path.join(dir, ".Inbox.app.old", "Contents", "Resources"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".Inbox.app.old", "Contents", "Resources", "app.asar"), "older");
+    fs.mkdirSync(bundle);
+    fs.writeFileSync(path.join(bundle, "v"), "old");
+    fs.mkdirSync(staged);
+    fs.writeFileSync(path.join(staged, "v"), "new");
+    await run(swap(bundle, staged));
+    assert.equal(fs.readFileSync(path.join(bundle, "v"), "utf8"), "new");
+    assert.deepEqual(fs.readdirSync(dir), ["Inbox.app"]);
+    assert.match((await failure(swap(bundle, staged))).message, /moving the new app in/);
+    assert.equal(fs.readFileSync(path.join(bundle, "v"), "utf8"), "new");
+    assert.deepEqual(fs.readdirSync(dir), ["Inbox.app"]);
+    fs.rmSync(dir, { recursive: true });
+  },
+);
