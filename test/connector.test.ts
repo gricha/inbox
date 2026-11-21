@@ -302,3 +302,106 @@ test("while a window shows, a pulse every 10 s reads again what changed or whose
   await beat();
   assert.equal(t.gh.pulses.length, pulses);
 });
+
+// Something that stays shut until the test opens it.
+function gateOf(): { promise: Promise<void>; resolve: () => void } {
+  let resolve = () => {};
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+// A few turns of the loop: what's running gets as far as it can without the test waiting for the desk to be idle.
+const turns = async () => {
+  for (let i = 0; i < 5; i++)
+    await new Promise<void>((r) => {
+      setImmediate(r);
+    });
+};
+
+test("nothing syncs while a pass runs: a timer, a look and a pulse all leave it alone, and none queues a second", async (c) => {
+  c.mock.timers.enable({ apis: ["setTimeout"] });
+  const t = await setup([reviewAsk(1)]);
+  c.after(t.cleanup);
+  const gh = t.desk.gh;
+  t.desk.start();
+  await idle(t.desk);
+  let passes = 0;
+  const pass = gh.pass.bind(gh);
+  gh.pass = () => {
+    passes++;
+    return pass();
+  };
+  // A pass that stays open until the test lets its searches answer.
+  let open = () => {};
+  const search = t.gh.search.bind(t.gh);
+  const hold = () => {
+    const gate = gateOf();
+    open = gate.resolve;
+    t.gh.search = (...a: Parameters<typeof search>) => Effect.promise(() => gate.promise).pipe(Effect.andThen(search(...a)));
+  };
+  t.desk.look(); // a window shows, 0 s after the first pass: pulses start, no pass yet
+
+  hold();
+  t.desk.runner.fork("sync", t.desk.sync());
+  await turns();
+  assert.deepEqual([gh.syncing, passes], [true, 1]);
+
+  // What GitHub has moves on, so a pulse would have something to read.
+  const one = t.gh.items.get("acme/api#1")!;
+  t.gh.items.set("acme/api#1", { ...one, ci: "red", updated_at: new Date(Date.parse(one.updated_at) + 60_000).toISOString() });
+  t.gh.items.set("acme/api#2", reviewAsk(2));
+  const details = t.gh.detailCalls.length;
+  c.mock.timers.tick(10_000); // the pulse's time
+  await turns();
+  c.mock.timers.tick(20_000); // the watched pass's time
+  await turns();
+  t.setNow(new Date(t.desk.now().getTime() + 45_000));
+  t.desk.look(); // and a look, with what the desk has now 45 s old
+  await turns();
+  assert.deepEqual([passes, gh.syncAgain, t.gh.pulses.length, t.gh.detailCalls.length], [1, false, 0, details]);
+
+  open();
+  await idle(t.desk);
+  assert.equal(passes, 1, "and none ran behind it");
+  assert.equal(runSync(t.desk.item("api#2")).item.id, "acme/api#2", "the pass itself read what changed");
+});
+
+test("a pulse whose answer comes after a pass started reads nothing, and the next pulse still sees the CI that moved", async (c) => {
+  c.mock.timers.enable({ apis: ["setTimeout"] });
+  const t = await setup([reviewAsk(1)]);
+  c.after(t.cleanup);
+  const gh = t.desk.gh;
+  t.desk.start();
+  await idle(t.desk);
+  t.desk.look();
+  c.mock.timers.tick(10_000);
+  await idle(t.desk); // the first pulse: it has seen CI green
+
+  const pulse = t.gh.pulse.bind(t.gh);
+  const slow = gateOf();
+  t.gh.pulse = (ids) => Effect.promise(() => slow.promise).pipe(Effect.andThen(pulse(ids)));
+  t.gh.items.set("acme/api#1", { ...t.gh.items.get("acme/api#1")!, ci: "red" });
+  c.mock.timers.tick(10_000);
+  await turns();
+  assert.equal(gh.pulsing, true);
+
+  const gate = gateOf();
+  const search = t.gh.search.bind(t.gh);
+  t.gh.search = (...a: Parameters<typeof search>) => Effect.promise(() => gate.promise).pipe(Effect.andThen(search(...a)));
+  t.desk.runner.fork("sync", t.desk.sync());
+  await turns();
+  const details = t.gh.detailCalls.length;
+  slow.resolve();
+  await turns();
+  assert.deepEqual([gh.syncing, gh.pulsing, t.gh.detailCalls.length], [true, false, details], "the pulse read nothing");
+
+  gate.resolve();
+  t.gh.pulse = pulse;
+  t.gh.search = search;
+  await idle(t.desk);
+  c.mock.timers.tick(10_000);
+  await idle(t.desk);
+  assert.equal(runSync(t.desk.item("api#1")).item.ci, "red");
+});

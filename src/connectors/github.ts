@@ -164,7 +164,12 @@ export class GitHubConnector implements Connector {
     if (this.started && !this.stopped) this.arm();
   }
 
+  // A pass already running (a look's, a pulse's, the feed's) is this tick's: asking again would queue a second behind it.
   tick(): void {
+    if (this.syncing) {
+      this.arm();
+      return;
+    }
     this.loop("sync", this.reconcile(), () => {
       this.arm();
     });
@@ -706,6 +711,9 @@ export class GitHubConnector implements Connector {
       const byNode = new Map(latest.map(([id, m]) => [m.node_id, { id, m }]));
       return Effect.gen({ self: this }, function* () {
         const p = yield* this.api.pulse([...byNode.keys()]);
+        // A pass that started meanwhile reads all this itself: the pulse leaves it alone and remembers nothing, so the
+        // next one still sees a CI that moved.
+        if (this.stopped || this.syncing) return;
         const refresh: SearchHit[] = [];
         for (const n of p.nodes) {
           const known = byNode.get(n.node_id);
@@ -714,8 +722,6 @@ export class GitHubConnector implements Connector {
           this.rollups.set(known.id, n.rollup);
           if (n.updated_at > known.m.updated_at || (before !== undefined && before !== n.rollup)) refresh.push(hitOf(known.id, known.m));
         }
-        const fresh = p.asked.filter((id) => !held.has(id) && !this.asked.has(id));
-        for (const id of fresh) this.asked.add(id);
         const items = refresh.length ? yield* this.details(refresh) : [];
         if (this.stopped) return;
         desk.ingest(this, items);
@@ -723,7 +729,11 @@ export class GitHubConnector implements Connector {
           desk.synced();
           desk.log(`pulse: ${items.length} refreshed`);
         }
-        if (fresh.length) desk.runner.fork("sync", this.reconcile());
+        // Not behind a pass that started while it read: the next pulse asks again.
+        const fresh = p.asked.filter((id) => !held.has(id) && !this.asked.has(id));
+        if (!fresh.length || this.syncing) return;
+        for (const id of fresh) this.asked.add(id);
+        desk.runner.fork("sync", this.reconcile());
       }).pipe(
         settle((e) => {
           if (e instanceof GitHubRateLimited) this.pause(e);
