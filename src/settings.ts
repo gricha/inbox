@@ -127,7 +127,7 @@ export const SETTINGS = [
     min: 30,
     max: 3600,
     unit: "seconds",
-    help: "It waits longer by itself when GitHub's limit runs low.",
+    help: "While the window shows: every 30 seconds, and a quick check every 10. Slower when GitHub's limit runs low.",
   },
   {
     key: "handoff.prompt",

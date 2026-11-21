@@ -116,9 +116,10 @@ Every write comes from a click in the desk's own window or a tap on your paired 
 
 ### Sync
 
-The connector (`src/connectors/github.ts`) runs two loops:
+The connector (`src/connectors/github.ts`) runs two loops, and a third while a window shows:
 
-- **Reconcile**, every `github.poll_seconds`: every board's searches, then details for what changed.
+- **Reconcile**, every `github.poll_seconds`: every board's searches, then details for what changed. While a window shows (it says so with `POST /api/look` when it comes up and every 30 s after, `look()`), every 30 s at most, and at once if the last pass is older than that.
+- **Pulse**, every 10 s while a window shows (`pulse()`; `PULSE` in `queries.ts`, one point): when each of the 100 items last changed, and its head commit's CI. One GitHub changed since the desk read it, or whose CI moved since the last pulse, is refreshed at once; an open PR asking for your review that the desk doesn't hold starts a reconcile, once. It stops under 1,000 points left, which your agents' `gh` spends too.
 - **Feed**: polls `/notifications` every `X-Poll-Interval` (about 60 s), with `If-Modified-Since`. A thread about a held item refreshes it at once. One about a new item (review request, mention, assignment, your own) starts a reconcile early.
 
 A rate limit pauses both. After you approve, that PR is refreshed at once, since search lags.

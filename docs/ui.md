@@ -612,7 +612,7 @@ The first plugin's part.
 - **Searches and rules**: its help says where each org's items start ("acme goes to Work, everything else to Personal."), or the error count in red.
 - **Archive a review request when someone else approves**: Always, only when your team was asked, or never.
 - **Claude reviews other people's PRs ahead of time** (the AI review).
-- **More GitHub settings**: AI reviews running at once, repos that count as yours, more bots, names agents use for you, the close-collaborator threshold, the sync interval (`github.poll_seconds`, 90 s), and the prompts `inbox prompt <ref>` prints for someone else's PR, yours and an issue.
+- **More GitHub settings**: AI reviews running at once, repos that count as yours, more bots, names agents use for you, the close-collaborator threshold, the sync interval (`github.poll_seconds`, 90 s; 30 s while the window shows), and the prompts `inbox prompt <ref>` prints for someone else's PR, yours and an issue.
 - **Automations**: the ones GitHub comes with (`src/connectors/github-automations.ts`). Each row: its name, what it does and its last run, **Run now** and its switch (the only thing you change). Its view has **Copy to your automations** in place of Edit (makes an editable copy, off) and no Delete.
 
 **Searches and rules** (`#/settings/rules`):

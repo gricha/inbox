@@ -215,3 +215,90 @@ test("a bot's PR opened for you is read as deeply and as often as your own, once
   await run(t.desk.sync());
   assert.deepEqual(seen, [["acme/api#1", true]], "yours again after 3 minutes, deeply; someone else's waits 30");
 });
+
+test("a window that shows gets a pass at once when the last is old, then one every 30 s until it stops saying so", async (c) => {
+  c.mock.timers.enable({ apis: ["setTimeout"] });
+  const t = await setup([reviewAsk(1)]);
+  c.after(t.cleanup);
+  t.desk.start();
+  await idle(t.desk);
+  const passes = () => t.desk.gh.passAt;
+  const first = passes();
+  const later = (s: number) => {
+    t.setNow(new Date(t.desk.now().getTime() + s * 1000));
+  };
+
+  later(10);
+  t.desk.look();
+  await idle(t.desk);
+  assert.equal(passes(), first, "what it has is 10 s old: no pass, the next in 20 s");
+  later(20);
+  c.mock.timers.tick(20_000);
+  await idle(t.desk);
+  const second = passes();
+  assert.equal(second - first, 30_000);
+
+  later(45);
+  t.desk.look();
+  await idle(t.desk);
+  const third = passes();
+  assert.equal(third - second, 45_000, "older than the pace: a pass at once");
+
+  // Nobody looks any more: the setting's pace again.
+  later(80);
+  c.mock.timers.tick(30_000);
+  await idle(t.desk);
+  const fourth = passes();
+  assert.equal(fourth - third, 80_000, "the pass armed while it showed");
+  later(30);
+  c.mock.timers.tick(30_000);
+  await idle(t.desk);
+  assert.equal(passes(), fourth, "no pass 30 s on");
+  later(60);
+  c.mock.timers.tick(60_000);
+  await idle(t.desk);
+  assert.equal(passes() - fourth, 90_000);
+});
+
+test("while a window shows, a pulse every 10 s reads again what changed or whose CI moved, and a new ask starts one pass", async (c) => {
+  c.mock.timers.enable({ apis: ["setTimeout"] });
+  const t = await setup([reviewAsk(1)]);
+  c.after(t.cleanup);
+  t.desk.start();
+  await idle(t.desk);
+  const ONE = "acme/api#1";
+  const beat = async () => {
+    c.mock.timers.tick(10_000);
+    await idle(t.desk);
+  };
+  await beat();
+  assert.equal(t.gh.pulses.length, 0, "nobody looks: no pulse");
+
+  t.desk.look();
+  const searches = t.gh.searches.length;
+  const one = t.gh.items.get(ONE)!;
+  t.gh.items.set(ONE, { ...one, title: "Renamed", updated_at: new Date(Date.parse(one.updated_at) + 60_000).toISOString() });
+  await beat();
+  assert.deepEqual(t.gh.pulses, [[one.node_id]]);
+  assert.equal(runSync(t.desk.item(ONE)).item.title, "Renamed", "what changed is read at once");
+  assert.equal(t.gh.searches.length, searches, "with no pass");
+
+  // CI moves without the PR's own time moving: the pulse before had seen it green.
+  const details = t.gh.detailCalls.length;
+  t.gh.items.set(ONE, { ...t.gh.items.get(ONE)!, ci: "red" });
+  await beat();
+  assert.equal(runSync(t.desk.item(ONE)).item.ci, "red");
+  assert.equal(t.gh.detailCalls.length, details + 1);
+
+  // A PR asking for you that the desk doesn't hold: one pass, which finds it. The next beat is the watched pass's own time.
+  t.gh.items.set("acme/api#2", reviewAsk(2));
+  await beat();
+  assert.equal(runSync(t.desk.item("api#2")).item.id, "acme/api#2");
+
+  // The window's gone: the pulses stop by themselves.
+  t.setNow(new Date(t.desk.now().getTime() + 120_000));
+  const pulses = t.gh.pulses.length;
+  await beat();
+  await beat();
+  assert.equal(t.gh.pulses.length, pulses);
+});

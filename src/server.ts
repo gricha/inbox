@@ -937,6 +937,12 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       return { ok: true };
     }),
   );
+  app.post("/api/look", (c) =>
+    total(c, () => {
+      desk.look();
+      return { ok: true };
+    }),
+  );
   app.get("/api/config", (c) =>
     respond(
       c,

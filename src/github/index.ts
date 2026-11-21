@@ -31,6 +31,7 @@ import {
   LOOKUP,
   PR_CHECKS,
   PR_CONTEXT,
+  PULSE,
   REVIEWERS,
   TEAMS,
   VIEWER,
@@ -85,6 +86,11 @@ export interface PrContext {
   comments: Said[]; // on the PR itself
   commits: { oid: string; headline: string; at: string; author: string }[]; // the latest 20, oldest first; author: login, "" if unknown
 }
+export interface Pulse {
+  nodes: { node_id: string; updated_at: string; rollup: string }[];
+  asked: string[];
+}
+
 export interface GitHub {
   viewer(): Effect.Effect<string, GitHubReadError>;
   search(query: string, max?: number): Effect.Effect<{ hits: SearchHit[]; total: number }, GitHubReadError>;
@@ -105,6 +111,9 @@ export interface GitHub {
   // A file's text at a commit; null when it isn't there, is binary or is too big for GitHub to give.
   blob(repo: string, oid: string, path: string): Effect.Effect<string | null, GitHubReadError>;
   rateLimit(): { remaining: number; reset_at: string } | null; // from the last response
+  // One cheap query: when each of these nodes (100 at most) last changed and its head commit's rollup ("" for none, or an
+  // issue), and `asked`, the node ids of the latest open PRs asking for your review.
+  pulse(nodeIds: string[]): Effect.Effect<Pulse, GitHubReadError>;
   // A repo's latest published release (not a draft or prerelease); null when it has none.
   latestRelease(repo: string): Effect.Effect<{ tag: string; url: string } | null, GitHubReadError>;
 }
@@ -269,6 +278,21 @@ const BLOB_DATA = Schema.Struct({
 const LOOKUP_DATA = Schema.Struct({
   repository: Schema.NullOr(Schema.Struct({ issueOrPullRequest: Schema.NullOr(RAW_HIT) })),
 });
+const PULSE_DATA = Schema.Struct({
+  nodes: Schema.Array(
+    Schema.NullOr(
+      Schema.Struct({
+        id: Schema.optionalKey(Schema.String),
+        updatedAt: Schema.optionalKey(Schema.String),
+        commits: Schema.optionalKey(
+          nodesOf(Schema.Struct({ commit: Schema.Struct({ statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })) }) })),
+        ),
+      }),
+    ),
+  ),
+  search: nodesOf(Schema.NullOr(Schema.Struct({ id: Schema.optionalKey(Schema.String) }))),
+});
+const PULSE_ASKED = "is:open is:pr review-requested:@me sort:updated-desc";
 const VIEWER_DATA = Schema.Struct({ viewer: Schema.Struct({ login: Schema.String }) });
 
 const RECENT = 20; // your latest PRs' titles, for the judge
@@ -552,6 +576,17 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     reviewers,
     blob,
     rateLimit: () => client.rateLimit(),
+    pulse: Effect.fn("GitHub.pulse")(function* (nodeIds: string[]) {
+      const d = yield* ask(PULSE_DATA, PULSE, { ids: nodeIds.slice(0, 100), q: PULSE_ASKED, first: 30 });
+      return {
+        nodes: d.nodes.flatMap((n) =>
+          n?.id && n.updatedAt
+            ? [{ node_id: n.id, updated_at: n.updatedAt, rollup: n.commits?.nodes[0]?.commit.statusCheckRollup?.state ?? "" }]
+            : [],
+        ),
+        asked: d.search.nodes.flatMap((n) => (n?.id ? [n.id] : [])),
+      };
+    }),
     latestRelease,
   };
 }

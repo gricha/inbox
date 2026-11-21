@@ -481,6 +481,11 @@ export function App() {
     };
   }, [onLane, load]);
 
+  // While the window shows, the desk reads GitHub sooner; a desk that can't hear it (down, or older) is no news here.
+  const look = useCallback(() => {
+    if (document.visibilityState === "visible") runUi(Effect.ignore(api.look()));
+  }, []);
+
   // Live updates; EventSource gives up after a non-200 (e.g. the dev proxy while the server is down), so reconnect by hand.
   useEffect(() => {
     let es: EventSource | null = null;
@@ -491,6 +496,7 @@ export function App() {
         refresh();
       });
       es.addEventListener("open", () => {
+        look();
         refresh();
         runUi(loadOmarchy());
       });
@@ -510,16 +516,19 @@ export function App() {
     };
     connect();
     const visible = () => {
+      look();
       if (document.visibilityState === "visible") refresh(0);
     };
     document.addEventListener("visibilitychange", visible);
+    const looking = window.setInterval(look, 30_000);
     return () => {
       es?.close();
       clearTimeout(retry);
+      clearInterval(looking);
       document.removeEventListener("visibilitychange", visible);
     };
     // Bumping epoch is how a dead stream gets reopened.
-  }, [refresh, epoch]);
+  }, [refresh, look, epoch]);
 
   // A desk from a checkout is back within a second or two of a change.
   const quick = sourceDown?.state === "running";
