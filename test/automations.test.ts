@@ -1987,10 +1987,14 @@ test("a scheduled question your agent answered while the decision model was down
 function claudeHome(c: TestContext, servers: Record<string, unknown>) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-claude-home-"));
   fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: servers }));
-  const was = process.env.HOME;
-  process.env.HOME = home;
+  // os.homedir() reads USERPROFILE on Windows.
+  const was = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  Object.assign(process.env, { HOME: home, USERPROFILE: home });
   c.after(() => {
-    process.env.HOME = was;
+    for (const [k, v] of Object.entries(was)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
     fs.rmSync(home, { recursive: true, force: true });
   });
 }
