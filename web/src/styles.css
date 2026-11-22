@@ -3316,6 +3316,12 @@ html::-webkit-scrollbar-corner,
   cursor: pointer;
 }
 
+/* An automation's Open is a link out drawn as a button. */
+a.act,
+a.c-cta {
+  text-decoration: none;
+}
+
 .act:hover:not(:disabled) {
   border-color: var(--faint);
   background: var(--wash);
@@ -4375,6 +4381,28 @@ html::-webkit-scrollbar-corner,
   display: flex;
   gap: 8px;
   margin-left: auto;
+}
+
+/* An automation's note, opened: its line as the title, where it came from under it, then its body. */
+.nc-head {
+  display: grid;
+  gap: 2px;
+  margin-right: 28px;
+}
+
+.nc-title {
+  color: var(--ink);
+  font: 600 var(--text-lg) / 1.35 var(--sans);
+}
+
+.nc-from {
+  color: var(--pencil);
+  font-size: var(--text-sm);
+}
+
+.note-card .prose {
+  max-height: 50vh;
+  overflow: auto;
 }
 
 .note-tray .note-acts .act {

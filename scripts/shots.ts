@@ -927,6 +927,36 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // An automation's note: its name where "by you" goes, its first button the row's; opened, read only, its body as prose
+    // with no live links or images, its buttons (Open a link out) and Mark as done.
+    name: "queue-note-card",
+    go: async (page) => {
+      await at("#/")(page);
+      const row = page.locator(".line.memo", { hasText: "Dana Okafor" });
+      await row.waitFor({ timeout: 3000 });
+      const cta = await row.locator(".line-cta, .c-cta").first().textContent();
+      if (cta !== "Open in Gmail") failures.push(`queue-note-card: the row's call to action reads ${JSON.stringify(cta)}`);
+      await row.locator(".row-main").click();
+      await page.locator(".note-card").waitFor({ timeout: 3000 });
+      const card = page.locator(".note-card");
+      if (!(await card.locator(".nc-from", { hasText: "From your automation Important personal email" }).count()))
+        failures.push("queue-note-card: it doesn't say which automation");
+      if (await card.locator(".prose a, .prose img").count()) failures.push("queue-note-card: its body has a live link or an image");
+      if (!(await card.locator(".prose b", { hasText: "$1,200 deposit" }).count())) failures.push("queue-note-card: no markdown");
+      const acts = await card.locator(".note-acts .act").allTextContents();
+      if (acts.join("|") !== "Open in Gmail|Draft a reply|Mark as done")
+        failures.push(`queue-note-card: its buttons read ${JSON.stringify(acts)}`);
+      const href = await card.locator("a.act").getAttribute("href");
+      if (!href?.startsWith("https://mail.google.com/")) failures.push(`queue-note-card: Open goes to ${href}`);
+      await page.waitForTimeout(400); // it has slid down
+    },
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(400);
+      if (await page.locator(".note-card").count()) failures.push("queue-note-card: Esc leaves it open");
+    },
+  },
+  {
     // A note's Done, Move to and Save show on the Inbox at once, before the desk answers (it never does here).
     name: "queue-notes-show",
     go: async (page) => {

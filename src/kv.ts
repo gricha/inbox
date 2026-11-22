@@ -241,6 +241,14 @@ export const AskSchema = schemaOf<Ask>()(
       ),
     ),
     fix: opt(Schema.Boolean),
+    note: opt(
+      Schema.Struct({
+        text: Schema.String,
+        body: opt(Schema.String),
+        url: opt(Schema.String),
+        from: opt(Schema.Struct({ id: Schema.String, name: Schema.String })),
+      }),
+    ),
     answer: Schema.NullOr(Schema.Struct({ text: Schema.String, at: Schema.String })),
   }),
 );
@@ -259,6 +267,11 @@ export const KeptInquirySchema = Schema.Struct({
     Schema.Struct({ text: Schema.String, at: Schema.String, dismissed: Schema.Boolean, read_at: opt(Schema.NullOr(Schema.String)) }),
   ),
 });
+export const NoteButtonSchema = Schema.Struct({
+  label: Schema.String,
+  do: Schema.Literals(["open", "ask"]),
+  prompt: opt(Schema.String),
+});
 export const NoteSchema = schemaOf<Omit<Note, "waiting">>()(
   Schema.Struct({
     id: Schema.String,
@@ -267,5 +280,9 @@ export const NoteSchema = schemaOf<Omit<Note, "waiting">>()(
     remind_at: Schema.NullOr(Schema.String),
     reminded_at: Schema.NullOr(Schema.String),
     section: opt(Schema.Literals(["urgent", "standard", "fyi"])),
+    from: opt(Schema.Struct({ id: Schema.String, name: Schema.String })),
+    body: opt(Schema.String),
+    url: opt(Schema.String),
+    buttons: opt(Schema.mutable(Schema.Array(NoteButtonSchema))),
   }),
 );

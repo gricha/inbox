@@ -1,11 +1,13 @@
 import { Effect } from "effect";
-import { useEffect, useRef, useState } from "react";
-import type { InboxSection, Note } from "../../../src/types.ts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { blocks } from "../../../src/prose.ts";
+import type { InboxSection, Note, NoteButton } from "../../../src/types.ts";
 import { runUi } from "../api.ts";
 import { age, cls, when } from "../format.ts";
 import { useKeyedLayout } from "../keyed.ts";
 import { remindTime, TIMES } from "../view.ts";
 import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
+import { ProseBlocks } from "./Prose.tsx";
 import { ClockIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 
 export const noteOf = (id: string) => `note:${id}`; // its row's id, as the right-click and the cursor read it
@@ -16,29 +18,72 @@ export interface NoteCtx {
   selected: string | null;
   open: (n: Note) => void; // into the note tray, to change it
   done: (n: Note) => void;
+  press: (n: Note, button: number) => void; // an automation's Ask button
   chains?: ChainCtx; // a chain's head: its steps, open under it on this device
   me?: string; // your login, for a step of yours
 }
 
-// A note to yourself as a row: Note, its words, Done; when it reminds (or reminded) you where a PR's author goes.
+// Where an Open button goes, said before you press it: the link is what a run read, so its host is the tell.
+const hostOf = (url: string) => URL.parse(url)?.host ?? url;
+
+// One of an automation's buttons: Open is a link out (the window opens it in your browser), Ask a press the desk handles.
+function NoteAction({
+  n,
+  b,
+  i,
+  className,
+  onPress,
+}: {
+  n: Note;
+  b: NoteButton;
+  i: number;
+  className: string;
+  onPress: (n: Note, i: number) => void;
+}) {
+  if (b.do === "open")
+    return n.url ? (
+      <a className={className} href={n.url} target="_blank" rel="noreferrer" data-tip={`Opens ${hostOf(n.url)}`}>
+        {b.label}
+      </a>
+    ) : null;
+  return (
+    <button
+      type="button"
+      className={className}
+      data-tip={`Asks your agent: ${b.prompt ?? ""}`}
+      onClick={() => {
+        onPress(n, i);
+      }}
+    >
+      {b.label}
+    </button>
+  );
+}
+
+// A note to yourself as a row: Note, its words, Done; when it reminds (or reminded) you where a PR's author goes. One an
+// automation raised says which, and its first button is the row's.
 export function NoteRow({ n, ctx }: { n: Note; ctx: NoteCtx }) {
   const id = noteOf(n.id);
   const later = !!n.remind_at && Date.parse(n.remind_at) > ctx.now;
-  const kindIcon = <KindIcon kind="note" tip="Note to yourself: a click changes it" />;
+  const kindIcon = (
+    <KindIcon kind="note" tip={n.from ? `From your automation ${n.from.name}: a click opens it` : "Note to yourself: a click changes it"} />
+  );
   const title = <span className="line-title">{n.text}</span>;
   const by = (
     <span
       className="line-by"
       title={n.remind_at ? `${later ? "Reminds you" : "Reminded you"} ${new Date(n.remind_at).toLocaleString()}` : undefined}
     >
-      {n.remind_at ? `at ${when(n.remind_at)}` : "by you"}
+      {n.remind_at ? `at ${when(n.remind_at)}` : (n.from?.name ?? "by you")}
     </span>
   );
+  const first = n.buttons?.[0];
+  const cta = ctx.compact ? "c-cta" : "act line-cta line-reply";
   const remind = n.remind_at ? `${later ? "Reminds you" : "Reminded you"} ${new Date(n.remind_at).toLocaleString()}` : undefined;
   const face = (
     <span className="line-by line-face" data-tip={remind}>
       {n.remind_at && <ClockIcon />}
-      <span className="sr">{n.remind_at ? `at ${when(n.remind_at)}` : "by you"}</span>
+      <span className="sr">{n.remind_at ? `at ${when(n.remind_at)}` : (n.from?.name ?? "by you")}</span>
     </span>
   );
   const ageEl = (
@@ -82,15 +127,19 @@ export function NoteRow({ n, ctx }: { n: Note; ctx: NoteCtx }) {
             )}
           </button>
           {chained && <ChainButton head={id} steps={steps} ctx={chained} />}
-          <button
-            type="button"
-            className={ctx.compact ? "c-cta" : "act line-cta line-reply"}
-            onClick={() => {
-              ctx.done(n);
-            }}
-          >
-            Done
-          </button>
+          {first && (first.do === "ask" || n.url) ? (
+            <NoteAction n={n} b={first} i={0} className={cta} onPress={ctx.press} />
+          ) : (
+            <button
+              type="button"
+              className={cta}
+              onClick={() => {
+                ctx.done(n);
+              }}
+            >
+              Done
+            </button>
+          )}
           {!ctx.compact && (
             <>
               <RowFacts />
@@ -527,6 +576,102 @@ export function NoteBar({
             )}
             <button type="button" className="act primary" title="Save (↵)" disabled={!ready} onClick={save}>
               {busy ? "Saving…" : "Save note"}
+            </button>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// A note an automation raised, opened: its line, where it came from, its body as prose (an agent wrote it from what it
+// read: no HTML, no images, its links as text), and its buttons. Nothing in it is yours to change, so it's read, not edited.
+export function NoteCard({
+  note,
+  now,
+  onPress,
+  onDone,
+  onClose,
+  closer,
+}: {
+  note: Note;
+  now: number;
+  onPress: (n: Note, button: number) => void;
+  onDone: (n: Note) => void;
+  onClose: () => void;
+  closer: (leave: (() => void) | null) => void;
+}) {
+  const [leaving, setLeaving] = useState(false);
+  const bs = useMemo(() => blocks(note.body ?? ""), [note.body]);
+  useEffect(() => {
+    closer(() => {
+      setLeaving(true);
+    });
+    return () => {
+      closer(null);
+    };
+  }, [closer]);
+  const leave = () => {
+    setLeaving(true);
+  };
+  return (
+    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- a click on the blurred page closes it; Esc and Close are its keys and button
+    <div
+      className={cls("note-veil", leaving && "leaving")}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) leave();
+      }}
+    >
+      <div
+        className={cls("note-tray note-card", leaving && "leaving")}
+        // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a native <dialog>'s backdrop covers the sidebar; this one covers only the page
+        role="dialog"
+        aria-modal="true"
+        aria-label={note.text}
+        onAnimationEnd={(e) => {
+          if (leaving && e.target === e.currentTarget) onClose();
+        }}
+      >
+        <button type="button" className="note-x" title="Close (Esc)" aria-label="Close" onClick={leave}>
+          <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+            <path d="m4.5 4.5 7 7m0-7-7 7" />
+          </svg>
+        </button>
+        <div className="nc-head">
+          <div className="nc-title">{note.text}</div>
+          <div className="nc-from">
+            From your automation {note.from?.name} · {age(note.at, now)} ago
+          </div>
+        </div>
+        {bs.length > 0 && <ProseBlocks bs={bs} links={false} />}
+        <div className="note-when">
+          <span className="note-acts">
+            {note.buttons?.map((b, i) => (
+              <NoteAction
+                key={`${b.do}:${b.label}`}
+                n={note}
+                b={b}
+                i={i}
+                className={cls("act", i === 0 && "primary")}
+                onPress={(n, at) => {
+                  onPress(n, at);
+                  leave();
+                }}
+              />
+            ))}
+            <button
+              type="button"
+              className="act note-done"
+              title="Mark this note as done: it leaves your Inbox"
+              onClick={() => {
+                onDone(note);
+                leave();
+              }}
+            >
+              <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m3.5 8.5 3 3 6-7" />
+              </svg>
+              Mark as done
             </button>
           </span>
         </div>

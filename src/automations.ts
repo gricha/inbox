@@ -39,9 +39,11 @@ import {
   type AutomationItem,
   type AutomationRun,
   type AutomationView,
+  type NoteButton,
   type RuleAction,
   type Verb,
 } from "./types.ts";
+import { NoteButtonSchema } from "./kv.ts";
 import { report } from "./sentry.ts";
 import { secretsPath } from "./settings.ts";
 
@@ -67,6 +69,7 @@ const AutomationSchema = schemaOf<Automation>()(
     rule: opt(Schema.Struct({ do: Schema.Literals(VERBS), until: opt(Schema.String), why: Schema.String })),
     can: opt(arrayOf(Schema.Literals(VERBS))),
     mcp: opt(arrayOf(Schema.String)),
+    buttons: opt(arrayOf(NoteButtonSchema)),
     on: Schema.Boolean,
     by: Schema.Literals(["you", "an agent"]),
     updated_at: Schema.String,
@@ -258,7 +261,13 @@ const NOTES = {
         type: "string",
         description: "Its id where it lives (a thread or message id), the same every run, so the desk raises it once",
       },
-      text: { type: "string", description: "One line: what it is and what it needs from me, with its link if it has one" },
+      text: { type: "string", description: "One line: who or what it is and what it needs from me. No link: that goes in url" },
+      body: {
+        type: "string",
+        description:
+          "Optional, in markdown: what I'd want before opening it (the gist, the dates and amounts, what's asked of me), in a few short lines. No HTML or images; links show as text",
+      },
+      url: { type: "string", description: "Its https link where it lives (the email in its web app), for the note's Open button" },
       urgent: { type: "boolean", description: "It can't wait for today" },
     },
     required: ["key", "text"],
@@ -495,6 +504,7 @@ export class Automations {
       rule?: { do?: unknown; until?: unknown; why?: unknown } | undefined;
       can?: readonly string[] | undefined;
       mcp?: readonly string[] | undefined;
+      buttons?: readonly NoteButton[] | undefined;
       on?: boolean | undefined;
     },
     byYou: boolean,
@@ -541,6 +551,7 @@ export class Automations {
         return yield* new BadRequest({ message: "mcp goes with an agent run: a rule or a question has no tools" });
       if (mcp.length > 10 || mcp.some((n) => n.length > 100))
         return yield* new BadRequest({ message: "mcp: up to 10 server names, each under 100 characters" });
+      const buttons = yield* buttonsOf(b.buttons, mcp.length > 0);
       const all = this.own();
       const was = all.find((x) => x.id === id);
       const next = {
@@ -553,6 +564,7 @@ export class Automations {
         ...(rule && { rule }),
         ...(!addsOnly(can) && { can: [...can] }),
         ...(mcp.length > 0 && { mcp }),
+        ...(buttons.length > 0 && { buttons }),
       };
       // Its name goes into the run's prompt as yours too, so an agent's rename is a change; so is what it may do.
       const changed = !was || does(was) !== does(next);
@@ -1148,13 +1160,22 @@ export class Automations {
     const mine = all[a.id] ?? [];
     if (mine.includes(key)) return Effect.succeed([]);
     const urgent = field(raw, "urgent") === true;
-    return this.desk.saveNote(null, { text: `${a.name}: ${text}`.slice(0, 1_000), remind: "", ...(urgent && { section: "urgent" }) }).pipe(
-      Effect.map((n): AutomationItem[] => {
-        this.desk.store.set(NOTED, { ...all, [a.id]: [...mine, key].slice(-NOTED_KEPT) });
-        return [{ item_id: `note:${n.id}`, why: text.slice(0, 300), outcome: "added" }];
-      }),
-      Effect.catch((e) => Effect.succeed([{ ...failedItem({ ref: key, why: text }, e.message) }])),
+    const body = str(field(raw, "body"))?.trim().slice(0, 4_000);
+    const url = httpsUrl(field(raw, "url"));
+    // Open is the one button a note with a link needs, unless the automation says which.
+    const buttons = a.buttons ?? (url ? [{ label: "Open", do: "open" as const }] : []);
+    const n = this.desk.raiseNote(
+      { id: a.id, name: a.name },
+      {
+        text: text.slice(0, 1_000),
+        ...(body && { body }),
+        ...(url && { url }),
+        urgent,
+        buttons: buttons.filter((b) => b.do !== "open" || url),
+      },
     );
+    this.desk.store.set(NOTED, { ...all, [a.id]: [...mine, key].slice(-NOTED_KEPT) });
+    return Effect.succeed([{ item_id: `note:${n.id}`, why: text.slice(0, 300), outcome: "added" }]);
   }
 
   // The --mcp-config of a run with MCP servers: the desk's and those it names, copied from your Claude Code's user-level
@@ -1227,7 +1248,36 @@ export class Automations {
 }
 
 // What an automation does, as an edit is compared: a change to any of it is a new instruction, by whoever changed it.
-const does = (a: Pick<Automation, "name" | "schedule" | "events" | "prompt" | "when" | "decide" | "rule" | "can" | "mcp">) =>
+// The buttons on its notes, checked: a label each, Open, or Ask with what your agent is asked; only with mcp, which raises notes.
+function buttonsOf(raw: readonly NoteButton[] | undefined, notes: boolean): Effect.Effect<NoteButton[], BadRequest> {
+  const bad = (message: string) => Effect.fail(new BadRequest({ message: `buttons: ${message}` }));
+  if (!raw?.length) return Effect.succeed([]);
+  if (!notes) return bad("they go on the notes an automation with mcp raises");
+  if (raw.length > 3) return bad("up to 3");
+  const out: NoteButton[] = [];
+  for (const b of raw) {
+    const label = b.label.replaceAll(/\s+/g, " ").trim();
+    if (!label || label.length > 24) return bad("each needs a label of up to 24 characters");
+    if (b.do === "open") {
+      if (b.prompt) return bad(`"${label}" opens the note's link: no prompt`);
+      out.push({ label, do: "open" });
+      continue;
+    }
+    if (b.do !== "ask") return bad(`"${label}": do is open or ask`);
+    const asked = b.prompt?.trim() ?? "";
+    if (!asked || asked.length > 1_000) return bad(`"${label}" asks your agent: its prompt, up to 1000 characters`);
+    out.push({ label, do: "ask", prompt: asked });
+  }
+  return Effect.succeed(out);
+}
+
+// A run's link, kept only as an https URL with no login in it.
+function httpsUrl(raw: unknown): string | undefined {
+  const at = typeof raw === "string" ? URL.parse(raw.trim()) : null;
+  return at?.protocol === "https:" && !at.username && !at.password && at.href.length <= 2_000 ? at.href : undefined;
+}
+
+const does = (a: Pick<Automation, "name" | "schedule" | "events" | "prompt" | "when" | "decide" | "rule" | "can" | "mcp" | "buttons">) =>
   JSON.stringify([
     a.name,
     a.schedule,
@@ -1238,6 +1288,7 @@ const does = (a: Pick<Automation, "name" | "schedule" | "events" | "prompt" | "w
     a.rule ?? null,
     canOf(a),
     ...(a.mcp ? [a.mcp] : []),
+    ...(a.buttons ? [a.buttons] : []),
   ]);
 
 // What a question was last asked about: by whom and on what instruction (askedBy), and each item as it was (itemKey).
@@ -1406,7 +1457,7 @@ function prompt(
     ...answerLines(canOf(a)),
     ...(a.mcp
       ? [
-          "- What needs me that isn't a PR or issue (an email, say) goes in notes: its key (its id there, so the desk raises it once), one line of text on what it is and what it needs from me with its link, and urgent when it can't wait for today. Only what needs me; none is a good run.",
+          "- What needs me that isn't a PR or issue (an email, say) goes in notes: its key (its id there, so the desk raises it once), one line of text on who or what it is and what it needs from me, a short markdown body with what I'd want before opening it, its https url (the message in its web app, so Open goes straight there), and urgent when it can't wait for today. Only what needs me; none is a good run.",
         ]
       : []),
     "- summary: what you looked at and what you found, in a few plain sentences.",

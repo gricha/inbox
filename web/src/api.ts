@@ -266,6 +266,8 @@ export const api = {
   saveNote: (id: string | null, b: { text: string; remind: string; section?: InboxSection }) =>
     call<{ ok: true; note: Note }>("POST", id ? `/api/notes/${encodeURIComponent(id)}` : "/api/notes", b),
   doneNote: (id: string) => call<{ ok: true }>("POST", `/api/notes/${encodeURIComponent(id)}/done`),
+  // An automation's note's Ask button, by its place: your agent is asked, and the note is done.
+  askNote: (id: string, button: number) => call<{ ok: true; ask: Ask }>("POST", `/api/notes/${encodeURIComponent(id)}/ask`, { button }),
   // What a step of an "after" chain waits on; [] is Stop waiting.
   after: (item: string, after: string[]) => call<{ ok: true; item: string; after: string[] }>("POST", "/api/after", { item, after }),
   // Your answer to an agent's question, or leaving it unanswered.

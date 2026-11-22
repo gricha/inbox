@@ -2569,6 +2569,22 @@ const NOTES: Note[] = [
     remind_at: new Date(Date.now() + 18 * HOUR).toISOString(),
     reminded_at: null,
   },
+  // An automation's, from what its run read: its body is untrusted markdown, its link a mail thread.
+  {
+    id: "n4",
+    at: iso(0.5),
+    text: "Dana Okafor: the venue needs the deposit confirmed by tomorrow",
+    remind_at: null,
+    reminded_at: null,
+    section: "fyi",
+    from: { id: "personal-gmail", name: "Important personal email" },
+    body: "Dana asks you to confirm the **$1,200 deposit** for the Oct 18 venue by **tomorrow, 5pm**, or the hold lapses.\n\n- Reply to confirm, or call her at the number in the thread\n- The invoice is attached: https://example.com/invoice.pdf",
+    url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0a7d1",
+    buttons: [
+      { label: "Open in Gmail", do: "open" },
+      { label: "Draft a reply", do: "ask", prompt: "Draft a reply to this email in my Gmail drafts; don't send it." },
+    ],
+  },
 ];
 const notesView = (): NotesView => {
   const now = new Date().toISOString();
@@ -4654,6 +4670,24 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     throw new HttpError(404, `no criterion "${id}"`);
   }
   if (route === "POST /api/notes") return { ok: true, note: saveNote(null, await readBody(req)) };
+  const noteAsk = /^POST \/api\/notes\/([^/]+)\/ask$/.exec(route);
+  if (noteAsk) {
+    const at = NOTES.findIndex((n) => n.id === noteAsk[1]);
+    if (at < 0) throw new HttpError(404, "no such note");
+    NOTES.splice(at, 1);
+    return {
+      ok: true,
+      ask: {
+        id: "a5e7c0de",
+        at: new Date().toISOString(),
+        text: "Draft a reply.",
+        item_id: null,
+        thread_id: null,
+        thread_url: null,
+        answer: null,
+      },
+    };
+  }
   // Stop waiting: the step leaves its chain (the mock doesn't put it on a list).
   if (route === "POST /api/after") {
     const b = await readBody(req);

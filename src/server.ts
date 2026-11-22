@@ -47,7 +47,7 @@ import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
 import { CHUNK_FIELDS, FIELDS } from "./signals.ts";
 import { field as fieldOf, isRecord, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
-import { GITHUB_ACTIONS, type Action, type AskLines, type InlineAt, type RemoteView } from "./types.ts";
+import { GITHUB_ACTIONS, type Action, type AskLines, type InlineAt, type NoteButton, type RemoteView } from "./types.ts";
 
 const VERSION = stringOf(fieldOf(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")), "version")) ?? "";
 export const DEFAULT_PORT = 47823;
@@ -235,6 +235,18 @@ function inlineAtOf(b: Record<string, unknown>): InlineAt | null {
   if (!isRecord(start)) return null;
   const { line: from, side: was } = start;
   return line(from) && side(was) ? { path: file, line: at, side: on, start: { line: from, side: was } } : null;
+}
+
+// An automation's buttons as sent: each { label, do: open|ask, prompt? }; anything else, null.
+function noteButtons(v: unknown): NoteButton[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: NoteButton[] = [];
+  for (const x of v) {
+    if (!isRecord(x) || typeof x.label !== "string" || (x.do !== "open" && x.do !== "ask")) return null;
+    if (x.prompt !== undefined && typeof x.prompt !== "string") return null;
+    out.push({ label: x.label, do: x.do, ...(x.prompt !== undefined && { prompt: x.prompt }) });
+  }
+  return out;
 }
 
 export function createApp(desk: Desk, port: number, remote: Remote = new Remote(desk.store)): Hono {
@@ -728,6 +740,21 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       { log },
     ),
   );
+  // A note's Ask button: only from the window (your click), as an ask is.
+  app.post("/api/notes/:id/ask", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        yield* up;
+        if (!fromDesk(c)) return yield* new Forbidden({ message: "a note's buttons work only in the desk's window" });
+        const { button } = yield* bodyOf(c);
+        if (typeof button !== "number" || !Number.isInteger(button))
+          return yield* new BadRequest({ message: "need { button: its index }" });
+        return { ok: true, ask: yield* desk.askNote(c.req.param("id"), button) };
+      }),
+      { log },
+    ),
+  );
   app.post("/api/notes/:id/done", (c) =>
     respond(
       c,
@@ -836,13 +863,18 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
         (b.when !== undefined && typeof b.when !== "string") ||
         (b.can !== undefined && !strings(b.can)) ||
         (b.mcp !== undefined && !strings(b.mcp)) ||
+        (b.buttons !== undefined && !noteButtons(b.buttons)) ||
         (b.on !== undefined && typeof b.on !== "boolean")
       )
-        return yield* new BadRequest({ message: "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, on? }" });
+        return yield* new BadRequest({
+          message:
+            "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, on? }",
+        });
       const { name, schedule, events, prompt, when, decide, rule, can, mcp, on } = b;
+      const buttons = b.buttons === undefined ? undefined : (noteButtons(b.buttons) ?? undefined);
       const a = yield* desk.automations.set(
         c.req.param("id"),
-        { name, schedule, events, prompt, when, decide, rule, can, mcp, on },
+        { name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, on },
         fromDesk(c),
       );
       return { ok: true, automation: a };

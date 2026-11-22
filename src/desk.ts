@@ -85,6 +85,8 @@ import type {
   AutomationItem,
   Inquiry,
   Note,
+  NoteButton,
+  AskNote,
   NotesView,
   InquiryLink,
   InquiryOption,
@@ -4172,6 +4174,7 @@ export class Desk {
     thread_url?: string | undefined;
     lines?: AskLines | undefined;
     fix?: boolean; // fixIssue()'s: never from the window's own words
+    note?: AskNote; // askNote()'s
   }): Effect.Effect<Ask, Conflict | RefError | BadRequest | Upstream> {
     return Effect.gen({ self: this }, function* () {
       if (!this.settings["agent.coordinator"]) return yield* new Conflict({ message: "your agent is off: Settings → Agent" });
@@ -4209,6 +4212,7 @@ export class Desk {
             }
           : null,
         ...(b.fix && item?.kind === "issue" && { fix: true }),
+        ...(b.note && { note: b.note }),
         answer: null,
       };
       const line = askLine(a, this.askAbout(a.item_id));
@@ -4413,6 +4417,45 @@ export class Desk {
       this.store.set("notes", old ? this.notes().map((n) => (n.id === note.id ? note : n)) : [...this.notes(), note]);
       this.changed();
       return note;
+    });
+  }
+
+  // An automation's run raised it: in Urgent when it said so, with the automation's buttons as they are now.
+  raiseNote(
+    from: { id: string; name: string },
+    b: { text: string; body?: string; url?: string; urgent?: boolean; buttons?: NoteButton[] },
+  ): Note {
+    const note: Note = {
+      id: randomBytes(4).toString("hex"),
+      at: this.now().toISOString(),
+      text: b.text,
+      remind_at: null,
+      reminded_at: null,
+      ...(b.urgent && { section: "urgent" as const }),
+      from,
+      ...(b.body && { body: b.body }),
+      ...(b.url && { url: b.url }),
+      ...(b.buttons?.length && { buttons: b.buttons }),
+    };
+    this.store.set("notes", [...this.notes(), note]);
+    this.changed();
+    return note;
+  }
+
+  // POST /api/notes/:id/ask: a note's Ask button, from the window: your agent is asked the button's prompt (your words, set
+  // with the automation) about the note, which inbox_ask gives it as data; handed on, the note is done.
+  askNote(id: string, button: number): Effect.Effect<Ask, NotFound | BadRequest | Conflict | RefError | Upstream> {
+    return Effect.gen({ self: this }, function* () {
+      const n = this.notes().find((x) => x.id === id);
+      if (!n) return yield* new NotFound({ message: `no note "${id}"` });
+      const b = n.buttons?.[button];
+      if (b?.do !== "ask" || !b.prompt) return yield* new BadRequest({ message: "that button doesn't ask your agent anything" });
+      const a = yield* this.ask({
+        text: b.prompt,
+        note: { text: n.text, ...(n.body && { body: n.body }), ...(n.url && { url: n.url }), ...(n.from && { from: n.from }) },
+      });
+      yield* Effect.ignore(this.doneNote(id));
+      return a;
     });
   }
 

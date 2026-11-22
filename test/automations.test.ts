@@ -436,9 +436,18 @@ test("an agent writes or changes one and it's on as yours is; only you delete it
   for (const [bad, error] of [
     [{ schedule: "9am" }, 'schedule: write it as "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30" or "weekdays hourly"'],
     [{ prompt: " " }, "the instruction is empty"],
-    [{ name: 3 }, "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, on? }"],
-    [{ can: "mute" }, "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, on? }"],
-    [{ rule: "mute" }, "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, on? }"],
+    [
+      { name: 3 },
+      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, on? }",
+    ],
+    [
+      { can: "mute" },
+      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, on? }",
+    ],
+    [
+      { rule: "mute" },
+      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, on? }",
+    ],
     [{ decide: "guess" }, 'decide: "guess" isn\'t one of rule, ask, agent'],
     [{ decide: "rule" }, "a rule on a schedule needs when: the items it's about"],
     [{ decide: "ask" }, "a question on a schedule needs when: the items it's about"],
@@ -2019,8 +2028,8 @@ test("an agent run with MCP servers gets only those of yours, beside the desk's,
   assert.equal(run.error, null);
   const notes = t.desk.notes();
   assert.deepEqual(
-    notes.map((n) => [n.text, n.section]),
-    [["Mail: Dana's invoice needs your approval by Friday", "urgent"]],
+    notes.map((n) => [n.text, n.section, n.from]),
+    [["Dana's invoice needs your approval by Friday", "urgent", { id: "mail", name: "Mail" }]],
   );
   assert.deepEqual(
     run.items.map((x) => [x.item_id, x.outcome]),
@@ -2066,6 +2075,74 @@ test("an agent run with MCP servers gets only those of yours, beside the desk's,
   const p = fake.args(4);
   assert.ok(!p.includes("--strict-mcp-config"));
   assert.ok(!("notes" in (JSON.parse(p[p.indexOf("--json-schema") + 1]!) as { properties: object }).properties));
+});
+
+test("an automation's notes carry a markdown body, an https link and its buttons; Open is the default, and only with a link", async (c) => {
+  if (unixOnly(c)) return;
+  const fake = fakeClaude(c);
+  claudeHome(c, { gmail: { type: "http", url: "https://gmail.example/mcp" } });
+  const t = await setup([], { settings: { "policy.judge": false, "notify.quiet": "" }, desk: { mcpUrl: "http://localhost:47823/mcp" } });
+  c.after(t.cleanup);
+  const mail = { name: "Mail", schedule: "weekdays 09:00", prompt: "Read my mail.", mcp: ["gmail"] };
+  const refused = (b: object) => runSync(Effect.flip(t.desk.automations.set("mail", { ...mail, ...b }, true))).message;
+  assert.match(
+    refused({ mcp: undefined, buttons: [{ label: "Open", do: "open" }] }),
+    /buttons: they go on the notes an automation with mcp raises/,
+  );
+  assert.match(refused({ buttons: [{ label: "Reply", do: "ask" }] }), /"Reply" asks your agent: its prompt/);
+  assert.match(refused({ buttons: [{ label: "Open", do: "open", prompt: "x" }] }), /opens the note's link: no prompt/);
+  assert.match(refused({ buttons: [{ label: " ", do: "open" }] }), /a label of up to 24 characters/);
+  assert.match(refused({ buttons: Array.from({ length: 4 }, () => ({ label: "Open", do: "open" })) }), /up to 3/);
+  const buttons = [
+    { label: " Open in  Gmail ", do: "open" as const },
+    { label: "Draft a reply", do: "ask" as const, prompt: " Draft a reply in my Gmail drafts. " },
+  ];
+  const a = runSync(t.desk.automations.set("mail", { ...mail, buttons }, true));
+  assert.deepEqual(a.buttons, [
+    { label: "Open in Gmail", do: "open" },
+    { label: "Draft a reply", do: "ask", prompt: "Draft a reply in my Gmail drafts." },
+  ]);
+  const gmail = "https://mail.google.com/mail/?authuser=me@example.com#all/t1";
+  fake.answer("Two need you.", [], {
+    notes: [
+      { key: "t1", text: "Dana: invoice to approve", body: "**Due** Friday, $1,200.\n\n<img src=x>", url: gmail },
+      { key: "t2", text: "Bank: card declined", url: "javascript:alert(1)" },
+      { key: "t3", text: "Login from a new device", url: "https://user:pw@evil.example/" },
+    ],
+  });
+  await t.desk.automations.run(a, "now").p;
+  const [n1, n2, n3] = t.desk.notes();
+  assert.deepEqual(n1, {
+    id: n1!.id,
+    at: n1!.at,
+    text: "Dana: invoice to approve",
+    remind_at: null,
+    reminded_at: null,
+    from: { id: "mail", name: "Mail" },
+    body: "**Due** Friday, $1,200.\n\n<img src=x>",
+    url: gmail,
+    buttons: a.buttons,
+  });
+  // A link that isn't plain https is dropped, and Open with it: the rest of the note stays.
+  assert.deepEqual([n2!.url, n2!.buttons], [undefined, [a.buttons?.[1]]]);
+  assert.equal(n3!.url, undefined, "no login in a link");
+
+  // Without buttons, a note with a link gets Open; one without, none.
+  const plain = runSync(t.desk.automations.set("mail", mail, true));
+  fake.answer("Two.", [], {
+    notes: [
+      { key: "t4", text: "With a link", url: gmail },
+      { key: "t5", text: "Without" },
+    ],
+  });
+  await t.desk.automations.run(plain, "now").p;
+  const [n4, n5] = t.desk.notes().slice(3);
+  assert.deepEqual([n4!.buttons, n5!.buttons], [[{ label: "Open", do: "open" }], undefined]);
+  const schema = JSON.parse(fake.args(2)[fake.args(2).indexOf("--json-schema") + 1]!) as {
+    properties: { notes: { items: { properties: object } } };
+  };
+  assert.deepEqual(Object.keys(schema.properties.notes.items.properties), ["key", "text", "body", "url", "urgent"]);
+  assert.match(fake.stdin(2), /a short markdown body with what I'd want before opening it, its https url/);
 });
 
 test("Settings → MCP servers lists your Claude Code's with the automations that name each; only the window adds or removes one", async (c) => {

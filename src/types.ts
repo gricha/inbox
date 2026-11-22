@@ -1339,6 +1339,7 @@ export interface Ask {
   thread_url: string | null;
   lines?: AskLines | null; // absent on asks kept before it; the file's name never goes in the wake line (inbox_ask gives it)
   fix?: boolean; // Make PR with fix on an issue: your agent may open a draft PR with its fix
+  note?: AskNote; // a note's Ask button: the note an automation raised, as it was, which inbox_ask gives as data
   answer: { text: string; at: string } | null; // untrusted: an agent wrote it; in paragraphs, drawn by src/prose.ts, never as HTML
 }
 
@@ -1366,6 +1367,9 @@ export interface AskPlace {
   fix: { repo: string; base: string } | null; // Make PR with fix on an open issue: a new branch off base and a draft PR in repo; else null
 }
 
+// The note an Ask button was pressed on, kept with the ask (the note itself is done): untrusted, an automation's run wrote it.
+export type AskNote = Pick<Note, "text" | "body" | "url" | "from">;
+
 // A question an agent session put to you through the desk (inbox_inquire): a row on the main page until you answer it, and
 // its own page with all you need to decide without opening anything else. Everything but the answer is untrusted: an agent wrote it.
 export interface Inquiry {
@@ -1384,6 +1388,14 @@ export interface Inquiry {
 
 // A note to yourself (New note, ⌘N): on your Inbox until you mark it done. With a reminder it waits until then, then
 // notifies once and leads Urgent.
+// A button an automation puts on the notes its runs raise, set with the automation (your words, never a run's): open the
+// note's url, or ask your agent `prompt` about the note.
+export interface NoteButton {
+  label: string; // up to 24 characters: "Open in Gmail", "Draft a reply"
+  do: "open" | "ask";
+  prompt?: string; // ask's, and only ask's
+}
+
 export interface Note {
   id: string;
   at: string; // written
@@ -1391,6 +1403,11 @@ export interface Note {
   remind_at: string | null;
   reminded_at: string | null; // when its reminder notified
   section?: InboxSection; // where you put it on the Inbox; none, Standard
+  // Raised by an automation's run (its notes): what it read is others' words, so its text, body and url are untrusted.
+  from?: { id: string; name: string }; // the automation; absent: yours
+  body?: string; // markdown, drawn as prose: no HTML, no images, its links as text
+  url?: string; // https only: where it lives (the email in Gmail), for an open button
+  buttons?: NoteButton[]; // the automation's, as it was when it raised this; the first is the row's
   waiting?: WaitingStep[]; // on QueueView.notes: the head of an "after" chain, as on a Card; never stored
 }
 
@@ -1499,6 +1516,7 @@ export interface Automation {
   // An agent's: your agent's MCP servers, by the names it lists them under, that its runs get beside the desk's, and no
   // other of yours; it may then raise notes for what isn't on GitHub (an email). Absent: as your agent has them, none allowed.
   mcp?: string[];
+  buttons?: NoteButton[]; // with mcp: the buttons on the notes it raises, up to 3; absent: Open, on a note with a url
   on: boolean;
   by: "you" | "an agent"; // who last changed what it does
   updated_at: string;
@@ -1618,6 +1636,7 @@ export type AutomationBody = Pick<Automation, "name"> & {
   rule?: { do: Verb; why: string; until?: string | undefined } | undefined;
   can?: Verb[] | undefined;
   mcp?: string[] | undefined;
+  buttons?: NoteButton[] | undefined;
   schedule?: string | undefined;
   prompt?: string | undefined;
   decide?: Way | undefined;

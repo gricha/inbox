@@ -62,7 +62,7 @@ import {
 import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
 import { CommentBar } from "./components/CommentBar.tsx";
-import { NoteBar, noteOf, type NoteCtx } from "./components/Note.tsx";
+import { NoteBar, NoteCard, noteOf, type NoteCtx } from "./components/Note.tsx";
 import { Beside } from "./components/Beside.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Inflight } from "./components/Inflight.tsx";
@@ -1075,6 +1075,24 @@ export function App() {
       ),
     );
   }
+  // An automation's note's Ask button: it leaves at once, handed to your agent; put back if the desk refuses.
+  function pressNote(n: Note, button: number) {
+    setNoteEdits((e) => ({ ...e, [n.id]: null }));
+    runUi(
+      api.askNote(n.id, button).pipe(
+        Effect.match({
+          onSuccess: () => {
+            flash("Asked your agent");
+          },
+          onFailure: (e) => {
+            setNoteEdits((x) => dropKey(x, n.id));
+            flash(e.message, true);
+          },
+        }),
+        Effect.tap(refreshNow),
+      ),
+    );
+  }
   // A chain's steps, open under its head or folded, as you left them on this device; a step opens as its row would.
   const chains: ChainCtx = {
     open: chainsOpen,
@@ -1118,6 +1136,7 @@ export function App() {
       setNoting(n);
     },
     done: doneNote,
+    press: pressNote,
     chains,
     me: overview?.me ?? "",
   };
@@ -2203,7 +2222,20 @@ export function App() {
           }}
         />
       )}
-      {noting && (
+      {noting && noting !== "new" && noting.from && (
+        <NoteCard
+          key={noting.id}
+          note={noting}
+          now={now}
+          onPress={pressNote}
+          onDone={doneNote}
+          onClose={() => {
+            setNoting(null);
+          }}
+          closer={setNoteClose}
+        />
+      )}
+      {noting && (noting === "new" || !noting.from) && (
         <NoteBar
           key={noting === "new" ? "new" : noting.id}
           note={noting === "new" ? null : noting}
