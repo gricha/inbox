@@ -90,6 +90,7 @@ import {
 import { hashOf } from "../../src/links.ts";
 import { bulkMenu, filterOf, filterPeople, filterRest, githubRef, parseFilter, logLine, pickRange, pickToggle } from "../src/view.ts";
 import { afterText, chainLabel, settleSteps, stepGuides, stepOf, toggled } from "../src/view.ts";
+import { remindTime } from "../src/view.ts";
 import type { WaitingStep } from "../../src/types.ts";
 import { isTestPath, onLines, sections, tagTip, traditional, walk } from "../../src/sections.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";
@@ -1589,4 +1590,11 @@ test("the menu of several picked rows offers only what all of them allow", () =>
   const mixed = bulkMenu([a, card("o/r#6", { status: "done" })]);
   assert.equal(mixed.done, null);
   assert.deepEqual(mixed.snoozes, []);
+});
+
+test("a picked day's reminder starts at 9:00, or the first half hour still ahead today", () => {
+  assert.equal(remindTime("2026-11-23", "2026-11-22", "21:10"), "09:00", "another day: the working day's start, not midnight");
+  assert.equal(remindTime("2026-11-22", "2026-11-22", "07:15"), "09:00", "early today: still 9:00");
+  assert.equal(remindTime("2026-11-22", "2026-11-22", "14:10"), "14:30", "later today: the next half hour");
+  assert.equal(remindTime("2026-11-22", "2026-11-22", "23:40"), "23:30", "nothing left today");
 });

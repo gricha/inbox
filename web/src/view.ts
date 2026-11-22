@@ -1013,3 +1013,11 @@ export function bulkMenu(cards: Card[]): BulkMenu {
     close: cards.length > 0 && cards.every((c) => (c.actions ?? []).includes("close")),
   };
 }
+
+const two = (n: number) => String(n).padStart(2, "0");
+// Every half hour of a day, as a clock reads it.
+export const TIMES = Array.from({ length: 48 }, (_, i) => `${two(Math.floor(i / 2))}:${i % 2 ? "30" : "00"}`);
+
+// A reminder's time once its day is picked: 9:00, or the first half hour still ahead when that's later today.
+export const remindTime = (day: string, today: string, now: string): string =>
+  TIMES.find((t) => t >= "09:00" && (day > today || t > now)) ?? "23:30";

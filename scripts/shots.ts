@@ -905,6 +905,13 @@ const SHOTS: Shot[] = [
         !(await page.locator(".note-tray .nt-cal-times .pop-item").count())
       )
         failures.push("queue-notes: Pick a time shows no calendar");
+      // A day picked first starts at 9:00, and the half hours open there, not at midnight.
+      await page.locator(".note-tray .nt-cal-step[aria-label='The month after']").click();
+      await page.locator(".note-tray .nt-cal-day", { hasText: /^1$/ }).first().click();
+      const on = await page.locator(".note-tray .nt-cal-times .pop-item.on").textContent();
+      if (on !== "09:00") failures.push(`queue-notes: a day picked first starts at ${on}, not 09:00`);
+      const scrolled = await page.locator(".note-tray .nt-cal-times").evaluate((el) => el.scrollTop);
+      if (!scrolled) failures.push("queue-notes: the half hours open at midnight");
       const acts = await page.locator(".note-tray .note-acts .act").allTextContents();
       if (acts.join("|") !== "Save note" || !(await page.locator(".note-tray .note-x").count()))
         failures.push(`queue-notes: the tray's buttons read ${JSON.stringify(acts)}, or it has no cross`);

@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import type { InboxSection, Note } from "../../../src/types.ts";
 import { runUi } from "../api.ts";
 import { age, cls, when } from "../format.ts";
+import { useKeyedLayout } from "../keyed.ts";
+import { remindTime, TIMES } from "../view.ts";
 import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
 import { ClockIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 
@@ -213,8 +215,6 @@ function Menu({
 
 const two = (n: number) => String(n).padStart(2, "0");
 const DAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
-// Every half hour of a day, as a clock reads it.
-const TIMES = Array.from({ length: 48 }, (_, i) => `${two(Math.floor(i / 2))}:${i % 2 ? "30" : "00"}`);
 
 // A day and a time you pick, in the desk's look: a small button saying it, and under it a month to click a day in and a
 // list of half hours. Nothing before `min` (now, when the tray opened) can be picked. Its value is a datetime-local's.
@@ -249,8 +249,16 @@ function TimePick({
   const said = value
     ? new Date(value).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
     : "Pick a day";
-  // A day picked first takes the first half hour still ahead of it; a time picked first takes today.
-  const ahead = (d: string) => TIMES.find((t) => d > minDay || t > minTime) ?? "23:30";
+  // A day picked first takes 9:00 or the first half hour still ahead of it; a time picked first takes today.
+  const ahead = (d: string) => remindTime(d, minDay, minTime);
+  // The half hours open on the one picked, else 9:00 or the next one ahead, never at midnight.
+  const times = useRef<HTMLDivElement>(null);
+  useKeyedLayout(open || null, () => {
+    const at = time || ahead(day || minDay);
+    const list = times.current;
+    const row = list?.querySelector<HTMLElement>(`[data-time="${at}"]`);
+    if (list && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top;
+  });
   return (
     <span className="nt-menu">
       <button
@@ -332,11 +340,12 @@ function TimePick({
                 })}
               </div>
             </div>
-            <div className="nt-cal-times" role="menu" aria-label="Time">
+            <div className="nt-cal-times" role="menu" aria-label="Time" ref={times}>
               {TIMES.map((t) => (
                 <button
                   key={t}
                   type="button"
+                  data-time={t}
                   role="menuitemradio"
                   aria-checked={t === time}
                   className={cls("pop-item", t === time && "on")}
