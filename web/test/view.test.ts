@@ -228,7 +228,7 @@ test("an automation opens as a view inside Settings, from its own link, and goes
 test("Settings' parts are the sidebar's items, each a route: the core's, then the plugins'; old links land on their part", () => {
   assert.deepEqual(
     SETTINGS_PARTS.map((p) => `${p.plugin ? "plugin " : ""}${p.id}`),
-    ["queue", "automations", "agent", "usage", "app", "network", "plugin github", "plugin sessions"],
+    ["queue", "automations", "agent", "usage", "app", "network", "plugin github", "plugin sessions", "plugin mcp"],
   );
   const part = (hash: string) => {
     const r = parseRoute(hash);

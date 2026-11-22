@@ -401,6 +401,30 @@ export interface SetupAgent {
   url: string; // its own page on installing it
 }
 
+// GET /api/mcp: your agent's own MCP servers, as its config keeps them, for Settings → MCP servers.
+export interface McpServer {
+  name: string;
+  kind: "http" | "stdio" | "connector"; // connector: a claude.ai one, from your login, seen only by a check
+  target: string; // its URL, or its command line
+  headers: boolean; // it sends headers (their values are never shown)
+  desk: boolean; // this desk's own (Settings → Agent connects it)
+  used_by: string[]; // the automations that name it
+  status?: { state: "connected" | "needs-auth" | "failed"; detail: string }; // after a check
+}
+export interface McpView {
+  agent: string; // "Claude Code"
+  config: string; // the file it keeps them in
+  servers: McpServer[];
+  checked: boolean; // statuses came from a check (Claude Code only)
+}
+// POST /api/mcp: a server added through your agent's CLI, at user scope.
+export interface McpAdd {
+  name: string;
+  url?: string | undefined; // a remote server's
+  command?: string[] | undefined; // or a local one's argv
+  header?: string | undefined; // "Name: value", a remote's, Claude Code and OpenCode only
+}
+
 // GET /api/agents: whether Claude Code has the desk's MCP tools and the Inbox skill.
 export interface AgentStatus {
   driver: string;

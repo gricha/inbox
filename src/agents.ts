@@ -5,11 +5,20 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Result } from "effect";
 import { parse } from "smol-toml";
-import { CommandFailed, CommandNotFound, CommandTimeout, Conflict, fsError, type FsError, type UnsafeArgument } from "./errors.ts";
+import {
+  BadRequest,
+  CommandFailed,
+  CommandNotFound,
+  CommandTimeout,
+  Conflict,
+  fsError,
+  type FsError,
+  type UnsafeArgument,
+} from "./errors.ts";
 import { ownersHome } from "./home.ts";
 import { field, isKeyOf, isRecord, str } from "./narrow.ts";
 import { claudeSpawn, runCommand } from "./review.ts";
-import type { AgentStatus } from "./types.ts";
+import type { AgentStatus, McpAdd, McpServer, McpView } from "./types.ts";
 
 const SKILL = fileURLToPath(new URL("../skills/inbox", import.meta.url));
 export const SKILL_MD = path.join(SKILL, "SKILL.md");
@@ -452,4 +461,134 @@ export const connect = Effect.fn("agents.connect")(function* (
   }
   yield* migrate(d, url, timeout, log);
   return yield* status(driver, url);
+});
+
+// ---------------------------------------------------------------- your MCP servers (Settings → MCP servers)
+
+const AGENT_NAME: Record<DriverId, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
+const CONFIG: Record<DriverId, (home: string) => string> = {
+  "claude-code": (h) => path.join(h, ".claude.json"),
+  codex: (h) => path.join(h, ".codex", "config.toml"),
+  opencode: (h) => path.join(h, ".config", "opencode", "opencode.json"),
+};
+const HEADERS = ["headers", "http_headers", "env_http_headers", "bearer_token_env_var"];
+
+// One entry of any agent's config: its URL, or its argv (OpenCode's command is the whole argv); never a header's value.
+function rowOf(name: string, entry: unknown, url: string): McpServer {
+  const at = str(field(entry, "url"));
+  const command = field(entry, "command");
+  const args = field(entry, "args");
+  const rest: unknown[] = Array.isArray(args) ? args : [];
+  const argv = Array.isArray(command) ? command : typeof command === "string" ? [command, ...rest] : [];
+  const headers = HEADERS.some((k) => {
+    const v = field(entry, k);
+    return typeof v === "string" ? v !== "" : isRecord(v) && Object.keys(v).length > 0;
+  });
+  return { name, kind: at ? "http" : "stdio", target: at ?? argv.map(String).join(" "), headers, desk: desks(entry, url), used_by: [] };
+}
+
+// What your agent's own config file has, at user level: read, never run.
+export function mcpServers(driver: DriverId, url: string): McpView {
+  const home = os.homedir();
+  const servers = listed(DRIVERS[driver], home);
+  return {
+    agent: AGENT_NAME[driver],
+    config: CONFIG[driver](home),
+    servers: Object.entries(servers).map(([n, e]) => rowOf(n, e, url)),
+    checked: false,
+  };
+}
+
+// `claude mcp list`'s lines: "name: target - ✔ Connected", "! Needs authentication", "✘ Failed to connect — why".
+const LISTED = /^(.+?): (.+) - (✔|!|✘) (.+)$/;
+const STATE = { "✔": "connected", "!": "needs-auth", "✘": "failed" } as const;
+export function parseMcpList(out: string): { name: string; target: string; status: NonNullable<McpServer["status"]> }[] {
+  return out.split("\n").flatMap((line) => {
+    const m = LISTED.exec(line.trim());
+    if (!m) return [];
+    const mark = m[3] ?? "";
+    if (!isKeyOf(STATE, mark)) return [];
+    return [{ name: m[1]!, target: m[2]!.replace(/ \((?:HTTP|SSE|stdio)\)$/, ""), status: { state: STATE[mark], detail: m[4]!.trim() } }];
+  });
+}
+
+// Claude Code's own check: each server's state, and the claude.ai connectors your login brings, which no file lists.
+// Other agents have no such check, and their view comes back as it is. Run from your home, so no repo's servers join in.
+export const checkMcp = Effect.fn("agents.checkMcp")(function* (driver: DriverId, url: string) {
+  const view = mcpServers(driver, url);
+  if (driver !== "claude-code") return view;
+  const d = DRIVERS[driver];
+  const spawnAs = yield* claudeSpawn(d.bin, ["mcp", "list"]);
+  const out = yield* runCommand(spawnAs, { cwd: os.homedir(), timeout: 120_000, missing: `${d.bin} isn't on PATH` });
+  const seen = parseMcpList(out);
+  const servers = view.servers.map((s) => {
+    const got = seen.find((x) => x.name === s.name);
+    return got ? { ...s, status: got.status } : s;
+  });
+  const connectors = seen
+    .filter((x) => x.name.startsWith("claude.ai ") && !servers.some((s) => s.name === x.name))
+    .map((x): McpServer => ({
+      name: x.name,
+      kind: "connector",
+      target: x.target,
+      headers: false,
+      desk: false,
+      used_by: [],
+      status: x.status,
+    }));
+  return { ...view, servers: [...servers, ...connectors], checked: true };
+});
+
+// Added at user level through your agent's own CLI, as you'd run it: a remote one by URL (a header for Claude Code and
+// OpenCode), or a local one's argv. Nothing replaces one you have.
+export const addMcp = Effect.fn("agents.addMcp")(function* (driver: DriverId, url: string, b: McpAdd) {
+  const name = b.name.trim();
+  if (!/^[A-Za-z0-9][\w.-]{0,63}$/.test(name))
+    return yield* new BadRequest({ message: "a server's name is letters, digits, ., _ and -, up to 64" });
+  if (mcpServers(driver, url).servers.some((s) => s.name === name))
+    return yield* new Conflict({ message: `you have a server named ${name}: remove it first, or pick another name` });
+  const remote = b.url?.trim();
+  const argv = (b.command ?? []).map((x) => x.trim()).filter(Boolean);
+  if (Boolean(remote) === argv.length > 0) return yield* new BadRequest({ message: "give a URL or a command, not both" });
+  if (remote && !/^https?:\/\//.test(remote)) return yield* new BadRequest({ message: "a server's URL starts with https:// or http://" });
+  const header = b.header?.trim();
+  if (header && !remote) return yield* new BadRequest({ message: "a header goes with a URL" });
+  if (header && !/^[\w-]+:\s*\S/.test(header)) return yield* new BadRequest({ message: 'write the header as "Name: value"' });
+  if (header && driver === "codex")
+    return yield* new BadRequest({
+      message: "Codex keeps no header from its CLI: add the server without it, then set bearer_token_env_var in ~/.codex/config.toml",
+    });
+  const d = DRIVERS[driver];
+  const args = remote
+    ? driver === "claude-code"
+      ? ["mcp", "add", "--transport", "http", "--scope", "user", name, remote, ...(header ? ["--header", header] : [])]
+      : driver === "codex"
+        ? ["mcp", "add", name, "--url", remote]
+        : ["mcp", "add", name, "--url", remote, ...(header ? ["--header", header.replace(/:\s*/, "=")] : [])]
+    : driver === "claude-code"
+      ? ["mcp", "add", "--scope", "user", name, "--", ...argv]
+      : driver === "codex"
+        ? ["mcp", "add", name, "--", ...argv]
+        : null;
+  if (!args)
+    return yield* new BadRequest({
+      message: `OpenCode adds a local server only in its config: add it under mcp in ${CONFIG[driver](os.homedir())}`,
+    });
+  // The command to run yourself, shown on failure: never with the header's value.
+  const yourself = commandOf(d, header ? args.map((x) => (x === header ? "<header>" : x)) : args);
+  yield* run(d.bin, args, yourself, TIMEOUT);
+  return mcpServers(driver, url);
+});
+
+// Removed through your agent's CLI; this desk's own is Settings → Agent's, and OpenCode has no command for it.
+export const removeMcp = Effect.fn("agents.removeMcp")(function* (driver: DriverId, url: string, name: string) {
+  const row = mcpServers(driver, url).servers.find((s) => s.name === name);
+  if (!row) return yield* new BadRequest({ message: `no server named ${name} in ${CONFIG[driver](os.homedir())}` });
+  if (row.desk) return yield* new BadRequest({ message: "that's this desk's own server: Settings → Agent connects it" });
+  const d: Driver = DRIVERS[driver];
+  if (!d.remove)
+    return yield* new BadRequest({ message: `OpenCode has no command to remove one: delete it from ${CONFIG[driver](os.homedir())}` });
+  const args = d.remove(name);
+  yield* run(d.bin, args, commandOf(d, args), TIMEOUT);
+  return mcpServers(driver, url);
 });

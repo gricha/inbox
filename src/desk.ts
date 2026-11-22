@@ -70,6 +70,8 @@ import type {
   Action,
   ActivityPage,
   AgentStatus,
+  McpAdd,
+  McpView,
   SetupAgent,
   SetupView,
   AiReview,
@@ -1136,6 +1138,38 @@ export class Desk {
   // A file it can't read fails it, in Node's words: a 500, as before.
   agentStatus(mcpUrl: string): Effect.Effect<AgentStatus, FsError> {
     return agents.status(agents.driverOf(this.settings["agent.harness"]), mcpUrl);
+  }
+
+  // Settings → MCP servers: your agent's own, each with the automations that name it.
+  mcpView(mcpUrl: string): McpView {
+    return this.usedBy(agents.mcpServers(agents.driverOf(this.settings["agent.harness"]), mcpUrl));
+  }
+
+  // Claude Code's own check of each, and your login's claude.ai connectors; what its CLI fails with is said in its words.
+  checkMcp(mcpUrl: string): Effect.Effect<McpView, Upstream> {
+    return agents.checkMcp(agents.driverOf(this.settings["agent.harness"]), mcpUrl).pipe(
+      Effect.map((v) => this.usedBy(v)),
+      Effect.mapError((e) => new Upstream({ message: e.message, cause: e })),
+    );
+  }
+
+  addMcp(mcpUrl: string, b: McpAdd): Effect.Effect<McpView, BadRequest | Conflict | Upstream> {
+    return agents.addMcp(agents.driverOf(this.settings["agent.harness"]), mcpUrl, b).pipe(
+      Effect.map((v) => (this.log(`added MCP server ${b.name.trim()}`), this.usedBy(v))),
+      Effect.mapError((e) => (e._tag === "BadRequest" || e._tag === "Conflict" ? e : new Upstream({ message: e.message, cause: e }))),
+    );
+  }
+
+  removeMcp(mcpUrl: string, name: string): Effect.Effect<McpView, BadRequest | Upstream> {
+    return agents.removeMcp(agents.driverOf(this.settings["agent.harness"]), mcpUrl, name).pipe(
+      Effect.map((v) => (this.log(`removed MCP server ${name}`), this.usedBy(v))),
+      Effect.mapError((e) => (e._tag === "BadRequest" ? e : new Upstream({ message: e.message, cause: e }))),
+    );
+  }
+
+  private usedBy(v: McpView): McpView {
+    const all = this.automations.all();
+    return { ...v, servers: v.servers.map((s) => ({ ...s, used_by: all.filter((a) => a.mcp?.includes(s.name)).map((a) => a.name) })) };
   }
 
   // What stops your agent being connected is passed on in its CLI's words ("… Run it yourself: …"), its error the cause.

@@ -478,7 +478,7 @@ Code: `src/links.ts`; the protocol in `electron/main.ts`.
 No tabs. In Settings the sidebar lists its parts in place of the pages, under **‹ Inbox** and a rule (⌘1–⌘4 still open the pages). There's no search there. Two groups, each under a quiet heading:
 
 - **App**, the app's own: Inbox and notifications, Automations, Agent, Usage, This device, Network.
-- **Integrations**, one per plugin: GitHub, Sessions.
+- **Integrations**, one per plugin: GitHub, Sessions; then MCP servers.
 
 `SETTINGS_PARTS` in `web/src/settings-parts.ts`. The sidebar's Settings and `#/settings` open the first part.
 
@@ -634,6 +634,10 @@ The Sessions plugin's part ([api.md → Sessions](api.md#sessions)):
 - **Show sessions that need you** (`sessions.enabled`).
 - **Ask your agent whether a question waits on you** (`sessions.ask`).
 - **More Sessions settings**: **Stalled after** (`sessions.quiet_minutes`).
+
+### MCP servers
+
+`McpServers.tsx`: your agent's own servers ([api.md → MCP servers](api.md#mcp-servers)). The first row says which file keeps them, with **Check connections** for Claude Code; then a row a server: its name (after a check, Connected, Needs sign-in or Can't connect beside it), where it is, whether it sends headers, the automations that name it, and **Remove** (not on the desk's own or a connector). Under **Add a server**: Name, URL or command, and for a URL a Header; Add runs the agent's CLI and the list redraws.
 
 ## The first run
 

@@ -35,6 +35,7 @@ import { GitHubAuthError, type ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
 import type {
   Action,
+  McpView,
   ActivityEvent,
   ActivityKind,
   AgentStatus,
@@ -2869,6 +2870,34 @@ const RUNS: AutomationRun[] = [
     session: null,
   },
 ];
+// Settings → MCP servers: the desk's own, a remote one an automation names, a local one; a check adds states and a connector.
+function mcpView(checked: boolean): McpView {
+  const ok = { state: "connected" as const, detail: "Connected" };
+  const servers: McpView["servers"] = [
+    { name: "inbox", kind: "http", target: "http://localhost:47823/mcp", headers: false, desk: true, used_by: [] },
+    { name: "linear", kind: "http", target: "https://mcp.linear.app/mcp", headers: false, desk: false, used_by: ["Linear check"] },
+    { name: "xcodebuildmcp", kind: "stdio", target: "npx -y xcodebuildmcp@latest mcp", headers: false, desk: false, used_by: [] },
+  ];
+  if (!checked) return { agent: "Claude Code", config: "~/.claude.json", servers, checked };
+  return {
+    agent: "Claude Code",
+    config: "~/.claude.json",
+    servers: [
+      ...servers.map((s) => Object.assign(s, { status: ok })),
+      {
+        name: "claude.ai Gmail",
+        kind: "connector",
+        target: "https://gmailmcp.googleapis.com/mcp/v1",
+        headers: false,
+        desk: false,
+        used_by: [],
+        status: { state: "needs-auth", detail: "Needs authentication" },
+      },
+    ],
+    checked,
+  };
+}
+
 function automationsView(): AutomationView[] {
   return [...AUTOMATIONS, ...builtIns()].map((a) => {
     const s = parseSchedule(a.schedule);
@@ -4739,6 +4768,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return putSettings(isRecord(body.set) ? body.set : {}, strings(body.reset) ?? []);
   }
   if (route === "GET /api/agents") return agentStatus();
+  if (route === "GET /api/mcp" || route === "POST /api/mcp/check") return mcpView(route === "POST /api/mcp/check");
   if (route === "GET /api/setup" || route === "POST /api/setup/check") return setupView();
   if (route === "POST /api/setup") {
     const agent = String((await readBody(req)).agent);

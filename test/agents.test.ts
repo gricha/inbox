@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Cause, Effect, Exit, Fiber } from "effect";
-import { connect, plan, refreshSkills, serverName, status } from "../src/agents.ts";
+import { addMcp, checkMcp, connect, mcpServers, parseMcpList, plan, refreshSkills, removeMcp, serverName, status } from "../src/agents.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 import { posix } from "./helpers/platform.ts";
 
@@ -578,4 +578,103 @@ test("one agent's CLI failing doesn't hold up the other's renaming", { skip: pro
   assert.deepEqual([codex.mcp.connected, codex.skill.state], [true, "installed"]);
   assert.equal(readFileSync(join(home, ".codex", "config.toml"), "utf8"), toml("inbox"));
   assert.equal(runSync(status("claude-code", MCP)).mcp.connected, true, "claude keeps the old name's tools until the next try");
+});
+
+test(
+  "MCP servers: what your Claude Code's config has, never a header's value; a check adds states and your connectors",
+  posix,
+  async () => {
+    write(
+      ".claude.json",
+      JSON.stringify({
+        mcpServers: {
+          inbox: { type: "http", url: MCP },
+          linear: { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer s3cret" } },
+          xcode: { command: "npx", args: ["-y", "xcodebuildmcp", "mcp"] },
+        },
+      }),
+    );
+    const v = mcpServers("claude-code", MCP);
+    assert.equal(v.config, join(home, ".claude.json"));
+    assert.deepEqual(
+      v.servers.map((s) => [s.name, s.kind, s.target, s.headers, s.desk]),
+      [
+        ["inbox", "http", MCP, false, true],
+        ["linear", "http", "https://mcp.linear.app/mcp", true, false],
+        ["xcode", "stdio", "npx -y xcodebuildmcp mcp", false, false],
+      ],
+    );
+    assert.ok(!JSON.stringify(v).includes("s3cret"));
+    fake(
+      "claude",
+      `/bin/cat <<'EOF'
+Checking MCP server health…
+
+linear: https://mcp.linear.app/mcp (HTTP) - ✔ Connected
+xcode: npx -y xcodebuildmcp mcp - ✘ Failed to connect — spawn npx ENOENT
+claude.ai Gmail: https://gmailmcp.googleapis.com/mcp/v1 - ! Needs authentication
+EOF`,
+    );
+    const c = await run(checkMcp("claude-code", MCP));
+    assert.equal(c.checked, true);
+    assert.deepEqual(
+      c.servers.map((s) => [s.name, s.kind, s.status?.state ?? null]),
+      [
+        ["inbox", "http", null],
+        ["linear", "http", "connected"],
+        ["xcode", "stdio", "failed"],
+        ["claude.ai Gmail", "connector", "needs-auth"],
+      ],
+    );
+    assert.equal(c.servers[2]!.status!.detail, "Failed to connect — spawn npx ENOENT");
+    assert.deepEqual(readFileSync(join(home, "claude-args"), "utf8").trim().split("\n"), ["mcp", "list"]);
+    assert.deepEqual(parseMcpList("noise\nname: x - ? odd"), []);
+  },
+);
+
+test("MCP servers: added and removed through your agent's CLI at user level; the desk's own and bad input are refused", posix, async () => {
+  write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: MCP } } }));
+  fake("claude", "");
+  await run(addMcp("claude-code", MCP, { name: "gmail", url: "https://gmail.example/mcp", header: "Authorization: Bearer t" }));
+  assert.deepEqual(readFileSync(join(home, "claude-args"), "utf8").trim().split("\n"), [
+    "mcp",
+    "add",
+    "--transport",
+    "http",
+    "--scope",
+    "user",
+    "gmail",
+    "https://gmail.example/mcp",
+    "--header",
+    "Authorization: Bearer t",
+  ]);
+  await run(addMcp("claude-code", MCP, { name: "xcode", command: ["npx", "-y", "xcodebuildmcp", "mcp"] }));
+  assert.deepEqual(readFileSync(join(home, "claude-args"), "utf8").trim().split("\n"), [
+    "mcp",
+    "add",
+    "--scope",
+    "user",
+    "xcode",
+    "--",
+    "npx",
+    "-y",
+    "xcodebuildmcp",
+    "mcp",
+  ]);
+  const refused = async (e: Effect.Effect<unknown, { message: string }>) => (await failure(e)).message;
+  assert.match(await refused(addMcp("claude-code", MCP, { name: "inbox", url: "https://x.example" })), /you have a server named inbox/);
+  assert.match(await refused(addMcp("claude-code", MCP, { name: "a b", url: "https://x.example" })), /letters, digits/);
+  assert.match(await refused(addMcp("claude-code", MCP, { name: "x", url: "ftp://x" })), /starts with https/);
+  assert.match(await refused(addMcp("claude-code", MCP, { name: "x" })), /a URL or a command/);
+  assert.match(await refused(addMcp("codex", MCP, { name: "x", url: "https://x.example", header: "A: b" })), /Codex keeps no header/);
+  assert.match(await refused(removeMcp("claude-code", MCP, "inbox")), /this desk's own/);
+  assert.match(await refused(removeMcp("claude-code", MCP, "nope")), /no server named nope/);
+  write(".claude.json", JSON.stringify({ mcpServers: { inbox: { type: "http", url: MCP }, gmail: { type: "http", url: "https://g" } } }));
+  await run(removeMcp("claude-code", MCP, "gmail"));
+  assert.deepEqual(readFileSync(join(home, "claude-args"), "utf8").trim().split("\n"), ["mcp", "remove", "--scope", "user", "gmail"]);
+  // A failing CLI says what to run yourself, never the header's value.
+  fake("claude", "echo boom >&2; exit 1");
+  const why = await refused(addMcp("claude-code", MCP, { name: "k", url: "https://k.example", header: "Authorization: Bearer t0p" }));
+  assert.match(why, /Run it yourself: claude mcp add .* '<header>'/);
+  assert.ok(!why.includes("t0p"));
 });

@@ -995,6 +995,45 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   const mcpUrl = `http://localhost:${port}/mcp`;
   app.get("/api/agents", (c) => respond(c, desk.agentStatus(mcpUrl), { log, read: true }));
   app.post("/api/agents/connect", (c) => respond(c, desk.connectAgent(mcpUrl), { log }));
+  app.get("/api/mcp", (c) =>
+    respond(
+      c,
+      Effect.sync(() => desk.mcpView(mcpUrl)),
+      { log, read: true },
+    ),
+  );
+  app.post("/api/mcp/check", (c) => respond(c, desk.checkMcp(mcpUrl), { log }));
+  // Your agent's config is yours: only the window adds or removes a server.
+  const yours = (c: Parameters<typeof fromDesk>[0]) =>
+    fromDesk(c)
+      ? Effect.void
+      : Effect.fail(new Forbidden({ message: "add or remove a server in the desk's window: Settings → MCP servers" }));
+  app.post("/api/mcp", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        yield* yours(c);
+        const b = yield* bodyOf(c);
+        const argv = b.command;
+        if (
+          typeof b.name !== "string" ||
+          (b.url !== undefined && typeof b.url !== "string") ||
+          (argv !== undefined && !(Array.isArray(argv) && argv.every((x) => typeof x === "string"))) ||
+          (b.header !== undefined && typeof b.header !== "string")
+        )
+          return yield* new BadRequest({ message: "need { name, url or command, header? }" });
+        return yield* desk.addMcp(mcpUrl, { name: b.name, url: b.url, command: argv, header: b.header });
+      }),
+      { log },
+    ),
+  );
+  app.delete("/api/mcp/:name", (c) =>
+    respond(
+      c,
+      Effect.flatMap(yours(c), () => desk.removeMcp(mcpUrl, c.req.param("name"))),
+      { log },
+    ),
+  );
   app.get("/api/setup", (c) => respond(c, desk.setupView(), { log, read: true }));
   app.post("/api/setup/check", (c) => respond(c, desk.checkSetup(), { log }));
   app.post("/api/setup", (c) =>

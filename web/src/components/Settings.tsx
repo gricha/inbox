@@ -1,5 +1,6 @@
 // Rendered from the schema in GET /api/settings: a new entry in SETTINGS (src/settings.ts) needs no change here.
 import { SETTINGS_PARTS } from "../settings-parts.ts";
+import { McpServers } from "./McpServers.tsx";
 import { Effect } from "effect";
 import { renderSVG } from "uqr";
 import {
@@ -1233,7 +1234,7 @@ export function Settings({
 
   return (
     <div className="settings" hidden={!active}>
-      <div className="s-page" hidden={inView || section === "automations" || section === "usage"}>
+      <div className="s-page" hidden={inView || section === "automations" || section === "usage" || section === "mcp"}>
         {!view && (
           <section className="s-part s-skel" aria-busy="true" aria-label="Loading">
             <div className="lines s-sheet">
@@ -1326,6 +1327,11 @@ export function Settings({
         <section id="s-criteria" className="s-part" aria-label="Urgency">
           <h2 className="group-head">Urgency</h2>
           <Criteria active={active && section === "automations"} refresh={loads} now={now} flash={flash} onAsked={onAsked} />
+        </section>
+      </div>
+      <div className="s-page" hidden={section !== "mcp"}>
+        <section id="s-mcp" className="s-part" aria-label="MCP servers">
+          <McpServers active={active && section === "mcp"} refresh={loads} flash={flash} />
         </section>
       </div>
       <div className="s-page" hidden={section !== "usage"}>

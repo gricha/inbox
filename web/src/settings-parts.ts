@@ -11,4 +11,5 @@ export const SETTINGS_PARTS: readonly { id: string; name: string; plugin?: true;
   { id: "network", name: "Network" }, // Tailscale, then Local network
   { id: "github", name: "GitHub", plugin: true },
   { id: "sessions", name: "Sessions", plugin: true, automations: false },
+  { id: "mcp", name: "MCP servers", plugin: true, automations: false }, // your agent's own, which automations name
 ];

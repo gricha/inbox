@@ -15,7 +15,7 @@ import { Desk } from "../src/desk.ts";
 import { judgeText } from "../src/judge.ts";
 import { createMcpServer } from "../src/mcp.ts";
 import { createApp } from "../src/server.ts";
-import type { Automation } from "../src/types.ts";
+import type { Automation, McpView } from "../src/types.ts";
 import { fakeDecisions } from "./helpers/decisions.ts";
 import { idle, myPr, reviewAsk, setup, teamPing, UNSCORED } from "./helpers/desk.ts";
 import { unixOnly } from "./helpers/platform.ts";
@@ -2062,4 +2062,28 @@ test("an agent run with MCP servers gets only those of yours, beside the desk's,
   const p = fake.args(4);
   assert.ok(!p.includes("--strict-mcp-config"));
   assert.ok(!("notes" in (JSON.parse(p[p.indexOf("--json-schema") + 1]!) as { properties: object }).properties));
+});
+
+test("Settings → MCP servers lists your Claude Code's with the automations that name each; only the window adds or removes one", async (c) => {
+  claudeHome(c, {
+    inbox: { type: "http", url: "http://localhost:47823/mcp" },
+    linear: { type: "http", url: "https://mcp.linear.app/mcp" },
+  });
+  const t = await setup([], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  runSync(t.desk.automations.set("lin", { name: "Linear check", schedule: "mon 09:00", prompt: "Read Linear.", mcp: ["linear"] }, true));
+  const req = http(createApp(t.desk, 47823));
+  const got = (await (await req("GET", "/api/mcp")).json()) as McpView;
+  assert.deepEqual(
+    got.servers.map((s) => [s.name, s.desk, s.used_by]),
+    [
+      ["inbox", true, []],
+      ["linear", false, ["Linear check"]],
+    ],
+  );
+  const agent = await req("POST", "/api/mcp", { name: "x", url: "https://x.example" });
+  assert.equal(agent.status, 403);
+  assert.equal((await req("DELETE", "/api/mcp/linear")).status, 403);
+  const own = await req("DELETE", "/api/mcp/inbox", undefined, DESK);
+  assert.equal(own.status, 400, "the desk's own is Settings → Agent's");
 });

@@ -7,6 +7,8 @@ import type {
   InboxSection,
   Action,
   AgentStatus,
+  McpAdd,
+  McpView,
   SetupView,
   AiReview,
   InlineAt,
@@ -307,6 +309,11 @@ export const api = {
   pairCode: () => call<PairCode>("POST", "/api/pair/code", {}),
   revokeDevice: (id: string) => call<{ ok: true }>("DELETE", `/api/devices/${encodeURIComponent(id)}`),
   connectAgent: () => call<AgentStatus>("POST", "/api/agents/connect", {}),
+  // Settings → MCP servers: your agent's own; a check asks Claude Code for each one's state.
+  mcp: () => call<McpView>("GET", "/api/mcp"),
+  checkMcp: () => call<McpView>("POST", "/api/mcp/check", {}),
+  addMcp: (b: McpAdd) => call<McpView>("POST", "/api/mcp", b),
+  removeMcp: (name: string) => call<McpView>("DELETE", `/api/mcp/${encodeURIComponent(name)}`),
   // The first-run page: its state, Retry (GitHub and the agents asked again), and picking your agent.
   setup: () => call<SetupView>("GET", "/api/setup"),
   checkSetup: () => call<SetupView>("POST", "/api/setup/check", {}),
