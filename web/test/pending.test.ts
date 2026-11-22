@@ -1,3 +1,4 @@
+import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { placeNotes, type Note, type Standing } from "../../src/types.ts";

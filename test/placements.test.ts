@@ -1,4 +1,5 @@
 // Each item's log: where it stood on your desk each time that changed, and why.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { reviewAsk, setup, teamPing, UNSCORED } from "./helpers/desk.ts";

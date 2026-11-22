@@ -1,3 +1,4 @@
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { areaFiles, areasFor, buildAreas, dirOf, touched, type AreaPr } from "../src/areas.ts";

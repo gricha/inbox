@@ -1,4 +1,5 @@
 // Who a bot's PR was opened for, where no line says: the light model reads it once per description, in the background.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

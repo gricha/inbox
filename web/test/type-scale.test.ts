@@ -1,5 +1,6 @@
 // Every size comes from the type scale on :root (docs/visual.md → Type); the few that keep their own are listed here,
 // so a new raw size fails and the list only shrinks.
+import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";

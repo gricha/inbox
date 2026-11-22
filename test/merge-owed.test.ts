@@ -1,5 +1,6 @@
 // Someone else's PR you approved whose author has no say on the repo (a fork's contributor): they can't merge it, so the
 // merge is yours. Approving doesn't resolve it or take it off your desk, Done does, and its row offers Hand off for merge.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import { Effect } from "effect";
 import assert from "node:assert/strict";

@@ -1,3 +1,4 @@
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createServer, type AddressInfo } from "node:net";

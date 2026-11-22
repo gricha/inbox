@@ -1,5 +1,6 @@
 // The More menu's GitHub writes: close, draft, merge and reopen your own PR, request changes on someone else's, close an
 // issue. The desk decides which an item allows, refuses the rest, and takes them only from its own window.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";

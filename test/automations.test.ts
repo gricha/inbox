@@ -1,6 +1,7 @@
 // Automations: the owner's instructions run on a schedule by their own Claude Code, read only; what a run lists lands on
 // the desk with its why, and what the owner dealt with stays dealt with. One that may do more (sort, snooze, done, mute)
 // does only what the owner allowed it. Never the real claude: a fake in a temp dir.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

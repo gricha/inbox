@@ -1,4 +1,5 @@
 // One geometry for the mark: assets/brand/mark.svg, copied into the window's Mark and written into every icon by npm run icons.
+import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { test } from "node:test";

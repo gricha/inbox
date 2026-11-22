@@ -1,4 +1,5 @@
 // The coordinator's runs stopping, and your asks of it.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

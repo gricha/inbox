@@ -1,3 +1,4 @@
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Effect } from "effect";
@@ -9,9 +10,6 @@ import { reviewAsk, setup, teamPing } from "./helpers/desk.ts";
 import { hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { until } from "./helpers/wait.ts";
-
-// Adding starts Claude's read: never the real claude, even when run without the no-agent preload.
-process.env.DESK_CLAUDE = "/nonexistent/claude";
 
 const DAY = 24 * 3_600_000;
 const ID = "acme/other#9";

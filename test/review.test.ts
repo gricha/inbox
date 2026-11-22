@@ -1,3 +1,4 @@
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import { aiPending } from "../src/stage.ts";
 import assert from "node:assert/strict";

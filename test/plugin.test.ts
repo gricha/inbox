@@ -1,4 +1,5 @@
 // A source that isn't GitHub, held in memory (ids notes:1, notes:2…): the guard that the core stops assuming GitHub.
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

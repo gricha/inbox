@@ -1,3 +1,4 @@
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { attributionOf, onBehalf, requesterOf } from "../src/github/behalf.ts";

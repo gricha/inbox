@@ -1,4 +1,5 @@
 // Runs the mock API and checks it speaks the shapes the UI relies on.
+import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";

@@ -1,5 +1,6 @@
 // Snoozing until something happens: the item waits in Later until CI passes, new commits land, it's approved, out of draft
 // or its conflict is fixed, then comes back once, however the condition moves after.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { myPr, reviewAsk, setup } from "./helpers/desk.ts";

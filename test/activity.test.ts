@@ -1,4 +1,5 @@
 // The event log, auto-resolve and the notifications feed, through a Desk over a FakeGitHub.
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Item } from "../src/types.ts";

@@ -1,5 +1,6 @@
 // The Decisions API client, against a local stand-in: the request it sends is the documented one, and what comes back is
 // read strictly. Never the real API, never a real key.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decide, type Question } from "../src/decisions.ts";

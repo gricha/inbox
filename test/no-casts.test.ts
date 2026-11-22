@@ -1,6 +1,7 @@
 // What the linters ban stays banned: an unchecked cast (typescript/no-unsafe-type-assertion) is allowed in src/narrow.ts,
 // whose helpers check first, and in the few reads of what the desk itself wrote, counted here so the list only shrinks; and
 // no effect may skip its dependencies (react/exhaustive-effect-dependencies).
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";

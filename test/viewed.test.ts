@@ -1,5 +1,6 @@
 // What you marked viewed in a PR's review: kept by what each hunk changes, so a rebase keeps it and a push that rewrites a
 // hunk drops that hunk alone. Marked only from the desk's window, and never sent to GitHub.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { Effect } from "effect";

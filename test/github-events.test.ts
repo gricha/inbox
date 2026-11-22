@@ -1,3 +1,4 @@
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { itemEvents, type DiffContext } from "../src/connectors/github-events.ts";

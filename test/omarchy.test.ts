@@ -1,4 +1,5 @@
 // Omarchy's theme as the desk reads it, from a scratch HOME laid out as Omarchy lays out its own.
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

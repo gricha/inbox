@@ -1,4 +1,5 @@
 // A PR's file at its head, for its review's more lines: read once per commit, null when GitHub won't give it whole.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { reviewAsk, setup } from "./helpers/desk.ts";

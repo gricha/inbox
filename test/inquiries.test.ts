@@ -1,5 +1,6 @@
 // Agents' questions for the owner (inbox_inquire): a row on the main page and a notification, answered only in the desk's
 // window; and a write the owner makes in the desk takes its item off the desk at once.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";

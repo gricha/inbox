@@ -1,4 +1,5 @@
 // The Vite UI (npm run dev, the desktop app running from a checkout).
+import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import config from "../vite.config.ts";

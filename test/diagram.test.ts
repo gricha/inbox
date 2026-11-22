@@ -1,4 +1,5 @@
 // An AI review's diagram: the strict Mermaid subset, its limits, and that nothing outside it gets through.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";

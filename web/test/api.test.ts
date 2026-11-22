@@ -1,5 +1,6 @@
 // The window's API calls: an error answer decoded into the UI's tagged errors the way docs/effect.md's "The wire" says (a
 // tag when the desk sends one, its status when an older desk doesn't), and runUi, which throws nothing and reports only bugs.
+import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { STATUS_CODES } from "node:http";
 import { afterEach, test } from "node:test";

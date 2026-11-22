@@ -1,5 +1,6 @@
 // A PR's checks in its review: read from GitHub one by one, only when a review is opened, kept until the desk next
 // refreshes the PR, and listed with what's wrong first under words that say where CI stands.
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";

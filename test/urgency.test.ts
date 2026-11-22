@@ -1,4 +1,5 @@
 // The Inbox's sections and order: criteria, scores, sections, and where each row says why it's there.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

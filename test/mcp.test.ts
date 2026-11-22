@@ -1,3 +1,4 @@
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { after, before, test } from "node:test";

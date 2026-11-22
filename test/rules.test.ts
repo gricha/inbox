@@ -1,3 +1,4 @@
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { classify, compileBoard, placedBy, queueOrder, quietText, type Entry } from "../src/rules.ts";

@@ -1,5 +1,6 @@
 // Merging (in flight): m on your own PR, the Merging tab (never the queue), the coordinator's notes and hand-backs, and Ready
 // for review on your own draft (a GitHub write).
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createApp } from "../src/server.ts";

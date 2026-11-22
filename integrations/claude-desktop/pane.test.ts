@@ -1,5 +1,6 @@
 // The /desk pane's hooks, run by a stand-in for Claude Code against a fake desk on a port of its own. Beside the plugin, not
 // in it: `claude plugin test` takes every *.test.ts under a plugin for a test of its own kind.
+import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";

@@ -1,4 +1,5 @@
 // The light model: its model and effort reach each agent's command, and a tier model your agent lacks gives way to its default.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

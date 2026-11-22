@@ -1,4 +1,5 @@
 // The GitHub connector's passes and loops: what fails them, what that records, and that a loop keeps its schedule.
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

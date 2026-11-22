@@ -1,6 +1,7 @@
 // Typed items: an automation with MCP servers declares its notes' type in TypeScript; the desk makes it an Effect Schema,
 // checks every note with it, sorts what fits by its rules, and holds what doesn't for Claude's recommendation, which the
 // owner agrees with, disagrees with or comments on. Never the real claude: a fake answering each call in turn.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

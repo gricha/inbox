@@ -1,5 +1,6 @@
 // Your comment on a line of a PR's diff: sent only from the desk's window (a fake writer), on GitHub's line and side,
 // pinned to the commit the review showed, and not the end of reviewing it.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { Effect } from "effect";

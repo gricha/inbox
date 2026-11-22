@@ -1,6 +1,7 @@
 // End to end over the HTTP API with a source that isn't email: an automation over the fake tracker MCP server
 // (scripts/fake-tracker), with a declared type, a when rule, an ask rule, an icon and buttons. The fake claude reads the
 // server through the --mcp-config the desk writes, as the real one would; the desk's tool-less calls answer from files.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

@@ -1,5 +1,6 @@
 // Your tags on a review's hunks (config.toml's [[tags]]): a rule is free and checked as the review is drawn; a question is
 // answered by the AI review itself, kept on it by hunk mark.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { Effect } from "effect";

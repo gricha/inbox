@@ -1,6 +1,7 @@
 // Settings is one thing everywhere: every setting sits in a part the sidebar lists, the desk (`inbox settings`, More's
 // button) names each part as the sidebar does, and the docs and every "Settings → …" path name parts that exist. A
 // rename, a moved setting or a new part fails here until all of them agree.
+import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";

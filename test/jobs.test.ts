@@ -1,6 +1,7 @@
 // The ledger of work Claude owes the owner (src/jobs.ts) and its loop: an AI review survives a desk restart, a run past its
 // time is retried with backoff and then failed with its reason, and the review page says what the ledger says; an answer
 // nobody picked up is said so once.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { Effect } from "effect";

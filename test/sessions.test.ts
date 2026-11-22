@@ -1,5 +1,6 @@
 // The Sessions source: Claude Code and Codex sessions on this machine that need you, read from fixtures shaped like 2.1.321's
 // files (claude agents --json, transcripts, the desktop app's records) and codex-cli 0.154's state_5.sqlite and rollouts.
+import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";

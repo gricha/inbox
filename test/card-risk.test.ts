@@ -1,5 +1,6 @@
 // A row's risk is its AI review's, not a guess from the verdict: "skim it" can be low risk.
 
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { reviewAsk, setup } from "./helpers/desk.ts";

@@ -1,5 +1,6 @@
 // What reviewers said on a PR: which of it waits on you, Claude's read of what does (a fake claude), the row's Reply, and
 // your reply, sent only from the desk's window (a fake writer).
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

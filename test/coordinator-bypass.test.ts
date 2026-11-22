@@ -1,4 +1,5 @@
 // The coordinator in bypass mode, and its run's errors.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

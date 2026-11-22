@@ -1,4 +1,5 @@
 // What a reviewer wrote on GitHub, drawn as text: comments gone, <details> a fold, <sub> small print, lists as lists.
+import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { saidBlocks, saidLine, type Said, type Span } from "../src/prose.ts";

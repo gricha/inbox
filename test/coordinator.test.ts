@@ -1,5 +1,6 @@
 // The coordinator: a background Claude Code session the desk starts on the first hand-off, keeps running, and wakes per batch of news.
 // Its wakes, restarts and Settings switch here; bypass mode and asks in their own files, so the three run at once.
+import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

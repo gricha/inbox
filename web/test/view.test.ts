@@ -1,3 +1,4 @@
+import "../../test/helpers/no-agent.ts";
 import { SETTINGS_PARTS } from "../src/settings-parts.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
