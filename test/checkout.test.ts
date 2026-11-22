@@ -78,3 +78,51 @@ test("a head that can't be fetched is why there's no review, in words its review
   assert.match(gone.message, new RegExp(`^couldn't check out this PR's head from your clone at ${r.clone}: `));
   fs.rmSync(r.root, { recursive: true });
 });
+
+// Your clone made shallow or blobless, then a branch fetched into it but never checked out (so a blobless one lacks its file),
+// and a PR on top of that commit.
+for (const [kind, args] of [
+  ["shallow", ["--depth", "1"]],
+  ["blobless", ["--filter=blob:none"]],
+  ["shallow and blobless", ["--depth", "1", "--filter=blob:none"]],
+] as const)
+  test(
+    `a ${kind} clone of yours isn't borrowed: the desk clones from GitHub, says why once, and your clone is left as it was`,
+    posix,
+    async () => {
+      const r = repos();
+      git(r.hub, "config", "uploadpack.allowFilter", "true");
+      const clone = path.join(r.root, "code", "partial");
+      git(r.root, "clone", "-q", ...args, `file://${r.hub}`, clone);
+      fs.writeFileSync(path.join(r.hub, "limits.ts"), "export const max = 5;\n");
+      git(r.hub, "add", ".");
+      git(r.hub, "commit", "-qm", "main moves on");
+      git(clone, "fetch", "-q", "origin", "main:moved");
+      git(r.hub, "checkout", "-qb", "pr2");
+      fs.writeFileSync(path.join(r.hub, "app.ts"), "export const limit = 1000;\n");
+      git(r.hub, "commit", "-qam", "pr2");
+      const head = git(r.hub, "rev-parse", "HEAD");
+      git(r.hub, "update-ref", "refs/pull/9/head", head);
+      git(r.hub, "checkout", "-q", "main");
+      const mine = () => [git(clone, "for-each-ref"), git(clone, "config", "--list", "--local"), git(clone, "count-objects", "-v")];
+      const before = mine();
+      const repo = `acme/${kind.replaceAll(" ", "-")}`; // its own: the log says it once per repo, for the whole desk
+      const item = { repo, number: 9, head_oid: head };
+      const said: string[] = [];
+      const log = (m: string) => {
+        said.push(m);
+      };
+      const c = await run(checkoutFor(r.home, item, () => clone, r.hub, log));
+      assert.equal(fs.readFileSync(path.join(c.dir, "app.ts"), "utf8"), "export const limit = 1000;\n", "the PR's code");
+      assert.equal(fs.readFileSync(path.join(c.dir, "limits.ts"), "utf8"), "export const max = 5;\n", "with main's file your clone lacks");
+      const bare = path.join(r.home, "repos", `${repo.replace("/", "__")}.git`);
+      assert.ok(!fs.existsSync(path.join(bare, "objects", "info", "alternates")), "its own, borrowing nothing");
+      const again = await run(checkoutFor(r.home, item, () => clone, r.hub, log));
+      assert.equal(said.length, 1, "said once per repo");
+      assert.ok(said[0]?.startsWith(`${repo}: `), said[0]);
+      assert.deepEqual(mine(), before, "nothing of yours changed");
+      await run(c.done);
+      await run(again.done);
+      fs.rmSync(r.root, { recursive: true });
+    },
+  );
