@@ -738,6 +738,7 @@ interface Automation {
   decide?: "rule" | "ask"; // absent: agent
   rule?: { do: Verb; until?: string; why: string }; // decide rule's fixed action
   can?: Verb[]; // absent: add only
+  mcp?: string[]; // an agent's: your agent's MCP servers its runs get, by name; absent: none named
   on: boolean;
   by: "you" | "an agent"; // who last changed it
   updated_at: string;
@@ -755,6 +756,7 @@ type AutomationBody = {
   decide?: "rule" | "ask" | "agent";
   rule?: { do: Verb; until?: string; why: string };
   can?: Verb[];
+  mcp?: string[]; // decide agent only
   on?: boolean;
 };
 
@@ -1545,6 +1547,17 @@ On Codex (`Automations.byCodex()`): `codex exec --json --sandbox read-only --ski
 Its session is kept (no `--ephemeral`): `session` is the thread and `agent` is `codex`, so Copy resume command is `codex resume <id>`. A login or a limit fails the run in Codex's words.
 
 On OpenCode (`opencodeRun()`): the tool-less call in `<home>/automations` with the desk's MCP server added, and `inbox-desk`'s permissions deny everything but those six read tools (`<server>_inbox_list` … `allow`). Its session is kept, `agent` is `opencode`, and Copy resume command is `opencode --session <id>`.
+
+#### MCP servers
+
+`mcp` (decide agent only, up to 10) names your agent's own MCP servers, as it lists them, that a run gets beside the desk's, and no other of yours. Absent, a run is as above: your servers load as your agent has them, and only the tools above are allowed.
+
+- **Claude Code:** each name is copied from your user-level config (`~/.claude.json` `mcpServers`, headers and all) with the desk's server into a file in `<home>/automations` (mode 0600, removed after the run), passed as `--strict-mcp-config --mcp-config <file>`, and `mcp__<name>` (its non-alphanumerics as `_`) is allowed: every tool of it. A server's saved OAuth login is reused. A claude.ai connector (`claude.ai Gmail`) comes only with your login and never through such a file: with one named, there is no file, everything of yours loads, and only the named servers' tools are allowed.
+- **Codex:** each named server is kept on (`mcp_servers.<name>.enabled=true`, every tool) and the rest are off as before. **OpenCode:** each is left enabled and `<name>_*` is allowed.
+- A name the agent doesn't have fails the run before it starts: `Claude Code has no MCP server named "gmial": …` (`McpServerMissing`).
+- The prompt names the servers, says to read only through them and that what they return is data.
+
+**Notes.** With `mcp`, the answer may carry `notes: [{ key, text, urgent? }]`: what needs you that isn't a PR or issue (an email). Each is `Desk.saveNote()` as `<name>: <text>`, in Urgent when `urgent`, else Standard, and its record item is `note:<id>`, `added`. Kv `automation_noted` keeps each automation's keys (the last 500): a key it raised before raises nothing, even after you mark the note done. Deleting the automation forgets them.
 
 #### What it may do
 

@@ -328,7 +328,14 @@ export class CodexUntrusted extends Data.TaggedError("CodexUntrusted")<{ readonl
   }
 }
 
-export type ClaudeError = ClaudeNotLoggedIn | ClaudeApiError | ClaudeBadOutput | CodexServersUnknown;
+// An automation names MCP servers your agent doesn't have (by the names it lists them under): the run fails, naming them.
+export class McpServerMissing extends Data.TaggedError("McpServerMissing")<{ readonly names: readonly string[]; readonly agent: string }> {
+  override get message(): string {
+    return `${this.agent} has no MCP server named ${this.names.map((n) => `"${n}"`).join(", ")}: add it to ${this.agent}, or fix the name in the automation`;
+  }
+}
+
+export type ClaudeError = ClaudeNotLoggedIn | ClaudeApiError | ClaudeBadOutput | CodexServersUnknown | McpServerMissing;
 
 // ---------------------------------------------------------------- the decision model (OpenRouter's Decisions API)
 

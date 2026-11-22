@@ -835,13 +835,14 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
         (b.events !== undefined && !strings(b.events)) ||
         (b.when !== undefined && typeof b.when !== "string") ||
         (b.can !== undefined && !strings(b.can)) ||
+        (b.mcp !== undefined && !strings(b.mcp)) ||
         (b.on !== undefined && typeof b.on !== "boolean")
       )
-        return yield* new BadRequest({ message: "need { name, prompt, schedule or events, when?, decide?, rule?, can?, on? }" });
-      const { name, schedule, events, prompt, when, decide, rule, can, on } = b;
+        return yield* new BadRequest({ message: "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, on? }" });
+      const { name, schedule, events, prompt, when, decide, rule, can, mcp, on } = b;
       const a = yield* desk.automations.set(
         c.req.param("id"),
-        { name, schedule, events, prompt, when, decide, rule, can, on },
+        { name, schedule, events, prompt, when, decide, rule, can, mcp, on },
         fromDesk(c),
       );
       return { ok: true, automation: a };

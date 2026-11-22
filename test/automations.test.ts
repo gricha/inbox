@@ -106,6 +106,7 @@ function fakeClaude(c: TestContext) {
 d="$(dirname "$0")"
 n=$(($(cat "$d/count" 2>/dev/null || echo 0) + 1)); echo $n > "$d/count"
 printf '%s\\n' "$@" > "$d/args.$n"; pwd > "$d/cwd.$n"; cat > "$d/stdin.$n"
+prev=""; for a; do [ "$prev" = "--mcp-config" ] && cp "$a" "$d/mcp.$n"; prev="$a"; done
 while [ -f "$d/hold" ]; do sleep 0.02; done
 if [ -f "$d/fail" ]; then echo '{"type":"result","is_error":true,"result":"Failed to authenticate. API Error: 401"}'; exit 1; fi
 cat "$d/answer"
@@ -120,12 +121,13 @@ cat "$d/answer"
   });
   const read = (f: string) => fs.readFileSync(path.join(dir, f), "utf8");
   return {
-    answer: (summary: string, items: { ref: string; why: string; do?: string; until?: string }[]) => {
+    answer: (summary: string, items: { ref: string; why: string; do?: string; until?: string }[], more: object = {}) => {
       fs.writeFileSync(
         path.join(dir, "answer"),
-        JSON.stringify({ type: "result", is_error: false, session_id: "sess-1", structured_output: { summary, items } }),
+        JSON.stringify({ type: "result", is_error: false, session_id: "sess-1", structured_output: { summary, items, ...more } }),
       );
     },
+    mcp: (n: number) => (fs.existsSync(path.join(dir, `mcp.${n}`)) ? (JSON.parse(read(`mcp.${n}`)) as unknown) : null),
     raw: (envelope: string) => {
       fs.writeFileSync(path.join(dir, "answer"), envelope);
     },
@@ -434,9 +436,9 @@ test("an agent writes or changes one and it's on as yours is; only you delete it
   for (const [bad, error] of [
     [{ schedule: "9am" }, 'schedule: write it as "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30" or "weekdays hourly"'],
     [{ prompt: " " }, "the instruction is empty"],
-    [{ name: 3 }, "need { name, prompt, schedule or events, when?, decide?, rule?, can?, on? }"],
-    [{ can: "mute" }, "need { name, prompt, schedule or events, when?, decide?, rule?, can?, on? }"],
-    [{ rule: "mute" }, "need { name, prompt, schedule or events, when?, decide?, rule?, can?, on? }"],
+    [{ name: 3 }, "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, on? }"],
+    [{ can: "mute" }, "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, on? }"],
+    [{ rule: "mute" }, "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, on? }"],
     [{ decide: "guess" }, 'decide: "guess" isn\'t one of rule, ask, agent'],
     [{ decide: "rule" }, "a rule on a schedule needs when: the items it's about"],
     [{ decide: "ask" }, "a question on a schedule needs when: the items it's about"],
@@ -1979,4 +1981,85 @@ test("a scheduled question your agent answered while the decision model was down
   api.calls.length = 0;
   const back = await t.desk.automations.run(a, "schedule").p;
   assert.equal(api.calls.length, 1, back.summary);
+});
+
+// Your own Claude Code's user-level servers, in a home of the test's own.
+function claudeHome(c: TestContext, servers: Record<string, unknown>) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-claude-home-"));
+  fs.writeFileSync(path.join(home, ".claude.json"), JSON.stringify({ mcpServers: servers }));
+  const was = process.env.HOME;
+  process.env.HOME = home;
+  c.after(() => {
+    process.env.HOME = was;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+}
+
+test("an agent run with MCP servers gets only those of yours, beside the desk's, and raises what isn't on GitHub as a note once", async (c) => {
+  if (unixOnly(c)) return;
+  const fake = fakeClaude(c);
+  const gmail = { type: "http", url: "https://gmail.example/mcp", headers: { Authorization: "Bearer t0ken" } };
+  claudeHome(c, { gmail, linear: { type: "http", url: "https://mcp.linear.app/mcp" } });
+  const t = await setup([], { settings: { "policy.judge": false, "notify.quiet": "" }, desk: { mcpUrl: "http://localhost:47823/mcp" } });
+  c.after(t.cleanup);
+  const mail = { name: "Mail", schedule: "weekdays 09:00", prompt: "Read my unread mail; raise what needs me.", mcp: [" gmail ", "gmail"] };
+  const a = runSync(t.desk.automations.set("mail", mail, true));
+  assert.deepEqual(a.mcp, ["gmail"]);
+  fake.answer("Read 8 unread threads; one needs you.", [], {
+    notes: [
+      { key: "thread-1", text: "Dana's invoice needs your approval by Friday", urgent: true },
+      { key: "", text: "no key" },
+    ],
+  });
+  const run = await t.desk.automations.run(a, "now").p;
+  assert.equal(run.error, null);
+  const notes = t.desk.notes();
+  assert.deepEqual(
+    notes.map((n) => [n.text, n.section]),
+    [["Mail: Dana's invoice needs your approval by Friday", "urgent"]],
+  );
+  assert.deepEqual(
+    run.items.map((x) => [x.item_id, x.outcome]),
+    [[`note:${notes[0]!.id}`, "added"]],
+  );
+  assert.deepEqual(t.notes, ["1 on your desk"]);
+
+  // Only the servers it names, copied from your config, and the desk's: in a file of its own, gone after the run.
+  const args = fake.args(1);
+  assert.ok(args.includes("--strict-mcp-config"));
+  assert.deepEqual(fake.mcp(1), { mcpServers: { inbox: { type: "http", url: "http://localhost:47823/mcp" }, gmail } });
+  const file = args[args.indexOf("--mcp-config") + 1]!;
+  assert.ok(!fs.existsSync(file), "its config file is gone");
+  const allowed = args[args.indexOf("--allowedTools") + 1]!.split(",");
+  assert.ok(allowed.includes("mcp__gmail") && allowed.includes("mcp__inbox__inbox_list"), allowed.join());
+  assert.ok(!allowed.some((x) => x.startsWith("mcp__linear")));
+  const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]!) as { properties: Record<string, unknown> };
+  assert.ok("notes" in schema.properties);
+  assert.match(fake.stdin(1), /You have these MCP servers for this run: gmail\. Read with them; never send/);
+
+  // The same thread again raises nothing.
+  await t.desk.automations.run(a, "now").p;
+  assert.equal(t.desk.notes().length, 1);
+
+  // A claude.ai connector comes only with your login: everything of yours loads, and only its tools are allowed.
+  const b = runSync(t.desk.automations.set("mail", { ...mail, mcp: ["claude.ai Gmail"] }, true));
+  await t.desk.automations.run(b, "now").p;
+  const loose = fake.args(3);
+  assert.ok(!loose.includes("--strict-mcp-config") && fake.mcp(3) === null);
+  assert.ok(loose[loose.indexOf("--allowedTools") + 1]!.split(",").includes("mcp__claude_ai_Gmail"));
+
+  // A server your Claude Code doesn't have fails the run, naming it; only an agent run has servers.
+  const c2 = runSync(t.desk.automations.set("mail", { ...mail, mcp: ["gmial"] }, true));
+  const bad = await t.desk.automations.run(c2, "now").p;
+  assert.match(bad.error ?? "", /Claude Code has no MCP server named "gmial"/);
+  assert.equal(fake.calls(), 3, "it never started");
+  const ask = runSync(Effect.flip(t.desk.automations.set("q", { ...mail, decide: "ask", when: "true" }, true)));
+  assert.match(ask.message, /mcp goes with an agent run/);
+
+  // A plain one is as before: no servers named, no notes in its answer.
+  const plain = runSync(t.desk.automations.set("warden", WARDEN, true));
+  await t.desk.automations.run(plain, "now").p;
+  const p = fake.args(4);
+  assert.ok(!p.includes("--strict-mcp-config"));
+  assert.ok(!("notes" in (JSON.parse(p[p.indexOf("--json-schema") + 1]!) as { properties: object }).properties));
 });

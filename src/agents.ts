@@ -131,6 +131,9 @@ function shown(entry: unknown): string {
   return typeof command === "string" ? ` (${[command, ...rest].map(String).join(" ")})` : "";
 }
 
+// Your Claude Code's user-level MCP servers, by name, as its config has them: what an automation names is copied from here.
+export const claudeServers = (): Record<string, unknown> => listed(DRIVERS["claude-code"], os.homedir());
+
 // This desk's entry under any name: inbox, review-desk from before the rename, or the name Connect gave it beside another.
 export function serverName(driver: DriverId, url: string): string | null {
   const servers = listed(DRIVERS[driver], os.homedir());

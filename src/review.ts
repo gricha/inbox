@@ -12,6 +12,7 @@ import {
   ClaudeApiError,
   CODEX_NOT_LOGGED_IN,
   CodexServersUnknown,
+  McpServerMissing,
   NOT_LOGGED_IN,
   OPENCODE_NOT_LOGGED_IN,
   ClaudeBadOutput,
@@ -845,10 +846,18 @@ function listedOf(list: unknown): Listed[] | null {
 }
 
 // The desk's own MCP server, for a Codex run that may use it: its address and, to keep a run read only, the tools it may call.
+// `keep`: your own servers, by name, that the run keeps (an automation's), every tool of each.
 export interface DeskMcp {
   url: string;
   tools?: string[];
+  keep?: readonly string[];
 }
+
+// The kept names the agent doesn't list fail the run before it starts.
+const missing = (listed: Listed[], kept: readonly string[] | undefined, agent: string) => {
+  const gone = (kept ?? []).filter((n) => !listed.some((s) => s.name === n));
+  return gone.length ? Effect.fail(new McpServerMissing({ names: gone, agent })) : Effect.void;
+};
 
 // A desk with no server has no MCP address to give Codex: a bug, since only a served desk runs agents.
 export const deskMcp = (url: string | null): Effect.Effect<string> =>
@@ -859,11 +868,14 @@ export const deskMcp = (url: string | null): Effect.Effect<string> =>
 // inbox_desk, since a url merged into another transport's entry wouldn't parse.
 export const codexMcp = Effect.fnUntraced(function* (command: string, dir: string, desk?: DeskMcp) {
   const listed = yield* codexServers(command, dir);
+  yield* missing(listed, desk?.keep, "Codex");
   const theirs = listed.find((s) => s.name === "inbox");
   const name = desk && theirs && theirs.url !== desk.url ? "inbox_desk" : "inbox";
-  const off = listed.filter((s) => s.enabled && !(desk && s.name === name)).map((s) => s.name);
+  const kept = new Set(desk?.keep);
+  const off = listed.filter((s) => s.enabled && !(desk && s.name === name) && !kept.has(s.name)).map((s) => s.name);
   return [
     ...off.flatMap((n) => ["-c", `mcp_servers.${tomlKey(n)}.enabled=false`]),
+    ...[...kept].flatMap((n) => ["-c", `mcp_servers.${tomlKey(n)}.enabled=true`]),
     ...(desk
       ? [
           "-c",
@@ -1033,10 +1045,12 @@ type Permits = (server: string) => Record<string, unknown>;
 // desk's, else inbox_desk, since a url merged into another server's entry wouldn't parse), never shared, and the agent.
 export const opencodeConfig = Effect.fnUntraced(function* (command: string, dir: string, permits: Permits, desk?: DeskMcp) {
   const listed = yield* opencodeServers(command, dir);
+  yield* missing(listed, desk?.keep, "OpenCode");
   const theirs = listed.find((s) => s.name === "inbox");
   const name = desk && theirs && theirs.url !== desk.url ? "inbox_desk" : "inbox";
+  const kept = new Set(desk?.keep);
   const mcp: Record<string, object> = Object.fromEntries(
-    listed.filter((s) => s.enabled && !(desk && s.name === name)).map((s) => [s.name, { enabled: false }]),
+    listed.filter((s) => s.enabled && !(desk && s.name === name)).map((s) => [s.name, { enabled: kept.has(s.name) }]),
   );
   if (desk) mcp[name] = { type: "remote", url: desk.url, enabled: true };
   const agent = { mode: "primary", description: "Inbox runs this agent for you.", permission: permits(name) };
@@ -1071,6 +1085,7 @@ export const opencodeRun = Effect.fn("opencodeRun")(function* (
     ...OPENCODE_DENY_ALL,
     ...(opts.read && { read: "allow", glob: "allow", grep: "allow", list: "allow" }),
     ...Object.fromEntries((desk?.tools ?? []).map((t) => [`${server}_${t}`, "allow"])),
+    ...Object.fromEntries((desk?.keep ?? []).map((n) => [`${n}_*`, "allow"])),
   });
   const config = yield* opencodeConfig(command, opts.dir, permits, desk);
   const spawnAs = yield* claudeSpawn(command, opencodeRunArgs(desk ? "Inbox automation" : "Inbox", undefined, opts.model));

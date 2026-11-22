@@ -209,6 +209,29 @@ test("an inbox server of yours that isn't the desk's is turned off, and the desk
   ]);
 });
 
+test("a Codex automation with MCP servers keeps those of yours on and every other off; one Codex lacks fails it", posix, async (c) => {
+  const t = await automating(c);
+  t.fake.servers([
+    { name: "linear", enabled: true, transport: { type: "streamable_http", url: "https://mcp.linear.app/mcp" } },
+    { name: "gmail", enabled: false, transport: { type: "streamable_http", url: "https://gmail.example/mcp" } },
+  ]);
+  t.fake.file("answer", JSON.stringify({ summary: "Nothing new.", items: [], notes: [] }));
+  const a = runSync(
+    t.desk.automations.set("mail", { name: "Mail", schedule: "weekdays 09:00", prompt: "Read my mail.", mcp: ["gmail"] }, true),
+  );
+  assert.equal((await t.desk.automations.run(a, "now").p).error, null);
+  const call = t.fake.calls()[0]!;
+  assert.ok(call.args.includes("mcp_servers.linear.enabled=false"));
+  assert.ok(call.args.includes("mcp_servers.gmail.enabled=true"));
+  assert.ok(!call.args.includes("mcp_servers.gmail.enabled=false"));
+  assert.match(call.stdin, /the desk's read tools and the MCP servers gmail, and nothing else/);
+  const b = runSync(
+    t.desk.automations.set("mail", { name: "Mail", schedule: "weekdays 09:00", prompt: "Read my mail.", mcp: ["claude.ai Gmail"] }, true),
+  );
+  assert.match((await t.desk.automations.run(b, "now").p).error ?? "", /Codex has no MCP server named "claude\.ai Gmail"/);
+  assert.equal(t.fake.calls().length, 1);
+});
+
 test("a Codex agent run that needs a login says Codex's words; one at its limit keeps codex's", posix, async (c) => {
   const t = await automating(c);
   t.fake.file("fail", "Error: Not logged in. Run `codex login`.\n");

@@ -39,8 +39,18 @@ interface Draft {
   decide: Way;
   rule?: RuleAction; // with decide rule
   can: Verb[];
+  mcp: string; // an agent's MCP servers, as typed: names, comma-separated
   on: boolean;
 }
+
+const serversOf = (t: string) => [
+  ...new Set(
+    t
+      .split(",")
+      .map((n) => n.trim())
+      .filter(Boolean),
+  ),
+];
 
 // What the desk may do with what it lists: "add to your desk, sort to FYI and snooze".
 const mayText = (can: readonly Verb[]) => {
@@ -81,6 +91,7 @@ function bodyOf(d: Draft): AutomationBody {
     ...(d.when.trim() && { when: d.when.trim() }),
     decide: d.decide,
     ...(rule ? { rule, can: [rule.do] } : { prompt: d.prompt, can: d.can }),
+    ...(d.decide === "agent" && serversOf(d.mcp).length > 0 && { mcp: serversOf(d.mcp) }),
     on: d.on,
   };
 }
@@ -279,6 +290,7 @@ const editing = (a: Auto): Draft => ({
   decide: a.decide ?? "agent",
   ...(a.rule && { rule: a.rule }),
   can: a.can ?? ["add"],
+  mcp: (a.mcp ?? []).join(", "),
   on: a.on,
 });
 
@@ -316,6 +328,7 @@ export function AutomationRows({ au, now, plugin }: { au: Automations; now: numb
           when: "",
           decide: "agent",
           can: ["add"],
+          mcp: "",
           on: true,
         });
       }}
@@ -648,6 +661,12 @@ function Facts({ a, model }: { a: Auto; model: string | null }) {
           <dd>{cap(mayText(a.can ?? ["add"]))}</dd>
         </>
       )}
+      {a.mcp && (
+        <>
+          <dt>MCP servers</dt>
+          <dd>{a.mcp.join(", ")}, and none other of yours</dd>
+        </>
+      )}
     </dl>
   );
 }
@@ -958,6 +977,24 @@ function Editor({
               can be undone.
             </span>
           </fieldset>
+          {d.decide === "agent" && (
+            <label className="au-field">
+              <span className="s-label">MCP servers</span>
+              <input
+                className="input"
+                value={d.mcp}
+                placeholder="gmail, claude.ai Gmail"
+                onKeyDown={keys}
+                onChange={(e) => {
+                  setD({ ...d, mcp: e.target.value });
+                }}
+              />
+              <span className="s-help">
+                Your agent's servers it reads, by the names it lists them under. A run gets only these beside the desk's, and may put what
+                isn't on GitHub (an email) on your desk as a note, once. Empty: none named.
+              </span>
+            </label>
+          )}
         </>
       )}
       <div className="actions">

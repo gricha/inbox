@@ -1472,6 +1472,9 @@ export interface Automation {
   decide?: "rule" | "ask"; // how it decides (WAYS); absent: agent
   rule?: RuleAction; // with decide rule: its fixed action, for every item its check passes
   can?: Verb[]; // what it may do with an item; absent: add only
+  // An agent's: your agent's MCP servers, by the names it lists them under, that its runs get beside the desk's, and no
+  // other of yours; it may then raise notes for what isn't on GitHub (an email). Absent: as your agent has them, none allowed.
+  mcp?: string[];
   on: boolean;
   by: "you" | "an agent"; // who last changed what it does
   updated_at: string;
@@ -1590,6 +1593,7 @@ export type AutomationBody = Pick<Automation, "name"> & {
   when?: string | undefined;
   rule?: { do: Verb; why: string; until?: string | undefined } | undefined;
   can?: Verb[] | undefined;
+  mcp?: string[] | undefined;
   schedule?: string | undefined;
   prompt?: string | undefined;
   decide?: Way | undefined;
