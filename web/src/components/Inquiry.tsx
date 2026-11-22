@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { Inquiry, InquiryView } from "../../../src/types.ts";
+import type { Inquiry, InquiryView, Recommendation } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed } from "../keyed.ts";
 import { age, ago, cls, fromName, issueUrl, MOD } from "../format.ts";
@@ -16,6 +16,7 @@ export interface InquiryCtx {
   selected: string | null;
   select: (q: Inquiry) => void;
   open: (q: Inquiry) => void; // a click: its page
+  agree: (q: Inquiry) => void; // a recommendation's call to action
   compact?: boolean; // the list beside a review: two lines a row
 }
 
@@ -24,7 +25,7 @@ export interface InquiryCtx {
 export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
   const id = inquiryOf(q.id);
   const sel = ctx.selected === id;
-  const kindIcon = <KindIcon kind="question" tip="A question from an agent" />;
+  const kindIcon = <KindIcon kind="question" tip={q.fix ? `${q.from}'s recommendation` : "A question from an agent"} />;
   const title = <span className="line-title">{q.question}</span>;
   const by = (
     <span className="line-by" title={q.from}>
@@ -81,10 +82,11 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
           type="button"
           className={ctx.compact ? "c-cta" : "act line-cta line-reply"}
           onClick={() => {
-            ctx.open(q);
+            if (q.fix) ctx.agree(q);
+            else ctx.open(q);
           }}
         >
-          Answer
+          {q.fix ? "Agree" : "Answer"}
         </button>
         {!ctx.compact && (
           <>
@@ -117,6 +119,39 @@ function rich(text: string): ReactNode[] {
         );
   }
   return out;
+}
+
+// What a recommendation would change, and the held note it's about with how it doesn't fit: as text, never markup.
+function FixParts({ fix }: { fix: Recommendation }) {
+  const change =
+    fix.do === "fix"
+      ? { head: "Its fields would be", text: JSON.stringify(fix.fields, null, 2) }
+      : fix.do === "type"
+        ? { head: "The type would be", text: fix.type ?? "" }
+        : fix.do === "prompt"
+          ? { head: "The instruction would be", text: fix.prompt ?? "" }
+          : null;
+  return (
+    <section className="inq-fix" aria-label="What it would change">
+      {change && (
+        <>
+          <h2 className="d-head">{change.head}</h2>
+          <pre className="inq-code">{change.text}</pre>
+        </>
+      )}
+      {fix.was !== undefined && (
+        <details className="inq-was">
+          <summary>What it replaces</summary>
+          <pre className="inq-code">{fix.was}</pre>
+        </details>
+      )}
+      <h2 className="d-head">The held note</h2>
+      <p className="inq-held">{fix.item.text}</p>
+      <pre className="inq-code">{JSON.stringify(fix.item.fields, null, 2)}</pre>
+      <h2 className="d-head">How it doesn&rsquo;t fit</h2>
+      <pre className="inq-code t-bad">{fix.error}</pre>
+    </section>
+  );
 }
 
 // An agent's question on its own page: what it's about, everything it said, its links, and each answer with what it leads
@@ -178,6 +213,7 @@ export function InquiryPage({
     if (!dismiss && !t.trim()) return;
     const mine = { text: dismiss ? "" : t.trim(), at: "", dismissed: dismiss }; // the desk stamps it
     setSent(mine);
+    if (v.fix) onBack(); // acted on, a recommendation is gone
     runUi(
       onAnswer(v, t, dismiss).pipe(
         Effect.tap((ok) =>
@@ -222,7 +258,7 @@ export function InquiryPage({
     <div className="inquiry">
       <header className="rv-head">
         <p className="rv-ref">
-          <span className="inq-kind">Agent</span>
+          <span className="inq-kind">{q.fix ? "Recommendation" : "Agent"}</span>
           <span className="rv-by" title={`asked ${new Date(q.at).toLocaleString()}`}>
             {fromName(q.from)}
             {" \u00b7 "}
@@ -260,6 +296,8 @@ export function InquiryPage({
           <p key={p}>{rich(p.trim())}</p>
         ))}
       </section>
+
+      {q.fix && <FixParts fix={q.fix} />}
 
       {q.links.length > 0 && (
         <section className="inq-links" aria-label="Links">
@@ -303,7 +341,7 @@ export function InquiryPage({
                     <span className="inq-option-text">
                       <span className="inq-option-answer">
                         {o.answer}
-                        {i === 0 && <span className="inq-pick">its pick</span>}
+                        {i === 0 && !q.fix && <span className="inq-pick">its pick</span>}
                       </span>
                       {o.next && <span className="inq-next">{rich(o.next)}</span>}
                     </span>
@@ -316,7 +354,9 @@ export function InquiryPage({
             <textarea
               className="cv-reply"
               aria-label={`Your answer to ${fromName(q.from, false)}`}
-              placeholder={q.options.length ? "Or write your own answer" : "Your answer"}
+              placeholder={
+                q.fix ? `Or approve with a comment: ${q.from} revises it` : q.options.length ? "Or write your own answer" : "Your answer"
+              }
               value={text}
               maxLength={2000}
               // oxlint-disable-next-line jsx-a11y/no-autofocus -- with nothing to pick, writing is the one thing to do here
@@ -337,24 +377,30 @@ export function InquiryPage({
               <button
                 type="button"
                 className={cls("act", !q.options.length && "primary")}
-                title={`Send it to ${fromName(q.from, false)} (${MOD}\u21b5)`}
+                title={
+                  q.fix
+                    ? `Send it to ${q.from}, who recommends again with it (${MOD}\u21b5)`
+                    : `Send it to ${fromName(q.from, false)} (${MOD}\u21b5)`
+                }
                 disabled={!text.trim()}
                 onClick={() => {
                   send(text);
                 }}
               >
-                Send
+                {q.fix ? "Approve with comment" : "Send"}
               </button>
-              <button
-                type="button"
-                className="act"
-                title="Leave it unanswered: the agent decides itself"
-                onClick={() => {
-                  send("", true);
-                }}
-              >
-                Dismiss
-              </button>
+              {!q.fix && (
+                <button
+                  type="button"
+                  className="act"
+                  title="Leave it unanswered: the agent decides itself"
+                  onClick={() => {
+                    send("", true);
+                  }}
+                >
+                  Dismiss
+                </button>
+              )}
               <button
                 type="button"
                 className="act"

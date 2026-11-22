@@ -150,8 +150,15 @@ export function QuestionMenu({
   const go = (label: string, id: string): Entry => ({ label, do: { key: id } });
   return (
     <Menu
-      label={`Question by ${fromName(q.from, false)}`}
-      groups={[[go("Answer", "answer"), go("Copy link", "link")], [go("Dismiss", "dismiss")]]}
+      label={q.fix ? `${q.from}'s recommendation` : `Question by ${fromName(q.from, false)}`}
+      groups={
+        q.fix
+          ? [
+              [go("Agree", "agree"), go("Disagree", "disagree")],
+              [go("Open", "answer"), go("Copy link", "link")],
+            ]
+          : [[go("Answer", "answer"), go("Copy link", "link")], [go("Dismiss", "dismiss")]]
+      }
       snoozes={[]}
       x={x}
       y={y}

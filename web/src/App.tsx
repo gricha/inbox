@@ -22,7 +22,7 @@ import type {
 } from "../../src/types.ts";
 import { permalink } from "../../src/links.ts";
 import { parseJson } from "../../src/narrow.ts";
-import { isCoordinator, untilTime } from "../../src/types.ts";
+import { AGREE, DISAGREE, isCoordinator, untilTime } from "../../src/types.ts";
 import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
 import { cls, copyText, fromName, MAC, shortId, shortRef, SNOOZE, snoozeOptions, aiName, setAiName, when } from "./format.ts";
 import { restOn } from "./reviews.ts";
@@ -1151,7 +1151,14 @@ export function App() {
       return api.answerInquiry(q.id, dismiss ? { dismiss: true } : { text }).pipe(
         Effect.match({
           onSuccess: () => {
-            flash(dismiss ? `Dismissed ${fromName(q.from, false)}'s question` : `Answered ${fromName(q.from, false)}`);
+            const said = q.fix
+              ? text === AGREE
+                ? "Agreed: done"
+                : text === DISAGREE
+                  ? "Disagreed: dropped"
+                  : `Sent: ${q.from} recommends again`
+              : `Answered ${fromName(q.from, false)}`;
+            flash(dismiss ? `Dismissed ${fromName(q.from, false)}'s question` : said);
             return true;
           },
           onFailure: (e) => {
@@ -1600,6 +1607,8 @@ export function App() {
     if (k === "answer") openInquiry(q);
     else if (k === "link") runUi(copyQuestionLink(q));
     else if (k === "dismiss") runUi(answerInquiry(q, "", true));
+    else if (k === "agree") runUi(answerInquiry(q, AGREE));
+    else if (k === "disagree") runUi(answerInquiry(q, DISAGREE));
   }
 
   // Try again on a failed job in Claude's work: the AI review runs again (its verdict in a toast once it's in), or your ask goes to your agent again.
@@ -1921,6 +1930,9 @@ export function App() {
       setSelected(inquiryOf(q.id));
     },
     open: openInquiry,
+    agree: (q: Inquiry) => {
+      runUi(answerInquiry(q, AGREE));
+    },
   };
 
   // The list beside a review or a question, and the row it marks: the open item's.

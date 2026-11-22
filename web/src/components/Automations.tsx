@@ -2,7 +2,7 @@
 // comes with, which you only switch or copy. The part lists them (turn one on, run it now, write a new one); each opens a view of its own that says in plain words what starts it, its check, how it decides
 // and what it may do, with its editor and its runs. A run's summary and whys are an agent's words: shown as text, never markup.
 import { Effect } from "effect";
-import { useCallback, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useState, type KeyboardEvent, type ReactNode } from "react";
 import { AskChange } from "./AskChange.tsx";
 import {
   ACTIVITY_KINDS,
@@ -15,6 +15,7 @@ import {
   type AutomationBody,
   type AutomationRun,
   type AutomationView as Auto,
+  type ItemRule,
   type RuleAction,
   type Verb,
   type Way,
@@ -40,6 +41,9 @@ interface Draft {
   rule?: RuleAction; // with decide rule
   can: Verb[];
   mcp: string; // an agent's MCP servers, as typed: names, comma-separated
+  // An agent writes these (inbox_automations); the editor keeps them as they are.
+  type?: string;
+  rules?: ItemRule[];
   on: boolean;
 }
 
@@ -70,6 +74,14 @@ const UNTILS: [string, string][] = [
 ];
 const untilWords = (u: string | undefined) => UNTILS.find(([k]) => k === (u ?? "tomorrow"))?.[1] ?? u ?? "";
 
+// What a rule on its notes does with a yes.
+const ITEM_DOES_WORDS: Record<ItemRule["do"], string> = {
+  drop: "Drop it",
+  urgent: "Urgent",
+  standard: "Standard",
+  fyi: "FYI",
+};
+
 // How it decides, the three ways cheapest first, as the editor offers them.
 const WAY: Record<Way, { name: string; help: string }> = {
   rule: { name: "A rule", help: "No model: every item that passes the check gets the one action below." },
@@ -91,7 +103,7 @@ function bodyOf(d: Draft): AutomationBody {
     ...(d.when.trim() && { when: d.when.trim() }),
     decide: d.decide,
     ...(rule ? { rule, can: [rule.do] } : { prompt: d.prompt, can: d.can }),
-    ...(d.decide === "agent" && serversOf(d.mcp).length > 0 && { mcp: serversOf(d.mcp) }),
+    ...(d.decide === "agent" && serversOf(d.mcp).length > 0 && { mcp: serversOf(d.mcp), type: d.type, rules: d.rules }),
     on: d.on,
   };
 }
@@ -291,6 +303,8 @@ const editing = (a: Auto): Draft => ({
   ...(a.rule && { rule: a.rule }),
   can: a.can ?? ["add"],
   mcp: (a.mcp ?? []).join(", "),
+  ...(a.type && { type: a.type }),
+  ...(a.rules && { rules: a.rules }),
   on: a.on,
 });
 
@@ -667,6 +681,30 @@ function Facts({ a, model }: { a: Auto; model: string | null }) {
           <dd>{a.mcp.join(", ")}, and none other of yours</dd>
         </>
       )}
+      {a.type && (
+        <>
+          <dt>Its notes are</dt>
+          <dd>
+            <pre className="au-type">{a.type}</pre>A note that doesn&rsquo;t fit is held off your desk, and {aiName()} recommends what to
+            do.
+          </dd>
+        </>
+      )}
+      {a.rules?.map((r, i) => (
+        <Fragment key={`${r.do} ${r.when ?? ""} ${r.ask ?? ""}`}>
+          <dt>{i ? "Then" : "Rules"}</dt>
+          <dd>
+            {ITEM_DOES_WORDS[r.do]}
+            {r.when && (
+              <>
+                {" when "}
+                <code>{r.when}</code>
+              </>
+            )}
+            {r.ask && `${r.when ? " and" : ""} if ${aiName()} says yes to \u201c${r.ask}\u201d`}
+          </dd>
+        </Fragment>
+      ))}
     </dl>
   );
 }
@@ -692,7 +730,9 @@ function Runs({ a, resume }: { a: Auto; resume: (session: string, agent: Automat
             <ul className="au-found">
               {r.items.map((x) => (
                 <li key={x.item_id}>
-                  <span className={cls("au-outcome", (x.outcome === "failed" || x.outcome === "refused") && "t-bad")}>
+                  <span
+                    className={cls("au-outcome", (x.outcome === "failed" || x.outcome === "refused" || x.outcome === "unfit") && "t-bad")}
+                  >
                     {outcomeText(x)}
                   </span>
                   {/^[\w.-]+\/[\w.-]+#\d+$/.test(x.item_id) ? (
@@ -702,7 +742,15 @@ function Runs({ a, resume }: { a: Auto; resume: (session: string, agent: Automat
                   ) : (
                     <span>{x.item_id}</span>
                   )}
-                  <span className="au-why">{x.error ?? x.why}</span>
+                  <span className="au-why">
+                    {x.error ?? x.why}
+                    {x.rule && (
+                      <>
+                        {", by "}
+                        <code>{x.rule}</code>
+                      </>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>

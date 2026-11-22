@@ -867,17 +867,20 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
         (b.mcp !== undefined && !strings(b.mcp)) ||
         (b.buttons !== undefined && !noteButtons(b.buttons)) ||
         (b.icon !== undefined && typeof b.icon !== "string") ||
+        (b.type !== undefined && typeof b.type !== "string") ||
+        (b.rules !== undefined && !(Array.isArray(b.rules) && b.rules.every(isRecord))) ||
         (b.on !== undefined && typeof b.on !== "boolean")
       )
         return yield* new BadRequest({
           message:
-            "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, on? }",
+            "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, type?, rules: [{ when?, ask?, do }]?, on? }",
         });
-      const { name, schedule, events, prompt, when, decide, rule, can, mcp, icon, on } = b;
+      const { name, schedule, events, prompt, when, decide, rule, can, mcp, icon, type, on } = b;
       const buttons = b.buttons === undefined ? undefined : (noteButtons(b.buttons) ?? undefined);
+      const rules = Array.isArray(b.rules) ? b.rules.filter(isRecord) : undefined;
       const a = yield* desk.automations.set(
         c.req.param("id"),
-        { name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, icon, on },
+        { name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, icon, type, rules, on },
         fromDesk(c),
       );
       return { ok: true, automation: a };

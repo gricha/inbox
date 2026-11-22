@@ -3577,6 +3577,67 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // Claude's recommendation for a note an automation held: what it would change, the note and how it doesn't fit, then
+    // Agree, Disagree, or a comment that asks it again. No Dismiss: Disagree is that.
+    name: "inquiry-recommendation",
+    go: async (page) => {
+      await at("#/inquiry/q5e1a11d")(page);
+      await page.locator(".inquiry .inq-fix").waitFor();
+      await page.waitForTimeout(200);
+      const read = await page.evaluate<{ options: string[]; acts: string[]; heads: string[]; kind: string }>(`({
+        options: [...document.querySelectorAll(".inq-option-answer")].map((o) => o.textContent),
+        acts: [...document.querySelectorAll(".inq-write .actions .act")].map((b) => b.textContent),
+        heads: [...document.querySelectorAll(".inq-fix .d-head")].map((h) => h.textContent),
+        kind: document.querySelector(".inq-kind").textContent,
+      })`);
+      const want = {
+        options: ["Agree", "Disagree"],
+        acts: ["Approve with comment", "Copy link"],
+        heads: ["The type would be", "The held note", "How it doesn\u2019t fit"],
+        kind: "Recommendation",
+      };
+      if (JSON.stringify(read) !== JSON.stringify(want)) failures.push(`inquiry-recommendation: its page reads ${JSON.stringify(read)}`);
+    },
+    after: at("#/"),
+  },
+  {
+    // On the Inbox its row's one call to action is Agree: one press, and the row is gone before the desk answers (answered
+    // here in the browser, so the mock keeps it for the next size).
+    name: "queue-recommendation",
+    sizes: ["wide"],
+    go: async (page) => {
+      await at("#/")(page);
+      await top(page);
+      const row = page.locator('.queue .line.inq[data-id="ask:q5e1a11d"]');
+      await row.waitFor();
+      const cta = (await row.locator(".line-cta").textContent())?.trim();
+      if (cta !== "Agree") failures.push(`queue-recommendation: its row's call to action reads ${JSON.stringify(cta)}`);
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.route("**/api/inquiries/*/answer", (r) => r.fulfill({ json: { ok: true } }));
+      await page.locator('.queue .line.inq[data-id="ask:q5e1a11d"] .line-cta').click();
+      await page.locator('.queue .line.inq[data-id="ask:q5e1a11d"]').waitFor({ state: "detached" });
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  {
+    // A typed automation: its notes' type and its rules among its facts; a run's held and dropped notes say why.
+    name: "settings-automations-typed",
+    go: async (page) => {
+      await at("#/settings/automations/gmail")(page);
+      await page.locator(".s-view .au-type").waitFor();
+      await page.waitForTimeout(200);
+      const said = await page.evaluate<string[]>(
+        `[...document.querySelectorAll(".s-view:not([hidden]) .au-found li")].map((l) => l.textContent)`,
+      );
+      if (!said.some((x) => x.startsWith("Dropped by a rule") && x.includes('item.kind == "statement"')))
+        failures.push(`settings-automations-typed: its run reads ${JSON.stringify(said)}`);
+    },
+    after: at("#/"),
+  },
+  {
     // Merged and closed ones under Merged, below the fold at every size.
     name: "inflight-landed",
     go: async (page) => {
@@ -4774,7 +4835,7 @@ const SHOTS: Shot[] = [
       const says = await settingsSays(page);
       if (says !== onPart("Automations")) failures.push(`settings-automations: the head and the sidebar read ${JSON.stringify(says)}`);
       if (await page.locator("#s-github").isVisible()) failures.push("settings-automations: another part shows on Your automations");
-      const [mine, draft, rule, ask, ...more] = await automationRows(page);
+      const [mine, draft, rule, ask, mail, ...more] = await automationRows(page);
       if (
         !mine ||
         mine.name !== "Warden and dotagents issues" ||
@@ -4797,7 +4858,9 @@ const SHOTS: Shot[] = [
         ask.red.length
       )
         failures.push(`settings-automations: the question's row reads ${JSON.stringify(ask)}`);
-      if (more.length) failures.push(`settings-automations: ${more.length} more rows than the mock's four`);
+      if (!mail || !/^Weekdays, every hour · next \S+( \S+)? · ran \d+m ago, put 2 on your desk$/.test(mail.help) || mail.red.length)
+        failures.push(`settings-automations: the typed one's row reads ${JSON.stringify(mail)}`);
+      if (more.length) failures.push(`settings-automations: ${more.length} more rows than the mock's five`);
       const edge = await page.evaluate<number>(`document.querySelector("#s-automations .switch").getBoundingClientRect().right`);
       if (Math.abs(edge - setting) > 0.5)
         failures.push(`settings-automations: an automation's switch ends at ${edge}px, a setting's at ${setting}px`);

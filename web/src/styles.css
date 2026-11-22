@@ -1564,6 +1564,45 @@ html::-webkit-scrollbar-corner,
   white-space: pre-wrap;
 }
 
+/* What a recommendation would change and the note it's about, as written: wrapped, not scrolled. */
+.inquiry > .inq-fix {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.inq-fix .d-head {
+  margin: 6px 0 0;
+}
+
+.inq-held {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+.inq-code {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--sheet);
+  font: 12.5px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inq-was summary {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.inq-was .inq-code {
+  margin-top: 6px;
+}
+
 .inq-links ul {
   display: grid;
   gap: 6px;
@@ -5913,6 +5952,13 @@ button.s-edit:hover:not(:disabled) {
 .au-facts code,
 .input.au-code {
   font: 12.5px var(--mono);
+}
+
+.au-type {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font: 12.5px/1.5 var(--mono);
+  white-space: pre-wrap;
 }
 
 .au-editor {

@@ -21,6 +21,7 @@ import { renderText } from "./render.ts";
 import {
   ACTIVITY_KINDS,
   isSessionRef,
+  ITEM_DOES,
   outcomeText,
   SESSION_KIND,
   UNTIL,
@@ -834,7 +835,7 @@ export function createMcpServer(
       description:
         "The owner's automations: their instructions that the desk runs on a schedule, or when something happens on an item, with their own agent, read only, putting what needs them on their desk with a line on why. " +
         "list: each one with its schedule, what it may do, whether it's on and its last runs (what each found and did); the ones a plugin comes with are listed too, marked built in (their ids are <plugin>.<id>: github.pick-reviewer). " +
-        "set: draft a new one or change one (id, name, schedule or events, prompt, when, decide, rule, can, mcp, buttons, icon): the whole automation each time. It's on as soon as it's saved, unless you pass on: false. Write one only when the owner asks for it. " +
+        "set: draft a new one or change one (id, name, schedule or events, prompt, when, decide, rule, can, mcp, buttons, icon, type, rules): the whole automation each time. It's on as soon as it's saved, unless you pass on: false. Write one only when the owner asks for it. " +
         "A built-in one can't be set, deleted or switched by you: only the owner switches it on or off, in the window (Settings → its plugin); to change one, draft your own with its definition (set, a new id). " +
         "Write `prompt` as their instruction, in their words: what to read (repos, searches, other tools), what counts as needing them, and that nothing needing them is a fine run; a run lists PRs and issues (owner/repo#123) with a why, and the desk adds them. " +
         '`schedule` is local time: "daily 09:00", "weekdays 09:00,13:00", "mon 09:00", "mon,thu 17:30" or "weekdays hourly" (every hour on the hour). ' +
@@ -845,6 +846,8 @@ export function createMcpServer(
         '`mcp`, with decide agent, names the owner\'s own MCP servers (as their agent lists them: "gmail", "claude.ai Gmail") the run gets beside the desk\'s, and no other of theirs; it may then also raise notes, things that aren\'t PRs or issues (an email), each on their desk once: a line of text (its row), a short markdown body (drawn without HTML, images or live links) and its https url. Name only what the instruction reads. ' +
         "`buttons`, with mcp, are the buttons on those notes, up to 3, the first the row's: { label, do: \"open\" } opens the note's url; { label, do: \"ask\", prompt } asks the owner's agent `prompt` (their words, fixed here, never a run's) about the note. Left out: Open, on a note with a url. Press Ask or Done and the note leaves the desk. " +
         `\`icon\`, with mcp, is the icon on those notes' rows: ${ICON_FORMAT}. A name neither pack has is refused. A run may pick one per note (a bill receipt, a flight plane), and the automation's shows on the rest. ` +
+        '`type`, with mcp, is TypeScript for what each note is (type Email = { kind: "statement" | "bill" | "personal"; sender: string; amount?: number; due?: string }): object literals of string, number, boolean, string-literal unions, optional fields, nested object literals and arrays, nothing else (a 400 says what isn\'t supported). The run fills each note\'s `fields` by it, and the desk checks every note: one that doesn\'t fit is held off the desk, and the owner\'s agent recommends what to do (fix that note, widen the type, change the prompt, or drop it) as a question the owner agrees or disagrees with. Declare only what the instruction already reads. ' +
+        "`rules`, with type, are asked of each note that fits, in order, and the first that says yes decides: { when, do } is an expression over item.<field> with no model (when: \"item.kind == 'statement'\"); { ask, do } a yes-or-no in the owner's words that one light model call answers for the notes (with when too, only those its when passes). `do` is drop (never raised; the run's record names the rule), or urgent, standard or fyi (its section). Use when whenever the fields settle it; ask only for what they can't. " +
         "run: run one that's on now (a built-in one too); it takes a few minutes, and its result shows in Settings.",
       inputSchema: {
         action: z.enum(["list", "set", "run"]),
@@ -882,11 +885,27 @@ export function createMcpServer(
           .describe(
             'set, with mcp: its notes\' icon, a Lucide name ("receipt") or brand:<Simple Icons slug> ("brand:gmail"); left out: a note\'s',
           ),
+        type: z.string().max(4000).optional().describe("set, with mcp: TypeScript for each note's fields; left out: none, unchecked"),
+        rules: z
+          .array(
+            z.object({
+              when: z.string().optional().describe("An expression over item.<field>: \"item.kind == 'statement'\""),
+              ask: z
+                .string()
+                .max(1000)
+                .optional()
+                .describe("A yes-or-no about the note, for a light model; with when, only of what it passes"),
+              do: z.enum(ITEM_DOES).describe("What a yes does: drop it, or its section"),
+            }),
+          )
+          .max(10)
+          .optional()
+          .describe("set, with type: rules on its notes, first yes decides; left out: none"),
         on: z.boolean().optional().describe("set: false saves it off; left out: on, or as it was"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    ({ action, id, name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, icon, on }) =>
+    ({ action, id, name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, icon, type, rules, on }) =>
       run(
         Effect.gen(function* () {
           if (action === "list") return automationsText(yield* api.automations());
@@ -906,6 +925,12 @@ export function createMcpServer(
             mcp,
             buttons: buttons?.map((b) => ({ label: b.label, do: b.do, ...(b.prompt !== undefined && { prompt: b.prompt }) })),
             icon,
+            type,
+            rules: rules?.map((r) => ({
+              do: r.do,
+              ...(r.when !== undefined && { when: r.when }),
+              ...(r.ask !== undefined && { ask: r.ask }),
+            })),
             on,
           });
           const starts = startsOn(a);
@@ -1097,6 +1122,10 @@ function automationsText(all: AutomationView[]): string {
             `  buttons: ${a.buttons.map((b) => (b.do === "ask" ? `${b.label} (asks: ${oneLine(b.prompt ?? "")})` : `${b.label} (opens)`)).join("; ")}`,
           ]
         : []),
+      ...(a.type ? [`  type: ${oneLine(a.type)}`] : []),
+      ...(a.rules ?? []).map(
+        (r) => `  rule: ${r.do}${r.when ? ` when ${oneLine(r.when)}` : ""}${r.ask ? ` if asked "${oneLine(r.ask)}"` : ""}`,
+      ),
       ...a.runs.slice(0, 3).map((r) => {
         // What came of its items, less those it left as they were: "Added: a, b. Snoozed until CI passes: c."
         const by = new Map<string, string[]>();

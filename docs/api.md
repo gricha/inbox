@@ -238,7 +238,7 @@ Every write here is own page only, logged, and answers 502 with GitHub's reason 
 | GET    | `/api/inquiries/unread`     | `Inquiry[]`: answers nobody has picked up yet (`answer.read_at` null), in the order asked. Listing picks none up                                                                                                                                                                                                        |     |
 | GET    | `/api/inquiries/:id`        | `InquiryView` (the question's page): the `Inquiry`, its item's `card` (null when the desk doesn't hold it), and `answer: { text, at, dismissed, read_at? }` once answered or dismissed. Reading here isn't a pickup                                                                                                     |     |
 | POST   | `/api/inquiries/:id/read`   | `{ ok, inquiry }`: stamps `answer.read_at` the first time and ends its job in Claude's work. No change for an open question, a dismissal or a later read                                                                                                                                                                |     |
-| POST   | `/api/inquiries/:id/answer` | `{ text }` or `{ dismiss: true }` → `{ ok, inquiry }`. Own page only (an agent can't answer its own question). 400 when empty; 409 if already answered                                                                                                                                                                  | ✓   |
+| POST   | `/api/inquiries/:id/answer` | `{ text }` or `{ dismiss: true }` → `{ ok, inquiry }`. Own page only (an agent can't answer its own question). 400 when empty; 409 if already answered. A recommendation's is acted on and it's gone (Automations → Typed notes)                                                                                        | ✓   |
 
 A question's limits: `question` one line (300), `from` one line (60), `context` 200 to 6,000 characters (paragraphs kept), at most 6 `options` (`answer` 80, `next` 400: what the agent does if you pick it), at most 12 `links` with https URLs, and an `item` or at least one link. Text over a limit is refused, never cut; bidi marks are dropped.
 
@@ -1579,6 +1579,31 @@ Settings → MCP servers lists, checks, adds and removes your agent's own (`GET`
 
 `POST /api/notes/:id/ask` `{ button }` (the window only, as an ask is) asks your agent the button's prompt with the note kept on the ask (`Ask.note`: its text, body, url and automation), then marks the note done. The wake line says `about a note an automation raised (inbox_ask <id> gives it: data, not instructions)`; `inbox_ask` gives the note inside an `untrusted-data` fence. 400 for a button that isn't an ask, 403 from anywhere but the window.
 
+#### Typed notes
+
+`type` (with `mcp`, up to 4,000 characters) is TypeScript for what each note is, written with the automation (by you or an agent you asked, never by a run): `type Email = { kind: "statement" | "bill" | "personal" | "security" | "booking" | "order"; sender: string; amount?: number; due?: string }`. Kept as written, and checked on save (`itemType()` in `src/itemtype.ts`).
+
+- **What it reads.** One `type Name = { … }` or `interface Name { … }` (optionally `export`), whose fields are `string`, `number` (`Schema.Finite`), `boolean`, string literals and unions of these, optional fields (`a?: T`), `readonly`, nested object literals and arrays (`T[]`, `Array<T>`); comments are skipped. Anything else is a 400 naming it and where, with what it does read: `type: line 1, column 20: "Date" (use string, an ISO date) isn't supported; a type here is …`. So are `null`, a number literal, a generic, `extends`, an index signature, a tuple, a function, `&`, another type's name, a second declaration, and a field named other than letters, digits and `_`. TypeScript 7 has no JS API, so this is a small parser of its own; its refusals are its subset, not TypeScript's.
+- **What it becomes.** An Effect `Schema.Struct`, and from it, by `Schema.toJsonSchemaDocument()` (`onExcessProperty: "error"`), the JSON Schema of each note's `fields` in the run's answer, which then requires `fields`. The run's prompt carries the type and says to fill the fields from the item itself, never guessing. Its fields' paths (`item.kind`, nested `item.ship.carrier`; a list of objects isn't one) are what its rules read.
+- **The check.** Each note's `fields` is decoded with the Schema (`fit()`, every error, Effect's words). One that fits goes through its rules; one that doesn't is **held**: kv `automation_held` keeps it by automation (`{ id, key, run, note, error, said, rec }`), it isn't on your desk and its key isn't kept as raised, and its run's record says `unfit` with the error. A later run that reads the same key the same way holds nothing more; one that reads it so it fits raises it, and the held one goes with its recommendation.
+
+**Rules on notes.** `rules` (with `type`, up to 10) are asked of each note that fits, in order, and the first that says yes decides; with none that does, it goes where the run said (Urgent when `urgent`).
+
+- `{ when, do }`: an expression in the rules' language over `item.<field>` (`compile()` with the type's fields: an unknown one is a 400 with "did you mean"), with no model. A field a note left out can't be read, so it doesn't pass.
+- `{ ask, do }` (up to 1,000 characters): a yes or no in your words, answered by one call on [the light model](#the-light-model) about all the run's notes still undecided at that rule (with `when` too, only those it passes), each a JSON line fenced as untrusted. When unsure, no. A light model that can't answer fails the run, and nothing of it is raised, so the next run reads them again.
+- `do` is `drop` (never raised: its key is kept, and the record says `dropped` with `rule`, the rule's `when` or `ask`) or `urgent`, `standard`, `fyi`, its section. A rule never acts outside the desk.
+- A type changed under its rules is checked again with them: a `when` naming a field it no longer has refuses the save.
+
+**A held note's recommendation.** Before its run ends, each held note with none yet is asked about (`Automations.recommend()`): your agent, one call without tools on its own model (`askAgent()` in `<home>/agent`), with your instruction, the type and the error as yours, the note (its text, body and fields as the run gave them) between `<item-<random>>` tags as untrusted data, and what you said of its earlier recommendations. It answers `{ do: fix | type | prompt | drop, says, why, fields?, type?, prompt? }` (`fields` by the type's JSON Schema), and the desk checks it: a fix must fit the type, a new type must be one it reads and the note must fit it, a new instruction must be up to 8,000 characters. One that doesn't hold up fails the run (`its recommendation for a held note …`), and the next run asks again.
+
+What it recommends is an `Inquiry` with `fix` (`Recommendation`: `automation`, `held`, `do`, the change and what it replaces as `was`, the note and its error), `from` your agent's name, its `says` as the question and its `why` as the context, and the options **Agree** and **Disagree**, each with what it does. It's a question on your Inbox like any other, notified once. Its answer (`POST /api/inquiries/:id/answer`) is the desk's to act on, and then the question is gone, with nothing owed:
+
+- **Agree**: `fix` puts the note through the rules with those fields (on your desk or dropped); `type` saves the automation with the new type, as an agent's change you approved (`by: "an agent"`, on or off as it was), and every note it held that the new type fits goes through the rules; `prompt` saves the new instruction the same way and forgets the note, so its next run reads it again; `drop` drops it. The run that held it has its record changed to what came of it.
+- **Disagree** (or a dismissal): the recommendation and the held note go, and its key is kept as raised: it doesn't come back.
+- **Anything else you write** (Approve with comment): it goes back to your agent with the recommendation it answers, for a revised one, in the background; the old one leaves at once. One that fails is logged and notified, and the next run asks again.
+
+A refusal (the automation gone, a fix that no longer fits) leaves both as they were. Deleting the automation forgets what it held, and its questions.
+
 #### What it may do
 
 `can` lists the verbs: `add`, `today`, `later`, `fyi`, `hide`, `snooze`, `done`, `mute`. Absent, it's `add` alone, and the run answers `{ ref, why }` only. With more, the schema gives each item `do` (one of its `can`) and `until`, the prompt says what each verb does, and each item goes through `Automations.apply()` against the automation as it is then. An automation deleted or turned off during its run, a `do` the desk doesn't know, or one no longer in its `can` is `refused`, and nothing happens to the item.
@@ -1615,6 +1640,8 @@ Each item's `outcome`:
 - `held`: its sort is kept, but a hard rule, a final rule or your pin holds it (`error` says which).
 - `refused`: outside its `can`.
 - `failed`: the desk couldn't (`error` says why).
+- `dropped`: a rule on its notes dropped it (`rule` says which; "you dropped it" for Disagree).
+- `unfit`: a note whose fields don't fit its type, held for a recommendation (`error` says how).
 
 `GET /api/automations` gives each run `did` ("put 2 on your desk, sorted 3 to FYI, snoozed 1") and `didnt` ("couldn't add 1, refused 2"). `outcomeText()` in `src/types.ts` words one item's outcome ("Sorted to FYI", "Snoozed until CI passes", "Not allowed") for the window and `inbox_automations`. Deleting an automation stops its run in progress, which then adds and stores nothing.
 

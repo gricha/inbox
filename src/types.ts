@@ -1384,6 +1384,22 @@ export interface Inquiry {
   // read_at: when whoever asked first read your answer (inbox_inquiry, or the wake that gives your agent its own); null
   // until then; absent on a dismissal, which owes nothing, and on an answer from before the desk kept it.
   answer: { text: string; at: string; dismissed: boolean; read_at?: string | null } | null;
+  fix?: Recommendation; // Claude's recommendation for a held note: Agree applies it, Disagree drops both, a comment asks again
+}
+
+// What Claude recommends for a note an automation held because its fields don't fit its type: the desk's to apply.
+export const AGREE = "Agree";
+export const DISAGREE = "Disagree";
+export interface Recommendation {
+  automation: string; // its id
+  held: string; // the held note's id
+  do: "fix" | "type" | "prompt" | "drop"; // fix the note's fields, widen the type, change the instruction, or drop the note
+  fields?: Record<string, unknown>; // fix's: the note's fields as they'd be, fitting the type
+  type?: string; // type's: the whole new type
+  prompt?: string; // prompt's: the whole new instruction
+  was?: string; // type's and prompt's: what it replaces
+  item: { text: string; fields: unknown }; // the held note, as its run gave it: untrusted
+  error: string; // how its fields don't fit
 }
 
 // A note icon naming a Simple Icons brand ("brand:gmail"); any other is a Lucide icon's name ("receipt").
@@ -1529,11 +1545,24 @@ export interface Automation {
   mcp?: string[];
   buttons?: NoteButton[]; // with mcp: the buttons on the notes it raises, up to 3; absent: Open, on a note with a url
   icon?: string; // with mcp: its notes' icon (as Note.icon), unless a run picks one for a note
+  // With mcp: TypeScript for its notes' fields ("type Email = { kind: …; sender: string }"), checked on every note; one that
+  // doesn't fit is held off your desk and Claude recommends what to do. src/itemtype.ts says what it reads.
+  type?: string;
+  rules?: ItemRule[]; // with type: asked of each note in order, the first that says yes decides
   on: boolean;
   by: "you" | "an agent"; // who last changed what it does
   updated_at: string;
   plugin?: string; // one a plugin comes with: its plugin's id ("github"); its definition is the plugin's, you only switch it
   help?: string; // a plugin's: what it does, in one plain line
+}
+
+// A rule on a typed automation's notes: `when` over item.<field> (the rules' language, no model), `ask` a yes-or-no a
+// light model answers for the notes `when` passes; a yes drops the note, or puts it in that section. Never more than that.
+export const ITEM_DOES = ["drop", "urgent", "standard", "fyi"] as const;
+export interface ItemRule {
+  when?: string;
+  ask?: string;
+  do: (typeof ITEM_DOES)[number];
 }
 
 // What a plugin comes with: an automation in its own file, whose id ("<plugin>.<id>"), name and definition are the code's;
@@ -1563,6 +1592,8 @@ export function outcomeText(x: Pick<AutomationItem, "outcome" | "do" | "until">)
   if (x.outcome === "failed") return verb === "add" ? "Couldn't add" : `Couldn't ${VERB[verb]}`;
   if (x.outcome === "kept" && verb !== "add") return "Already there";
   const said = {
+    dropped: "Dropped by a rule",
+    unfit: "Held: doesn't fit its type",
     added: "Added",
     kept: "Already on your desk",
     left: "You'd dealt with it",
@@ -1602,8 +1633,11 @@ export interface AutomationItem {
   // left: you'd dealt with it (done, snoozed, muted, in Merging), so it stays that way; resolved: nobody needs it now (closed,
   // merged, approved by someone else); held: a review asked of them by name, or its sort is kept but a hard rule, a final rule or your pin holds it where it is
   // (error says which); refused: the automation may not do that (its `can`); failed: the desk couldn't (error says why)
-  outcome: "added" | "did" | "kept" | "left" | "resolved" | "held" | "refused" | "failed";
+  // dropped: a rule on its notes dropped it (rule says which); unfit: a note whose fields don't fit its type, held off your
+  // desk for Claude's recommendation (error says how)
+  outcome: "added" | "did" | "kept" | "left" | "resolved" | "held" | "refused" | "failed" | "dropped" | "unfit";
   error?: string;
+  rule?: string; // dropped's: the rule's when, or its ask
 }
 
 // A criterion (Settings → Automations → Urgency): a yes-or-no about an item that orders the Inbox and never acts on it. `when` is free (the
@@ -1650,6 +1684,8 @@ export type AutomationBody = Pick<Automation, "name"> & {
   mcp?: string[] | undefined;
   buttons?: NoteButton[] | undefined;
   icon?: string | undefined;
+  type?: string | undefined;
+  rules?: ItemRule[] | undefined;
   schedule?: string | undefined;
   prompt?: string | undefined;
   decide?: Way | undefined;

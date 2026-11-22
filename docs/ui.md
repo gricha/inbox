@@ -205,6 +205,8 @@ A Claude Code session asks you in the desk (`inbox_inquire`) beside its chat: wh
 
 A question is a row at the top of Urgent: a question mark as its icon, the question as its title, **Answer** as its call to action, a small robot whose tip says who asks ("Asked by your agent", or the session's name), and its age. The desk refuses a question without enough context, a link or item, or answers that say what follows.
 
+A **recommendation** is a question too: your agent's, about a note an automation held because its fields don't fit the automation's type ([api.md → Typed notes](api.md#typed-notes)). Its title is what it thinks should happen ("I think Email should allow receipts: do you agree?"), and its call to action is **Agree**: one press applies it and the row is gone. Its menu: **Agree**, **Disagree**, **Open**, **Copy link**.
+
 ### Sessions that need you
 
 Your own Claude Code and Codex sessions on this computer that are blocked on you or stalled (`src/connectors/sessions.ts`; Settings → Sessions turns them off). They follow the questions, blocked ones first.
@@ -229,6 +231,8 @@ Your own Claude Code and Codex sessions on this computer that are blocked on you
 - **Copy link** copies the question's link ([Links](#links)).
 
 Once answered or dismissed it leaves the Inbox at once. The page stays and says so ("✓ Answered", with your answer). If the desk refuses, your words come back.
+
+A recommendation's page ("Recommendation" over it) has its reasons as the context, then what it would change (**The type would be**, **Its fields would be** or **The instruction would be**, as written, with **What it replaces** folded), **The held note** (its line and its fields) and **How it doesn't fit** (the desk's check, in red). Its answers are **Agree** (applies it) and **Disagree** (drops it and the note for good), each saying what it does. The box is **Approve with comment**: your words go back to your agent, which recommends again. No Dismiss: Disagree is that. Whichever you press, the page goes back and the question is gone.
 
 Under your answer: **Not picked up yet**, then **Picked up 2m ago** once the asking session reads it (`inbox_inquiry`, or your agent's wake). Nothing pushes an answer to a session that stopped waiting. Until it's read, it's a line in Merging's [Claude's work](#claudes-work); after 30 minutes unread the desk tells you once that the session has probably ended. A dismissal owes nothing.
 
@@ -548,9 +552,11 @@ Each row:
 - **Only when**: its check, in the code font.
 - **Decides**: a rule ("A rule, with no model: …"), a question ("A question: Claude answers, without tools", or the decision model "through OpenRouter"), or an agent ("An agent: your Claude Code, with read-only tools").
 - **May** (not for a rule): "Add to your desk, sort to FYI and snooze".
+- **Its notes are** (with a type): the type as written, and that a note that doesn't fit is held and your agent recommends what to do.
+- **Rules**, then **Then** for each after the first: what a yes does ("Drop it", "Urgent", "Standard", "FYI"), when its check (in the code font) passes, and if your agent says yes to its question.
 - While its model can't answer: a red line saying it's waiting, why, when it asks again, and that nothing was spent.
 - **Run now** (not for a rule, or a question on events without a check), **Edit**, **Turn off**/**Turn on**.
-- Its runs: when and how ("on schedule", "run now", "on an event"), what it did ("put 2 on your desk, sorted 3 to FYI, snoozed 1"), the agent's summary, each item with what came of it (Added, Sorted to FYI, Hidden, Snoozed until CI passes, Marked done, Muted, Already on your desk, You'd dealt with it, Nobody needs it now, Held where it is; Not allowed and Couldn't add in red) and why.
+- Its runs: when and how ("on schedule", "run now", "on an event"), what it did ("put 2 on your desk, sorted 3 to FYI, snoozed 1"), the agent's summary, each item with what came of it (Added, Sorted to FYI, Hidden, Snoozed until CI passes, Marked done, Muted, Already on your desk, You'd dealt with it, Nobody needs it now, Held where it is, Dropped by a rule with the rule; Not allowed, Couldn't add and Held: doesn't fit its type in red) and why.
 - **Copy resume command** copies `cd <home>/automations && claude --resume <id>` (`codex resume` or `opencode --session` for those agents).
 - Deleting one goes back to Automations. A link to one that isn't there says so.
 
@@ -564,6 +570,7 @@ Each row:
 - For the others, **Instruction** and **It may** (the same eight, at least one).
 - **Save** (⌘S; off until it's a valid automation), **Cancel** (Esc), and in a view **Delete** (no confirmation; stops a run in progress).
 - A new one's id is its name's, made unique with -2, -3…
+- Its type and rules aren't in the editor: an agent writes them (**Change with your agent**), and a save keeps them as they are.
 
 #### Urgency
 

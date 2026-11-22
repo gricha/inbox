@@ -285,7 +285,7 @@ const isValue = (v: unknown): v is Value =>
   v === null || v === undefined || ["string", "number", "boolean"].includes(typeof v) || (Array.isArray(v) && v.every(isValue));
 
 // Callers only pass paths compile() allowed, whose leaves are Values.
-function lookup(s: Signals, path: string): Value {
+function lookup(s: object, path: string): Value {
   let v: unknown = s;
   for (const k of path.split(".")) v = field(v, k);
   if (!isValue(v)) throw new Error(`${path} isn't a field's value`);
@@ -312,7 +312,7 @@ function glob(pattern: string): RegExp {
   );
 }
 
-function evaluate(node: Node, s: Signals): Value {
+function evaluate(node: Node, s: object): Value {
   switch (node.t) {
     case "lit":
       return node.v;
@@ -393,10 +393,10 @@ function evaluate(node: Node, s: Signals): Value {
   throw new Error("unknown node");
 }
 
-// An expression ready to run on an item's signals: its value, or why the item's values don't work with it. Per item, per
-// rule, per board on every snapshot, so a Result and never an Effect.
+// An expression ready to run on an item's signals, or a typed item's fields under item: its value, or why the item's values
+// don't work with it. Per item, per rule, per board on every snapshot, so a Result and never an Effect.
 export interface Compiled {
-  eval(s: Signals): Result.Result<unknown, ExprEvalError>;
+  eval(s: object): Result.Result<unknown, ExprEvalError>;
 }
 
 // `fields`: the paths it may name; a tag's `when` passes TAG_FIELDS.

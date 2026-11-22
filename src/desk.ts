@@ -133,10 +133,14 @@ import type {
   UsageView,
   WaitingStep,
   Work,
+  InboxSection,
+  Recommendation,
 } from "./types.ts";
 import {
   AGENT_NAME,
+  AGREE,
   byPart,
+  DISAGREE,
   INBOX_SECTIONS,
   isCoordinator,
   isSessionRef,
@@ -4329,8 +4333,49 @@ export class Desk {
     });
   }
 
+  // Claude's recommendation for a note an automation held: a question on your main page whose answer the desk acts on.
+  recommend(from: string, says: string, why: string, fix: Recommendation, url: string | undefined): Inquiry {
+    const AGREES: Record<Recommendation["do"], string> = {
+      fix: "Puts the note on your desk with these fields, through the automation's rules",
+      type: `Saves the new type to ${from}, as an agent's change you approved, and releases every held note it fits`,
+      prompt: `Saves the new instruction to ${from}; its next run reads this one again`,
+      drop: "Drops the note: it won't be raised again",
+    };
+    const q: Inquiry = {
+      id: randomBytes(4).toString("hex"),
+      at: this.now().toISOString(),
+      from: agentName(this.agent()),
+      question: says,
+      context: why,
+      options: [
+        { answer: AGREE, next: AGREES[fix.do] },
+        { answer: DISAGREE, next: "Drops this recommendation and the held note: it won't be raised again" },
+      ],
+      links: url ? [{ label: "The note's link", url }] : [],
+      item_id: null,
+      answer: null,
+      fix,
+    };
+    this.store.set("inquiries", [...this.inquiries(), q]);
+    this.log(`${q.from} recommends, for ${from}: ${says}`);
+    this.changed();
+    if (this.mayNotify()) this.notify(`${q.from} recommends`, says);
+    return q;
+  }
+
+  // A recommendation acted on, or whose held note went: it leaves your desk, and nothing is owed on it.
+  dropInquiry(id: string): void {
+    const all = this.inquiries();
+    if (!all.some((q) => q.id === id)) return;
+    this.store.set(
+      "inquiries",
+      all.filter((q) => q.id !== id),
+    );
+    this.changed();
+  }
+
   // POST /api/inquiries/:id/answer, from the desk's window: your answer, for the agent to read; it leaves your desk.
-  answerInquiry(id: string, text: string, dismissed = false): Effect.Effect<Inquiry, NotFound | Conflict | BadRequest> {
+  answerInquiry(id: string, text: string, dismissed = false) {
     return Effect.gen({ self: this }, function* () {
       const q = yield* this.inquiry(id);
       if (q.answer) return yield* new Conflict({ message: "already answered" });
@@ -4338,6 +4383,12 @@ export class Desk {
       if (!dismissed && !answer) return yield* new BadRequest({ message: "the answer is empty" });
       if (answer.length > MAX_ASK) return yield* new BadRequest({ message: `keep an answer under ${MAX_ASK} characters` });
       const at = this.now().toISOString();
+      // A recommendation's answer is the desk's to act on: done, it's gone, and nobody is owed it.
+      if (q.fix) {
+        yield* this.automations.verdict({ ...q, fix: q.fix }, answer, dismissed);
+        this.dropInquiry(id);
+        return { ...q, answer: { text: answer, at, dismissed } };
+      }
       const done: Inquiry = { ...q, answer: { text: answer, at, dismissed, ...(!dismissed && { read_at: null }) } };
       this.store.set(
         "inquiries",
@@ -4423,10 +4474,10 @@ export class Desk {
     });
   }
 
-  // An automation's run raised it: in Urgent when it said so, with the automation's buttons as they are now.
+  // An automation's run raised it: in the section it or its rule said, with the automation's buttons as they are now.
   raiseNote(
     from: { id: string; name: string },
-    b: { text: string; body?: string; url?: string; urgent?: boolean; buttons?: NoteButton[]; icon?: string },
+    b: { text: string; body?: string; url?: string; section?: InboxSection; buttons?: NoteButton[]; icon?: string },
   ): Note {
     const note: Note = {
       id: randomBytes(4).toString("hex"),
@@ -4434,7 +4485,7 @@ export class Desk {
       text: b.text,
       remind_at: null,
       reminded_at: null,
-      ...(b.urgent && { section: "urgent" as const }),
+      ...(b.section && b.section !== "standard" && { section: b.section }),
       from,
       ...(b.body && { body: b.body }),
       ...(b.url && { url: b.url }),

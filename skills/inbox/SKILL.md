@@ -214,7 +214,7 @@ When the user wants something checked on a schedule or on events ("every morning
   - A `rule` or `ask` on a schedule needs `when`.
 - `can`: what the desk may do with what a run lists. Default `["add"]` (on the desk, pinned to Today). Add only what's needed: `today`, `later`, `fyi`, `hide` (sorts it there until the item changes or the user acts; hard rules still win; never into Now or Blocked), `snooze`, `done`, `mute` (undoable, logged as the automation's). Nothing overrides a hand-back, the user's pin or a hard rule. Tell the user what you let it do.
 
-### What isn't on GitHub: MCP servers, notes, buttons and icons
+### What isn't on GitHub: MCP servers, notes, buttons, icons, types and rules
 
 An automation can read the user's other tools (mail, chat, an issue tracker) through their agent's own MCP servers.
 
@@ -242,6 +242,30 @@ Example (the user's personal mail, through a server named `executor`):
   "buttons": [
     { "label": "Open in Gmail", "do": "open" },
     { "label": "Draft a reply", "do": "ask", "prompt": "Draft a reply to this email in my Gmail drafts; don't send it." }
+  ]
+}
+```
+
+**Typed notes.** With `mcp`, `type` declares what each note is, in TypeScript, and the run fills each note's `fields` by it (the desk adds them to its answer's schema and puts the type in its prompt). The desk reads object literals of `string`, `number`, `boolean`, string-literal unions (`"bill" | "statement"`), optional fields (`due?: string`), nested object literals and arrays (`string[]`); anything else (`Date`, `null`, generics, other types' names) is refused, saying what isn't supported. Declare only what the prompt already has the run read.
+
+- Every note's `fields` are checked against the type. One that doesn't fit is held: not on the desk, and not counted as raised. The user's agent (one call, no tools) recommends what should happen: fix that note's fields, widen the type, change the prompt, or drop it. That's a question on their desk with Agree, Disagree and Approve with comment; Agree applies it (a wider type or a new prompt is saved as an agent's change they approved, and the held notes the type now fits go through the rules), Disagree drops the note for good, and a comment asks for a revised recommendation. Don't answer those questions yourself.
+- `rules` (with `type`, up to 10) sort what fits, in order; the first that says yes decides. `{ "when": "item.kind == 'statement'", "do": "drop" }` is an expression in the rules' language over `item.<field>`, no model. `{ "ask": "Is it a newsletter or a promotion?", "do": "fyi" }` is a yes-or-no one light model call answers for all the run's notes at once (with `when` too, only for those it passes). `do` is `drop` (the run's record names the rule) or `urgent`, `standard`, `fyi`: its section, never more. Use `when` whenever the fields settle it; `ask` only for what they can't.
+- Put in the type what the rules need: a rule's `when` is compiled against it on save, so `item.knd` is refused with "did you mean item.kind?".
+
+Example: the user's Gmail, where their cards are on autopay, so statements never need them:
+
+```json
+{
+  "id": "gmail",
+  "name": "Gmail",
+  "schedule": "weekdays hourly",
+  "mcp": ["claude.ai Gmail"],
+  "icon": "brand:gmail",
+  "prompt": "Read my unread Gmail since the last run, read only. Raise a note for each email that needs me: a bill to pay, a statement, a security alert, a booking or order that changed, a person waiting on my reply. Each note: key the thread id; text the sender and what it needs; body the gist with dates and amounts; url its Gmail link; urgent only if it can't wait for today. Finding nothing is a good run.",
+  "type": "type Email = { kind: \"statement\" | \"bill\" | \"personal\" | \"security\" | \"booking\" | \"order\"; sender: string; amount?: number; due?: string }",
+  "rules": [
+    { "when": "item.kind == 'statement'", "do": "drop" },
+    { "when": "item.kind == 'security'", "do": "urgent" }
   ]
 }
 ```

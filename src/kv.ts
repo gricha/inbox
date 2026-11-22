@@ -2,7 +2,17 @@
 // has reads as absent.
 import { Schema } from "effect";
 import { schemaOf } from "./narrow.ts";
-import { BUCKETS, type AiReview, type Ask, type Bucket, type Handoff, type IssueReview, type Note, type ReviewFile } from "./types.ts";
+import {
+  BUCKETS,
+  type AiReview,
+  type Ask,
+  type Bucket,
+  type Handoff,
+  type IssueReview,
+  type Note,
+  type Recommendation,
+  type ReviewFile,
+} from "./types.ts";
 
 // An automation's sort of an item (kv `sorted:<id>`): good while the item is what it sorted (sortKey) and you haven't acted
 // on it.
@@ -265,6 +275,21 @@ export const KeptInquirySchema = Schema.Struct({
   item_id: Schema.NullOr(Schema.String),
   answer: Schema.NullOr(
     Schema.Struct({ text: Schema.String, at: Schema.String, dismissed: Schema.Boolean, read_at: opt(Schema.NullOr(Schema.String)) }),
+  ),
+  fix: opt(
+    schemaOf<Recommendation>()(
+      Schema.Struct({
+        automation: Schema.String,
+        held: Schema.String,
+        do: Schema.Literals(["fix", "type", "prompt", "drop"]),
+        fields: opt(Schema.Record(Schema.String, Schema.Unknown)),
+        type: opt(Schema.String),
+        prompt: opt(Schema.String),
+        was: opt(Schema.String),
+        item: Schema.Struct({ text: Schema.String, fields: Schema.Unknown }),
+        error: Schema.String,
+      }),
+    ),
   ),
 });
 export const NoteButtonSchema = Schema.Struct({

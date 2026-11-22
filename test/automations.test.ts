@@ -438,15 +438,15 @@ test("an agent writes or changes one and it's on as yours is; only you delete it
     [{ prompt: " " }, "the instruction is empty"],
     [
       { name: 3 },
-      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, on? }",
+      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, type?, rules: [{ when?, ask?, do }]?, on? }",
     ],
     [
       { can: "mute" },
-      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, on? }",
+      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, type?, rules: [{ when?, ask?, do }]?, on? }",
     ],
     [
       { rule: "mute" },
-      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, on? }",
+      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, type?, rules: [{ when?, ask?, do }]?, on? }",
     ],
     [{ decide: "guess" }, 'decide: "guess" isn\'t one of rule, ask, agent'],
     [{ decide: "rule" }, "a rule on a schedule needs when: the items it's about"],

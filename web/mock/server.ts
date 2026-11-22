@@ -2652,6 +2652,13 @@ function saveNote(id: string | null, b: Record<string, unknown>): Note {
   return note;
 }
 
+const GMAIL_TYPE = `type Email = {
+  kind: "statement" | "bill" | "personal" | "security" | "booking" | "order";
+  sender: string;
+  amount?: number;
+  due?: string;
+}`;
+
 const INQUIRIES: Inquiry[] = [
   {
     id: "q1c0ffee",
@@ -2733,6 +2740,35 @@ const INQUIRIES: Inquiry[] = [
     item_id: null,
     answer: { text: "Now, on #12's branch", at: iso(6 / 60), dismissed: false, read_at: iso(4 / 60) },
   },
+  {
+    // Claude's recommendation for a note the Gmail automation held: its fields didn't fit the automation's type.
+    id: "q5e1a11d",
+    at: iso(0.2),
+    from: "Claude",
+    question: 'I think Email should allow receipts: add "receipt" to kind. Do you agree?',
+    context:
+      "This is a receipt for a coffee order: Blue Bottle charged $6.50 to your card, and nothing is asked of you. None of Email's kinds fits it, so the run called it a receipt, which the type doesn't allow.\n\n" +
+      'Receipts like this come every week, so widening the type is the lasting fix. With kind "receipt" allowed, this one goes on your desk in Standard; add a rule dropping receipts if you never want them.',
+    options: [
+      {
+        answer: "Agree",
+        next: "Saves the new type to Gmail, as an agent's change you approved, and releases every held note it fits",
+      },
+      { answer: "Disagree", next: "Drops this recommendation and the held note: it won't be raised again" },
+    ],
+    links: [{ label: "The note's link", url: "https://mail.google.com/mail/u/0/#inbox/18f2a9c4d1e0b7a3" }],
+    item_id: null,
+    answer: null,
+    fix: {
+      automation: "gmail",
+      held: "h7c2e9a1",
+      do: "type",
+      type: GMAIL_TYPE.replace('| "order";', '| "order" | "receipt";'),
+      was: GMAIL_TYPE,
+      item: { text: "Your receipt from Blue Bottle Coffee", fields: { kind: "receipt", sender: "Blue Bottle Coffee", amount: 6.5 } },
+      error: 'Expected "statement" | "bill" | "personal" | "security" | "booking" | "order"\n  at ["kind"]',
+    },
+  },
 ];
 function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
   const q = INQUIRIES.find((x) => x.id === id);
@@ -2741,6 +2777,12 @@ function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
   const dismissed = b.dismiss === true;
   const text = typeof b.text === "string" ? b.text.trim() : "";
   if (!dismissed && !text) throw new HttpError(400, "the answer is empty");
+  // A recommendation's answer is the desk's to act on: it's gone.
+  if (q.fix) {
+    INQUIRIES.splice(INQUIRIES.indexOf(q), 1);
+    bump();
+    return { ...q, answer: { text, at: new Date().toISOString(), dismissed } };
+  }
   q.answer = { text: dismissed ? "" : text, at: new Date().toISOString(), dismissed, ...(!dismissed && { read_at: null }) };
   if (!dismissed) setJob("answer", q.id, { item: q.item_id });
   bump();
@@ -2794,6 +2836,18 @@ const AUTOMATIONS: Automation[] = [
     on: true,
     by: "you",
     updated_at: iso(400),
+  },
+  {
+    id: "gmail",
+    name: "Gmail",
+    schedule: "weekdays hourly",
+    prompt: "Read my unread mail since the last run and raise what needs me: a bill to pay, something to sign, a person waiting on me.",
+    mcp: ["claude.ai Gmail"],
+    type: GMAIL_TYPE,
+    rules: [{ when: 'item.kind == "statement"', do: "drop" }],
+    on: true,
+    by: "you",
+    updated_at: iso(500),
   },
 ];
 // What GitHub comes with, as the desk lists it: its definition the code's, on or off as you switched it.
@@ -2866,6 +2920,27 @@ const RUNS: AutomationRun[] = [
     error: null,
     summary: "",
     items: [{ item_id: "acme/web#412", why: "CI is red: back when it passes", do: "snooze", until: "ci", outcome: "did" }],
+    session: null,
+  },
+  {
+    id: "r6",
+    automation: "gmail",
+    trigger: "schedule",
+    at: iso(0.3),
+    done_at: iso(0.25),
+    error: null,
+    summary: "Read 6 unread threads. Three need you; a card statement and a receipt don't.",
+    items: [
+      { item_id: "note:n1b111", why: "PG&E: electric bill of $61.20 due Friday", outcome: "added" },
+      { item_id: "note:n1b112", why: "Dana is waiting on your answer about the offsite dates", outcome: "added" },
+      { item_id: "18f2a9c4d1e0b7a2", why: "Amex statement is ready: $812.40", outcome: "dropped", rule: 'item.kind == "statement"' },
+      {
+        item_id: "18f2a9c4d1e0b7a3",
+        why: "Your receipt from Blue Bottle Coffee",
+        outcome: "unfit",
+        error: 'Expected "statement" | "bill" | "personal" | "security" | "booking" | "order" at ["kind"]',
+      },
+    ],
     session: null,
   },
   {
