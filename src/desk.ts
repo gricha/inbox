@@ -208,6 +208,7 @@ import {
   saidOf,
   type FetchPrError,
   type PrText,
+  type YourMcp,
 } from "./review.ts";
 import * as agents from "./agents.ts";
 import { Judge, JudgeAnswerSchema, judgeKey, sortKey, textHash } from "./judge.ts";
@@ -427,6 +428,7 @@ export interface ReviewDeps {
     dir: string,
     agent: agents.DriverId,
     code?: string,
+    mcp?: YourMcp,
   ): Effect.Effect<AiReview, CommandError | ClaudeError>;
   checkout?(item: Item): Effect.Effect<Checkout, NoCheckout>; // the PR's head from your clone, for the agent to read
   loggedIn?(agent: agents.DriverId): Effect.Effect<boolean>; // the CLI's own status command; absent: nothing checks it
@@ -1136,6 +1138,15 @@ export class Desk {
   // ---------------------------------------------------------------- agents
 
   // A file it can't read fails it, in Node's words: a 500, as before.
+  // An AI review's MCP servers: all of your agent's but the desk's own.
+  yourMcp(): YourMcp {
+    const desk = this.mcpUrl;
+    if (this.agent() !== "claude-code") return { desk, claude: {} };
+    const own = desk ? agents.serverName("claude-code", desk) : null;
+    const claude = Object.fromEntries(Object.entries(agents.claudeServers()).filter(([n]) => n !== own && n !== "inbox"));
+    return { desk, claude };
+  }
+
   agentStatus(mcpUrl: string): Effect.Effect<AgentStatus, FsError> {
     return agents.status(agents.driverOf(this.settings["agent.harness"]), mcpUrl);
   }
@@ -2700,7 +2711,7 @@ export class Desk {
         };
         const code = this.review.checkout ? yield* this.review.checkout(e.item) : null;
         const written = yield* this.review
-          .generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir(), this.agent(), code?.dir)
+          .generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir(), this.agent(), code?.dir, this.yourMcp())
           .pipe(Effect.ensuring(code?.done ?? Effect.void));
         const doc = yield* this.writeDoc(e.item, pr.files, written);
         const ai = doc ? { ...written, doc } : written;

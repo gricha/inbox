@@ -346,3 +346,29 @@ test(
     assert.equal(view().error, OPENCODE_NOT_LOGGED_IN);
   },
 );
+
+test("an AI review on OpenCode keeps your MCP servers that are on, every tool of each, but the desk's own", posix, async (c) => {
+  const f = fakeOpencode(c);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-agent-"));
+  c.after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  f.file(
+    "config",
+    JSON.stringify({
+      mcp: {
+        linear: { type: "remote", url: "https://mcp.linear.app/mcp" },
+        off: { type: "remote", url: "https://x.test/mcp", enabled: false },
+        desk: { type: "remote", url: "http://localhost:47823/mcp" },
+      },
+    }),
+  );
+  f.file("answer", '{"summary":"ok"}');
+  await run(askAgent("hi", { agent: "opencode", dir, mcp: { desk: "http://127.0.0.1:47823/mcp", claude: {} } }));
+  const cfg = config(f.runs()[0]!);
+  assert.deepEqual(cfg.mcp, { linear: { enabled: true }, desk: { enabled: false } });
+  const permission = cfg.agent[OPENCODE_AGENT]!.permission as Record<string, string>;
+  assert.equal(permission["linear_*"], "allow");
+  assert.equal(permission["desk_*"], undefined);
+  assert.equal(permission["off_*"], undefined);
+});

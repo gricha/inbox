@@ -1567,6 +1567,69 @@ test(
   },
 );
 
+test(
+  "an AI review with your MCP servers: Claude Code gets them in a file of their own, every tool allowed, told to read only",
+  posix,
+  async () => {
+    const review = { structured_output: { verdict: "skim", risk: "low", summary: "Caps rows.", risk_reasons: [] } };
+    // The file it's given, copied while it runs: removed after.
+    const f = fakeAgent(
+      "claude",
+      `d="$(dirname "$0")"; while [ $# -gt 0 ]; do [ "$1" = --mcp-config ] && { cp "$2" "$d/mcp"; echo "$2" > "$d/mcp-path"; }; shift; done; echo '${JSON.stringify(review)}'`,
+    );
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+    const was = process.env.DESK_CLAUDE;
+    process.env.DESK_CLAUDE = f.bin;
+    try {
+      const item = makeItem();
+      const linear = { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer x" } };
+      const mcp = { desk: "http://localhost:47823/mcp", claude: { linear, "my.server": { command: "srv" } } };
+      await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home), "claude-code", undefined, mcp));
+      const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
+      assert.ok(args.includes("--strict-mcp-config"), "a PR's .mcp.json never loads");
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, "mcp"), "utf8")), { mcpServers: mcp.claude });
+      assert.ok(!fs.existsSync(fs.readFileSync(path.join(f.dir, "mcp-path"), "utf8").trim()), "removed after the run");
+      assert.equal(args[args.indexOf("--allowedTools") + 1], "mcp__linear,mcp__my_server");
+      assert.equal(args[args.indexOf("--permission-mode") + 1], "default");
+      assert.deepEqual(JSON.parse(args[args.indexOf("--settings") + 1]!), { disableAllHooks: true });
+      const prompt = fs.readFileSync(path.join(f.dir, "stdin"), "utf8");
+      assert.match(prompt, /Your own MCP servers are connected too/);
+      assert.match(prompt, /never write, send or change anything through them/);
+    } finally {
+      process.env.DESK_CLAUDE = was;
+      fs.rmSync(f.dir, { recursive: true });
+      fs.rmSync(home, { recursive: true });
+    }
+  },
+);
+
+test("an AI review on Codex keeps your MCP servers that are on, but the desk's own", posix, async () => {
+  const f = fakeCodex(ANSWERED);
+  fs.writeFileSync(
+    path.join(f.dir, "servers"),
+    JSON.stringify([
+      { name: "linear", enabled: true, transport: { type: "streamable_http", url: "https://mcp.linear.app/mcp" } },
+      { name: "sentry", enabled: false },
+      { name: "desk", enabled: true, transport: { type: "streamable_http", url: "http://localhost:47823/mcp" } },
+    ]),
+  );
+  forgetCodexServers();
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
+  try {
+    const mcp = { desk: "http://127.0.0.1:47823/mcp", claude: {} };
+    await run(askAgent("PROMPT", { agent: "codex", command: f.bin, dir: agentDir(home), mcp }));
+    const args = f.args().join(" ");
+    assert.match(args, /mcp_servers\.desk\.enabled=false/);
+    assert.match(args, /mcp_servers\.linear\.enabled=true/);
+    assert.doesNotMatch(args, /mcp_servers\.linear\.enabled=false/);
+    assert.doesNotMatch(args, /mcp_servers\.sentry/, "one you turned off stays off");
+  } finally {
+    forgetCodexServers();
+    fs.rmSync(f.dir, { recursive: true });
+    fs.rmSync(home, { recursive: true });
+  }
+});
+
 test("Codex reading a checkout keeps its shell, to read with, in its read-only sandbox; without one it has none", posix, async () => {
   const args = async (read: boolean) => {
     forgetCodexServers();

@@ -25,6 +25,7 @@ import {
   deskMcp,
   opencodeRun,
   runCommand,
+  toolPart,
 } from "./review.ts";
 import {
   ACTIVITY_KINDS,
@@ -121,8 +122,6 @@ interface Scoped {
   file: string | null;
   desk: string | null;
 }
-// A server's name as Claude Code puts it in its tools' names (mcp__<it>__<tool>).
-const toolPart = (name: string) => name.replaceAll(/[^A-Za-z0-9_-]/g, "_");
 // A run reads, never asks, and is refused the rest: these and whatever your own settings allow (your MCP servers' tools you
 // allowed, say). The desk adds what it lists, so it reads the desk too: under the name it's connected as, beside another desk's inbox.
 const allow = (name: string | null) => [
