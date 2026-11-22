@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import type { Card, Stage } from "../../../src/types.ts";
 import { aiPending } from "../../../src/stage.ts";
 import { RISK_BARS, rowLit } from "../risk.ts";
@@ -47,11 +48,25 @@ const KIND = {
 
 const KIND_WORD = { pr: "PR", issue: "Issue", question: "Question", session: "Session", note: "Note" };
 
-// What a row is, as an icon in the titles' first column; its word stays for a screen reader.
-export function KindIcon({ kind, tip }: { kind: keyof typeof KIND; tip: string }) {
+const PackIcon = lazy(() => import("./PackIcon.tsx"));
+
+// A note's icon: the one its pack draws for its name (an email's Gmail logo, a bill's receipt), else a note's.
+export function NoteGlyph({ icon }: { icon: string | undefined }) {
+  const plain = <Icon>{KIND.note}</Icon>;
+  if (!icon) return plain;
+  return (
+    <Suspense fallback={plain}>
+      <PackIcon name={icon} fallback={plain} />
+    </Suspense>
+  );
+}
+
+// What a row is, as an icon in the titles' first column; its word stays for a screen reader. A note an automation raised
+// may show its own icon (an email's Gmail logo) in place of a note's.
+export function KindIcon({ kind, tip, icon }: { kind: keyof typeof KIND; tip: string; icon?: string | undefined }) {
   return (
     <span className="line-kind" data-tip={tip}>
-      <Icon>{KIND[kind]}</Icon>
+      {kind === "note" ? <NoteGlyph icon={icon} /> : <Icon>{KIND[kind]}</Icon>}
       <span className="sr">{KIND_WORD[kind]}</span>
     </span>
   );

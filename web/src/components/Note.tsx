@@ -8,7 +8,7 @@ import { useKeyedLayout } from "../keyed.ts";
 import { remindTime, TIMES } from "../view.ts";
 import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
 import { ProseBlocks } from "./Prose.tsx";
-import { ClockIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
+import { ClockIcon, KindIcon, NoteGlyph, RowFacts } from "./RowIcons.tsx";
 
 export const noteOf = (id: string) => `note:${id}`; // its row's id, as the right-click and the cursor read it
 
@@ -66,7 +66,11 @@ export function NoteRow({ n, ctx }: { n: Note; ctx: NoteCtx }) {
   const id = noteOf(n.id);
   const later = !!n.remind_at && Date.parse(n.remind_at) > ctx.now;
   const kindIcon = (
-    <KindIcon kind="note" tip={n.from ? `From your automation ${n.from.name}: a click opens it` : "Note to yourself: a click changes it"} />
+    <KindIcon
+      kind="note"
+      icon={n.icon}
+      tip={n.from ? `From your automation ${n.from.name}: a click opens it` : "Note to yourself: a click changes it"}
+    />
   );
   const title = <span className="line-title">{n.text}</span>;
   const by = (
@@ -640,6 +644,7 @@ export function NoteCard({
         <div className="nc-head">
           <div className="nc-title">{note.text}</div>
           <div className="nc-from">
+            <NoteGlyph icon={note.icon} />
             From your automation {note.from?.name} · {age(note.at, now)} ago
           </div>
         </div>

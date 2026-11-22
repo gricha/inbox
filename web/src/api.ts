@@ -4,6 +4,7 @@
 import { Cause, Data, Effect, Exit } from "effect";
 import type { ErrorBody } from "../../src/errors.ts";
 import type {
+  BrandIcon,
   InboxSection,
   Action,
   AgentStatus,
@@ -249,6 +250,7 @@ export const api = {
   kickSession: (id: string) => call<{ ok: true; args: string[] }>("POST", `/api/sessions/${encodeURIComponent(id)}/kick`),
   openSession: (id: string) => call<{ ok: true; url: string }>("POST", `/api/sessions/${encodeURIComponent(id)}/open`),
   automations: () => call<AutomationView[]>("GET", "/api/automations"),
+  brandIcon: (slug: string) => call<BrandIcon>("GET", `/api/icons/brand/${encodeURIComponent(slug)}`),
   criteria: () => call<CriteriaView>("GET", "/api/criteria"),
   usage: (days: number | null) => call<UsageView>("GET", days ? `/api/usage?days=${days}` : "/api/usage"),
   setCriterion: (id: string, b: CriterionBody) =>

@@ -33,6 +33,7 @@ import {
   type GitHubReadError,
   type Upstream,
 } from "./errors.ts";
+import { brandIcon } from "./icons.ts";
 import { settleHome } from "./home.ts";
 import { createMcpServer } from "./mcp.ts";
 import { instrument, logLine } from "./sentry.ts";
@@ -848,6 +849,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   // Automations (src/automations.ts): any local client may list, write and run them, on as soon as saved; only you delete one. A
   // plugin's is listed too, and only switched, only from the window.
   app.get("/api/automations", (c) => total(c, () => desk.automations.view()));
+  app.get("/api/icons/brand/:slug", (c) => respond(c, brandIcon(c.req.param("slug")), { log, read: true }));
   app.put("/api/automations/:id", (c) => {
     const set = Effect.gen(function* () {
       yield* up;
@@ -864,17 +866,18 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
         (b.can !== undefined && !strings(b.can)) ||
         (b.mcp !== undefined && !strings(b.mcp)) ||
         (b.buttons !== undefined && !noteButtons(b.buttons)) ||
+        (b.icon !== undefined && typeof b.icon !== "string") ||
         (b.on !== undefined && typeof b.on !== "boolean")
       )
         return yield* new BadRequest({
           message:
-            "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, on? }",
+            "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, on? }",
         });
-      const { name, schedule, events, prompt, when, decide, rule, can, mcp, on } = b;
+      const { name, schedule, events, prompt, when, decide, rule, can, mcp, icon, on } = b;
       const buttons = b.buttons === undefined ? undefined : (noteButtons(b.buttons) ?? undefined);
       const a = yield* desk.automations.set(
         c.req.param("id"),
-        { name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, on },
+        { name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, icon, on },
         fromDesk(c),
       );
       return { ok: true, automation: a };

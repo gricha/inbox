@@ -29,6 +29,7 @@ import {
 } from "./review.ts";
 import {
   ACTIVITY_KINDS,
+  BRAND,
   EVENT,
   VERB,
   VERBS,
@@ -43,6 +44,7 @@ import {
   type RuleAction,
   type Verb,
 } from "./types.ts";
+import { ICON_FORMAT, iconName } from "./icons.ts";
 import { NoteButtonSchema } from "./kv.ts";
 import { report } from "./sentry.ts";
 import { secretsPath } from "./settings.ts";
@@ -70,6 +72,7 @@ const AutomationSchema = schemaOf<Automation>()(
     can: opt(arrayOf(Schema.Literals(VERBS))),
     mcp: opt(arrayOf(Schema.String)),
     buttons: opt(arrayOf(NoteButtonSchema)),
+    icon: opt(Schema.String),
     on: Schema.Boolean,
     by: Schema.Literals(["you", "an agent"]),
     updated_at: Schema.String,
@@ -269,6 +272,10 @@ const NOTES = {
       },
       url: { type: "string", description: "Its https link where it lives (the email in its web app), for the note's Open button" },
       urgent: { type: "boolean", description: "It can't wait for today" },
+      icon: {
+        type: "string",
+        description: `Optional: the icon its row shows, the one that fits what it is. ${ICON_FORMAT}; left out: the automation's`,
+      },
     },
     required: ["key", "text"],
   },
@@ -505,6 +512,7 @@ export class Automations {
       can?: readonly string[] | undefined;
       mcp?: readonly string[] | undefined;
       buttons?: readonly NoteButton[] | undefined;
+      icon?: string | undefined;
       on?: boolean | undefined;
     },
     byYou: boolean,
@@ -552,6 +560,10 @@ export class Automations {
       if (mcp.length > 10 || mcp.some((n) => n.length > 100))
         return yield* new BadRequest({ message: "mcp: up to 10 server names, each under 100 characters" });
       const buttons = yield* buttonsOf(b.buttons, mcp.length > 0);
+      const icon = b.icon === undefined ? undefined : iconName(b.icon);
+      if (b.icon !== undefined && !icon)
+        return yield* new BadRequest({ message: `icon: "${b.icon}" isn't a Lucide icon or ${BRAND}<a Simple Icons slug>` });
+      if (icon && !mcp.length) return yield* new BadRequest({ message: "icon goes on the notes an automation with mcp raises" });
       const all = this.own();
       const was = all.find((x) => x.id === id);
       const next = {
@@ -565,6 +577,7 @@ export class Automations {
         ...(!addsOnly(can) && { can: [...can] }),
         ...(mcp.length > 0 && { mcp }),
         ...(buttons.length > 0 && { buttons }),
+        ...(icon && { icon }),
       };
       // Its name goes into the run's prompt as yours too, so an agent's rename is a change; so is what it may do.
       const changed = !was || does(was) !== does(next);
@@ -1162,6 +1175,8 @@ export class Automations {
     const urgent = field(raw, "urgent") === true;
     const body = str(field(raw, "body"))?.trim().slice(0, 4_000);
     const url = httpsUrl(field(raw, "url"));
+    // Only the run's own pick: one without shows its automation's icon as it is then (Desk.notesView).
+    const icon = iconName(field(raw, "icon"));
     // Open is the one button a note with a link needs, unless the automation says which.
     const buttons = a.buttons ?? (url ? [{ label: "Open", do: "open" as const }] : []);
     const n = this.desk.raiseNote(
@@ -1172,6 +1187,7 @@ export class Automations {
         ...(url && { url }),
         urgent,
         buttons: buttons.filter((b) => b.do !== "open" || url),
+        ...(icon && { icon }),
       },
     );
     this.desk.store.set(NOTED, { ...all, [a.id]: [...mine, key].slice(-NOTED_KEPT) });
@@ -1277,7 +1293,9 @@ function httpsUrl(raw: unknown): string | undefined {
   return at?.protocol === "https:" && !at.username && !at.password && at.href.length <= 2_000 ? at.href : undefined;
 }
 
-const does = (a: Pick<Automation, "name" | "schedule" | "events" | "prompt" | "when" | "decide" | "rule" | "can" | "mcp" | "buttons">) =>
+const does = (
+  a: Pick<Automation, "name" | "schedule" | "events" | "prompt" | "when" | "decide" | "rule" | "can" | "mcp" | "buttons" | "icon">,
+) =>
   JSON.stringify([
     a.name,
     a.schedule,
@@ -1289,6 +1307,7 @@ const does = (a: Pick<Automation, "name" | "schedule" | "events" | "prompt" | "w
     canOf(a),
     ...(a.mcp ? [a.mcp] : []),
     ...(a.buttons ? [a.buttons] : []),
+    ...(a.icon ? [a.icon] : []),
   ]);
 
 // What a question was last asked about: by whom and on what instruction (askedBy), and each item as it was (itemKey).
@@ -1457,7 +1476,7 @@ function prompt(
     ...answerLines(canOf(a)),
     ...(a.mcp
       ? [
-          "- What needs me that isn't a PR or issue (an email, say) goes in notes: its key (its id there, so the desk raises it once), one line of text on who or what it is and what it needs from me, a short markdown body with what I'd want before opening it, its https url (the message in its web app, so Open goes straight there), and urgent when it can't wait for today. Only what needs me; none is a good run.",
+          `- What needs me that isn't a PR or issue (an email, say) goes in notes: its key (its id there, so the desk raises it once), one line of text on who or what it is and what it needs from me, a short markdown body with what I'd want before opening it, its https url (the message in its web app, so Open goes straight there), the icon that fits what it is (a Lucide name like "receipt" or "plane", or ${BRAND}<slug> for a brand's logo, ${BRAND}gmail), and urgent when it can't wait for today. Only what needs me; none is a good run.`,
         ]
       : []),
     "- summary: what you looked at and what you found, in a few plain sentences.",

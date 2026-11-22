@@ -6,6 +6,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Browser, type Page, type Request as Sent, type Route } from "playwright-core";
+import { siGmail } from "simple-icons";
 import { field, isRecord, str, strings } from "../src/narrow.ts";
 import { colorsOf, tokensFrom } from "../src/omarchy.ts";
 import { isTestPath } from "../src/sections.ts";
@@ -935,12 +936,38 @@ const SHOTS: Shot[] = [
       const row = page.locator(".line.memo", { hasText: "Dana Okafor" });
       await row.waitFor({ timeout: 3000 });
       const cta = await row.locator(".line-cta, .c-cta").first().textContent();
+      // Its icon in place of a note's: the email's Gmail's logo in Gmail's red, from Simple Icons; the bill's Lucide receipt.
+      const logo = row.locator(".line-kind svg.brand path");
+      if (
+        !(await logo.waitFor({ timeout: 3000 }).then(
+          () => true,
+          () => false,
+        )) ||
+        (await logo.getAttribute("d")) !== siGmail.path
+      )
+        failures.push("queue-note-card: the email's row doesn't show Gmail's logo");
+      else {
+        const [fill, pencil] = await page.evaluate<string[]>(`(() => {
+          const logo = document.querySelector(".line.memo .line-kind svg.brand path");
+          return [getComputedStyle(logo).fill, getComputedStyle(logo.closest(".line-kind")).color];
+        })()`);
+        if (fill === pencil) failures.push(`queue-note-card: Gmail's logo is in the row's grey (${fill}), not its red`);
+      }
+      const bill = page.locator(".line.memo", { hasText: "Northwind Card" }).locator(".line-kind svg.lucide-receipt");
+      if (
+        !(await bill.waitFor({ timeout: 3000 }).then(
+          () => true,
+          () => false,
+        ))
+      )
+        failures.push("queue-note-card: the bill's row doesn't show Lucide's receipt");
       if (cta !== "Open in Gmail") failures.push(`queue-note-card: the row's call to action reads ${JSON.stringify(cta)}`);
       await row.locator(".row-main").click();
       await page.locator(".note-card").waitFor({ timeout: 3000 });
       const card = page.locator(".note-card");
       if (!(await card.locator(".nc-from", { hasText: "From your automation Important personal email" }).count()))
         failures.push("queue-note-card: it doesn't say which automation");
+      if (!(await card.locator(".nc-from svg.brand").count())) failures.push("queue-note-card: opened, it doesn't show Gmail's logo");
       if (await card.locator(".prose a, .prose img").count()) failures.push("queue-note-card: its body has a live link or an image");
       if (!(await card.locator(".prose b", { hasText: "$1,200 deposit" }).count())) failures.push("queue-note-card: no markdown");
       const acts = await card.locator(".note-acts .act").allTextContents();

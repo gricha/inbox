@@ -13,6 +13,7 @@ import { plan } from "../../src/agents.ts";
 import { agentView, githubView } from "../../src/setup.ts";
 import { didntText, didText, eventsWords, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
 import { GITHUB_AUTOMATIONS } from "../../src/connectors/github-automations.ts";
+import { brandIcon } from "../../src/icons.ts";
 import { GITHUB_CRITERIA } from "../../src/connectors/github-criteria.ts";
 import { WORK } from "../../src/usage.ts";
 import { fallbackScore, sectionOf } from "../../src/urgency.ts";
@@ -2584,6 +2585,21 @@ const NOTES: Note[] = [
       { label: "Open in Gmail", do: "open" },
       { label: "Draft a reply", do: "ask", prompt: "Draft a reply to this email in my Gmail drafts; don't send it." },
     ],
+    icon: "brand:gmail",
+  },
+  // The same automation's, with the Lucide icon its run picked for a bill.
+  {
+    id: "n5",
+    at: iso(0.75),
+    text: "Northwind Card: November statement is ready — $412.80 due Dec 12",
+    remind_at: null,
+    reminded_at: null,
+    section: "fyi",
+    from: { id: "personal-gmail", name: "Important personal email" },
+    body: "Your statement closed Nov 20. **$412.80** is due **Dec 12**; autopay is off.",
+    url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0b9e4",
+    buttons: [{ label: "Open in Gmail", do: "open" }],
+    icon: "receipt",
   },
 ];
 const notesView = (): NotesView => {
@@ -4336,6 +4352,11 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const b = config.boards.find((x) => x.id === decodeURIComponent(url.pathname.slice(12)));
     if (!b) throw new HttpError(404, "unknown board");
     return boardView(b);
+  }
+  if (req.method === "GET" && url.pathname.startsWith("/api/icons/brand/")) {
+    const got = Effect.runSync(Effect.result(brandIcon(decodeURIComponent(url.pathname.slice(17)))));
+    if (Result.isFailure(got)) throw new HttpError(404, got.failure.message);
+    return got.success;
   }
   if (route === "GET /api/item") return detail(resolve(url.searchParams.get("id") ?? ""));
   // inbox add, from a pasted link: one the mock has comes back pinned; any other is a PR it makes up, pinned in Today. It takes a

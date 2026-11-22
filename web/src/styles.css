@@ -1229,6 +1229,17 @@ html::-webkit-scrollbar-corner,
   stroke-linejoin: round;
 }
 
+/* A Lucide icon (a note's) is drawn on a 24 grid: the same 1.5px line at 16px. */
+.i.lucide {
+  stroke-width: 2.25;
+}
+
+/* A brand's logo (a note's) is filled, in its own colour (set inline). */
+.i.brand {
+  fill: currentcolor;
+  stroke: none;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -4396,6 +4407,9 @@ a.c-cta {
 }
 
 .nc-from {
+  display: flex;
+  gap: 6px;
+  align-items: center;
   color: var(--pencil);
   font-size: var(--text-sm);
 }

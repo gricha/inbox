@@ -1386,6 +1386,16 @@ export interface Inquiry {
   answer: { text: string; at: string; dismissed: boolean; read_at?: string | null } | null;
 }
 
+// A note icon naming a Simple Icons brand ("brand:gmail"); any other is a Lucide icon's name ("receipt").
+export const BRAND = "brand:";
+
+// A Simple Icons logo as the window draws it: its 24×24 path, in its brand's colour (hex, no #).
+export interface BrandIcon {
+  title: string;
+  hex: string;
+  path: string;
+}
+
 // A note to yourself (New note, ⌘N): on your Inbox until you mark it done. With a reminder it waits until then, then
 // notifies once and leads Urgent.
 // A button an automation puts on the notes its runs raise, set with the automation (your words, never a run's): open the
@@ -1408,6 +1418,7 @@ export interface Note {
   body?: string; // markdown, drawn as prose: no HTML, no images, its links as text
   url?: string; // https only: where it lives (the email in Gmail), for an open button
   buttons?: NoteButton[]; // the automation's, as it was when it raised this; the first is the row's
+  icon?: string; // its row's, an icon pack's name ("receipt", "brand:gmail"): the run's pick; on a view, else its automation's
   waiting?: WaitingStep[]; // on QueueView.notes: the head of an "after" chain, as on a Card; never stored
 }
 
@@ -1517,6 +1528,7 @@ export interface Automation {
   // other of yours; it may then raise notes for what isn't on GitHub (an email). Absent: as your agent has them, none allowed.
   mcp?: string[];
   buttons?: NoteButton[]; // with mcp: the buttons on the notes it raises, up to 3; absent: Open, on a note with a url
+  icon?: string; // with mcp: its notes' icon (as Note.icon), unless a run picks one for a note
   on: boolean;
   by: "you" | "an agent"; // who last changed what it does
   updated_at: string;
@@ -1637,6 +1649,7 @@ export type AutomationBody = Pick<Automation, "name"> & {
   can?: Verb[] | undefined;
   mcp?: string[] | undefined;
   buttons?: NoteButton[] | undefined;
+  icon?: string | undefined;
   schedule?: string | undefined;
   prompt?: string | undefined;
   decide?: Way | undefined;

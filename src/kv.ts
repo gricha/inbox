@@ -284,5 +284,6 @@ export const NoteSchema = schemaOf<Omit<Note, "waiting">>()(
     body: opt(Schema.String),
     url: opt(Schema.String),
     buttons: opt(Schema.mutable(Schema.Array(NoteButtonSchema))),
+    icon: opt(Schema.String),
   }),
 );

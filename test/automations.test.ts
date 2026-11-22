@@ -438,15 +438,15 @@ test("an agent writes or changes one and it's on as yours is; only you delete it
     [{ prompt: " " }, "the instruction is empty"],
     [
       { name: 3 },
-      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, on? }",
+      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, on? }",
     ],
     [
       { can: "mute" },
-      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, on? }",
+      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, on? }",
     ],
     [
       { rule: "mute" },
-      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, on? }",
+      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, on? }",
     ],
     [{ decide: "guess" }, 'decide: "guess" isn\'t one of rule, ask, agent'],
     [{ decide: "rule" }, "a rule on a schedule needs when: the items it's about"],
@@ -2141,8 +2141,72 @@ test("an automation's notes carry a markdown body, an https link and its buttons
   const schema = JSON.parse(fake.args(2)[fake.args(2).indexOf("--json-schema") + 1]!) as {
     properties: { notes: { items: { properties: object } } };
   };
-  assert.deepEqual(Object.keys(schema.properties.notes.items.properties), ["key", "text", "body", "url", "urgent"]);
+  assert.deepEqual(Object.keys(schema.properties.notes.items.properties), ["key", "text", "body", "url", "urgent", "icon"]);
   assert.match(fake.stdin(2), /a short markdown body with what I'd want before opening it, its https url/);
+});
+
+test("a note's icon is a Lucide name or brand:<Simple Icons slug>; one neither pack has is refused or dropped; a note without one shows its automation's as it is now", async (c) => {
+  if (unixOnly(c)) return;
+  const fake = fakeClaude(c);
+  claudeHome(c, { gmail: { type: "http", url: "https://gmail.example/mcp" } });
+  const t = await setup([], { settings: { "policy.judge": false, "notify.quiet": "" }, desk: { mcpUrl: "http://localhost:47823/mcp" } });
+  c.after(t.cleanup);
+  const mail = { name: "Mail", schedule: "weekdays 09:00", prompt: "Read my mail.", mcp: ["gmail"] };
+  const refused = (b: object) => runSync(Effect.flip(t.desk.automations.set("mail", { ...mail, ...b }, true))).message;
+  assert.equal(refused({ icon: "rocketship" }), 'icon: "rocketship" isn\'t a Lucide icon or brand:<a Simple Icons slug>');
+  assert.match(refused({ icon: "brand:gmial" }), /icon: "brand:gmial" isn't a Lucide icon/);
+  assert.match(refused({ mcp: undefined, icon: "receipt" }), /icon goes on the notes an automation with mcp raises/);
+  assert.equal(runSync(t.desk.automations.set("mail", { ...mail, icon: "receipt" }, true)).icon, "receipt");
+  const a = runSync(t.desk.automations.set("mail", mail, true));
+  fake.answer("Five.", [], {
+    notes: [
+      { key: "t1", text: "Airline: your flight moved", icon: "plane" },
+      { key: "t2", text: "GitHub: a new sign-in", icon: "brand:github" },
+      { key: "t3", text: "Dana: lunch Friday?" },
+      { key: "t4", text: "Shop: <script>", icon: "<svg onload=x>" },
+      { key: "t5", text: "Brand off the pack", icon: "brand:nope" },
+    ],
+  });
+  await t.desk.automations.run(a, "now").p;
+  assert.deepEqual(
+    t.desk.notes().map((n) => n.icon),
+    ["plane", "brand:github", undefined, undefined, undefined],
+    "only a run's own pick from either pack is kept",
+  );
+  const shown = () =>
+    Object.fromEntries(
+      Object.values(runSync(t.desk.queue()).notes)
+        .flat()
+        .map((n) => [n.text, n.icon]),
+    );
+  assert.equal(shown()["Dana: lunch Friday?"], undefined, "an automation without an icon: a note's");
+  runSync(t.desk.automations.set("mail", { ...mail, icon: "brand:gmail" }, true));
+  assert.deepEqual(shown(), {
+    "Airline: your flight moved": "plane",
+    "GitHub: a new sign-in": "brand:github",
+    "Dana: lunch Friday?": "brand:gmail",
+    "Shop: <script>": "brand:gmail",
+    "Brand off the pack": "brand:gmail",
+  });
+  runSync(t.desk.automations.set("mail", { ...mail, icon: "mail" }, true));
+  assert.equal(shown()["Dana: lunch Friday?"], "mail", "its automation's icon as it is now");
+  assert.equal(t.desk.notes()[2]!.icon, undefined, "nothing is written to the note");
+
+  const schema = JSON.parse(fake.args(1)[fake.args(1).indexOf("--json-schema") + 1]!) as {
+    properties: { notes: { items: { properties: { icon: { enum?: string[]; description: string } } } } };
+  };
+  assert.equal(schema.properties.notes.items.properties.icon.enum, undefined, "named by format, not thousands of names");
+  assert.match(
+    schema.properties.notes.items.properties.icon.description,
+    /"receipt" for a bill.*brand:<a Simple Icons slug>.*"brand:gmail"/,
+  );
+  assert.match(fake.stdin(1), /the icon that fits what it is \(a Lucide name like "receipt" or "plane", or brand:<slug>/);
+
+  const req = http(createApp(t.desk, 47823));
+  const logo = await req("GET", "/api/icons/brand/gmail");
+  const got = (await logo.json()) as { title: string; hex: string; path: string };
+  assert.deepEqual([logo.status, got.title, got.hex, got.path.startsWith("M24 5.457")], [200, "Gmail", "EA4335", true]);
+  assert.equal((await req("GET", "/api/icons/brand/nope")).status, 404);
 });
 
 test("Settings → MCP servers lists your Claude Code's with the automations that name each; only the window adds or removes one", async (c) => {

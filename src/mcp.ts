@@ -12,6 +12,7 @@ import { baseUrl, createClient, untilText, type AddResult, type DeskClient } fro
 import { saveDoc } from "./doc.ts";
 import { fsError } from "./errors.ts";
 import { deskHome } from "./home.ts";
+import { ICON_FORMAT } from "./icons.ts";
 import { linesText } from "./coordinator.ts";
 import { judgeText, weighedLines } from "./judge.ts";
 import { logLines } from "./placements.ts";
@@ -833,7 +834,7 @@ export function createMcpServer(
       description:
         "The owner's automations: their instructions that the desk runs on a schedule, or when something happens on an item, with their own agent, read only, putting what needs them on their desk with a line on why. " +
         "list: each one with its schedule, what it may do, whether it's on and its last runs (what each found and did); the ones a plugin comes with are listed too, marked built in (their ids are <plugin>.<id>: github.pick-reviewer). " +
-        "set: draft a new one or change one (id, name, schedule or events, prompt, when, decide, rule, can, mcp, buttons): the whole automation each time. It's on as soon as it's saved, unless you pass on: false. Write one only when the owner asks for it. " +
+        "set: draft a new one or change one (id, name, schedule or events, prompt, when, decide, rule, can, mcp, buttons, icon): the whole automation each time. It's on as soon as it's saved, unless you pass on: false. Write one only when the owner asks for it. " +
         "A built-in one can't be set, deleted or switched by you: only the owner switches it on or off, in the window (Settings → its plugin); to change one, draft your own with its definition (set, a new id). " +
         "Write `prompt` as their instruction, in their words: what to read (repos, searches, other tools), what counts as needing them, and that nothing needing them is a fine run; a run lists PRs and issues (owner/repo#123) with a why, and the desk adds them. " +
         '`schedule` is local time: "daily 09:00", "weekdays 09:00,13:00", "mon 09:00", "mon,thu 17:30" or "weekdays hourly" (every hour on the hour). ' +
@@ -843,6 +844,7 @@ export function createMcpServer(
         "`can` is what the desk may do with what a run lists, and it refuses the rest: add (the default: on their desk, pinned to Today), today, later, fyi or hide (sorted there until the item changes or they act on it; their hard rules still win), snooze, done, mute (as inbox_act does them; they can undo each). Ask for no more than the instruction needs. " +
         '`mcp`, with decide agent, names the owner\'s own MCP servers (as their agent lists them: "gmail", "claude.ai Gmail") the run gets beside the desk\'s, and no other of theirs; it may then also raise notes, things that aren\'t PRs or issues (an email), each on their desk once: a line of text (its row), a short markdown body (drawn without HTML, images or live links) and its https url. Name only what the instruction reads. ' +
         "`buttons`, with mcp, are the buttons on those notes, up to 3, the first the row's: { label, do: \"open\" } opens the note's url; { label, do: \"ask\", prompt } asks the owner's agent `prompt` (their words, fixed here, never a run's) about the note. Left out: Open, on a note with a url. Press Ask or Done and the note leaves the desk. " +
+        `\`icon\`, with mcp, is the icon on those notes' rows: ${ICON_FORMAT}. A name neither pack has is refused. A run may pick one per note (a bill receipt, a flight plane), and the automation's shows on the rest. ` +
         "run: run one that's on now (a built-in one too); it takes a few minutes, and its result shows in Settings.",
       inputSchema: {
         action: z.enum(["list", "set", "run"]),
@@ -874,11 +876,17 @@ export function createMcpServer(
           .max(3)
           .optional()
           .describe("set, with mcp: the buttons on its notes; left out: Open, on a note with a url"),
+        icon: z
+          .string()
+          .optional()
+          .describe(
+            'set, with mcp: its notes\' icon, a Lucide name ("receipt") or brand:<Simple Icons slug> ("brand:gmail"); left out: a note\'s',
+          ),
         on: z.boolean().optional().describe("set: false saves it off; left out: on, or as it was"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    ({ action, id, name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, on }) =>
+    ({ action, id, name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, icon, on }) =>
       run(
         Effect.gen(function* () {
           if (action === "list") return automationsText(yield* api.automations());
@@ -897,6 +905,7 @@ export function createMcpServer(
             can,
             mcp,
             buttons: buttons?.map((b) => ({ label: b.label, do: b.do, ...(b.prompt !== undefined && { prompt: b.prompt }) })),
+            icon,
             on,
           });
           const starts = startsOn(a);
@@ -1082,6 +1091,7 @@ function automationsText(all: AutomationView[]): string {
       ...(a.waiting ? [`  waiting: ${oneLine(a.waiting.why)} (asks again ${a.waiting.until})`] : []),
       ...(a.can ? [`  may: ${a.can.map((v) => VERB[v]).join(", ")}`] : []),
       ...(a.mcp ? [`  mcp: ${a.mcp.join(", ")}`] : []),
+      ...(a.icon ? [`  icon: ${a.icon}`] : []),
       ...(a.buttons
         ? [
             `  buttons: ${a.buttons.map((b) => (b.do === "ask" ? `${b.label} (asks: ${oneLine(b.prompt ?? "")})` : `${b.label} (opens)`)).join("; ")}`,

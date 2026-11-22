@@ -4371,16 +4371,19 @@ export class Desk {
     return decodeEach(NoteSchema, this.store.get("notes"));
   }
 
-  // A note waiting in an "after" chain is on no list; one at a chain's head carries it.
+  // A note waiting in an "after" chain is on no list; one at a chain's head carries it. A note whose run picked no icon
+  // shows its automation's as it is now, so one set later reaches the notes it raised before.
   notesView(snap: Snapshot): NotesView {
     const v = placeNotes(
       this.notes().filter((n) => !snap.chains.head.has(`${NOTE}${n.id}`)),
       this.now().toISOString(),
     );
+    const icons = new Map(this.automations.own().map((a) => [a.id, a.icon]));
     const withSteps = (ns: Note[]) =>
       ns.map((n) => {
         const waiting = snap.steps.get(`${NOTE}${n.id}`);
-        return waiting ? { ...n, waiting } : n;
+        const icon = n.icon ?? (n.from && icons.get(n.from.id));
+        return { ...n, ...(icon && { icon }), ...(waiting && { waiting }) };
       });
     return {
       due: withSteps(v.due),
@@ -4423,7 +4426,7 @@ export class Desk {
   // An automation's run raised it: in Urgent when it said so, with the automation's buttons as they are now.
   raiseNote(
     from: { id: string; name: string },
-    b: { text: string; body?: string; url?: string; urgent?: boolean; buttons?: NoteButton[] },
+    b: { text: string; body?: string; url?: string; urgent?: boolean; buttons?: NoteButton[]; icon?: string },
   ): Note {
     const note: Note = {
       id: randomBytes(4).toString("hex"),
@@ -4436,6 +4439,7 @@ export class Desk {
       ...(b.body && { body: b.body }),
       ...(b.url && { url: b.url }),
       ...(b.buttons?.length && { buttons: b.buttons }),
+      ...(b.icon && { icon: b.icon }),
     };
     this.store.set("notes", [...this.notes(), note]);
     this.changed();
