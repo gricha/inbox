@@ -4670,6 +4670,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     sync();
     return { ok: true };
   }
+  if (route === "POST /api/look") return { ok: true };
   if (route === "GET /api/config") {
     const hard = config.boards.flatMap((b) =>
       rulesOf(b).flatMap((r) =>

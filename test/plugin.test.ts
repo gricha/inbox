@@ -51,6 +51,8 @@ class Notes implements Connector {
     });
   }
 
+  look(): void {}
+
   // Kept by the source alone, until the desk fetches it.
   write(text: string): Note {
     const at = this.desk.now().toISOString();

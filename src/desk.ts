@@ -1230,6 +1230,11 @@ export class Desk {
     return Effect.forEach(this.connectors, (c) => c.reconcile(), { concurrency: "unbounded", discard: true });
   }
 
+  // A window shows (it says so when it comes up, and every 30 s while it does): its sources read sooner.
+  look(): void {
+    for (const c of this.connectors) c.look();
+  }
+
   // A connector brought in something new.
   synced(): void {
     this.changed();

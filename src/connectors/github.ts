@@ -97,6 +97,14 @@ const settle =
       ),
     );
 
+// While a window shows, a pass this often (the setting's own floor), and a look counts this long: the window says so every 30 s.
+const WATCHED = 30;
+const LOOKING = 75_000;
+// And between passes a pulse: one cheap query asking when the items changed last, so a change shows in seconds.
+const PULSE = 10_000;
+const PULSE_MAX = 100; // the items a pulse asks about, the last changed first: one query's worth
+const PULSE_FLOOR = 1000; // GitHub points left under which it stops: your agents' gh spends the same budget
+
 export class GitHubConnector implements Connector {
   readonly id = "github";
   readonly name = "GitHub";
@@ -116,7 +124,13 @@ export class GitHubConnector implements Connector {
   contextError: string | null = null;
   feedError: string | null = null;
   pausedUntil = 0;
+  lookedAt = 0; // when a window last said it shows
+  passAt = 0; // when the last pass started
   timer: NodeJS.Timeout | null = null;
+  pulseTimer: NodeJS.Timeout | null = null;
+  pulsing = false;
+  rollups = new Map<string, string>(); // each item's CI as the last pulse had it
+  asked = new Set<string>(); // PRs asking for you the desk didn't hold, that a pulse already started a pass for
   feedTimer: NodeJS.Timeout | null = null;
   feed: Feed;
   ctx: Context | null; // who you are, your teams, orgs and areas: kv `context`
@@ -143,25 +157,72 @@ export class GitHubConnector implements Connector {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.feedTimer) clearTimeout(this.feedTimer);
+    if (this.pulseTimer) clearTimeout(this.pulseTimer);
   }
 
   reschedule(): void {
     if (this.started && !this.stopped) this.arm();
   }
 
+  // A pass already running (a look's, a pulse's, the feed's) is this tick's: asking again would queue a second behind it.
   tick(): void {
+    if (this.syncing) {
+      this.arm();
+      return;
+    }
     this.loop("sync", this.reconcile(), () => {
       this.arm();
     });
   }
 
-  arm(): void {
+  // Between passes: the setting, or sooner while a window shows.
+  pace(): number {
+    const set = this.desk.settings["github.poll_seconds"];
+    return (this.watched() ? Math.min(set, WATCHED) : set) * 1000;
+  }
+
+  watched(): boolean {
+    return this.desk.now().getTime() - this.lookedAt < LOOKING;
+  }
+
+  // A window shows: a pass now if the last one is older than the pace, and that pace while it shows.
+  look(): void {
+    if (!this.started || this.stopped) return;
+    const now = this.desk.now().getTime();
+    const was = this.watched();
+    this.lookedAt = now;
+    if (!this.pulseTimer && !this.pulsing) this.armPulse();
+    if (this.syncing) return;
+    const left = this.pace() - (now - this.passAt);
+    if (left > 0) {
+      if (!was) this.arm(left);
+      return;
+    }
     if (this.timer) clearTimeout(this.timer);
-    const wait = Math.max(this.desk.settings["github.poll_seconds"] * 1000, this.pausedUntil - Date.now());
+    this.tick();
+  }
+
+  arm(pace = this.pace()): void {
+    if (this.timer) clearTimeout(this.timer);
+    const wait = Math.max(pace, this.pausedUntil - Date.now());
     this.timer = setTimeout(() => {
       this.tick();
     }, wait);
     this.timer.unref();
+  }
+
+  // Pulses stop by themselves once no window shows.
+  armPulse(): void {
+    if (this.pulseTimer) clearTimeout(this.pulseTimer);
+    this.pulseTimer = null;
+    if (!this.watched()) return;
+    this.pulseTimer = setTimeout(() => {
+      this.pulseTimer = null;
+      this.loop("pulse", this.pulse(), () => {
+        this.armPulse();
+      });
+    }, PULSE);
+    this.pulseTimer.unref();
   }
 
   feedTick(): void {
@@ -358,6 +419,7 @@ export class GitHubConnector implements Connector {
       }
       if (Date.now() < this.pausedUntil) return Effect.void;
       this.syncing = true;
+      this.passAt = desk.now().getTime();
       desk.changed();
       return this.pass().pipe(
         settle((e) => {
@@ -614,6 +676,74 @@ export class GitHubConnector implements Connector {
           else report(e, "refresh", id);
           desk.log(`refresh of ${id} failed: ${messageOf(e)}`);
         }),
+      );
+    });
+  }
+
+  // ---------------------------------------------------------------- the pulse
+
+  // Never fails: a rate limit pauses the loops, anything else is logged (the next pass reads it all anyway). What changed
+  // since the desk read it, or whose CI moved since the last pulse, is read again; a PR asking for you that the desk
+  // doesn't hold starts a pass, once.
+  pulse(): Effect.Effect<void> {
+    return Effect.suspend((): Effect.Effect<void> => {
+      const desk = this.desk;
+      if (
+        this.stopped ||
+        !this.watched() ||
+        this.pulsing ||
+        this.syncing ||
+        this.polling ||
+        !desk.loaded ||
+        !this.ctx ||
+        Date.now() < this.pausedUntil
+      )
+        return Effect.void;
+      const budget = this.api.rateLimit();
+      if (budget && budget.remaining < PULSE_FLOOR && Date.parse(budget.reset_at) > Date.now()) return Effect.void;
+      this.pulsing = true;
+      const meta = desk.store.itemMeta();
+      const held = new Set([...meta.values()].map((m) => m.node_id));
+      const latest = [...meta]
+        .filter(([, m]) => !m.quiet)
+        .sort((a, b) => b[1].updated_at.localeCompare(a[1].updated_at))
+        .slice(0, PULSE_MAX);
+      const byNode = new Map(latest.map(([id, m]) => [m.node_id, { id, m }]));
+      return Effect.gen({ self: this }, function* () {
+        const p = yield* this.api.pulse([...byNode.keys()]);
+        // A pass that started meanwhile reads all this itself: the pulse leaves it alone and remembers nothing, so the
+        // next one still sees a CI that moved.
+        if (this.stopped || this.syncing) return;
+        const refresh: SearchHit[] = [];
+        for (const n of p.nodes) {
+          const known = byNode.get(n.node_id);
+          if (!known) continue;
+          const before = this.rollups.get(known.id);
+          this.rollups.set(known.id, n.rollup);
+          if (n.updated_at > known.m.updated_at || (before !== undefined && before !== n.rollup)) refresh.push(hitOf(known.id, known.m));
+        }
+        const items = refresh.length ? yield* this.details(refresh) : [];
+        if (this.stopped) return;
+        desk.ingest(this, items);
+        if (items.length) {
+          desk.synced();
+          desk.log(`pulse: ${items.length} refreshed`);
+        }
+        // Not behind a pass that started while it read: the next pulse asks again.
+        const fresh = p.asked.filter((id) => !held.has(id) && !this.asked.has(id));
+        if (!fresh.length || this.syncing) return;
+        for (const id of fresh) this.asked.add(id);
+        desk.runner.fork("sync", this.reconcile());
+      }).pipe(
+        settle((e) => {
+          if (e instanceof GitHubRateLimited) this.pause(e);
+          desk.log(`pulse failed: ${messageOf(e)}`);
+        }),
+        Effect.ensuring(
+          Effect.sync(() => {
+            this.pulsing = false;
+          }),
+        ),
       );
     });
   }

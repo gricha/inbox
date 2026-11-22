@@ -650,3 +650,41 @@ test("notifications: an answer that isn't a list of threads is a bad response", 
   assert.equal(e._tag, "GitHubBadResponse");
   assert.match(e.message, /Expected array/);
 });
+
+test("pulse: one query for a hundred nodes at most: when each changed and its CI, and who's asking for your review", async () => {
+  const { gh, calls } = fakeGitHub(() => ({
+    data: {
+      rateLimit: RL,
+      nodes: [
+        {
+          __typename: "PullRequest",
+          id: "PR_1",
+          updatedAt: "2026-03-02T00:00:00Z",
+          commits: { nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }] },
+        },
+        {
+          __typename: "PullRequest",
+          id: "PR_2",
+          updatedAt: "2026-03-01T00:00:00Z",
+          commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+        },
+        { __typename: "Issue", id: "I_3", updatedAt: "2026-03-03T00:00:00Z" },
+        null, // deleted
+        { __typename: "Discussion" },
+      ],
+      search: { nodes: [{ id: "PR_9" }, {}, null] },
+    },
+  }));
+  const p = await run(gh.pulse(Array.from({ length: 150 }, (_, i) => `N_${i}`)));
+  assert.deepEqual(p, {
+    nodes: [
+      { node_id: "PR_1", updated_at: "2026-03-02T00:00:00Z", rollup: "FAILURE" },
+      { node_id: "PR_2", updated_at: "2026-03-01T00:00:00Z", rollup: "" },
+      { node_id: "I_3", updated_at: "2026-03-03T00:00:00Z", rollup: "" },
+    ],
+    asked: ["PR_9"],
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.variables.ids.length, 100);
+  assert.match(calls[0]!.variables.q, /review-requested:@me/);
+});

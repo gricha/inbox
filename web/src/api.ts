@@ -289,6 +289,7 @@ export const api = {
     call<{ ok: true; author: string }>("POST", `/api/issue/${encodeURIComponent(id)}/${on ? "block" : "unblock"}`, {}),
   undo: (seq?: number) => call<{ ok: true; id: string; action?: string }>("POST", "/api/undo", seq ? { seq } : {}),
   sync: () => call<{ ok: true }>("POST", "/api/sync", {}),
+  look: () => call<{ ok: true }>("POST", "/api/look", {}),
   update: () => call<UpdateView>("POST", "/api/update", {}),
   config: () => call<ConfigDoc>("GET", "/api/config"),
   preview: (text: string) => call<PreviewResult>("POST", "/api/config/preview", { text }),

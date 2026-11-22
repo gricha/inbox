@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import type { GitHubRateLimited, GitHubReadError } from "../../src/errors.ts";
 import type { Areas, Check, Context, Item, Reviewer } from "../../src/types.ts";
-import type { GitHub, NotificationPage, NotificationThread, PrContext, SearchHit } from "../../src/github/index.ts";
+import type { GitHub, NotificationPage, NotificationThread, PrContext, Pulse, SearchHit } from "../../src/github/index.ts";
 
 export const NOW = new Date("2026-10-27T12:00:00Z");
 export const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOString();
@@ -218,6 +218,21 @@ export class FakeGitHub implements GitHub {
 
   rateLimit() {
     return null;
+  }
+
+  // The pulse over the same items: what GitHub has for each node asked about, and the PRs asking for your review.
+  pulses: string[][] = [];
+  pulse(nodeIds: string[]): Effect.Effect<Pulse, GitHubReadError> {
+    return Effect.sync(() => {
+      this.pulses.push(nodeIds);
+      const all = [...this.items.values()];
+      return {
+        nodes: all
+          .filter((it) => nodeIds.includes(it.node_id))
+          .map((it) => ({ node_id: it.node_id, updated_at: it.updated_at, rollup: it.ci })),
+        asked: all.filter((it) => it.kind === "pr" && it.state === "open" && it.review_requests.length).map((it) => it.node_id),
+      };
+    });
   }
 
   latestRelease(): Effect.Effect<{ tag: string; url: string } | null, GitHubReadError> {

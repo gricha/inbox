@@ -1257,6 +1257,8 @@ test("the desk's reviews, AI, asks, wakes, agents and event log answer through r
   assert.deepEqual(await call("POST", "/api/sync"), [200, { ok: true }]);
   await idle(t.desk);
   assert.equal(runSync(t.desk.item("api#2")).item.id, "acme/api#2", "the pass it forked ran");
+  assert.deepEqual(await call("POST", "/api/look"), [200, { ok: true }]);
+  await idle(t.desk);
 });
 
 test(

@@ -153,6 +153,7 @@ JSON in and out. Errors are `{ error: string, candidates?: string[] }`:
 | POST   | `/api/after`                       | `{ item, after: string[] }` → `{ ok, item, after }` as ids: what a step waits on, replacing it; `[]` clears it (Stop waiting). 400 for a loop; 404 for what the desk doesn't hold. Agents may call it                                                              | ✓   |
 | POST   | `/api/undo`                        | `{ seq? }` (default: the latest action, any client's) → `{ ok, id, action }`. 409 if a later action on the item must be undone first, or for a hand-off or Back to desk not from the own page                                                                      | ✓   |
 | POST   | `/api/sync`                        | Starts a sync now                                                                                                                                                                                                                                                  |     |
+| POST   | `/api/look`                        | `{ ok }`. The window's, while it shows: a sync now if the last is over 30 s old, then one every 30 s while it keeps saying so                                                                                                                                      |
 | POST   | `/api/issue/:id/analyze`           | `{ trust? }` → `{ ok }`: the issue's pre-review now ([Issues](#issues)); `trust` (no screen) own page only. 400 for a PR; 409 for a blocked author                                                                                                                 | ✓   |
 | POST   | `/api/issue/:id/fix`               | `{ ok, ask }`: Make PR with fix, an ask to your agent. Own page only. 409 unless open with a fixable pre-review                                                                                                                                                    | ✓   |
 | POST   | `/api/issue/:id/block`, `/unblock` | `{ ok, author }`: the author on or off the desk's blocklist. Own page only; nothing on GitHub                                                                                                                                                                      | ✓   |
@@ -832,7 +833,8 @@ interface AutomationView extends Automation {
 
 - A notification about an item on the desk refreshes that item at once.
 - One about an item the desk doesn't hold (a review request, mention, team mention, assignment or your own item) starts a full pass early.
-- The full pass (every board's searches, then details for what changed) still runs every `github.poll_seconds`. A rate limit pauses both.
+- The full pass (every board's searches, then details for what changed) still runs every `github.poll_seconds`, and every 30 s at most while a window shows (`POST /api/look`). A rate limit pauses both.
+- While a window shows, a pulse every 10 s (one query, one point) asks when each of the 100 items last changed and where its CI stands: what changed is refreshed at once, and a PR newly asking for your review starts a full pass. It stops while fewer than 1,000 of GitHub's points are left.
 
 ## Agents and models
 

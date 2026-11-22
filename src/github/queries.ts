@@ -18,6 +18,17 @@ export const LIGHT_SEARCH = `query($q: String!, $first: Int!, $after: String) {
   }
 }`;
 
+// The pulse: when each held item last changed and where its head commit's CI stands, and the latest PRs asking for your review.
+export const PULSE = `query($ids: [ID!]!, $q: String!, $first: Int!) {
+  ${RATE}
+  nodes(ids: $ids) {
+    __typename
+    ... on PullRequest { id updatedAt commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } }
+    ... on Issue { id updatedAt }
+  }
+  search(query: $q, type: ISSUE, first: $first) { nodes { ... on PullRequest { id } } }
+}`;
+
 // Where you work: each PR's changed paths. 50 a page: 100 took 9.5 s of GitHub's 10 s limit, 50 up to 7 s (2026-11-02).
 export const FILES_SEARCH = `query($q: String!, $first: Int!, $after: String) {
   ${RATE}

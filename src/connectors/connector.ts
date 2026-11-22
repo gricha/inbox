@@ -31,6 +31,7 @@ export interface Connector {
   start(): void; // its loops: the full reconcile and the cheap change feed
   stop(): void;
   reschedule(): void; // settings changed; re-arm the timers
+  look(): void; // a window shows: read now if what it has is old, and sooner while it shows
   reconcile(): Effect.Effect<void>; // a full pass over everything the config subscribes to; what fails it shows in status()
   poll(): Effect.Effect<void>; // the change feed: refresh what changed, start a reconcile if something new appeared
   events(prev: Item | null, next: Item): NewEvent[]; // what changed between two snapshots of one item
