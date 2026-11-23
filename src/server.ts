@@ -186,6 +186,17 @@ const fromDesk = (c: Context) =>
     !!c.req.header("origin") &&
     (!REMOTE.has(c.req.raw) || VIA.get(c.req.raw) === "cookie"));
 
+// Why a request isn't from the desk's own page: an Origin that isn't `own`, or another site reading the API. A no-cors GET
+// (an <img> on another site or another localhost port) has no Origin; browsers still say where it came from.
+const crossSite = (c: Context, own: (origin: string) => boolean): string | null => {
+  const origin = c.req.header("origin");
+  if (origin && !own(origin)) return "forbidden origin";
+  const site = c.req.header("sec-fetch-site");
+  if ((site === "cross-site" || site === "same-site") && (c.req.path.startsWith("/api/") || c.req.path === "/mcp"))
+    return "forbidden cross-site request";
+  return null;
+};
+
 const PAIR_PAGE = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Inbox</title>
 <style>body{font:15px/1.5 system-ui,sans-serif;margin:4em auto;max-width:32em;padding:0 1em;color-scheme:light dark}</style>
 <p id="m">Pairing this browser with your desk…</p>
@@ -266,13 +277,8 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     Effect.suspend((): Effect.Effect<void, Forbidden> => {
       const refused = (message: string) => Effect.fail(new Forbidden({ message }));
       if (!LOCAL.has(new URL(c.req.url).hostname)) return refused("forbidden host");
-      const origin = c.req.header("origin");
-      if (origin && !origins.has(origin)) return refused("forbidden origin");
-      // A no-cors GET (an <img> on another site or another localhost port) has no Origin; browsers still say where it came from.
-      const site = c.req.header("sec-fetch-site");
-      if ((site === "cross-site" || site === "same-site") && (c.req.path.startsWith("/api/") || c.req.path === "/mcp"))
-        return refused("forbidden cross-site request");
-      return Effect.void;
+      const why = crossSite(c, (o) => origins.has(o));
+      return why ? refused(why) : Effect.void;
     });
   // From another device, through `tailscale serve`: this desk's tailnet name, its owner's login as Tailscale names them,
   // and a paired device's token (a browser's cookie; a machine's or a phone's bearer); pairing itself, its page and its
@@ -283,11 +289,8 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       const tn = remote.tailnet;
       if (!tn) return refused("this desk isn't served over Tailscale now");
       if (new URL(c.req.url).hostname !== tn.name) return refused("forbidden host");
-      const origin = c.req.header("origin");
-      if (origin && origin !== `https://${tn.name}`) return refused("forbidden origin");
-      const site = c.req.header("sec-fetch-site");
-      if ((site === "cross-site" || site === "same-site") && (c.req.path.startsWith("/api/") || c.req.path === "/mcp"))
-        return refused("forbidden cross-site request");
+      const why = crossSite(c, (o) => o === `https://${tn.name}`);
+      if (why) return refused(why);
       if ((c.req.header("tailscale-user-login") ?? "").toLowerCase() !== tn.login)
         return refused("only the desk's owner may use it from another device");
       if ((c.req.method === "GET" && c.req.path === "/pair") || (c.req.method === "POST" && c.req.path === "/api/pair")) return Effect.void;
@@ -308,11 +311,8 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       const secret = desk.settings["lan.token"];
       if (!desk.settings["lan.on"] || !secret) return refused("this desk isn't served on the local network now");
       if (c.req.method !== "GET" && c.req.method !== "HEAD") return refused("from the local network the desk is read only");
-      const origin = c.req.header("origin");
-      if (origin && origin !== new URL(c.req.url).origin) return refused("forbidden origin");
-      const site = c.req.header("sec-fetch-site");
-      if ((site === "cross-site" || site === "same-site") && (c.req.path.startsWith("/api/") || c.req.path === "/mcp"))
-        return refused("forbidden cross-site request");
+      const why = crossSite(c, (o) => o === new URL(c.req.url).origin);
+      if (why) return refused(why);
       const auth = c.req.header("authorization") ?? "";
       const basic = /^Basic (\S+)$/i.exec(auth)?.[1];
       const given =
