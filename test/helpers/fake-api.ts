@@ -336,6 +336,9 @@ const NOTE: Note = {
   text: "Run the Seer load test",
   remind_at: null,
   reminded_at: null,
+  from: { id: "tracker", name: "Tracker mentions" },
+  url: "https://tracker.example/m/m9",
+  fields: { kind: "question", due: "2026-11-27" },
   waiting: [{ ...STEP, id: "getsentry/ops#25646", ref: "ops#25646", after: "Run the Seer load test" }],
 };
 

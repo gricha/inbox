@@ -272,6 +272,9 @@ const noteJson = (n: Note) => ({
   text: n.text,
   at: n.at,
   remind_at: n.remind_at,
+  ...(n.from && { from: n.from.name }),
+  ...(n.url && { url: n.url }),
+  ...(n.fields && { fields: n.fields }),
   ...(n.waiting && { waiting: n.waiting.map((w) => w.id) }),
 });
 const noteLine = (n: Note) => `note   note:${n.id}  ${oneLine(n.text)}${afterNote(n.waiting)}`;

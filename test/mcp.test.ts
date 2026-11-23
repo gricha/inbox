@@ -343,6 +343,11 @@ test("inbox_list gives a chain one line, its head's, saying how many come after 
   const json = jsonBlock(r.text);
   assert.deepEqual(json[1].after_this, ["getsentry/ops#25732", "getsentry/ops#25733"]);
   assert.deepEqual([json[2].id, json[2].waiting], ["note:1a2b3c4d", ["getsentry/ops#25646"]]);
+  // An automation's note says which, where it lives and what its type read, inside the fence with the rest.
+  assert.deepEqual(
+    [json[2].from, json[2].url, json[2].fields],
+    ["Tracker mentions", "https://tracker.example/m/m9", { kind: "question", due: "2026-11-27" }],
+  );
 });
 
 test("inbox_config: get, preview with moved titles fenced, save with the hash", async () => {
