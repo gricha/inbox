@@ -1718,6 +1718,7 @@ const bodyOf = (a: Automation) => ({
   can: a.can,
   mcp: a.mcp,
   buttons: a.buttons,
+  icon: a.icon,
   type: a.type,
   rules: a.rules,
   on: a.on,

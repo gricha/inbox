@@ -365,6 +365,19 @@ test("Agree on a wider type saves it as an agent's change you approved and relea
   );
 });
 
+test("Agree on a new type or instruction keeps the rest of the automation as it was: its icon and buttons", async (c) => {
+  if (unixOnly(c)) return;
+  const { fake, t } = await mailDesk(c);
+  const buttons = [{ label: "Open in Gmail", do: "open" as const }];
+  const a = runSync(t.desk.automations.set("mail", { ...MAIL, icon: "brand:gmail", buttons }, true));
+  fake.answer(run("Read 1 unread thread.", [RECEIPT]), 1);
+  fake.answer({ do: "type", says: "Allow receipts?", why: "A receipt.", type: WIDER }, 2);
+  await t.desk.automations.run(a, "now").p;
+  await runFx(t.desk.answerInquiry(t.desk.inquiries().at(-1)!.id, AGREE));
+  const saved = t.desk.automations.own()[0]!;
+  assert.deepEqual([saved.type, saved.icon, saved.buttons], [WIDER, "brand:gmail", buttons]);
+});
+
 test("Agree on a fixed note puts it through the rules, which may drop it", async (c) => {
   if (unixOnly(c)) return;
   const { t, q } = await held(c, {
