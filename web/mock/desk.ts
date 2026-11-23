@@ -425,7 +425,6 @@ const DEMO = process.env.MOCK_DEMO
       "oss/tinyhttp#212",
       "acme/web#2303",
       "acme/ml-pipeline#311",
-      "acme/api#4071",
       "acme/worker#870",
       "oss/tinyhttp#209",
       "acme/web#2295",
@@ -652,7 +651,7 @@ const SEEDS: Seed[] = [
     by: "alex-ops",
     team: "ml-team",
     owner: true,
-    size: [18, 18, 2],
+    size: [12, 9, 2],
     on: { "work-review": ["owners"] },
   },
   {
@@ -832,7 +831,7 @@ const SEEDS: Seed[] = [
     review: "changes_requested",
     reviews: [["dana", "changes_requested", 5]],
     mergeable: "clean",
-    size: [260, 40, 8],
+    size: [81, 5, 4],
     threads: [3, 5],
     fresh: true,
     on: { "work-mine": ["cr"] },
@@ -849,7 +848,7 @@ const SEEDS: Seed[] = [
     review: "approved",
     reviews: [["marco", "approved", 3]],
     mergeable: "clean",
-    size: [180, 22, 6],
+    size: [90, 2, 6],
     on: { "work-mine": ["merge"] },
     st: { pinned: true },
     log: [
@@ -869,7 +868,7 @@ const SEEDS: Seed[] = [
     ci: "red",
     review: "required",
     mergeable: "clean",
-    size: [8, 3, 1],
+    size: [9, 3, 1],
     on: { "work-mine": ["red"] },
     st: { inflight_at: iso(3) },
     fly: {
@@ -917,7 +916,7 @@ const SEEDS: Seed[] = [
     ci: "green",
     draft: true,
     mergeable: "clean",
-    size: [96, 12, 4],
+    size: [92, 18, 4],
     on: { "work-mine": [] },
     judge: ["today", "your draft, touched today: yours to finish"],
   },
@@ -993,7 +992,7 @@ const SEEDS: Seed[] = [
     author: "li-wei",
     age: 80,
     upd: 30,
-    size: [150, 30, 8],
+    size: [45, 2, 4],
     comments: 3,
     on: { "work-mentions": [] },
   },
@@ -1016,7 +1015,7 @@ const SEEDS: Seed[] = [
     wait: 29,
     by: "ana-k",
     direct: true,
-    size: [310, 45, 9],
+    size: [34, 4, 4],
     on: { "personal-review": ["direct"] },
   },
   {
@@ -1070,7 +1069,7 @@ const SEEDS: Seed[] = [
     reviews: [["kai", "commented", 6]],
     log: [["commented", "priya", 2]],
     mergeable: "clean",
-    size: [420, 66, 12],
+    size: [121, 11, 5],
     threads: [3, 4],
     fresh: true,
     on: { "personal-mine": ["unres"] },
@@ -1100,7 +1099,7 @@ const SEEDS: Seed[] = [
     review: "approved",
     reviews: [["kofi", "approved", 22]],
     mergeable: "clean",
-    size: [34, 6, 2],
+    size: [32, 2, 2],
     on: { "work-mine": [] },
     resolved: "merged",
     st: { inflight_at: iso(48) },
@@ -1645,8 +1644,9 @@ const recOf = (s: Seed): Rec => {
   return rec;
 };
 const recs: Rec[] = SEEDS.map(recOf).filter((r) => inDemo(r.id));
-// The demo's Inbox: three things need you now; the rest can wait.
-if (DEMO) for (const r of recs) if (["oss/tinyhttp#212", "me/notes-app#12", "acme/web#2303"].includes(r.id)) r.state.section = "standard";
+// The demo's Inbox: three things need you now (with your agent's question and its session); the rest can wait.
+const DEMO_STANDARD = new Set(["acme/worker#875", "oss/tinyhttp#212", "me/notes-app#12", "acme/web#2303"]);
+if (DEMO) for (const r of recs) if (DEMO_STANDARD.has(r.id)) r.state.section = "standard";
 
 // ---------------------------------------------------------------------------
 // Signals, items, placements
@@ -2558,105 +2558,105 @@ const coordinator: CoordinatorView = {
 // Agent sessions' questions for you: one with options, one without. Answering one takes it off the main page. Then two
 // you answered: one its session never came back for, one it picked up two minutes later.
 // Two of your sessions that need you: the desktop app's, waiting on a permission, and a background one stopped by a rate limit.
-const SESSIONS: SessionCard[] = DEMO
-  ? []
-  : [
-      {
-        id: "session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
-        session_id: "5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
-        kind: "desktop",
-        name: "Fix the flaky upload test",
-        cwd: "/Users/you/code/api",
-        branch: "fix/upload-flake",
-        state: "blocked",
-        reason: "needs permission: Bash",
-        since: iso(0.3),
-        excerpt: "Bash: Run the upload tests 20 times with retries off",
-        resets_at: null,
-        alive: true,
-        actions: ["open"],
-        open_url: "claude://claude.ai/epitaxy/local_5f1c2a90",
-        attach: null,
-        status: "active",
-        snooze_until: null,
-      },
-      {
-        id: "session:a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
-        session_id: "a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
-        kind: "background",
-        name: "Migrate the job store to SQLite",
-        cwd: "/Users/you/code/worker",
-        branch: "store-sqlite",
-        state: "stalled",
-        reason: `rate limited until ${new Date(T0 + HOUR).toTimeString().slice(0, 5)}`,
-        since: iso(1.6),
-        excerpt: "API Error: Rate limit reached for your five-hour window",
-        resets_at: new Date(T0 + HOUR).toISOString(),
-        alive: false,
-        actions: ["kick"],
-        open_url: null,
-        attach: null,
-        status: "active",
-        snooze_until: null,
-      },
-    ];
+const ALL_SESSIONS: SessionCard[] = [
+  {
+    id: "session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
+    session_id: "5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
+    kind: "desktop",
+    name: "Fix the flaky upload test",
+    cwd: "/Users/you/code/api",
+    branch: "fix/upload-flake",
+    state: "blocked",
+    reason: "needs permission: Bash",
+    since: iso(0.3),
+    excerpt: "Bash: Run the upload tests 20 times with retries off",
+    resets_at: null,
+    alive: true,
+    actions: ["open"],
+    open_url: "claude://claude.ai/epitaxy/local_5f1c2a90",
+    attach: null,
+    status: "active",
+    snooze_until: null,
+  },
+  {
+    id: "session:a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
+    session_id: "a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
+    kind: "background",
+    name: "Migrate the job store to SQLite",
+    cwd: "/Users/you/code/worker",
+    branch: "store-sqlite",
+    state: "stalled",
+    reason: `rate limited until ${new Date(T0 + HOUR).toTimeString().slice(0, 5)}`,
+    since: iso(1.6),
+    excerpt: "API Error: Rate limit reached for your five-hour window",
+    resets_at: new Date(T0 + HOUR).toISOString(),
+    alive: false,
+    actions: ["kick"],
+    open_url: null,
+    attach: null,
+    status: "active",
+    snooze_until: null,
+  },
+];
+// The demo's: the one waiting on a permission, an agent stuck on you.
+const SESSIONS = DEMO ? ALL_SESSIONS.filter((x) => x.id.startsWith("session:5f1c")) : ALL_SESSIONS;
 const sessionTriage = new Map<string, SessionCard["status"]>();
 const sessionCards = () => SESSIONS.map((x) => ({ ...x, status: sessionTriage.get(x.id) ?? "active" }));
 const activeSessions = () => sessionCards().filter((x) => x.status === "active");
 
 // Notes to yourself: one reminder that came due, one without a time, one for tomorrow.
-const NOTES: Note[] = DEMO
-  ? []
-  : [
-      {
-        id: "n1",
-        at: iso(26),
-        text: "Ask Priya whether the planner change needs a migration note",
-        remind_at: iso(0.2),
-        reminded_at: iso(0.2),
-      },
-      { id: "n2", at: iso(3), text: "Write up the tombstone compaction idea for the sync design doc", remind_at: null, reminded_at: null },
-      {
-        id: "n3",
-        at: iso(1),
-        text: "Check the p95 dashboard after the search deploy",
-        remind_at: new Date(now() + 18 * HOUR).toISOString(),
-        reminded_at: null,
-      },
-      // An automation's, from what its run read: its body is untrusted markdown, its link a mail thread.
-      {
-        id: "n4",
-        at: iso(0.5),
-        text: "Dana Okafor: the venue needs the deposit confirmed by tomorrow",
-        remind_at: null,
-        reminded_at: null,
-        section: "fyi",
-        from: { id: "personal-gmail", name: "Important personal email" },
-        body: "Dana asks you to confirm the **$1,200 deposit** for the Oct 18 venue by **tomorrow, 5pm**, or the hold lapses.\n\n- Reply to confirm, or call her at the number in the thread\n- The invoice is attached: https://example.com/invoice.pdf",
-        url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0a7d1",
-        buttons: [
-          { label: "Open in Gmail", do: "open" },
-          { label: "Draft a reply", do: "ask", prompt: "Draft a reply to this email in my Gmail drafts; don't send it." },
-        ],
-        icon: "brand:gmail",
-      },
-      // The same automation's, with the Lucide icon its run picked for a bill.
-      {
-        id: "n5",
-        at: iso(0.75),
-        text: "Northwind Card: November statement is ready — $412.80 due Dec 12",
-        remind_at: null,
-        reminded_at: null,
-        section: "fyi",
-        from: { id: "personal-gmail", name: "Important personal email" },
-        body: "Your statement closed Nov 20. **$412.80** is due **Dec 12**; autopay is off.",
-        url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0b9e4",
-        buttons: [{ label: "Open in Gmail", do: "open" }],
-        icon: "receipt",
-      },
-      // A typed automation's over a source that isn't mail: its fields shown as facts when it's opened.
-      trackerNote(),
-    ];
+const ALL_NOTES: Note[] = [
+  {
+    id: "n1",
+    at: iso(26),
+    text: "Ask Priya whether the planner change needs a migration note",
+    remind_at: iso(0.2),
+    reminded_at: iso(0.2),
+  },
+  { id: "n2", at: iso(3), text: "Write up the tombstone compaction idea for the sync design doc", remind_at: null, reminded_at: null },
+  {
+    id: "n3",
+    at: iso(1),
+    text: "Check the p95 dashboard after the search deploy",
+    remind_at: new Date(now() + 18 * HOUR).toISOString(),
+    reminded_at: null,
+  },
+  // An automation's, from what its run read: its body is untrusted markdown, its link a mail thread.
+  {
+    id: "n4",
+    at: iso(0.5),
+    text: "Dana Okafor: the venue needs the deposit confirmed by tomorrow",
+    remind_at: null,
+    reminded_at: null,
+    section: "fyi",
+    from: { id: "personal-gmail", name: "Important personal email" },
+    body: "Dana asks you to confirm the **$1,200 deposit** for the Oct 18 venue by **tomorrow, 5pm**, or the hold lapses.\n\n- Reply to confirm, or call her at the number in the thread\n- The invoice is attached: https://example.com/invoice.pdf",
+    url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0a7d1",
+    buttons: [
+      { label: "Open in Gmail", do: "open" },
+      { label: "Draft a reply", do: "ask", prompt: "Draft a reply to this email in my Gmail drafts; don't send it." },
+    ],
+    icon: "brand:gmail",
+  },
+  // The same automation's, with the Lucide icon its run picked for a bill.
+  {
+    id: "n5",
+    at: iso(0.75),
+    text: "Northwind Card: November statement is ready — $412.80 due Dec 12",
+    remind_at: null,
+    reminded_at: null,
+    section: "fyi",
+    from: { id: "personal-gmail", name: "Important personal email" },
+    body: "Your statement closed Nov 20. **$412.80** is due **Dec 12**; autopay is off.",
+    url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0b9e4",
+    buttons: [{ label: "Open in Gmail", do: "open" }],
+    icon: "receipt",
+  },
+  // A typed automation's over a source that isn't mail: its fields shown as facts when it's opened.
+  trackerNote(),
+];
+// The demo's: what automations sorted to FYI from mail and a chat tracker, so the list isn't GitHub's alone.
+const NOTES = DEMO ? ALL_NOTES.filter((n) => n.id === "n4" || n.id === "n6") : ALL_NOTES;
 function trackerNote(): Note {
   const fields = {
     kind: "review_request",
@@ -3604,13 +3604,7 @@ const WRITTEN: Record<
       "Find in page can't reach rows that aren't rendered, which the old list allowed.",
     ],
   },
-  "oss/tinyhttp#212": {
-    verdict: "look",
-    risk: "medium",
-    summary:
-      "Accepts cleartext HTTP/2 when a client opens with the h2 preface, behind a new http2: 'prior-knowledge' option. HTTP/1.1 on the same port keeps working.",
-    concerns: ["The preface sniff waits for 24 bytes, so an HTTP/1 client that sends less sits out the 5 s sniff timeout."],
-  },
+
   "acme/worker#882": {
     verdict: "look",
     risk: "medium",

@@ -343,6 +343,32 @@ const CANNED: Record<string, Canned> = {
         unread: [],
         total: 5,
       },
+      guide: {
+        steps: [
+          {
+            title: "The cached tokenizer",
+            body: "`get_tokenizer` takes an optional name and is wrapped in `lru_cache`, so each process loads a model once. `encode_batch` passes the configured name, and `warm_up` loads it ahead of the first request.",
+            check: "Every caller passes the same name, so the cache holds one entry per model.",
+            hunks: [{ id: "h1", path: "pipeline/tokenize.py" }],
+          },
+          {
+            title: "Warming it after the fork",
+            body: "The worker's `post_fork` hook calls `warm_up`, so each worker pays the 1.5 s load at start instead of on its first request.",
+            check: "Nothing in the master calls `get_tokenizer` before it forks.",
+            hunks: [{ id: "h3", path: "pipeline/worker.py" }],
+          },
+          {
+            title: "Pins, the setting and tests",
+            body: "A transformers minor bump, a migration adding a cache-size setting that nothing reads yet (the cache is fixed at 4), and tests for the cache and the warm-up switch.",
+            check: "",
+            hunks: [
+              { id: "h2", path: "requirements.txt" },
+              { id: "h4", path: "pipeline/migrations/versions/0008_tokenizer_cache.py" },
+              { id: "h5", path: "tests/test_tokenize.py" },
+            ],
+          },
+        ],
+      },
     },
   },
 };
