@@ -1,27 +1,28 @@
 // The page around the demo: the pile behind it, things to try that take the demo somewhere, Start over, and Copy.
 const frame = document.querySelector<HTMLIFrameElement>("#demo");
 
-// What GitHub sends you in a week, unsorted: the stage's backdrop, repeated so its drift loops.
+// Everything that wants you in a day, unsorted: the stage's backdrop, repeated so its drift loops.
 const PILE = [
   "priya requested your review on acme/api#4127 Stream partial results from the query planner",
+  "Claude Code is waiting: allow Bash(npm test) in acme/api?",
   "dependabot[bot] opened acme/tinyhttp#215 Bump undici from 6.19.8 to 6.21.0",
+  "Mina in #design: can you look at the onboarding copy before Friday?",
   "CI failed on acme/worker#882 Retry dead-lettered jobs with jittered backoff",
+  "Codex finished: 3 files changed in me/notes-app, waiting for your review",
+  "Dana Okafor: the venue needs the deposit confirmed by tomorrow",
   "@backend was requested to review acme/web#2301 Virtualize the issue stream list",
-  "azulus commented on me/notes-app#12 Last-writer-wins sync with tombstones",
+  "azulus commented on me/notes-app#12: why do tombstones never go away?",
+  "Your agent asks: compact tombstones in #12, or ship it and follow up?",
   "renovate[bot] opened acme/web#2311 Update dependency vite to v8.0.3",
+  "Northwind Card: your November statement is ready",
   "sam approved acme/worker#875 Add idempotency keys to webhook delivery",
-  "ana-k requested your review on acme/tinyhttp#212 Support HTTP/2 prior knowledge",
-  "github-actions[bot] commented on acme/api#4131 Coverage report: 81.2% (-0.4%)",
-  "you were mentioned in acme/infra#540 Rotate the staging database credentials",
-  "@platform was requested to review acme/api#4099 Drop the legacy v1 auth middleware",
-  "CI passed on acme/ml-pipeline#311 Cache the tokenizer per worker",
-  "jules pushed 3 commits to acme/web#2303 Show the export's progress in the toolbar",
-  "dependabot[bot] opened acme/api#4140 Bump @types/node from 22.10.1 to 22.10.2",
-  "mira closed acme/sentry-javascript#14402 Capture unhandled rejections in edge runtimes",
+  "#incidents: search latency p95 over budget in eu-west",
+  "ana-k requested your review on oss/tinyhttp#212 Support HTTP/2 prior knowledge",
+  "Background session stopped: rate limited until 12:05",
   "kai requested changes on acme/worker#870 Document queue sizing for large tenants",
-  "CI failed on acme/web#2295 Fix the flaky timezone test",
-  "@security was requested to review acme/api#1294 Service accounts reach control-silo endpoints",
-  "codecov[bot] commented on acme/tinyhttp#205 Add a keep-alive timeout option",
+  "Calendar: design review moved to 3:30",
+  "github-actions[bot] commented on acme/api#4131 Coverage report: 81.2% (-0.4%)",
+  "Linear: INF-2291 assigned to you",
 ];
 
 const pile = document.querySelector(".pile");

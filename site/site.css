@@ -1,4 +1,4 @@
-/* useinbox.dev: the live app is the hero, on a stage of one strong colour with GitHub's raw pile behind it. Instrument Sans,
+/* useinbox.dev: the live app is the hero, on a stage of one strong colour with the raw pile of what wants you behind it. Instrument Sans,
    the app's own face, set condensed for the one big line. */
 @font-face {
   font-family: "Instrument Sans";
@@ -20,20 +20,44 @@
   --mono: "JetBrains Mono", ui-monospace, menlo, monospace;
   --top: 64px;
 
-  /* Violet: the logo's, deepened into the stage; the app's own accent lives in it. */
-  --stage: #1d1733;
-  --on-stage: #f6f3fc;
-  --stage-muted: #b9afd0;
-  --stage-line: rgb(246 243 252 / 14%);
-  --stage-link: #c9b0f7;
-  --pile: #b9afd0;
-  --paper: #f8f7fb;
+  /* Violet, the logo's: a pale wash in Light, the deep stage in Dark. The app inside follows the same scheme. */
+  --stage: #efeaf8;
+  --on-stage: #1d1733;
+  --stage-muted: #5f5873;
+  --stage-line: rgb(29 23 51 / 12%);
+  --stage-link: #6236b3;
+  --pile: #6a3dbd;
+  --pile-alpha: 0.16;
+  --paper: #fbfafe;
   --ink: #1d1733;
   --muted: #5f5873;
   --line: #e3dfec;
   --cmd: #1d1733;
   --on-cmd: #f6f3fc;
   --cmd-link: #c9b0f7;
+  --window-edge: rgb(29 23 51 / 10%);
+  --window-shadow: 0 24px 60px -28px rgb(29 23 51 / 35%);
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --stage: #1d1733;
+    --on-stage: #f6f3fc;
+    --stage-muted: #b9afd0;
+    --stage-line: rgb(246 243 252 / 14%);
+    --stage-link: #c9b0f7;
+    --pile: #b9afd0;
+    --pile-alpha: 0.2;
+    --paper: #120f1f;
+    --ink: #f6f3fc;
+    --muted: #b9afd0;
+    --line: #2c2542;
+    --cmd: #241c3f;
+    --window-edge: rgb(246 243 252 / 24%);
+    --window-shadow: 0 24px 60px -24px rgb(0 0 0 / 70%);
+  }
 }
 
 * {
@@ -83,7 +107,7 @@ button {
   overflow: hidden;
   color: var(--pile);
   font: 400 11px/24px var(--mono);
-  opacity: 0.2;
+  opacity: var(--pile-alpha);
   white-space: nowrap;
   mask-image: linear-gradient(to right, transparent 0, transparent 380px, #000 520px);
   pointer-events: none;
@@ -260,18 +284,9 @@ figcaption {
   border-radius: 12px;
   background: light-dark(#eeecf3, #0b0911);
   box-shadow:
-    0 0 0 1px var(--stage-line),
-    0 24px 60px -24px rgb(0 0 0 / 45%);
+    0 0 0 1px var(--window-edge),
+    var(--window-shadow);
   color-scheme: light dark;
-}
-
-/* The app in Dark is nearly the stage's colour: a brighter edge keeps it a window. */
-@media (prefers-color-scheme: dark) {
-  .window {
-    box-shadow:
-      0 0 0 1px rgb(246 243 252 / 24%),
-      0 24px 60px -24px rgb(0 0 0 / 70%);
-  }
 }
 
 .window iframe {
@@ -442,7 +457,6 @@ footer a {
 
   .pile {
     mask-image: linear-gradient(to bottom, #000 0, transparent 110px);
-    opacity: 0.12;
   }
 
   .install,

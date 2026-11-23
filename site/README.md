@@ -3,7 +3,7 @@
 The website: one page, with the real Inbox window running in it. The demo at `/demo/` is `web/src` unchanged, talking to the
 repo's mock desk (`web/mock/desk.ts`) inside the visitor's tab: `site/demo/desk.ts` answers the window's `fetch` and
 `EventSource`, and `site/demo/node/` stands in for the Node builtins the mock's modules import. Each visitor has their own
-desk; a reload starts it again. Nothing reaches GitHub.
+desk; a reload starts it again. Nothing leaves the page.
 
 ```bash
 npm run site         # the site on Vite at :5190
@@ -12,20 +12,28 @@ npm run site:build   # site/dist: static files for Cloudflare
 
 ## The page
 
-The landing page is the demo: the live app fills the first screen, on desktop and on a phone.
+The landing page is the demo: the live app fills the first screen, on desktop and on a phone. The story is attention, not
+GitHub: code reviews are one source beside your agents' questions and stuck sessions and what automations bring in.
 
-- **The stage.** The first screen is petrol, the brand tile's colour. Behind it drifts the raw pile of GitHub notifications
-  (review requested, CI failed, dependabot opened…); in front, the live app shows the same work as one sorted list. That
-  contrast is the page's one bold idea; everything else stays quiet.
-- **The rail** beside the app: the headline "Your GitHub pile, sorted." (Instrument Sans, the app's own face, 700 at 75%
-  width), one paragraph, four things to try (each takes the demo to a place; the action stays the visitor's), and Start
-  the demo over. Under 1000px the rail's text sits above the app and the things to try below it.
-- **Below the stage**, on warm white: Install (one command; `/install` redirects to the repo's `install.sh`), three facts
-  (writes only when you click; runs on your agent; hands off what it can), and a footer.
-- **Palette:** petrol `#1e3436` and `#365d60`, warm white `#f7f6f2`, ink `#172322`, lichen `#9db8b0` for quiet text on
-  petrol, the app's lilac `#c4a7f5` for links and focus. JetBrains Mono only for the pile and the command.
+- **The stage.** Behind the app drifts the raw pile of what wants you (review requests, CI, an agent asking for a
+  permission, mail, chat mentions); in front, the live app shows it as one short list. That contrast is the page's one bold
+  idea; everything else stays quiet.
+- **The rail** beside the app: "Your attention, sorted." (Instrument Sans, the app's own face, 700 at 75% width), one
+  paragraph, four things to try (each takes the demo to a place; the action stays the visitor's), and Start the demo over.
+  Under 1000px the words sit above the app and the things to try below it.
+- **Below the stage:** Install (one command; `/install` redirects to the repo's `install.sh`), three facts (runs on your
+  machine; uses your agent; writes when you say so), and a footer.
+- **Light and Dark follow the system,** page and app alike. Violet, the logo's `#6a3dbd`: a pale `#efeaf8` stage in Light,
+  a deep `#1d1733` one in Dark. JetBrains Mono only for the pile and the command.
 - **Left out on purpose:** features grid, screenshots, themes showcase, video, testimonials, pricing, newsletter, cookie
   banner, analytics, docs site (the README is the docs).
+
+## The demo's list
+
+`MOCK_DEMO` in `web/mock/desk.ts` keeps it short. Urgent: your agent's question, a session waiting on a permission, and
+Priya's planner PR. Standard: your approved PR to hand off, an easy review, your sync PR with an open thread, your draft.
+FYI: a docs PR and two notes automations sorted there (mail, a chat mention). Every PR you can open has a written diff and
+AI review: `diffs.ts` for the planner and tokenizer, one file each under `web/mock/reviews/` for the rest.
 
 ## Cloudflare
 
@@ -34,12 +42,8 @@ itself, and caches hashed assets for a year; `public/_redirects` sends `/install
 
 ## Next
 
-1. **A demo seed.** The demo shows the screenshot suite's seed today. It needs its own, about ten authored items: the hard
-   review (api#4127), your approved PR to hand off, a thread to ask your agent about, an easy low-risk PR, a draft, an issue,
-   a question from your agent, a dependency bump sorted into FYI. Every PR you can open needs a written diff (no
-   `step_N()` filler). Scrub the internal names (`sentry:`/`seer:` sources, sessions, Gmail and load-test notes), use bundled
-   avatars instead of fetching GitHub's, write per-item agent answers instead of "Done: I checked it…", and say "in the demo"
-   where the window says "on GitHub". Links out show "This PR is example data."
+1. **Agent answers and words.** Per-item answers in Ask your agent instead of "Done: I checked it…"; "in the demo" where
+   the window says "on GitHub"; links out show "This is example data"; bundled avatars instead of GitHub's.
 2. **Load.** The demo is about 1.2 MB gzipped before a review opens; aim under 700 KB: fewer Shiki grammars and themes,
    no diagram stack. A poster of the opening Inbox holds the frame while it loads.
 3. **Hand off's story.** A scripted Merging timeline after Hand off (CI fix → ready → merged), with your agent's notes.
