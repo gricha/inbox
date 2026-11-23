@@ -9,7 +9,7 @@ import path from "node:path";
 import { Effect, Result, Schema, type Fiber } from "effect";
 import { claudeServers, serverName } from "./agents.ts";
 import { DENY as COORDINATOR_DENY, denyDir, wakeFor } from "./coordinator.ts";
-import type { Desk, Entry } from "./desk.ts";
+import type { Core, Desk, Entry } from "./desk.ts";
 import { decide, type Question } from "./decisions.ts";
 import { compile } from "./expr.ts";
 import { fit, itemType, readType, type ItemType } from "./itemtype.ts";
@@ -59,6 +59,25 @@ import { ICON_FORMAT, iconName } from "./icons.ts";
 import { NoteButtonSchema } from "./kv.ts";
 import { report } from "./sentry.ts";
 import { secretsPath } from "./settings.ts";
+
+type Host = Core &
+  Pick<
+    Desk,
+    | "light"
+    | "mcpUrl"
+    | "agent"
+    | "line"
+    | "connectors"
+    | "syncedAt"
+    | "sort"
+    | "recommend"
+    | "raiseNote"
+    | "push"
+    | "inquiries"
+    | "dropInquiry"
+    | "ctx"
+    | "clear"
+  >;
 
 const KEY = "automations";
 const RUNS = "automation_runs";
@@ -480,7 +499,7 @@ interface Batch {
 type Running = { p: Promise<AutomationRun>; fiber: Fiber.Fiber<void> | null };
 
 export class Automations {
-  desk: Desk;
+  desk: Host;
   timer: NodeJS.Timeout | null = null;
   running = new Map<string, Running>();
   // A question whose model couldn't answer, or an event's run that failed (failed): why, and when it runs again.
@@ -488,7 +507,7 @@ export class Automations {
   // Held notes Claude is being asked about now: a run's end doesn't ask again about one a comment's re-ask has out.
   asking = new Set<string>();
 
-  constructor(desk: Desk) {
+  constructor(desk: Host) {
     this.desk = desk;
   }
 
