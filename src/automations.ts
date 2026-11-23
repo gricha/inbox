@@ -667,6 +667,7 @@ export class Automations {
       };
       this.desk.store.set(KEY, was ? all.map((x) => (x.id === id ? a : x)) : [...all, a]);
       this.held.delete(id); // what it waited on may be what you just changed
+      if (!a.type) for (const h of this.heldOf(id)) this.forgetHeld(id, h.id); // nothing left to fit: its next run reads them again
       // Its events count from when it starts watching: what happened before isn't its news.
       if (a.events && !(was?.on && was.events)) this.look(id, this.desk.store.lastSeq());
       this.desk.changed();

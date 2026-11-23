@@ -1602,7 +1602,7 @@ What it recommends is an `Inquiry` with `fix` (`Recommendation`: `automation`, `
 - **Disagree** (or a dismissal): the recommendation and the held note go, and its key is kept as raised: it doesn't come back.
 - **Anything else you write** (Approve with comment): it goes back to your agent with the recommendation it answers, for a revised one, in the background; the old one leaves at once. One that fails is logged and notified, and the next run asks again.
 
-A refusal (the automation gone, a fix that no longer fits) leaves both as they were. Deleting the automation forgets what it held, and its questions.
+A refusal (the automation gone, a fix that no longer fits) leaves both as they were. Deleting the automation forgets what it held, and its questions; so does saving it without a type, since nothing is left for them to fit: its next run reads them again.
 
 #### What it may do
 

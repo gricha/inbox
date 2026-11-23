@@ -413,6 +413,25 @@ test("a recommendation that doesn't hold up fails the run, and the next run asks
   assert.equal(t.desk.inquiries().at(0)?.question, "Drop it?");
 });
 
+test("saving it without a type forgets what it held, so its next run raises them as untyped notes", async (c) => {
+  if (unixOnly(c)) return;
+  const { fake, t } = await mailDesk(c);
+  const a = runSync(t.desk.automations.set("mail", MAIL, true));
+  fake.answer(run("Read 1 unread thread.", [RECEIPT]), 1);
+  fake.answer({ do: "drop", says: "Drop it?", why: "A receipt needs nothing." }, 2);
+  await t.desk.automations.run(a, "now").p;
+  assert.equal(t.desk.automations.heldOf("mail").length, 1);
+  const untyped = runSync(t.desk.automations.set("mail", { ...MAIL, type: undefined, rules: undefined }, true));
+  assert.deepEqual([t.desk.automations.heldOf("mail"), t.desk.inquiries()], [[], []], "nothing left for them to fit");
+  fake.answer(run("Read 1 unread thread.", [RECEIPT]), 3);
+  const r = await t.desk.automations.run(untyped, "now").p;
+  assert.equal(r.error, null);
+  assert.deepEqual(
+    t.desk.notes().map((n) => [n.text, n.fields]),
+    [[RECEIPT.text, undefined]],
+  );
+});
+
 test("Disagree drops the recommendation and the held note for good", async (c) => {
   if (unixOnly(c)) return;
   const { fake, t, a, q } = await held(c, { do: "type", says: "Allow receipts?", why: "A receipt.", type: WIDER });
