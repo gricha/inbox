@@ -25,6 +25,7 @@ import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { until } from "./helpers/wait.ts";
+import { request } from "./helpers/http.ts";
 
 // An agent the desk started inherits these; the tests that want them set their own.
 delete process.env.DESK_UI_ORIGIN;
@@ -51,7 +52,7 @@ async function setup(settings?: Record<string, unknown>) {
   await run(desk.init());
   await run(desk.sync());
   const app = createApp(desk, 47823);
-  const req = (p: string, init: RequestInit = {}) => app.request(`http://127.0.0.1:47823${p}`, init);
+  const req = request(app);
   const json = async (p: string, init: RequestInit = {}): Promise<any> => (await req(p, init)).json();
   return {
     desk,

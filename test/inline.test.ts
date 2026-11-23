@@ -7,14 +7,13 @@ import { Effect } from "effect";
 import type { ReviewDeps } from "../src/desk.ts";
 import type { GitHubWriter, InlineThread } from "../src/github/write.ts";
 import { createApp } from "../src/server.ts";
-import { setup } from "./helpers/desk.ts";
+import { setup, WINDOW_HEADERS } from "./helpers/desk.ts";
 import { makeItem } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { GitHubGraphQLError } from "../src/errors.ts";
 import { run } from "./helpers/run.ts";
 
 const HEAD = "a".repeat(40);
-const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
 
 async function inline(c: TestContext, fail?: string) {
   const calls: [string, string, InlineThread][] = [];
@@ -37,7 +36,7 @@ async function inline(c: TestContext, fail?: string) {
   c.after(t.cleanup);
   await run(t.desk.sync());
   const app = createApp(t.desk, 47823);
-  const post = (body: unknown, headers: Record<string, string> = DESK) =>
+  const post = (body: unknown, headers: Record<string, string> = WINDOW_HEADERS) =>
     app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent("acme/web#4")}/inline`, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
@@ -51,7 +50,7 @@ const ok = { path: "src/plan.ts", line: 42, side: "new", body: "Off by one?", he
 test("an inline comment goes only from the desk's window, with what GitHub needs", async (c) => {
   const { calls, post } = await inline(c);
   assert.equal((await post(ok, {})).status, 403, "curl, the CLI and agents");
-  assert.equal((await post(ok, { ...DESK, origin: "https://evil.example" })).status, 403);
+  assert.equal((await post(ok, { ...WINDOW_HEADERS, origin: "https://evil.example" })).status, 403);
   for (const bad of [
     { ...ok, path: "" },
     { ...ok, line: 0 },

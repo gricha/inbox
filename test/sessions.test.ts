@@ -24,7 +24,7 @@ import {
 } from "../src/connectors/sessions.ts";
 import { readTail } from "../src/coordinator.ts";
 import { createApp } from "../src/server.ts";
-import { setup } from "./helpers/desk.ts";
+import { setup, WINDOW_HEADERS } from "./helpers/desk.ts";
 import { NOW } from "./helpers/items.ts";
 import { failure, run } from "./helpers/run.ts";
 import { posix } from "./helpers/platform.ts";
@@ -698,7 +698,7 @@ test("only the desk's window kicks or opens a session; anyone may read one", pos
   assert.equal((await post("kick")).status, 403);
   assert.equal((await post("open")).status, 403);
   assert.deepEqual(t.opened, []);
-  const page = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
+  const page = WINDOW_HEADERS;
   assert.equal((await post("open", page)).status, 200);
   assert.deepEqual(t.opened, ["claude://claude.ai/epitaxy/local_abc"]);
   assert.equal((await post("kick", page)).status, 409, "a desktop session is the app's: Open only");

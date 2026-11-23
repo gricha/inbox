@@ -7,13 +7,11 @@ import os from "node:os";
 import path from "node:path";
 import { personOf } from "../src/attribution.ts";
 import type { Item } from "../src/types.ts";
-import { idle, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
+import { teamPing, idle, QUIET, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { posix } from "./helpers/platform.ts";
 import { until } from "./helpers/wait.ts";
-
-const QUIET = { "policy.judge": false, "review.auto_ai": false, "notify.quiet": "" };
 
 // A claude that answers answer.json's items and keeps each call's prompt.
 function fakeClaude(c: TestContext) {

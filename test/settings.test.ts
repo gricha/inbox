@@ -19,6 +19,7 @@ import {
 import { defaultConfigText, parseConfig } from "../src/config.ts";
 import type { SettingDef } from "../src/types.ts";
 import { failureSync, runSync } from "./helpers/run.ts";
+import { WINDOW_HEADERS } from "./helpers/desk.ts";
 
 test("every setting's default is valid", () => {
   for (const d of SETTINGS) assert.equal(checkSetting(d.key, d.default), null, d.key);
@@ -194,7 +195,7 @@ test("a secret setting is kept in secrets.json, yours alone to read, set only fr
   ] as const)
     assert.equal(checkSetting("agent.decision_key", bad), why);
 
-  const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin", "content-type": "application/json" };
+  const DESK = { ...WINDOW_HEADERS, "content-type": "application/json" };
   const app = createApp(t.desk, 47823);
   const put = async (body: unknown, headers: Record<string, string> = DESK) => {
     const res = await app.request("http://127.0.0.1:47823/api/settings", { method: "PUT", headers, body: JSON.stringify(body) });

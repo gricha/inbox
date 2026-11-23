@@ -31,6 +31,10 @@ export const myPr = (n: number, o: Partial<Item> = {}) =>
 
 // The Inbox's model score is off, as the owner may turn it: few tests are about it, and a fake agent would answer its calls.
 export const UNSCORED = { "agent.score": false };
+// No judge, no AI review ahead of time, no quiet hours: only the rules place items.
+export const QUIET = { "policy.judge": false, "review.auto_ai": false, "notify.quiet": "" };
+// What the desk's own window sends: its page's origin, same-origin.
+export const WINDOW_HEADERS = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
 
 // Searches return what GitHub would: open items requested from you, and your own open PRs.
 // `settings` is written to settings.json before the desk reads it; `desk` adds options (a writer).

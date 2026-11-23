@@ -7,7 +7,7 @@ import path from "node:path";
 import { defaultConfigText, parseConfig } from "../src/config.ts";
 import { Desk, parseUntil } from "../src/desk.ts";
 import type { Card, Context, Item } from "../src/types.ts";
-import { idle, myPr, reviewAsk, setup, teamPing, UNSCORED } from "./helpers/desk.ts";
+import { teamPing, idle, myPr, QUIET, reviewAsk, setup, UNSCORED } from "./helpers/desk.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
@@ -948,7 +948,6 @@ const dependent = (n: number, o: Partial<Item> = {}) =>
     requires: [LIVE],
     ...o,
   });
-const QUIET = { "policy.judge": false, "notify.quiet": "" };
 const merge = (t: Awaited<ReturnType<typeof setup>>, id: string, h: number) => {
   t.setNow(new Date(NOW.getTime() + h * 3_600_000));
   const at = new Date(NOW.getTime() + h * 3_600_000).toISOString();

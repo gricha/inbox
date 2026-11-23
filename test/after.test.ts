@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { chains, loopThrough, type NodeState } from "../src/after.ts";
 import type { Card, Item, QueueView } from "../src/types.ts";
-import { reviewAsk, setup } from "./helpers/desk.ts";
+import { QUIET, reviewAsk, setup } from "./helpers/desk.ts";
 import { makeItem, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 
@@ -60,7 +60,6 @@ test("loopThrough names the prerequisite that would close a loop", () => {
 
 // --- the desk
 
-const QUIET = { "policy.judge": false, "notify.quiet": "" };
 const ids = (cs: Card[]) => cs.map((c) => c.id);
 const onInbox = (v: QueueView) => [...v.inbox.urgent, ...v.inbox.standard, ...v.inbox.fyi];
 const steps = (c: Card | undefined) => c?.waiting?.map((w) => [w.id, w.after]);

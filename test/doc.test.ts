@@ -18,6 +18,7 @@ import { setup } from "./helpers/desk.ts";
 import { sample, SOURCE } from "./helpers/doc.ts";
 import { makeItem } from "./helpers/items.ts";
 import { failure, run } from "./helpers/run.ts";
+import { request } from "./helpers/http.ts";
 
 const tmp = mkdtempSync(join(tmpdir(), "desk-doc-"));
 
@@ -188,7 +189,7 @@ async function deskWith() {
     generate: (it) => Effect.succeed({ ...ai, head_oid: it.head_oid, model: "claude-opus-5", at: "2026-11-10T12:00:00.000Z" }),
   };
   const app = createApp(t.desk, 47823);
-  const req = (p: string, init: RequestInit = {}) => app.request(`http://127.0.0.1:47823${p}`, init);
+  const req = request(app);
   return { ...t, app, req };
 }
 
@@ -240,7 +241,7 @@ test("inbox_doc submits a document from the agent's file and says where its page
   const t = await deskWith();
   c.after(t.cleanup);
   const [a, b] = InMemoryTransport.createLinkedPair();
-  await createMcpServer(createClient((p, init) => t.app.request(`http://127.0.0.1:47823${p}`, init))).connect(a);
+  await createMcpServer(createClient(request(t.app))).connect(a);
   const client = new Client({ name: "test", version: "0" });
   await client.connect(b);
   c.after(() => client.close());

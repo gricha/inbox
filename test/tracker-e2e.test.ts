@@ -10,12 +10,12 @@ import path from "node:path";
 import { createApp } from "../src/server.ts";
 import { AGREE, DISAGREE, type AutomationView, type Inquiry, type QueueView } from "../src/types.ts";
 import { TRACKER_TYPE } from "../scripts/fake-tracker/messages.ts";
-import { setup } from "./helpers/desk.ts";
+import { setup, WINDOW_HEADERS } from "./helpers/desk.ts";
 import { unixOnly } from "./helpers/platform.ts";
 import { until } from "./helpers/wait.ts";
 
 const ROOT = path.join(import.meta.dirname, "..");
-const WINDOW = { "sec-fetch-site": "same-origin", origin: "http://localhost:47823", "content-type": "application/json" };
+const WINDOW = { ...WINDOW_HEADERS, "content-type": "application/json" };
 
 const TRACKER = {
   name: "Tracker mentions",

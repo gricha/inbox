@@ -7,11 +7,10 @@ import { Effect } from "effect";
 import type { ReviewDeps } from "../src/desk.ts";
 import { createApp } from "../src/server.ts";
 import type { ReviewFile, ReviewView } from "../src/types.ts";
-import { setup } from "./helpers/desk.ts";
+import { setup, WINDOW_HEADERS } from "./helpers/desk.ts";
 import { makeItem } from "./helpers/items.ts";
 import { run } from "./helpers/run.ts";
 
-const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
 const ID = "acme/web#4";
 const file = (patch: string): ReviewFile => ({
   path: "src/plan.ts",
@@ -37,7 +36,7 @@ async function viewed(c: TestContext) {
   c.after(t.cleanup);
   await run(t.desk.sync());
   const app = createApp(t.desk, 47823);
-  const post = (body: unknown, headers: Record<string, string> = DESK) =>
+  const post = (body: unknown, headers: Record<string, string> = WINDOW_HEADERS) =>
     app.request(`http://127.0.0.1:47823/api/review/${encodeURIComponent(ID)}/viewed`, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },

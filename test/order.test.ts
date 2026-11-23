@@ -8,12 +8,10 @@ import { Desk } from "../src/desk.ts";
 import { arrange, rankAt, type Ranked } from "../src/order.ts";
 import { createApp } from "../src/server.ts";
 import type { InboxSection, Place } from "../src/types.ts";
-import { reviewAsk, setup, teamPing } from "./helpers/desk.ts";
+import { teamPing, QUIET, reviewAsk, setup, WINDOW_HEADERS } from "./helpers/desk.ts";
 import { hoursAgo, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { posix } from "./helpers/platform.ts";
-
-const QUIET = { "policy.judge": false, "review.auto_ai": false, "notify.quiet": "" };
 
 type Row = { id: string; key: number; place?: Place };
 const R: Ranked<Row> = { id: (r) => r.id, key: (r) => r.key, place: (r) => r.place };
@@ -186,7 +184,7 @@ test("POST /api/place takes a row and its neighbours; a bad section is refused i
   const post = (body: unknown) =>
     app.request("http://127.0.0.1:47823/api/place", {
       method: "POST",
-      headers: { "content-type": "application/json", origin: "http://localhost:47823", "sec-fetch-site": "same-origin" },
+      headers: { "content-type": "application/json", ...WINDOW_HEADERS },
       body: JSON.stringify(body),
     });
   const was = order(t, "urgent");

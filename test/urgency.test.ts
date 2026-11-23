@@ -9,14 +9,13 @@ import { createApp } from "../src/server.ts";
 import type { Card, InboxSection, Item } from "../src/types.ts";
 import { fallbackScore, sectionOf } from "../src/urgency.ts";
 import { fakeDecisions } from "./helpers/decisions.ts";
-import { idle, myPr, reviewAsk, setup, teamPing } from "./helpers/desk.ts";
+import { teamPing, idle, myPr, QUIET, reviewAsk, setup } from "./helpers/desk.ts";
 import { hoursAgo, makeItem } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { posix } from "./helpers/platform.ts";
 import { until } from "./helpers/wait.ts";
 
-const QUIET = { "policy.judge": false, "review.auto_ai": false, "notify.quiet": "" };
 const SVC = { name: "Service accounts", ask: "Is it about service accounts?", when: "!me.author", urgent: true };
 
 // A fake claude: answers a criteria question with ask.json, a score with score.json; each call's kind goes in calls.

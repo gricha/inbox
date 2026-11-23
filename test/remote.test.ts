@@ -14,13 +14,14 @@ import { unusedPort } from "./helpers/fake-api.ts";
 import { Effect } from "effect";
 import type { Item } from "../src/types.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
-import { myPr, reviewAsk } from "./helpers/desk.ts";
+import { myPr, reviewAsk, WINDOW_HEADERS } from "./helpers/desk.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
 import { unixOnly } from "./helpers/platform.ts";
 import { codeOf } from "../src/narrow.ts";
 import { run } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { until } from "./helpers/wait.ts";
+import { request } from "./helpers/http.ts";
 
 delete process.env.DESK_UI_ORIGIN;
 delete process.env.DESK_DEV;
@@ -55,7 +56,7 @@ async function setup(items?: Item[], writer?: GitHubWriter) {
     if (login) headers.set("tailscale-user-login", login);
     return Promise.resolve(far(new Request(`http://${NAME}${p}`, { ...rest, headers })));
   };
-  const local = (p: string, init: RequestInit = {}) => app.request(`http://127.0.0.1:47823${p}`, init);
+  const local = request(app);
   const json = { "content-type": "application/json" };
   const mint = async (): Promise<string> => ((await (await local("/api/pair/code", { method: "POST" })).json()) as { code: string }).code;
   const trade = (code: string, kind = "device", headers: Record<string, string> = {}) =>
@@ -158,7 +159,7 @@ test("a revoked device's token stops working at once, and only the desk's window
   );
   const id = view.devices[0]!.id;
   assert.equal((await t.local(`/api/devices/${id}`, { method: "DELETE" })).status, 403, "curl or an agent");
-  const desk = { "sec-fetch-site": "same-origin", origin: "http://localhost:47823" };
+  const desk = WINDOW_HEADERS;
   assert.equal((await t.local(`/api/devices/${id}`, { method: "DELETE", headers: desk })).status, 200);
   assert.equal((await t.viaTailnet("/api/queue", { headers: bearer(tok) })).status, 401);
   assert.ok(!JSON.stringify(t.desk.store.devices()).includes(tok), "never the token itself");

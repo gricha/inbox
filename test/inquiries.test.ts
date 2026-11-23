@@ -10,13 +10,13 @@ import { createMcpServer } from "../src/mcp.ts";
 import { createApp } from "../src/server.ts";
 import type { GitHubWriter } from "../src/github/write.ts";
 import type { Inquiry } from "../src/types.ts";
-import { myPr, reviewAsk, setup } from "./helpers/desk.ts";
+import { myPr, reviewAsk, setup, WINDOW_HEADERS } from "./helpers/desk.ts";
 import { NOW } from "./helpers/items.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { Effect } from "effect";
 import { run, runSync } from "./helpers/run.ts";
+import { request } from "./helpers/http.ts";
 
-const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
 const CONTEXT =
   "The queue labels each row PR or Issue in text; GitHub shows icons instead. Text needs no legend and reads at 13px. " +
   "Icons take less room, but a draft and an open PR look alike at that size. I'd keep the text: nothing else changes.";
@@ -78,7 +78,7 @@ test("an agent's question is a row on the main page and a notification until the
   );
   assert.deepEqual(t.notes, ["Keep the label as text, or icons?"]);
 
-  const answer = (body: unknown, headers: Record<string, string> = DESK) =>
+  const answer = (body: unknown, headers: Record<string, string> = WINDOW_HEADERS) =>
     req("POST", `/api/inquiries/${inquiry.id}/answer`, body, headers);
   assert.equal((await answer({ text: "Text" }, {})).status, 403, "an agent can't answer its own question");
   assert.equal((await answer({})).status, 400);
@@ -203,7 +203,7 @@ test("a dismissed question tells the agent so", async (c) => {
   await run(t.desk.sync());
   const req = http(t);
   const q = runSync(t.desk.inquire(full()));
-  assert.equal((await req("POST", `/api/inquiries/${q.id}/answer`, { dismiss: true }, DESK)).status, 200);
+  assert.equal((await req("POST", `/api/inquiries/${q.id}/answer`, { dismiss: true }, WINDOW_HEADERS)).status, 200);
   assert.deepEqual(runSync(t.desk.inquiry(q.id)).answer?.dismissed, true);
   assert.deepEqual(runSync(t.desk.queue()).inquiries, []);
   assert.equal((await req("GET", "/api/inquiries/nope")).status, 404);
@@ -218,7 +218,7 @@ test("an answer is owed to the agent that asked until it reads it: Claude's work
   const work = () => runSync(t.desk.inflight()).work.map((w) => [w.kind, w.key, w.state, w.title, w.from, w.item]);
   const q = runSync(t.desk.inquire(full({ from: "docs research", item: "api#1" })));
   assert.deepEqual(work(), [], "nothing is owed while it waits on you");
-  assert.equal((await req("POST", `/api/inquiries/${q.id}/answer`, { text: "Yes" }, DESK)).status, 200);
+  assert.equal((await req("POST", `/api/inquiries/${q.id}/answer`, { text: "Yes" }, WINDOW_HEADERS)).status, 200);
   const rev = t.desk.rev;
   assert.equal((await json<Inquiry>(req("GET", `/api/inquiries/${q.id}`))).answer?.read_at, null, "the window's look isn't a read");
   assert.deepEqual(work(), [["answer", q.id, "queued", "Ship it?", "docs research", "acme/api#1"]]);
@@ -251,10 +251,7 @@ test("the whole way round: an agent asks through MCP, you answer in the window, 
   const app = createApp(t.desk, 47823);
   const [server, client] = InMemoryTransport.createLinkedPair();
   // The desk's own tools over its own routes, as its /mcp serves them.
-  await createMcpServer(
-    createClient((p, init) => app.request(`http://127.0.0.1:47823${p}`, init)),
-    () => {},
-  ).connect(server);
+  await createMcpServer(createClient(request(app)), () => {}).connect(server);
   const agent = new Client({ name: "test", version: "0" });
   await agent.connect(client);
   c.after(() => agent.close());
@@ -263,7 +260,7 @@ test("the whole way round: an agent asks through MCP, you answer in the window, 
   const id = /^asked as inquiry (\w+)/.exec(await call("inbox_inquire", full({ from: "docs research" })))![1]!;
   assert.equal(await call("inbox_inquiry"), "no answers waiting to be picked up");
   assert.equal(await call("inbox_inquiry", { id }), 'no answer yet to "Ship it?"');
-  assert.equal((await http(t)("POST", `/api/inquiries/${id}/answer`, { text: "Yes" }, DESK)).status, 200);
+  assert.equal((await http(t)("POST", `/api/inquiries/${id}/answer`, { text: "Yes" }, WINDOW_HEADERS)).status, 200);
   assert.ok((await call("inbox_inquiry")).includes(`\n${id}  docs research asked "Ship it?"\n`), "who asked, the question, its id");
   assert.equal(runSync(t.desk.inquiry(id)).answer?.read_at, null, "finding it isn't picking it up");
   assert.equal(await call("inbox_inquiry", { id }), "the user answered: Yes");
@@ -330,7 +327,7 @@ test("a comment on the PR goes from the desk's window only, and takes it off the
   c.after(t.cleanup);
   await run(t.desk.sync());
   const req = http(t);
-  const post = (body: unknown, headers: Record<string, string> = DESK) =>
+  const post = (body: unknown, headers: Record<string, string> = WINDOW_HEADERS) =>
     req("POST", `/api/review/${encodeURIComponent("acme/api#1")}/comment`, body, headers);
   assert.equal((await post({ body: "Why the retry?" }, {})).status, 403);
   assert.equal((await post({})).status, 400);
