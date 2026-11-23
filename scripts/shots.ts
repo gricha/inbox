@@ -3483,6 +3483,28 @@ const SHOTS: Shot[] = [
         failures.push(`inflight: the first row's phrase has the tooltip ${JSON.stringify(note)}`);
     },
   },
+  // Back to desk leaves Merging at once, its button gone, before the desk (here never) answers.
+  {
+    name: "inflight-back-shows",
+    sizes: ["wide"],
+    go: async (page) => {
+      await page.route("**/api/act", stall);
+      await at("#/")(page);
+      await at("#/inflight")(page);
+      const row = page.locator(".lane .lane-row:not(.dim):not(.work-row)[data-id]").first();
+      const id = await row.getAttribute("data-id");
+      await row.locator(".row-main").click();
+      await page.getByRole("button", { name: "Back to desk" }).click();
+      await page.waitForTimeout(150);
+      if (await page.getByRole("button", { name: "Back to desk" }).count())
+        failures.push(`inflight-back-shows: ${id}'s review still offers Back to desk until the desk answers`);
+      await at("#/inflight")(page);
+      await page.waitForTimeout(150);
+      if (await page.locator(`.lane [data-id="${id}"]`).count())
+        failures.push(`inflight-back-shows: ${id} is still in Merging until the desk answers`);
+    },
+    after: drop,
+  },
   // A PR in a repo that needs no review, CI running: it can merge once CI passes, no review to wait on.
   {
     name: "inflight-no-review",

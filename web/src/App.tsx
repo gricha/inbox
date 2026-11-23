@@ -6,6 +6,7 @@ import type {
   Action,
   Card,
   GitHubAction,
+  InflightRow,
   InflightView,
   Inquiry,
   Note,
@@ -253,6 +254,8 @@ export function App() {
   const [ruleFocus, setRuleFocus] = useState<RuleFocus | null>(null); // a row's "See the rule that put it here"
   const [tick, setTick] = useState(0); // bumped when an undo's hold on the selection runs out
   const [lane, setLane] = useState<InflightView | null>(null);
+  // PRs you brought back from Merging: off it, and yours to hand off again, until Merging's read has them gone.
+  const backed = useShown<string, true>(lane, (id) => !lane?.rows.some((r) => r.card.id === id));
   const [laneSel, setLaneSel] = useState<string | null>(null);
   const [reviewFrom, setReviewFrom] = useState<ListPage>("queue"); // where Esc goes back to from a review
   const [reviewQuestion, setReviewQuestion] = useState<string | null>(null); // or the agent's question it was opened from
@@ -674,11 +677,12 @@ export function App() {
   const current = flat.find((c) => c.id === selected) ?? null;
   // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
   const questionOf = (id: string) => view?.inquiries.find((q) => q.id === id) ?? (pageQuestion?.id === id ? pageQuestion : undefined);
-  // Merging as the search leaves it.
+  // Merging as the search and Back to desk leave it.
   const laneShown = useMemo(() => {
     const q = filter.trim();
-    return lane && q ? { ...lane, rows: lane.rows.filter((r) => matches(r.card, q, me)) } : lane;
-  }, [lane, filter, me]);
+    const shown = (r: InflightRow) => !backed.shown.has(r.card.id) && (!q || matches(r.card, q, me));
+    return lane && (q || backed.shown.size) ? { ...lane, rows: lane.rows.filter(shown) } : lane;
+  }, [lane, filter, me, backed.shown]);
   const laneRows = useMemo(() => laneShown?.rows ?? [], [laneShown]);
   const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? null;
   // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
@@ -686,8 +690,12 @@ export function App() {
     const m = new Map<string, Card>();
     if (view) for (const c of [...Object.values(view.sections).flat(), ...view.hidden, ...view.cleared, ...view.resolved]) m.set(c.id, c);
     for (const r of lane?.rows ?? []) m.set(r.card.id, r.card);
+    for (const id of backed.shown.keys()) {
+      const c = m.get(id);
+      if (c) m.set(id, { ...c, inflight: false });
+    }
     return m;
-  }, [view, lane]);
+  }, [view, lane, backed.shown]);
   const knownRef = useRef(known);
   knownRef.current = known;
 
@@ -1364,6 +1372,7 @@ export function App() {
 
   // Hand off for merge: your own open PR goes to Merging (you're done; your agent gets it merged). Back to desk undoes it.
   function handOff(c: Card) {
+    backed.drop(c.id);
     const write = api.act(c.id, "inflight").pipe(
       Effect.map(() => {
         undoSeq.current = [];
@@ -1373,7 +1382,6 @@ export function App() {
     runUi(finish(c, `Handing off ${shortRef(c)}…`, { what: "Handed off for merge", where: "inflight" }, write));
   }
 
-  // Back to desk: your PR leaves Merging for your desk.
   // An issue's pre-review buttons: analyze it (anyway, after a flag), Make PR with fix (your agent's chat opens on it), and
   // the desk's blocklist. Each refetches the issue as it's drawn.
   function issueAct(c: Card, k: "analyze" | "trust" | "fix" | "block" | "unblock"): Effect.Effect<void> {
@@ -1398,21 +1406,26 @@ export function App() {
     );
   }
 
+  // Back to desk: your PR leaves Merging for your desk at once; a refusal puts it back.
   function back(c: Card): Effect.Effect<void> {
     return Effect.suspend(() => {
       if (!c.inflight) {
         flash(`${shortRef(c)} isn't in Merging`);
         return Effect.void;
       }
+      const before = actedRef.current[c.id] ?? null;
+      backed.show(c.id, true);
+      markActed(c.id, null);
       return api.act(c.id, "takeback").pipe(
         Effect.match({
           onSuccess: () => {
             undoSeq.current = [];
             undoWrite.current = null;
-            markActed(c.id, null);
             flash(`Back on your desk: ${shortRef(c)}`);
           },
           onFailure: (e) => {
+            backed.drop(c.id);
+            markActed(c.id, before);
             flash(e.message, true);
           },
         }),
