@@ -225,7 +225,6 @@
     "ai": null,
     "ai_stale": false,
     "generating": false,
-    "held": false,
     "activity": [
         {
             "at": "2026-11-16T14:39:10.100Z",

@@ -2669,7 +2669,6 @@
             }
         ]
     },
-    "reviewing": 0,
     "hidden": [
         {
             "team_ask": "asked @maintainers",

@@ -31,8 +31,8 @@ project with the change.
 
 `npm run check` neither builds nor tests this folder (Prettier skips `ios/` too): the commands above are its check. The
 tests (`InboxTests`) decode every response the app reads from saved copies of the mock desk's answers
-(`InboxTests/Fixtures`: each the mock's answer to the read it's named for, saved with `curl` and indented four spaces;
-`review-lean.json` is written by hand), hold the wording to the window's (`web/src/format.ts`, `notices.ts`), and run the client against
+(`InboxTests/Fixtures`: each the mock's answer to the read it's named for, saved by `node scripts/ios-fixtures.ts`;
+`review-lean.json` is written by hand; `web/test/ios-fixtures.test.ts` fails when the mock stops sending a key one has), hold the wording to the window's (`web/src/format.ts`, `notices.ts`), and run the client against
 the desk's exact refusals through a stubbed `URLProtocol`. They never touch the network.
 
 ## Run it in the Simulator
