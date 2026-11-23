@@ -2,9 +2,6 @@
 import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { personOf } from "../src/attribution.ts";
 import type { Item } from "../src/types.ts";
 import { teamPing, idle, QUIET, reviewAsk, setup } from "./helpers/desk.ts";
@@ -12,28 +9,21 @@ import { hoursAgo } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { posix } from "./helpers/platform.ts";
 import { until } from "./helpers/wait.ts";
+import { fakeAgent } from "./helpers/fake-agent.ts";
 
 // A claude that answers answer.json's items and keeps each call's prompt.
 function fakeClaude(c: TestContext) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-fake-attribution-"));
-  const bin = path.join(dir, "claude");
-  fs.writeFileSync(
-    bin,
-    `#!/bin/sh\nd="$(dirname "$0")"\nn=$(($(cat "$d/count" 2>/dev/null || echo 0) + 1)); echo $n > "$d/count"\ncat > "$d/stdin.$n"\nprintf '{"type":"result","is_error":false,"structured_output":%s}' "$(cat "$d/answer.json")"\n`,
+  const f = fakeAgent(
+    c,
+    "claude",
+    `n=$(($(cat "$d/count" 2>/dev/null || echo 0) + 1)); echo $n > "$d/count"\ncat > "$d/stdin.$n"\nprintf '{"type":"result","is_error":false,"structured_output":%s}' "$(cat "$d/answer.json")"`,
   );
-  fs.chmodSync(bin, 0o755);
-  const was = process.env.DESK_CLAUDE;
-  process.env.DESK_CLAUDE = bin;
-  c.after(() => {
-    process.env.DESK_CLAUDE = was;
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
   return {
     say: (items: { id: string; person: string }[]) => {
-      fs.writeFileSync(path.join(dir, "answer.json"), JSON.stringify({ items }));
+      f.write("answer.json", JSON.stringify({ items }));
     },
-    calls: () => (fs.existsSync(path.join(dir, "count")) ? Number(fs.readFileSync(path.join(dir, "count"), "utf8")) : 0),
-    stdin: (n: number) => fs.readFileSync(path.join(dir, `stdin.${n}`), "utf8"),
+    calls: () => Number(f.read("count") || 0),
+    stdin: (n: number) => f.read(`stdin.${n}`),
   };
 }
 
