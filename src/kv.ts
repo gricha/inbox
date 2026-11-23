@@ -277,6 +277,23 @@ export const AskSchema = schemaOf<Ask>()(
 );
 const InquiryOptionSchema = Schema.Struct({ answer: Schema.String, next: Schema.String });
 // Questions asked before options said what follows had plain options and no links.
+// A recommendation by what it does; one stored in a shape none of them has reads as absent, and its question with it.
+const recommended = <F extends Schema.Struct.Fields>(fields: F) =>
+  Schema.Struct({
+    automation: Schema.String,
+    held: Schema.String,
+    item: Schema.Struct({ text: Schema.String, fields: Schema.Unknown }),
+    error: Schema.String,
+    ...fields,
+  });
+const RecommendationSchema = schemaOf<Recommendation>()(
+  Schema.Union([
+    recommended({ do: Schema.Literal("fix"), fields: Schema.Record(Schema.String, Schema.Unknown) }),
+    recommended({ do: Schema.Literal("type"), type: Schema.String, was: opt(Schema.String) }),
+    recommended({ do: Schema.Literal("prompt"), prompt: Schema.String, was: Schema.String }),
+    recommended({ do: Schema.Literal("drop") }),
+  ]),
+);
 export const KeptInquirySchema = Schema.Struct({
   id: Schema.String,
   at: Schema.String,
@@ -289,21 +306,7 @@ export const KeptInquirySchema = Schema.Struct({
   answer: Schema.NullOr(
     Schema.Struct({ text: Schema.String, at: Schema.String, dismissed: Schema.Boolean, read_at: opt(Schema.NullOr(Schema.String)) }),
   ),
-  fix: opt(
-    schemaOf<Recommendation>()(
-      Schema.Struct({
-        automation: Schema.String,
-        held: Schema.String,
-        do: Schema.Literals(["fix", "type", "prompt", "drop"]),
-        fields: opt(Schema.Record(Schema.String, Schema.Unknown)),
-        type: opt(Schema.String),
-        prompt: opt(Schema.String),
-        was: opt(Schema.String),
-        item: Schema.Struct({ text: Schema.String, fields: Schema.Unknown }),
-        error: Schema.String,
-      }),
-    ),
-  ),
+  fix: opt(RecommendationSchema),
   place: opt(PlaceSchema),
 });
 

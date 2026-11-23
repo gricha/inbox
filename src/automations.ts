@@ -37,7 +37,10 @@ import {
   AGREE,
   DISAGREE,
   EVENT,
+  FIX_DOES,
   ITEM_DOES,
+  OUTCOMES,
+  TRIGGERS,
   VERB,
   VERBS,
   type ActivityEvent,
@@ -117,7 +120,7 @@ const AutomationRunSchema = schemaOf<AutomationRun>()(
   Schema.Struct({
     id: Schema.String,
     automation: Schema.String,
-    trigger: Schema.Literals(["schedule", "now", "event"]),
+    trigger: Schema.Literals(TRIGGERS),
     at: Schema.String,
     done_at: Schema.NullOr(Schema.String),
     error: Schema.NullOr(Schema.String),
@@ -128,7 +131,7 @@ const AutomationRunSchema = schemaOf<AutomationRun>()(
         why: Schema.String,
         do: opt(Schema.Literals(VERBS)),
         until: opt(Schema.String),
-        outcome: Schema.Literals(["added", "did", "kept", "left", "resolved", "held", "refused", "failed", "dropped", "unfit"]),
+        outcome: Schema.Literals(OUTCOMES),
         error: opt(Schema.String),
         rule: opt(Schema.String),
       }),
@@ -1444,21 +1447,16 @@ export class Automations {
       });
       const bad = (message: string) =>
         new ClaudeBadOutput({ message: `its recommendation for a held note ${message}`, excerpt: JSON.stringify(answer).slice(0, 500) });
-      const does = (["fix", "type", "prompt", "drop"] as const).find((d) => d === field(answer, "do"));
+      const does = FIX_DOES.find((d) => d === field(answer, "do"));
       const says = str(field(answer, "says"))?.replaceAll(/\s+/g, " ").trim().slice(0, 300);
       const why = str(field(answer, "why"))?.trim().slice(0, 6_000) ?? "";
       if (!does || !says) return yield* bad("has no do or says");
-      const fix: Recommendation = {
-        automation: a.id,
-        held: h.id,
-        do: does,
-        item: { text: h.note.text, fields: h.note.fields },
-        error: h.error,
-      };
+      const base = { automation: a.id, held: h.id, item: { text: h.note.text, fields: h.note.fields }, error: h.error };
+      let fix: Recommendation = { ...base, do: "drop" };
       if (does === "fix") {
         const fitted = fit(t, field(answer, "fields"));
         if (Result.isFailure(fitted)) return yield* bad(`doesn't fit ${t.name} either: ${fitted.failure}`);
-        fix.fields = fitted.success;
+        fix = { ...base, do: "fix", fields: fitted.success };
       }
       if (does === "type") {
         const type = str(field(answer, "type"))?.trim() ?? "";
@@ -1466,12 +1464,13 @@ export class Automations {
         if (Result.isFailure(next)) return yield* bad(`isn't a type the desk reads: ${next.failure}`);
         const fitted = fit(next.success, h.note.fields);
         if (Result.isFailure(fitted)) return yield* bad(`is a type the note doesn't fit either: ${fitted.failure}`);
-        Object.assign(fix, { type, was: a.type });
+        fix = { ...base, do: "type", type, ...(a.type && { was: a.type }) };
       }
       if (does === "prompt") {
         const instruction = str(field(answer, "prompt"))?.trim() ?? "";
-        if (!instruction || instruction.length > 8_000) return yield* bad("has no instruction, or one over 8000 characters");
-        Object.assign(fix, { prompt: instruction, was: a.prompt });
+        if (!instruction || instruction.length > LIMITS.prompt)
+          return yield* bad(`has no instruction, or one over ${LIMITS.prompt} characters`);
+        fix = { ...base, do: "prompt", prompt: instruction, was: a.prompt };
       }
       // Released, dropped or deleted while it was asked: nothing left to recommend about.
       if (!this.heldOf(a.id).some((x) => x.id === h.id)) return null;
@@ -1757,7 +1756,7 @@ function recommendSchema(t: ItemType): object {
     type: "object",
     required: ["do", "says", "why"],
     properties: {
-      do: { type: "string", enum: ["fix", "type", "prompt", "drop"] },
+      do: { type: "string", enum: FIX_DOES },
       says: { type: "string", description: 'One line, as you\'d ask me: "I think … : do you agree?"' },
       why: { type: "string", description: "A few plain sentences: what doesn't fit, and why your pick fixes it" },
       fields: { ...t.json, description: `With fix: the item's fields as they should be, a ${t.name}` },

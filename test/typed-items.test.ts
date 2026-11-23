@@ -441,7 +441,7 @@ test("Agree on a fixed note puts it through the rules, which may drop it", async
     why: "The run misread it.",
     fields: { kind: "statement", sender: "Blue Bottle" },
   });
-  assert.deepEqual(q.fix.fields, { kind: "statement", sender: "Blue Bottle" });
+  assert.deepEqual(q.fix, { ...q.fix, do: "fix", fields: { kind: "statement", sender: "Blue Bottle" } });
   await runFx(t.desk.answerInquiry(q.id, AGREE));
   assert.deepEqual(t.desk.notes(), [], "the statements rule dropped it");
   assert.deepEqual(t.desk.automations.heldOf("mail"), []);
@@ -694,4 +694,30 @@ test("an automation's page lists what it held, each with its error and its open 
   assert.equal((await page())[0]?.rec, t.desk.inquiries()[0]!.id);
   await runFx(t.desk.answerInquiry(t.desk.inquiries()[0]!.id, DISAGREE));
   assert.deepEqual(await page(), []);
+});
+
+test("a stored recommendation in no shape its do has reads as absent, its question with it", async (c) => {
+  const t = await setup([]);
+  c.after(t.cleanup);
+  const q = (id: string, fix: object) => ({
+    id,
+    at: "2026-11-20T09:00:00Z",
+    from: "Claude",
+    question: "Fix it?",
+    context: "",
+    options: [AGREE, DISAGREE],
+    item_id: null,
+    answer: null,
+    fix: { automation: "mail", held: "h1", item: { text: "x", fields: {} }, error: "e", ...fix },
+  });
+  t.desk.store.set("inquiries", [
+    q("good", { do: "type", type: "type T = { a: string }" }),
+    q("fix-without-fields", { do: "fix" }),
+    q("prompt-without-was", { do: "prompt", prompt: "Read it." }),
+    q("type-with-a-number", { do: "type", type: 3 }),
+  ]);
+  assert.deepEqual(
+    t.desk.inquiries().map((x) => x.id),
+    ["good"],
+  );
 });

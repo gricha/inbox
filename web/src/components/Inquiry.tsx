@@ -126,9 +126,9 @@ function FixParts({ fix }: { fix: Recommendation }) {
     fix.do === "fix"
       ? { head: "Its fields would be", text: JSON.stringify(fix.fields, null, 2) }
       : fix.do === "type"
-        ? { head: "The type would be", text: fix.type ?? "" }
+        ? { head: "The type would be", text: fix.type, was: fix.was }
         : fix.do === "prompt"
-          ? { head: "The instruction would be", text: fix.prompt ?? "" }
+          ? { head: "The instruction would be", text: fix.prompt, was: fix.was }
           : null;
   return (
     <section className="inq-fix" aria-label="What it would change">
@@ -138,10 +138,10 @@ function FixParts({ fix }: { fix: Recommendation }) {
           <pre className="inq-code">{change.text}</pre>
         </>
       )}
-      {fix.was !== undefined && (
+      {change?.was !== undefined && (
         <details className="inq-was">
           <summary>What it replaces</summary>
-          <pre className="inq-code">{fix.was}</pre>
+          <pre className="inq-code">{change.was}</pre>
         </details>
       )}
       <h2 className="d-head">The held note</h2>

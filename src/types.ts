@@ -1420,17 +1420,20 @@ export interface Inquiry {
 // What Claude recommends for a note an automation held because its fields don't fit its type: the desk's to apply.
 export const AGREE = "Agree";
 export const DISAGREE = "Disagree";
-export interface Recommendation {
+// Fix the note's fields, widen the type, change the instruction, or drop the note.
+export const FIX_DOES = ["fix", "type", "prompt", "drop"] as const;
+interface RecommendationBase {
   automation: string; // its id
   held: string; // the held note's id
-  do: "fix" | "type" | "prompt" | "drop"; // fix the note's fields, widen the type, change the instruction, or drop the note
-  fields?: Record<string, unknown>; // fix's: the note's fields as they'd be, fitting the type
-  type?: string; // type's: the whole new type
-  prompt?: string; // prompt's: the whole new instruction
-  was?: string; // type's and prompt's: what it replaces
   item: { text: string; fields: unknown }; // the held note, as its run gave it: untrusted
   error: string; // how its fields don't fit
 }
+type Recommended<T> = { [K in keyof (RecommendationBase & T)]: (RecommendationBase & T)[K] };
+export type Recommendation =
+  | Recommended<{ do: "fix"; fields: Record<string, unknown> }> // the note's fields as they'd be, fitting the type
+  | Recommended<{ do: "type"; type: string; was?: string }> // the whole new type, and the one it replaces
+  | Recommended<{ do: "prompt"; prompt: string; was: string }> // the whole new instruction, and the one it replaces
+  | Recommended<{ do: "drop" }>;
 
 // A note icon naming a Simple Icons brand ("brand:gmail"); any other is a Lucide icon's name ("receipt").
 export const BRAND = "brand:";
@@ -1680,10 +1683,11 @@ export interface RuleAction {
   why: string;
 }
 
+export const TRIGGERS = ["schedule", "now", "event"] as const;
 export interface AutomationRun {
   id: string;
   automation: string;
-  trigger: "schedule" | "now" | "event";
+  trigger: (typeof TRIGGERS)[number];
   at: string;
   done_at: string | null; // null while it runs
   error: string | null;
@@ -1704,10 +1708,11 @@ export interface AutomationItem {
   // (error says which); refused: the automation may not do that (its `can`); failed: the desk couldn't (error says why)
   // dropped: a rule on its notes dropped it (rule says which); unfit: a note whose fields don't fit its type, held off your
   // desk for Claude's recommendation (error says how)
-  outcome: "added" | "did" | "kept" | "left" | "resolved" | "held" | "refused" | "failed" | "dropped" | "unfit";
+  outcome: (typeof OUTCOMES)[number];
   error?: string;
   rule?: string; // dropped's: the rule's when, or its ask
 }
+export const OUTCOMES = ["added", "did", "kept", "left", "resolved", "held", "refused", "failed", "dropped", "unfit"] as const;
 
 // A criterion (Settings → Automations → Urgency): a yes-or-no about an item that orders the Inbox and never acts on it. `when` is free (the
 // rules' language); `ask` is a question a model answers, only of the items whose `when` passes. A yes from an `urgent` one
