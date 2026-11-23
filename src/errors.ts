@@ -268,6 +268,9 @@ export type CommandError = CommandNotFound | CommandTimeout | CommandOutputTooLa
 // message is what Settings → Network → Tailscale says.
 export class TailscaleError extends Data.TaggedError("TailscaleError")<{ readonly message: string; readonly cause?: unknown }> {}
 
+// The MCP SDK couldn't take a request at /mcp (its transport refused it): no status of its own, so a logged 500.
+export class McpTransportFailed extends Data.TaggedError("McpTransportFailed")<{ readonly message: string; readonly cause: unknown }> {}
+
 // ---------------------------------------------------------------- Claude Code
 
 // The whole message: retryAgents, paused() and the judge find it by suffix in the stored error texts.

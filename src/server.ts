@@ -25,6 +25,7 @@ import {
   fsError,
   isDeskHttpError,
   ListenFailed,
+  McpTransportFailed,
   NotFound,
   Unauthorized,
   Unavailable,
@@ -48,7 +49,7 @@ import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
 import { CHUNK_FIELDS, FIELDS } from "./signals.ts";
 import { typeCheck } from "./automations.ts";
-import { field as fieldOf, int as intOf, isRecord, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
+import { field as fieldOf, int as intOf, isRecord, messageOf, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
 import { ACTIONS, GITHUB_ACTIONS, INBOX_SECTIONS, type AskLines, type InlineAt, type NoteButton, type RemoteView } from "./types.ts";
 
 const VERSION = stringOf(fieldOf(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")), "version")) ?? "";
@@ -1266,9 +1267,12 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.post("/mcp", (c) => {
     const api = createClient((p, init) => app.request(p, init));
     const transport = new WebStandardStreamableHTTPServerTransport();
-    const handled = Effect.promise(async () => {
-      await createMcpServer(api, log).connect(transport);
-      return transport.handleRequest(c.req.raw);
+    const handled = Effect.tryPromise({
+      try: async () => {
+        await createMcpServer(api, log).connect(transport);
+        return transport.handleRequest(c.req.raw);
+      },
+      catch: (cause) => new McpTransportFailed({ message: messageOf(cause), cause }),
     });
     return respond(c, handled, { log });
   });
