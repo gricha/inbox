@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Inbox: one list of what needs you on GitHub</title>
+    <meta
+      name="description"
+      content="A desktop app for code review. Your rules and your own agent sort everything else away, so you see only what to act on."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#eeecf3" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0b0911" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="../assets/brand/tile.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./site.css" />
+  </head>
+  <body>
+    <header class="top">
+      <a class="brand" href="/"><img src="../assets/brand/tile.svg" alt="" width="24" height="24" />Inbox</a>
+      <nav>
+        <a href="https://github.com/gricha/inbox">GitHub</a>
+        <a href="#install">Install</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>One list of what needs you on GitHub.</h1>
+        <p class="lead">
+          Inbox is a desktop app for code review. Your rules and your own agent sort everything else away, so you see only what to act on,
+          one line each, in order. Below is the real app with made-up pull requests. Click anything.
+        </p>
+      </section>
+
+      <section class="demo" aria-label="Try Inbox">
+        <a class="skip" href="#install">Skip the demo</a>
+        <div class="hints">
+          <span class="try">Try:</span>
+          <button type="button" data-go="#/review/acme%2Fapi%234127">Review Priya's planner PR</button>
+          <button type="button" data-go="#/review/acme%2Fworker%23875">Hand off your approved PR</button>
+          <button type="button" data-go="#/">Snooze or drag a row</button>
+          <button type="button" data-go="#/review/me%2Fnotes-app%2312">Ask your agent about a thread</button>
+          <button type="button" class="reset" data-reset>Start over</button>
+        </div>
+        <div class="frame">
+          <iframe id="demo" src="/demo/" title="Inbox demo: the real app with made-up pull requests" loading="lazy"></iframe>
+        </div>
+        <p class="phone">
+          <a class="button" href="/demo/">Open the demo</a>
+          <span>The real app with made-up pull requests. Nothing reaches GitHub.</span>
+        </p>
+      </section>
+
+      <section class="install" id="install">
+        <h2>Install</h2>
+        <p>One command on macOS and Linux. It installs the app, signs you in with the GitHub CLI, and sets your agent up if one runs it.</p>
+        <div class="cmd">
+          <code id="cmd">curl -fsSL https://useinbox.dev/install | bash</code>
+          <button type="button" class="button" data-copy>Copy</button>
+        </div>
+        <p class="note">
+          Runs <a href="https://github.com/gricha/inbox/blob/main/install.sh">install.sh</a> from the repository. Run it again to update. On
+          Windows, download it from <a href="https://github.com/gricha/inbox/releases/latest">Releases</a>.
+        </p>
+      </section>
+
+      <section class="facts">
+        <div>
+          <h3>Writes only on your click</h3>
+          <p>Inbox writes to GitHub only when you press a button that says so, and logs each write.</p>
+        </div>
+        <div>
+          <h3>Your agent, your login</h3>
+          <p>Every AI review and every question runs on your own Claude Code, Codex or OpenCode.</p>
+        </div>
+        <div>
+          <h3>Hands off what it can</h3>
+          <p>Give it your approved PR and your agent fixes CI, answers comments and merges, handing it back only when it can't.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>Inbox · free and open source, MIT · <a href="https://github.com/gricha/inbox">GitHub</a></footer>
+    <script type="module" src="./site.ts"></script>
+  </body>
+</html>

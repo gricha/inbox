@@ -22,5 +22,5 @@
     "useUnknownInCatchVariables": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["src/**/*", "mock/**/*", "test/**/*", "vite.config.ts"]
+  "include": ["src/**/*", "mock/**/*", "test/**/*", "vite.config.ts", "../site/**/*.ts"]
 }

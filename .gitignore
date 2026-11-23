@@ -6,3 +6,4 @@ release/
 .shots/
 .claude/worktrees/
 lib/
+site/dist/

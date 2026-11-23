@@ -44,7 +44,7 @@
       }
     ]
   },
-  "ignorePatterns": ["node_modules", "web/dist", "release", "research", "integrations", ".claude/workflows"],
+  "ignorePatterns": ["node_modules", "web/dist", "site/dist", "release", "research", "integrations", ".claude/workflows"],
   "overrides": [
     {
       "files": ["test/**", "web/test/**", "scripts/smoke-*.ts", "scripts/shots.ts"],

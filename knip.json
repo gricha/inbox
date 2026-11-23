@@ -4,11 +4,12 @@
     "electron/preload.cjs",
     "electron/desk-host.ts",
     "web/mock/server.ts",
+    "site/demo/node/*.ts",
     "scripts/*.ts",
     "scripts/*/*.ts",
     "test/**/*.test.ts",
     "web/test/*.test.ts"
   ],
-  "project": ["src/**/*.ts", "electron/**/*.{ts,cjs}", "web/**/*.{ts,tsx}", "scripts/**/*.ts", "test/**/*.ts"],
+  "project": ["src/**/*.ts", "electron/**/*.{ts,cjs}", "web/**/*.{ts,tsx}", "site/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
   "ignoreBinaries": ["plutil", "pkill", "xattr"]
 }

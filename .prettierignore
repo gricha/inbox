@@ -1,5 +1,6 @@
 node_modules
 web/dist
+site/dist
 release
 research
 package-lock.json
