@@ -259,6 +259,29 @@ test("inbox_item shows the trace and the hand-off prompt inside the fence", asyn
   assert.match(amb.text, /candidates: getsentry\/sentry#1, other\/sentry#1/);
 });
 
+test("inbox_act with after or before places the item in that section's order, as a drag does", async () => {
+  const r = await call("inbox_act", { ref: "seer#8949", action: "standard", after: "sentry#1" });
+  assert.equal(r.isError, false);
+  assert.deepEqual(lastCall(), { method: "POST", path: "/api/place", body: { id: "seer#8949", section: "standard", after: "sentry#1" } });
+  assert.match(r.text, /^seer#8949 placed in standard after sentry#1, until its next activity\. Local state only/);
+  assert.equal(jsonBlock(r.text).undo_seq, 8);
+  const bad = await call("inbox_act", { ref: "seer#8949", action: "done", before: "sentry#1" });
+  assert.equal(bad.isError, true);
+  assert.match(bad.text, /after and before go with urgent, standard or fyi/);
+});
+
+test("inbox_list board inbox: each section in the order the user sees, by the ids inbox_act places by", async () => {
+  const r = await call("inbox_list", { board: "inbox" });
+  assert.equal(r.isError, false);
+  const rows = jsonBlock(r.text) as { section: string; id: string }[];
+  assert.deepEqual(
+    rows.map((x) => x.section),
+    ["urgent", "standard", "fyi", "fyi"],
+  );
+  assert.equal(rows[0]!.id, "getsentry/seer#8949");
+  assert.match(r.text, /<untrusted-data/);
+});
+
 test("inbox_act posts local triage", async () => {
   const r = await call("inbox_act", { ref: "seer#8949", action: "snooze", until: "3h" });
   assert.equal(r.isError, false);

@@ -2,6 +2,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { Effect, Result, Schema } from "effect";
 import { decode, num, oneOf, schemaOf, str } from "./narrow.ts";
+import { PlaceSchema } from "./kv.ts";
 import type { Usage } from "./usage.ts";
 import {
   ACTIVITY_KINDS,
@@ -55,6 +56,7 @@ export const emptyState = (id: string): StateRow => ({
   seen_at: null,
   inflight_at: null,
   section: null,
+  place: null,
 });
 
 // Undo entries logged before in-flight, snoozing until something happens, or sections existed don't carry them.
@@ -71,6 +73,7 @@ const StateRowSchema = schemaOf<StateRow>()(
     seen_at: Schema.NullOr(Schema.String),
     inflight_at: since,
     section: Schema.NullOr(Schema.Literals(INBOX_SECTIONS)).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
+    place: Schema.NullOr(PlaceSchema).pipe(Schema.withDecodingDefaultKey(Effect.succeed(null))),
     snoozed_at: Schema.NullOr(Schema.String),
     acked_at: Schema.NullOr(Schema.String),
   }),
@@ -139,6 +142,7 @@ export class Store {
     if (!cols.has("inflight_at")) this.db.exec("ALTER TABLE state ADD COLUMN inflight_at TEXT");
     if (!cols.has("snooze_when")) this.db.exec("ALTER TABLE state ADD COLUMN snooze_when TEXT");
     if (!cols.has("section")) this.db.exec("ALTER TABLE state ADD COLUMN section TEXT");
+    if (!cols.has("place")) this.db.exec("ALTER TABLE state ADD COLUMN place TEXT");
     if (!columns("hits").includes("kept")) this.db.exec("ALTER TABLE hits ADD COLUMN kept INTEGER NOT NULL DEFAULT 0");
     // kept() runs once per board a recompute places: this reads only the few kept rows.
     this.db.exec("CREATE INDEX IF NOT EXISTS hits_kept ON hits (item_id) WHERE kept = 1");
@@ -337,10 +341,11 @@ export class Store {
   putState(s: StateRow): void {
     this.db
       .prepare(
-        `INSERT INTO state (id, done_at, snooze_until, snooze_on_activity, snoozed_at, acked_at, muted, pinned, seen_at, inflight_at, snooze_when, section) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO state (id, done_at, snooze_until, snooze_on_activity, snoozed_at, acked_at, muted, pinned, seen_at, inflight_at, snooze_when, section, place) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET done_at = excluded.done_at, snooze_until = excluded.snooze_until, snooze_on_activity = excluded.snooze_on_activity,
            snoozed_at = excluded.snoozed_at, acked_at = excluded.acked_at, muted = excluded.muted, pinned = excluded.pinned, seen_at = excluded.seen_at,
-           inflight_at = excluded.inflight_at, snooze_when = excluded.snooze_when, section = excluded.section`,
+           inflight_at = excluded.inflight_at, snooze_when = excluded.snooze_when, section = excluded.section,
+           place = excluded.place`,
       )
       .run(
         s.id,
@@ -355,6 +360,7 @@ export class Store {
         s.inflight_at ?? null, // undo entries logged before in-flight existed don't carry it
         s.snooze_when ?? null, // nor, from before snoozing until something happens, this
         s.section ?? null, // nor, from before moving between sections, this
+        s.place ? JSON.stringify(s.place) : null, // nor, from before dragging, this
       );
   }
 
@@ -655,5 +661,6 @@ function rowToState(r: Record<string, unknown>): StateRow {
     seen_at: textOrNull(r.seen_at),
     inflight_at: textOrNull(r.inflight_at),
     section: r.section === null ? null : lit(INBOX_SECTIONS, r.section),
+    place: r.place === null || r.place === undefined ? null : (json(PlaceSchema, r.place) ?? null),
   };
 }

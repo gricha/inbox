@@ -5,7 +5,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { chromium, type Browser, type Page, type Request as Sent, type Route } from "playwright-core";
+import { chromium, type Browser, type Locator, type Page, type Request as Sent, type Route } from "playwright-core";
 import { siGmail } from "simple-icons";
 import { field, isRecord, str, strings } from "../src/narrow.ts";
 import { GITHUB_CRITERIA } from "../src/connectors/github-criteria.ts";
@@ -138,6 +138,7 @@ interface Shot {
   after?: (page: Page) => Promise<void>; // puts back what `go` changed in the mock
   writes?: true; // changes the desk's settings or state: only against the mock, never a real desk at --url
   sizes?: string[]; // only at these of SIZES; without it, at every size but the ones a shot must ask for
+  held?: true; // shot with the pointer where `go` left it: a drag in progress
 }
 // Your agent with nothing to do, and how it runs by default: for a shot that answers /api/asks itself.
 const IDLE_AGENT = { on: true, id: null, url: null, error: null, status: null, queued: [], activity: [], saying: "" };
@@ -182,6 +183,22 @@ const rowMenuPick = async (page: Page, row: string, item: string) => {
 // Where each selector's first match starts down the page, or -1 when there's none: read at once, never waited for.
 const tops = (page: Page, sels: string[]) =>
   page.evaluate<number[]>(`${JSON.stringify(sels)}.map((s) => document.querySelector(s)?.getBoundingClientRect().top ?? -1)`);
+// The mock's Inbox, as the drag shots read it: Urgent's first two PRs, its last, and Standard's first.
+const SECOND_URGENT = "oss/tinyhttp#212";
+const LAST_URGENT = "acme/ml-pipeline#299";
+const FIRST_STANDARD = "acme/web#2301";
+// A native drag from `from` to the top half of `to` (the gap above it), in steps as a hand moves; let go unless `hold`.
+async function dragTo(page: Page, from: Locator, to: Locator, drop = true): Promise<void> {
+  const a = (await from.boundingBox())!;
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2 + 6, a.y + a.height / 2 - 6, { steps: 3 });
+  await to.scrollIntoViewIfNeeded();
+  const b = (await to.boundingBox())!;
+  await page.mouse.move(b.x + 120, b.y + 5, { steps: 10 });
+  await page.waitForTimeout(120);
+  if (drop) await page.mouse.up();
+}
 // A review's Conversation tab: what reviewers said and your comment's box are under it.
 const talk = (page: Page) => page.locator(".rv-views .head-tab", { hasText: "Conversation" }).click();
 const inOrder = (ys: number[]) => ys.every((y, i) => y >= 0 && (i === 0 || y > ys[i - 1]!));
@@ -867,6 +884,95 @@ const SHOTS: Shot[] = [
         failures.push(`queue: an agent's question's row reads ${JSON.stringify(list.first)}`);
       if (list.back !== "Handed back") failures.push(`queue: the handed-back PR's stage reads ${JSON.stringify(list.back)}`);
       if (list.fold) failures.push('queue: a section folds behind a "more" line');
+    },
+  },
+  // Your order: a row drags by the handle that shows under the pointer, or anywhere on it; mid-drag a line in the accent says
+  // where it lands and the row on its way fades where it was. Held here over the top half of Urgent's second PR.
+  {
+    name: "queue-drag",
+    sizes: ["wide", "mac", "min"],
+    held: true,
+    go: async (page) => {
+      await at("#/")(page);
+      const from = page.locator(`.g-urgent .line[data-id="${LAST_URGENT}"]`);
+      await from.scrollIntoViewIfNeeded();
+      await from.hover();
+      const grip = from.locator(".line-grip");
+      if (!(await grip.isVisible())) failures.push("queue-drag: no handle on the row under the pointer");
+      await dragTo(page, grip, page.locator(`.g-urgent .line[data-id="${SECOND_URGENT}"]`), false);
+      const seen = await page.evaluate<{ line: number | null; row: number; faded: boolean }>(`(() => {
+        const line = document.querySelector(".queue .drop-line")?.getBoundingClientRect();
+        return {
+          line: line ? Math.round(line.top + line.height / 2) : null,
+          row: Math.round(document.querySelector('.g-urgent .line[data-id="${SECOND_URGENT}"]').getBoundingClientRect().top),
+          faded: document.querySelector('.line[data-id="${LAST_URGENT}"]').hasAttribute("data-dragging"),
+        };
+      })()`);
+      if (seen.line === null) failures.push("queue-drag: no line where the row will land");
+      else if (Math.abs(seen.line - seen.row) > 2) failures.push(`queue-drag: the line is at ${seen.line}, not on the gap at ${seen.row}`);
+      if (!seen.faded) failures.push("queue-drag: the row on its way isn't faded");
+    },
+    // Let go over the sidebar: no drop, nothing written.
+    after: async (page) => {
+      await page.mouse.move(20, 300, { steps: 4 });
+      await page.mouse.up();
+      await fresh(page);
+    },
+  },
+  // A drop shows at once, before the desk (here never) answers: the row where you let it go, the line gone.
+  {
+    name: "queue-drop-shows",
+    sizes: ["wide"],
+    go: async (page) => {
+      await page.route("**/api/place", stall);
+      await at("#/")(page);
+      const from = page.locator(`.g-urgent .line[data-id="${LAST_URGENT}"]`);
+      await from.scrollIntoViewIfNeeded();
+      await dragTo(page, from.locator(".line-title"), page.locator(`.g-urgent .line[data-id="${SECOND_URGENT}"]`));
+      await page.waitForTimeout(200);
+      const seen = await page.evaluate<{ order: string[]; line: boolean }>(`({
+        order: [...document.querySelectorAll(".g-urgent .lines > .line[data-lane=card]")].map((e) => e.dataset.id),
+        line: !!document.querySelector(".queue .drop-line, .line[data-dragging]"),
+      })`);
+      if (unanswered.length !== 1) failures.push(`queue-drop-shows: ${unanswered.length} places sent, not one (the whole row drags)`);
+      if (seen.order[1] !== LAST_URGENT)
+        failures.push(`queue-drop-shows: Urgent reads ${seen.order.slice(0, 3).join(", ")} before the desk answers`);
+      if (seen.line) failures.push("queue-drop-shows: the drag's line or faded row stays after the drop");
+    },
+    after: drop,
+  },
+  // Dropped into another section, the desk answers and the page reads it back: there after a reload, "Moved to Urgent" with
+  // Undo. Then Move up in a row's menu does what a drag would.
+  {
+    name: "queue-dropped",
+    sizes: ["wide"],
+    writes: true,
+    go: async (page) => {
+      await at("#/")(page);
+      const from = page.locator(`.g-standard .line[data-id="${FIRST_STANDARD}"]`);
+      await from.scrollIntoViewIfNeeded();
+      await dragTo(page, from.locator(".line-title"), page.locator(`.g-urgent .line[data-id="${SECOND_URGENT}"]`));
+      await page
+        .locator(".toast", { hasText: "Moved to Urgent" })
+        .waitFor({ timeout: 3000 })
+        .catch(() => {});
+      if (!(await page.locator(".toast", { hasText: "Moved to Urgent" }).count()))
+        failures.push("queue-dropped: no toast says where it went");
+      await page.reload();
+      await page.locator(READY).first().waitFor({ timeout: 15_000 });
+      const urgent = () =>
+        page.evaluate<string[]>(`[...document.querySelectorAll(".g-urgent .lines > .line[data-lane=card]")].map((e) => e.dataset.id)`);
+      const after = await urgent();
+      if (after[1] !== FIRST_STANDARD) failures.push(`queue-dropped: after a reload Urgent reads ${after.slice(0, 3).join(", ")}`);
+      await rowMenuPick(page, `.g-urgent .line[data-id="${SECOND_URGENT}"]`, "Move up");
+      await page.waitForTimeout(150);
+      const moved = await urgent();
+      if (moved[1] !== SECOND_URGENT || moved[2] !== FIRST_STANDARD)
+        failures.push(`queue-dropped: Move up left Urgent reading ${moved.slice(0, 3).join(", ")}`);
+    },
+    after: async (page) => {
+      for (let i = 0; i < 2; i++) await page.evaluate(`fetch("/api/undo", { method: "POST", body: "{}" })`);
+      await fresh(page);
     },
   },
   {
@@ -6356,7 +6462,8 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
-    // Right-click an agent's question: what its page offers, Answer, Copy link and Dismiss. Then each: Copy link copies its
+    // Right-click an agent's question: what its page offers, Answer, Copy link and Dismiss, and Move down (the first has
+    // none above it to move up past). Then each: Copy link copies its
     // inbox:// link (the clipboard stubbed); Dismiss takes its row off the list at once (held, so the mock keeps the
     // question for the next size); Answer opens its page.
     name: "row-menu-question",
@@ -6367,7 +6474,7 @@ const SHOTS: Shot[] = [
       const items = await page.evaluate<string[][]>(
         `[...document.querySelectorAll(".ctx > .ctx-group")].map((g) => [...g.querySelectorAll(".ctx-item")].map((b) => b.textContent))`,
       );
-      if (JSON.stringify(items) !== JSON.stringify([["Answer", "Copy link"], ["Dismiss"]]))
+      if (JSON.stringify(items) !== JSON.stringify([["Answer", "Copy link"], ["Move down"], ["Dismiss"]]))
         failures.push(`row-menu-question: a question's menu reads ${JSON.stringify(items)}`);
     },
     after: async (page) => {
@@ -6695,7 +6802,7 @@ try {
         await windBack(page);
         await page.keyboard.press("Escape");
         await shot.go(page);
-        await page.mouse.move(0, 0); // no hover state left over from a click
+        if (!shot.held) await page.mouse.move(0, 0); // no hover state left over from a click
         const file = `${theme}-${size.name}-${shot.name}.png`;
         // The pictures on screen have loaded, or gone for good: none is a broken box.
         const box = (await page.waitForFunction(AVATARS_DRAWN, undefined, { timeout: 3000 }).catch(() => null)) === null;

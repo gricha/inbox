@@ -7,6 +7,7 @@ import { age, ago, cls, fromName, issueUrl, MOD } from "../format.ts";
 import { shownUrl, urlPlace } from "../../../src/prose.ts";
 import { inquiryOf, routeHash } from "../view.ts";
 import { AgentIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
+import { Grip, press, type RowDrag } from "./Reorder.tsx";
 
 const URL_IN_TEXT = /(https:\/\/[^\s<>"'`]*[^\s<>"'`.,;:!?)\]])/;
 
@@ -22,7 +23,7 @@ export interface InquiryCtx {
 
 // An agent session's question for you, a row in the table like a PR's or an issue's: Question, the question, its call to
 // action (Answer), who asks, its age; a click opens its page. Beside a review, two lines: the question, then the rest.
-export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
+export function InquiryRow({ q, ctx, drag }: { q: Inquiry; ctx: InquiryCtx; drag?: RowDrag | undefined }) {
   const id = inquiryOf(q.id);
   const sel = ctx.selected === id;
   const kindIcon = <KindIcon kind="question" tip={q.fix ? `${q.from}'s recommendation` : "A question from an agent"} />;
@@ -44,19 +45,17 @@ export function InquiryRow({ q, ctx }: { q: Inquiry; ctx: InquiryCtx }) {
     </span>
   );
   return (
-    <div className={cls("line inq", ctx.compact && "c-line", sel && "sel")} data-id={id}>
+    <div className={cls("line inq", ctx.compact && "c-line", sel && "sel")} data-id={id} {...drag}>
       <div className={cls("line-main line-row", ctx.compact && "c-row")}>
+        {drag && <Grip />}
         <button
           type="button"
           className="row-main line-btn"
-          onMouseDown={(e) => {
-            e.preventDefault();
-          }}
+          {...press(drag, () => {
+            ctx.select(q);
+          })}
           onClick={() => {
             ctx.open(q);
-          }}
-          onFocus={() => {
-            ctx.select(q);
           }}
         >
           {ctx.compact ? (

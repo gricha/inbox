@@ -1,12 +1,13 @@
 import { useState } from "react";
 import type { Card, Inquiry, Note, Overview, QueueView, SessionCard } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import { fyiShown, PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
+import { fyiShown, inquiryOf, PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { noteOf, NoteRow, type NoteCtx } from "./Note.tsx";
 import { SessionRow, type SessionCtx } from "./Session.tsx";
 import { SkRows } from "./Skeleton.tsx";
+import type { Lane, Reorder } from "./Reorder.tsx";
 
 // The main page: what's on your Inbox, in its sections, each in the desk's order: Urgent (agents' questions and the sessions
 // that need you first, since one waits on each), Standard and FYI. Each row says why it's there, quietly.
@@ -38,6 +39,7 @@ export function Queue({
   filter,
   adding = null,
   toggle,
+  reorder,
 }: {
   view: QueueView | null;
   overview: Overview | null;
@@ -51,6 +53,7 @@ export function Queue({
   filter: string;
   adding?: string | null; // a pasted link's PR or issue the desk is adding: a placeholder row in place of "No matches."
   toggle: (k: GroupKey) => void;
+  reorder?: Reorder; // the Inbox's own page: its rows drag to another place
 }) {
   const [allFyi, setAllFyi] = useState(false);
   if (!view) {
@@ -82,8 +85,10 @@ export function Queue({
   const any = parts.some(({ g, lead }) => lead > 0 || g.cards.some((c) => !ctx.leaving.has(c.id)));
   // A new desk's first minutes, said in the desk's words: where the empty line would be, or above the rows.
   const first = view.first_pass && !filter.trim() ? view.first_pass.line : null;
+  const section = (k: GroupKey) => (k === "urgent" || k === "standard" || k === "fyi" ? k : null);
   return (
-    <div className="queue">
+    <div className="queue" {...reorder?.list}>
+      {reorder?.line}
       {first && <p className={cls("queue-first", any && "above")}>{first}</p>}
       {any ? (
         parts.map(({ g, lead }) => {
@@ -94,8 +99,10 @@ export function Queue({
               : null;
           const notes = fold === null ? fyi : fyi.slice(0, fold);
           const cards = fold === null ? g.cards : g.cards.slice(0, Math.max(0, fold - fyi.length));
+          const s = section(g.key);
+          const drag = (id: string, lane: Lane) => (reorder && s ? reorder.row(id, lane, s) : undefined);
           return (
-            <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
+            <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`} {...(s && { "data-section": s })}>
               <h2 id={`h-${g.key}`} className="group-head">
                 <button
                   type="button"
@@ -113,13 +120,15 @@ export function Queue({
               </h2>
               {g.open && (
                 <div className="lines">
-                  {g.key === "urgent" && inquiries.map((q) => <InquiryRow key={q.id} q={q} ctx={inq} />)}
-                  {g.key === "urgent" && ses && shown.map((s) => <SessionRow key={s.id} s={s} ctx={ses} />)}
-                  {g.key === "urgent" && [...due, ...urgent].map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
-                  {g.key === "standard" && open.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
-                  {g.key === "fyi" && notes.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
+                  {g.key === "urgent" &&
+                    inquiries.map((q) => <InquiryRow key={q.id} q={q} ctx={inq} drag={drag(inquiryOf(q.id), "ask")} />)}
+                  {g.key === "urgent" && ses && shown.map((x) => <SessionRow key={x.id} s={x} ctx={ses} />)}
+                  {g.key === "urgent" && due.map((n) => <NoteRow key={n.id} n={n} ctx={note} drag={drag(noteOf(n.id), "due")} />)}
+                  {g.key === "urgent" && urgent.map((n) => <NoteRow key={n.id} n={n} ctx={note} drag={drag(noteOf(n.id), "note")} />)}
+                  {g.key === "standard" && open.map((n) => <NoteRow key={n.id} n={n} ctx={note} drag={drag(noteOf(n.id), "note")} />)}
+                  {g.key === "fyi" && notes.map((n) => <NoteRow key={n.id} n={n} ctx={note} drag={drag(noteOf(n.id), "note")} />)}
                   {cards.map((c) => (
-                    <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
+                    <CardRow key={c.id} card={c} variant="active" ctx={ctx} drag={drag(c.id, "card")} />
                   ))}
                 </div>
               )}

@@ -1319,7 +1319,48 @@ html::-webkit-scrollbar-corner,
 .queue {
   --lines-r: 0;
 
+  position: relative;
   display: grid;
+}
+
+/* Your order (Reorder.tsx): a row under the pointer shows its handle in its left margin; the whole row drags. Where it will
+   land, a line in the accent across the table; the row on its way fades where it was. */
+.line-grip {
+  position: absolute;
+  top: 50%;
+  left: max(2px, calc(var(--pad, 14px) / 2 - 5px));
+  z-index: 2;
+  display: inline-flex;
+  padding: 3px 2px;
+  color: var(--pencil);
+  opacity: 0;
+  cursor: grab;
+  translate: 0 -50%;
+}
+
+.line-grip .i {
+  width: 6px;
+  height: 10px;
+  fill: currentcolor;
+}
+
+.line[draggable]:hover .line-grip {
+  opacity: 1;
+}
+
+.line[data-dragging] {
+  opacity: 0.4;
+}
+
+.drop-line {
+  position: absolute;
+  right: 0;
+  left: 0;
+  z-index: 4;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--accent);
+  pointer-events: none;
 }
 
 /* minmax(0, 1fr): a long unwrapped row truncates instead of widening the page. */

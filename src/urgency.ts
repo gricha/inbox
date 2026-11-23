@@ -13,6 +13,7 @@ import { BadRequest, DecisionModelDown, fsError, messageOf, NotFound } from "./e
 import { compile, type Compiled } from "./expr.ts";
 import { sortKey, textHash } from "./judge.ts";
 import { decodeEach, decodeValues, field, keysOf, num, schemaOf, str } from "./narrow.ts";
+import { arrange, type Ranked } from "./order.ts";
 import { agentDown } from "./review.ts";
 import { report } from "./sentry.ts";
 import { BUCKETS, type Bucket, type Card, type CriteriaView, type Criterion, type InboxSection } from "./types.ts";
@@ -99,6 +100,17 @@ export function sectionOf(
 // The score with no model's: where the rules put it, plus each yes's weight, at most 10.
 export const fallbackScore = (bucket: Bucket, points: number) => Math.min(10, BASE[bucket] + points);
 const pointsOf = (cs: readonly Pick<Criterion, "weight">[]) => cs.reduce((n, c) => n + (c.weight ?? 1), 0);
+
+// A section's cards in your order: by score, with the ones you dragged there where you put them until their next activity.
+export const cardOrder = (snap: Snapshot, section: InboxSection): Ranked<Card> => ({
+  id: (c) => c.id,
+  key: (c) => c.score ?? 0,
+  place: (c) => {
+    const e = snap.entries.get(c.id);
+    const p = e?.state.place;
+    return p?.section === section && (!p.seen || e!.activityAt <= p.seen) ? p : undefined;
+  },
+});
 
 const itemKey = (e: Entry) => sortKey(e.item, e.analysis.activity_at, undefined, e.analysis.signals.pr.blocker);
 const question = (c: Criterion) => JSON.stringify([c.when ?? "", c.ask ?? ""]);
@@ -359,7 +371,11 @@ export class Urgency {
       c.reason = [back ? c.why : "", named(urgent), automation ? c.why : "", model?.why ?? "", named(yes), c.why].find(Boolean) ?? "";
       out[c.section].push(c);
     }
-    for (const k of keysOf(out)) out[k] = out[k].toSorted((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    for (const k of keysOf(out))
+      out[k] = arrange(
+        out[k].toSorted((a, b) => (b.score ?? 0) - (a.score ?? 0)),
+        cardOrder(snap, k),
+      );
     return out;
   }
 

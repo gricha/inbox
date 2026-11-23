@@ -5,6 +5,7 @@ import { Avatar } from "./Avatar.tsx";
 import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
 import { Detail } from "./Detail.tsx";
 import { AgentIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
+import { Grip, press, type RowDrag } from "./Reorder.tsx";
 
 // Everything a row needs from the app; `run` takes an action id, as App's run() reads it.
 export interface RowCtx {
@@ -49,7 +50,21 @@ function noteOf(card: Card, variant: Variant): string {
 // itself in a tip. Beside a review (compact), the same on two lines: icon, title and call to action, then the rest.
 // A click opens an issue in place under it. On Blocked, `tree` indents it under the PR it needs, with a quiet guide. A chain's
 // head says how many steps wait on it after its why, and opens them under it.
-export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant: Variant; ctx: RowCtx; why?: boolean; tree?: Guide[] }) {
+export function CardRow({
+  card,
+  variant,
+  ctx,
+  why,
+  tree,
+  drag,
+}: {
+  card: Card;
+  variant: Variant;
+  ctx: RowCtx;
+  why?: boolean;
+  tree?: Guide[];
+  drag?: RowDrag | undefined; // on the Inbox: it drags to another place
+}) {
   const open = ctx.expanded === card.id;
   const sel = ctx.selected === card.id || !!ctx.picked?.has(card.id);
   const reason = card.reason ?? "";
@@ -123,12 +138,14 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
           variant === "blocked" && "blocked-row",
         )}
         data-id={card.id}
+        {...drag}
       >
         {/* The row's button reaches over the whole line (CSS), so its call to action can be a button of its own. */}
         <div
           className={cls("line-main line-row", ctx.compact && "c-row", chained && "has-chain")}
           style={tree?.length ? { paddingLeft: `calc(var(--pad, 14px) + ${tree.length * TREE_STEP}px)` } : undefined}
         >
+          {drag && <Grip />}
           {!!tree?.length && (
             <span className="tree" aria-hidden="true">
               {tree.map((g, i) => (
@@ -142,15 +159,12 @@ export function CardRow({ card, variant, ctx, why, tree }: { card: Card; variant
             type="button"
             className="row-main line-btn"
             aria-expanded={open}
-            onMouseDown={(e) => {
-              e.preventDefault();
-            }}
+            {...press(drag, () => {
+              ctx.select(card);
+            })}
             onClick={(e) => {
               if (ctx.pick && (e.shiftKey || e.metaKey || e.ctrlKey)) ctx.pick(card, e.shiftKey);
               else ctx.click(card);
-            }}
-            onFocus={() => {
-              ctx.select(card);
             }}
           >
             {ctx.compact ? (

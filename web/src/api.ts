@@ -223,6 +223,9 @@ export const api = {
   add: (id: string) => call<{ ok: true; item: ItemDetail; undo_seq: number }>("POST", "/api/add", { id }),
   act: (id: string, action: Action, until?: string) =>
     call<{ ok: true; state: ItemState; undo_seq: number }>("POST", "/api/act", { id, action, until }),
+  // A row dragged on the Inbox (or moved up or down from its menu): between the rows of its kind named, in that section.
+  place: (id: string, section: InboxSection, at: { after?: string; before?: string }) =>
+    call<{ ok: true; undo_seq: number }>("POST", "/api/place", { id, section, ...at }),
   // ahead: before you open it, so the desk starts no AI review or read for it.
   review: (id: string, ahead = false) => call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}${ahead ? "?ahead=1" : ""}`),
   aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${encodeURIComponent(id)}/ai`, { force }),

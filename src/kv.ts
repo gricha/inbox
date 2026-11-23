@@ -10,6 +10,7 @@ import {
   type Handoff,
   type IssueReview,
   type Note,
+  type Place,
   type Recommendation,
   type ReviewFile,
 } from "./types.ts";
@@ -45,6 +46,16 @@ export interface Merging {
 export const arrayOf = <S extends Schema.Top>(s: S) => Schema.mutable(Schema.Array(s));
 const opt = Schema.optionalKey;
 const lineSide = Schema.Literals(["new", "old"]);
+export const PlaceSchema = schemaOf<Place>()(
+  Schema.Struct({
+    section: Schema.Literals(["urgent", "standard", "fyi"]),
+    rank: Schema.Number,
+    after: opt(Schema.String),
+    before: opt(Schema.String),
+    at: opt(Schema.String),
+    seen: opt(Schema.String),
+  }),
+);
 export const SortedSchema = schemaOf<Sorted>()(
   Schema.Struct({
     automation: Schema.String,
@@ -292,6 +303,7 @@ export const KeptInquirySchema = Schema.Struct({
       }),
     ),
   ),
+  place: opt(PlaceSchema),
 });
 export const NoteButtonSchema = Schema.Struct({
   label: Schema.String,
@@ -312,5 +324,6 @@ export const NoteSchema = schemaOf<Omit<Note, "waiting" | "facts">>()(
     buttons: opt(Schema.mutable(Schema.Array(NoteButtonSchema))),
     icon: opt(Schema.String),
     fields: opt(Schema.Record(Schema.String, Schema.Unknown)),
+    place: opt(PlaceSchema),
   }),
 );

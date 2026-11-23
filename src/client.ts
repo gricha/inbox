@@ -19,6 +19,7 @@ import {
   type Criterion,
   type CriterionBody,
   type DocSaved,
+  type InboxSection,
   type Inquiry,
   type InquiryLink,
   type InquiryOption,
@@ -186,6 +187,8 @@ export function createClient(send: (path: string, init: RequestInit) => Response
     board: (id: string) => call<BoardView>("GET", `/api/boards/${q(id)}`),
     item: (ref: string) => call<ItemDetail>("GET", `/api/item?id=${q(ref)}`),
     act: (id: string, action: Action, until?: string) => call<ActResult>("POST", "/api/act", { id, action, until }),
+    place: (id: string, section: InboxSection, at: { after?: string; before?: string }) =>
+      call<{ ok: true; undo_seq: number }>("POST", "/api/place", { id, section, ...at }),
     undo: (seq?: number) => call<{ ok: true; id: string; action: Action }>("POST", "/api/undo", { seq }),
     add: (ref: string, why?: string, from?: string, after?: string[]) =>
       call<AddResult>("POST", "/api/add", {

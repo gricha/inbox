@@ -21,8 +21,18 @@ import { bulkMenu } from "../view.ts";
 const MOVES: Record<InboxSection, InboxSection[]> = { urgent: ["standard"], standard: ["urgent", "fyi"], fyi: ["standard"] };
 const SECTION_NAME: Record<InboxSection, string> = { urgent: "Urgent", standard: "Standard", fyi: "FYI" };
 
-// What an entry does: the row's action (as run() takes it), a desk action, a More menu write, or a snooze.
-type Do = { key: string } | { act: Action } | { github: GitHubAction } | { snooze: string };
+// What an entry does: the row's action (as run() takes it), a desk action, a More menu write, a snooze, or a step in its order.
+type Do = { key: string } | { act: Action } | { github: GitHubAction } | { snooze: string } | { step: keyof Steps };
+
+// Move up and Move down: on the Inbox, a row past the one of its kind above or below it, as a drag would put it.
+export interface Steps {
+  up?: () => void;
+  down?: () => void;
+}
+const stepsOf = (s: Steps | undefined): Entry[] => [
+  ...(s?.up ? [{ label: "Move up", do: { step: "up" as const } }] : []),
+  ...(s?.down ? [{ label: "Move down", do: { step: "down" as const } }] : []),
+];
 
 interface Entry {
   label: string;
@@ -39,6 +49,7 @@ export interface RowMenuProps {
   x: number;
   y: number;
   snooze?: boolean; // opened by an issue's Snooze: Snooze open, its first time focused
+  step?: Steps;
   run: (c: Card, key: string) => void;
   act: (c: Card, action: Action, until?: string) => void;
   github: (c: Card, a: GitHubAction) => void;
@@ -47,7 +58,7 @@ export interface RowMenuProps {
 }
 
 // A row's right-click menu: every write a row has. Snooze opens to the side with the times and what this item can wait on.
-export function RowMenu({ card, x, y, snooze, run, act, github, reopen, onClose }: RowMenuProps) {
+export function RowMenu({ card, x, y, snooze, step, run, act, github, reopen, onClose }: RowMenuProps) {
   const snoozes = card.inflight ? [] : snoozeOptions(card);
 
   const go = (label: string, id: string): Entry => ({ label, do: { key: id } });
@@ -58,7 +69,7 @@ export function RowMenu({ card, x, y, snooze, run, act, github, reopen, onClose 
       ? [go("Back to the desk", "back")]
       : [card.status === "active" ? DONE : { label: "Back on the desk", do: { act: "restore" as const } }],
     card.section && card.status === "active" && !card.inflight
-      ? MOVES[card.section].map((to) => ({ label: `Move to ${SECTION_NAME[to]}`, do: { act: to } }))
+      ? [...stepsOf(step), ...MOVES[card.section].map((to) => ({ label: `Move to ${SECTION_NAME[to]}`, do: { act: to } }))]
       : [],
     rowActions(card)
       .filter((a) => a === "close")
@@ -67,7 +78,8 @@ export function RowMenu({ card, x, y, snooze, run, act, github, reopen, onClose 
     [go("Copy link", "link"), go("Copy GitHub link", "github-link")],
   ];
   function pick(d: Do) {
-    if ("key" in d) run(card, d.key);
+    if ("step" in d) step?.[d.step]?.();
+    else if ("key" in d) run(card, d.key);
     else if ("act" in d) act(card, d.act);
     else if ("github" in d) github(card, d.github);
     else act(card, "snooze", d.snooze);
@@ -136,6 +148,7 @@ export function QuestionMenu({
   q,
   x,
   y,
+  step,
   run,
   reopen,
   onClose,
@@ -143,6 +156,7 @@ export function QuestionMenu({
   q: Inquiry;
   x: number;
   y: number;
+  step?: Steps;
   run: (q: Inquiry, key: string) => void;
   reopen: (x: number, y: number) => void;
   onClose: () => void;
@@ -157,13 +171,14 @@ export function QuestionMenu({
               [go("Agree", "agree"), go("Disagree", "disagree")],
               [go("Open", "answer"), go("Copy link", "link")],
             ]
-          : [[go("Answer", "answer"), go("Copy link", "link")], [go("Dismiss", "dismiss")]]
+          : [[go("Answer", "answer"), go("Copy link", "link")], stepsOf(step), [go("Dismiss", "dismiss")]]
       }
       snoozes={[]}
       x={x}
       y={y}
       pick={(d) => {
-        if ("key" in d) run(q, d.key);
+        if ("step" in d) step?.[d.step]?.();
+        else if ("key" in d) run(q, d.key);
       }}
       reopen={reopen}
       onClose={onClose}
@@ -250,11 +265,13 @@ export function NoteMenu({
   move,
   run,
   now,
+  step,
   reopen,
   onClose,
 }: {
   n: Note;
   now: number;
+  step?: Steps;
   x: number;
   y: number;
   done: (n: Note) => void;
@@ -271,6 +288,7 @@ export function NoteMenu({
       groups={[
         [
           DONE,
+          ...stepsOf(step),
           ...MOVES[due ? "urgent" : (n.section ?? "standard")].map((to) => ({ label: `Move to ${SECTION_NAME[to]}`, do: { act: to } })),
         ],
         [
@@ -282,7 +300,8 @@ export function NoteMenu({
       x={x}
       y={y}
       pick={(d) => {
-        if ("snooze" in d) snooze(n, d.snooze);
+        if ("step" in d) step?.[d.step]?.();
+        else if ("snooze" in d) snooze(n, d.snooze);
         else if ("act" in d && isKeyOf(MOVES, d.act)) move(n, d.act);
         else if ("act" in d) done(n);
         else if ("key" in d && (d.key === "open" || d.key === "copy")) run(n, d.key);

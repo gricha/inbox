@@ -49,7 +49,7 @@ import { isSecret } from "./settings.ts";
 import { CHUNK_FIELDS, FIELDS } from "./signals.ts";
 import { typeCheck } from "./automations.ts";
 import { field as fieldOf, isRecord, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
-import { GITHUB_ACTIONS, type Action, type AskLines, type InlineAt, type NoteButton, type RemoteView } from "./types.ts";
+import { GITHUB_ACTIONS, INBOX_SECTIONS, type Action, type AskLines, type InlineAt, type NoteButton, type RemoteView } from "./types.ts";
 
 const VERSION = stringOf(fieldOf(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")), "version")) ?? "";
 export const DEFAULT_PORT = 47823;
@@ -418,6 +418,22 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       return { ok: true, ...(yield* desk.act(b.id, b.action, b.until, fromDesk(c) ? undefined : "agent")) };
     });
     return respond(c, act, { log });
+  });
+  // Your order on the Inbox: a row dragged between two of its kind, or inbox_act's move with after or before. Local only.
+  app.post("/api/place", (c) => {
+    const place = Effect.gen(function* () {
+      yield* up;
+      const { id, section, after, before } = yield* bodyOf(c);
+      const to = INBOX_SECTIONS.find((x) => x === section);
+      if (typeof id !== "string" || !id || !to) return yield* new BadRequest({ message: "need { id, section: urgent|standard|fyi }" });
+      const a = typeof after === "string" && after ? after : undefined;
+      const b = typeof before === "string" && before ? before : undefined;
+      if ((after !== undefined && !a) || (before !== undefined && !b))
+        return yield* new BadRequest({ message: "after and before are row ids" });
+      const at = { ...(a && { after: a }), ...(b && { before: b }) };
+      return { ok: true, ...(yield* desk.place(id, to, at, fromDesk(c) ? undefined : "agent")) };
+    });
+    return respond(c, place, { log });
   });
   // inbox_add and `inbox add`: a pin plus GitHub reads, so agents may call it.
   app.post("/api/add", (c) => {

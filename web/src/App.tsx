@@ -22,7 +22,7 @@ import type {
 } from "../../src/types.ts";
 import { permalink } from "../../src/links.ts";
 import { parseJson } from "../../src/narrow.ts";
-import { AGREE, DISAGREE, isCoordinator, untilTime } from "../../src/types.ts";
+import { AGREE, DISAGREE, INBOX_SECTIONS, isCoordinator, untilTime } from "../../src/types.ts";
 import { api, DeskUnreachable, runUi, type ApiError, type ClipboardUnavailable, type DeskConfigBroken, type DeskStarting } from "./api.ts";
 import { cls, copyText, fromName, MAC, shortId, shortRef, SNOOZE, snoozeOptions, aiName, setAiName, when } from "./format.ts";
 import { restOn } from "./reviews.ts";
@@ -30,7 +30,7 @@ import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop, loadOmarchy, OmarchyAnswer, omarchyIs } from "./theme.ts";
 import { getStored, setStored } from "./storage.ts";
 import { useKeyed, useKeyedLayout } from "./keyed.ts";
-import { dropKey, settleNoteEdits, withNoteEdits, type NoteEdits } from "./pending.ts";
+import { dropKey, settleNoteEdits, withDrops, withNoteEdits, type Drop, type NoteEdits } from "./pending.ts";
 import {
   attachCommand,
   beside,
@@ -67,9 +67,10 @@ import { Beside } from "./components/Beside.tsx";
 import { Chat, type About, type Spot } from "./components/Chat.tsx";
 import { Inflight } from "./components/Inflight.tsx";
 import { InquiryPage } from "./components/Inquiry.tsx";
-import { BulkMenu, NoteMenu, QuestionMenu, RowMenu, SessionMenu, StepMenu } from "./components/RowMenu.tsx";
+import { BulkMenu, NoteMenu, QuestionMenu, RowMenu, SessionMenu, StepMenu, type Steps } from "./components/RowMenu.tsx";
 import type { ChainCtx } from "./components/Chain.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
+import { stepDrops, useReorder } from "./components/Reorder.tsx";
 import type { SessionCtx } from "./components/Session.tsx";
 import { PeopleFilter } from "./components/PeopleFilter.tsx";
 import { Review } from "./components/Review.tsx";
@@ -185,6 +186,7 @@ export function App() {
   const [chainsOpen, setChainsOpen] = useState(chainsAtStart);
   const [unwaited, setUnwaited] = useState<ReadonlySet<string>>(new Set()); // Stop waiting, until the desk's view has it
   const [noteEdits, setNoteEdits] = useState<NoteEdits>({});
+  const [drops, setDrops] = useState<readonly Drop[]>([]); // rows you placed, drawn there until the desk's view is read back
   const newNotes = useRef(0);
   const noteClose = useRef<(() => void) | null>(null); // the open tray's way out, for Esc
   const setNoteClose = useCallback((leave: (() => void) | null) => {
@@ -563,7 +565,9 @@ export function App() {
     stay.current = null;
     setMenuAt(null);
   }, [route]);
-  const groups = useMemo(() => groupsOf(view, open, filter, me), [view, open, filter, me]);
+  // The desk's view with the rows you placed where you put them, until it's read back.
+  const placed = useMemo(() => (view && drops.length ? withDrops(view, drops) : view), [view, drops]);
+  const groups = useMemo(() => groupsOf(placed, open, filter, me), [placed, open, filter, me]);
   const people = useMemo(
     () =>
       filterPeople(
@@ -632,10 +636,10 @@ export function App() {
   const inquiries = useMemo(() => {
     const f = filter.trim().toLowerCase();
     if (listPage !== "queue") return []; // on a question's page, the queue's cursor stays on it
-    return (view?.inquiries ?? []).filter(
+    return (placed?.inquiries ?? []).filter(
       (q) => !answered.has(q.id) && (!f || q.question.toLowerCase().includes(f) || q.from.toLowerCase().includes(f)),
     );
-  }, [view, answered, filter, listPage]);
+  }, [placed, answered, filter, listPage]);
   // Then the sessions that need you, which the filter reads too.
   const sessions = useMemo(() => {
     const f = filter.trim().toLowerCase();
@@ -647,9 +651,9 @@ export function App() {
   // The queue with your note writes on it until the desk's view has them.
   const queueView = useMemo(
     () =>
-      view &&
-      (Object.keys(noteEdits).length ? { ...view, notes: withNoteEdits(view.notes, noteEdits, new Date(now).toISOString()) } : view),
-    [view, noteEdits, now],
+      placed &&
+      (Object.keys(noteEdits).length ? { ...placed, notes: withNoteEdits(placed.notes, noteEdits, new Date(now).toISOString()) } : placed),
+    [placed, noteEdits, now],
   );
   useEffect(() => {
     if (view) setNoteEdits((e) => settleNoteEdits(view.notes, e));
@@ -914,6 +918,45 @@ export function App() {
       ),
     );
   }
+
+  // A row you dragged, or moved up or down from its menu: drawn where you put it at once, then the desk's view read back;
+  // a refusal puts it back and says why. A move to another section says so, with Undo.
+  function place(d: Drop) {
+    setDrops((x) => [...x.filter((y) => y.id !== d.id), d]);
+    const cross = view && INBOX_SECTIONS.find((s) => view.inbox[s].some((c) => c.id === d.id));
+    runUi(
+      Effect.gen(function* () {
+        const res = yield* api.place(d.id, d.section, { ...(d.after && { after: d.after }), ...(d.before && { before: d.before }) });
+        yield* load();
+        if (cross && cross !== d.section) {
+          undoSeq.current = res.undo_seq ? [res.undo_seq] : [];
+          undoWrite.current = null;
+          const c = known.get(d.id);
+          flash(`${VERB[d.section] ?? ""}${c ? `: ${shortRef(c)}` : ""}`, false, true);
+        }
+      }).pipe(
+        Effect.catch(failed),
+        Effect.ensuring(
+          Effect.sync(() => {
+            setDrops((x) => x.filter((y) => y !== d));
+          }),
+        ),
+      ),
+    );
+  }
+  const reorder = useReorder(place);
+  // The menu's Move up and Move down, as a drag past the row of its kind above or below.
+  const stepsOf = (id: string): Steps => {
+    const at = stepDrops(id);
+    const by = (d: Drop | undefined) =>
+      d &&
+      (() => {
+        place(d);
+      });
+    const above = by(at.up);
+    const below = by(at.down);
+    return { ...(above && { up: above }), ...(below && { down: below }) };
+  };
 
   // One action on several picked rows: each leaves at once as it would alone, and one Undo takes them all back.
   function actAll(cs: Card[], action: Action, until?: string): Effect.Effect<void> {
@@ -2069,6 +2112,7 @@ export function App() {
               filter={filter}
               adding={adding}
               toggle={toggleGroup}
+              reorder={reorder}
             />
           )}
           {route.name === "blocked" && !broken && (
@@ -2313,6 +2357,7 @@ export function App() {
           x={menuAt.x}
           y={menuAt.y}
           {...(menuAt.snooze !== undefined && { snooze: menuAt.snooze })}
+          step={stepsOf(menuAt.id)}
           run={run}
           act={(c, a, until) => {
             runUi(act(c, a, until));
@@ -2342,6 +2387,7 @@ export function App() {
           n={menuNote}
           x={menuAt.x}
           y={menuAt.y}
+          step={stepsOf(menuAt.id)}
           done={doneNote}
           snooze={(n, until) => {
             runUi(saveNote(n, n.text, until));
@@ -2387,6 +2433,7 @@ export function App() {
           q={menuQuestion}
           x={menuAt.x}
           y={menuAt.y}
+          step={stepsOf(menuAt.id)}
           run={runQuestion}
           reopen={reopenMenu}
           onClose={closeMenu}

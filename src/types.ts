@@ -1,5 +1,6 @@
 // Shared types: GitHub items, rule signals, config, and the HTTP API shapes.
 import { isKeyOf } from "./narrow.ts";
+import { arrange, type Ranked } from "./order.ts";
 
 export type Bucket = "now" | "today" | "blocked" | "later" | "fyi" | "hide";
 export const BUCKETS: Bucket[] = ["now", "today", "blocked", "later", "fyi", "hide"];
@@ -497,6 +498,18 @@ export interface ItemState {
   seen_at: string | null;
   inflight_at: string | null; // your own PR, handed off for merge with m: the coordinator takes it from here
   section: InboxSection | null; // the Inbox section you moved it to, until you're done with it, snooze or mute it
+  place: Place | null; // where you dragged it in its section, until its next activity (src/order.ts)
+}
+
+// Where you put a row in a section's order (src/order.ts): a rank among the keys the desk sorts that list by, the rows you
+// dropped it between (for equal keys), when, and an item's latest activity then (newer ends it).
+export interface Place {
+  section: InboxSection;
+  rank: number;
+  after?: string;
+  before?: string;
+  at?: string;
+  seen?: string;
 }
 
 // Someone you can ask for a review of your PR: a user (login) or a team (its slug). id is the node id a review request takes.
@@ -1385,6 +1398,7 @@ export interface Inquiry {
   // until then; absent on a dismissal, which owes nothing, and on an answer from before the desk kept it.
   answer: { text: string; at: string; dismissed: boolean; read_at?: string | null } | null;
   fix?: Recommendation; // Claude's recommendation for a held note: Agree applies it, Disagree drops both, a comment asks again
+  place?: Place; // where you dragged it among the questions leading Urgent
 }
 
 // What Claude recommends for a note an automation held because its fields don't fit its type: the desk's to apply.
@@ -1438,6 +1452,7 @@ export interface Note {
   fields?: Record<string, unknown>; // a typed automation's: the note's fields as its type decoded them, untrusted text
   facts?: NoteFact[]; // on a view: its fields as its automation's type reads them, for the opened note; never stored
   waiting?: WaitingStep[]; // on QueueView.notes: the head of an "after" chain, as on a Card; never stored
+  place?: Place; // where you dragged it among the notes of a section
 }
 
 // One of a typed note's fields as the opened note shows it: its name in words, and its value as plain text, a number or a
@@ -1455,12 +1470,22 @@ export interface NotesView {
 }
 
 // Where the desk puts your notes at `now` (ISO); the window places its own writes the same way.
+// A section's notes in your order: newest first (a due reminder, soonest), with the ones you dragged where you put them.
+export const noteOrder = (section: InboxSection, due: boolean): Ranked<Note> => ({
+  id: (n) => n.id,
+  key: due ? (n) => -Date.parse(n.remind_at ?? "") : (n) => Date.parse(n.at),
+  place: (n) => (n.place?.section === section ? n.place : undefined),
+});
+
 export function placeNotes(all: readonly Note[], now: string): NotesView {
   const soonest = (a: Note, b: Note) => (a.remind_at ?? "").localeCompare(b.remind_at ?? "");
   const waiting = (s: InboxSection) =>
-    all.filter((n) => !n.remind_at && (n.section ?? "standard") === s).toSorted((a, b) => b.at.localeCompare(a.at));
+    arrange(
+      all.filter((n) => !n.remind_at && (n.section ?? "standard") === s).toSorted((a, b) => b.at.localeCompare(a.at)),
+      noteOrder(s, false),
+    );
   return {
-    due: all.filter((n) => n.remind_at && n.remind_at <= now).toSorted(soonest),
+    due: arrange(all.filter((n) => n.remind_at && n.remind_at <= now).toSorted(soonest), noteOrder("urgent", true)),
     urgent: waiting("urgent"),
     open: waiting("standard"),
     fyi: waiting("fyi"),

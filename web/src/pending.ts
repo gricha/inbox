@@ -1,4 +1,15 @@
-import { placeNotes, type Item, type Note, type NotesView, type Standing } from "../../src/types.ts";
+import { ASK } from "../../src/order.ts";
+import {
+  INBOX_SECTIONS,
+  placeNotes,
+  type Card,
+  type InboxSection,
+  type Item,
+  type Note,
+  type NotesView,
+  type QueueView,
+  type Standing,
+} from "../../src/types.ts";
 
 // Note writes the desk's view doesn't show yet, by id: the note as you left it, null once done; a new one under a temporary id.
 export type NoteEdits = Readonly<Record<string, Note | null>>;
@@ -53,4 +64,87 @@ export function settleReviewerAsks(requests: Item["review_requests"], asks: Revi
   const asked = new Set(requests.map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer).toLowerCase()));
   const left = Object.entries(asks).filter(([who, how]) => asked.has(who) !== (how === "asked"));
   return left.length === Object.keys(asks).length ? asks : Object.fromEntries(left);
+}
+
+// A row you dragged (or moved up or down) on the Inbox, drawn there until the desk's view is read back: its id as the row's
+// ("note:<id>", "ask:<id>" or an item's), the section, and the rows of its kind it went between.
+export interface Drop {
+  id: string;
+  section: InboxSection;
+  after?: string;
+  before?: string;
+}
+
+const NOTE = "note:";
+
+// Into `list` beside the row the drop names, else where the desk's key puts it.
+function insert<T>(list: readonly T[], x: T, d: Drop, id: (t: T) => string, below: (t: T) => boolean): T[] {
+  const a = d.after === undefined ? -1 : list.findIndex((t) => id(t) === d.after);
+  const b = d.before === undefined ? -1 : list.findIndex((t) => id(t) === d.before);
+  const k = list.findIndex(below);
+  const i = a >= 0 ? a + 1 : b >= 0 ? b : k < 0 ? list.length : k;
+  return [...list.slice(0, i), x, ...list.slice(i)];
+}
+
+function dropNote(v: QueueView, d: Drop): QueueView {
+  const id = d.id.slice(NOTE.length);
+  const n = [...v.notes.due, ...v.notes.urgent, ...v.notes.open, ...v.notes.fyi].find((x) => x.id === id);
+  if (!n) return v;
+  const due = v.notes.due.includes(n) && d.section === "urgent";
+  const moved: Note = { ...n, section: d.section, ...(!due && { remind_at: null, reminded_at: null }) };
+  const off = (ns: Note[]) => ns.filter((x) => x.id !== id);
+  const notes: NotesView = {
+    ...v.notes,
+    due: off(v.notes.due),
+    urgent: off(v.notes.urgent),
+    open: off(v.notes.open),
+    fyi: off(v.notes.fyi),
+  };
+  const key = { urgent: "urgent", standard: "open", fyi: "fyi" } as const;
+  const into = due ? "due" : key[d.section];
+  const nd = { ...d, ...(d.after && { after: d.after.slice(NOTE.length) }), ...(d.before && { before: d.before.slice(NOTE.length) }) };
+  notes[into] = insert(
+    notes[into],
+    moved,
+    nd,
+    (x) => x.id,
+    (x) => (due ? (x.remind_at ?? "") > (n.remind_at ?? "") : x.at < n.at),
+  );
+  return { ...v, notes };
+}
+
+function dropAsk(v: QueueView, d: Drop): QueueView {
+  const q = v.inquiries.find((x) => `${ASK}${x.id}` === d.id);
+  if (!q || d.section !== "urgent") return v;
+  const rest = v.inquiries.filter((x) => x !== q);
+  return {
+    ...v,
+    inquiries: insert(
+      rest,
+      q,
+      d,
+      (x) => `${ASK}${x.id}`,
+      (x) => x.at > q.at,
+    ),
+  };
+}
+
+function dropCard(v: QueueView, d: Drop): QueueView {
+  const from = INBOX_SECTIONS.find((s) => v.inbox[s].some((c) => c.id === d.id));
+  if (!from) return v;
+  const c: Card = { ...v.inbox[from].find((x) => x.id === d.id)!, section: d.section };
+  const inbox = { ...v.inbox, [from]: v.inbox[from].filter((x) => x.id !== d.id) };
+  inbox[d.section] = insert(
+    inbox[d.section],
+    c,
+    d,
+    (x) => x.id,
+    (x) => (x.score ?? 0) < (c.score ?? 0),
+  );
+  return { ...v, inbox };
+}
+
+// The desk's view with your drops on it, in the order you made them.
+export function withDrops(v: QueueView, drops: readonly Drop[]): QueueView {
+  return drops.reduce((w, d) => (d.id.startsWith(NOTE) ? dropNote(w, d) : d.id.startsWith(ASK) ? dropAsk(w, d) : dropCard(w, d)), v);
 }

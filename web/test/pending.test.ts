@@ -1,8 +1,8 @@
 import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { placeNotes, type Note, type Standing } from "../../src/types.ts";
-import { settleNoteEdits, settleReviewerAsks, withNoteEdits, withReviewerAsks } from "../src/pending.ts";
+import { placeNotes, type Card, type Inquiry, type Note, type QueueView, type Standing } from "../../src/types.ts";
+import { settleNoteEdits, settleReviewerAsks, withDrops, withNoteEdits, withReviewerAsks } from "../src/pending.ts";
 
 const NOW = "2026-11-17T12:00:00.000Z";
 const note = (id: string, extra: Partial<Note> = {}): Note => ({
@@ -64,4 +64,29 @@ test("a reviewer change shows at once and drops once the review's requests have 
   assert.equal(settleReviewerAsks([user("Sam")], asks), asks);
   assert.deepEqual(settleReviewerAsks([user("kofi"), user("dana")], asks), {});
   assert.deepEqual(settleReviewerAsks([{ reviewer: "web", type: "team", codeowner: false }], { "@web": "asked" }), {});
+});
+
+test("a drop shows at once: the row where you let it go, in its section, among its kind", () => {
+  const card = (id: string, score: number) => ({ id, score }) as Card;
+  const ask = (id: string, at: string) => ({ id, at }) as Inquiry;
+  const v = {
+    inbox: { urgent: [card("a", 9), card("b", 8)], standard: [card("c", 6), card("d", 5)], fyi: [] },
+    inquiries: [ask("q1", "2026-11-17T09:00:00.000Z"), ask("q2", "2026-11-17T10:00:00.000Z")],
+    notes: placeNotes([note("n1"), note("n2", { at: "2026-11-17T11:00:00.000Z" }), note("n3", { section: "fyi" })], NOW),
+  } as unknown as QueueView;
+  const cards = (w: QueueView) => Object.fromEntries(Object.entries(w.inbox).map(([k, cs]) => [k, cs.map((c) => c.id)]));
+  assert.deepEqual(cards(withDrops(v, [{ id: "d", section: "urgent", after: "a", before: "b" }])), {
+    urgent: ["a", "d", "b"],
+    standard: ["c"],
+    fyi: [],
+  });
+  assert.equal(withDrops(v, [{ id: "d", section: "urgent", before: "a" }]).inbox.urgent[0]?.section, "urgent");
+  assert.deepEqual(cards(withDrops(v, [{ id: "a", section: "fyi" }])).fyi, ["a"], "no neighbours: where its score goes");
+  assert.deepEqual(
+    withDrops(v, [{ id: "ask:q2", section: "urgent", before: "ask:q1" }]).inquiries.map((q) => q.id),
+    ["q2", "q1"],
+  );
+  assert.equal(withDrops(v, [{ id: "ask:q2", section: "fyi" }]), v, "a question stays in Urgent");
+  const moved = withDrops(v, [{ id: "note:n2", section: "fyi", after: "note:n3" }]).notes;
+  assert.deepEqual([ids(moved.open), ids(moved.fyi)], [["n1"], ["n3", "n2"]]);
 });

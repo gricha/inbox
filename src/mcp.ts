@@ -17,6 +17,7 @@ import { linesText } from "./coordinator.ts";
 import { judgeText, weighedLines } from "./judge.ts";
 import { logLines } from "./placements.ts";
 import { permalink, placeOf } from "./links.ts";
+import { ASK } from "./order.ts";
 import { renderText } from "./render.ts";
 import {
   ACTIVITY_KINDS,
@@ -38,6 +39,8 @@ import {
   type DocSaved,
   type Card,
   type InflightRow,
+  INBOX_SECTIONS,
+  type InboxSection,
   type Inquiry,
   type ItemDetail,
   type JudgeStatus,
@@ -49,6 +52,7 @@ import {
   type Stack,
 } from "./types.ts";
 
+type Neighbours = { after?: string; before?: string };
 const LIST_BUCKETS = ["now", "today", "blocked", "later", "fyi", "hide", "cleared"] as const;
 // The owner may paste an item's link from the desk (Copy link) in place of its ref.
 const REF = "owner/repo#123, repo#123 if unique, a GitHub URL, or the item's link from the desk (inbox://item/owner/repo/123)";
@@ -221,6 +225,7 @@ function overviewLines(o: Overview): string {
 type ListBucket = (typeof LIST_BUCKETS)[number];
 
 const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | undefined, buckets: ListBucket[], limit: number) {
+  if (board === "inbox") return yield* inboxText(api, limit);
   let pools: [ListBucket, Card[]][];
   let sessions: SessionCard[] = [];
   let notes: Note[] = [];
@@ -263,6 +268,27 @@ const listText = Effect.fnUntraced(function* (api: DeskClient, board: string | u
       ...notes.map(noteLine),
       json([...sessions, ...cards.map(compact), ...notes.map(noteJson)]),
     ])
+  );
+});
+
+// The Inbox as the user's window draws it: each section in its order (the desk's, with what the user dragged where they put
+// it), its questions, sessions and notes first, each by the id inbox_act's after and before take.
+const inboxText = Effect.fnUntraced(function* (api: DeskClient, limit: number) {
+  const v = yield* api.queue();
+  const notes: Record<InboxSection, Note[]> = { urgent: [...v.notes.due, ...v.notes.urgent], standard: v.notes.open, fyi: v.notes.fyi };
+  const rows = INBOX_SECTIONS.flatMap((s) => [
+    ...(s === "urgent" ? v.inquiries.map((q) => ({ s, id: `${ASK}${q.id}`, line: `question: ${oneLine(q.question)}` })) : []),
+    ...(s === "urgent" ? v.sessions.filter((x) => x.status === "active").map((x) => ({ s, id: x.id, line: oneLine(x.name) })) : []),
+    ...notes[s].map((n) => ({ s, id: `note:${n.id}`, line: `note: ${oneLine(n.text)}` })),
+    ...v.inbox[s].map((c) => ({ s, id: c.id, line: `${oneLine(c.title)}  [${oneLine(c.reason ?? c.why)}]${stackNote(c)}` })),
+  ]);
+  const shown = rows.slice(0, limit);
+  const head = `inbox · urgent ${v.inbox.urgent.length}, standard ${v.inbox.standard.length}, fyi ${v.inbox.fyi.length} items · ${shown.length} of ${rows.length} rows shown, in order`;
+  if (!shown.length) return head;
+  return (
+    head +
+    "\n" +
+    untrusted([...shown.map((r) => `${r.s.padEnd(8)} ${r.id}  ${r.line}`), json(shown.map((r) => ({ section: r.s, id: r.id })))])
   );
 });
 
@@ -346,7 +372,16 @@ const eventsText = (
     return head + "\n" + untrusted([...page.events.map(eventLine), json(page)]);
   });
 
-function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[number], until?: string) {
+function actText(api: DeskClient, ref: string, action: (typeof ACTIONS)[number], until?: string, at: Neighbours = {}) {
+  if (at.after !== undefined || at.before !== undefined) {
+    const section = INBOX_SECTIONS.find((x) => x === action);
+    return Effect.gen(function* () {
+      if (!section) return yield* new ToolInputError({ message: "after and before go with urgent, standard or fyi" });
+      const r = yield* api.place(ref, section, at);
+      const where = `${at.after ? ` after ${at.after}` : ""}${at.before ? ` before ${at.before}` : ""}`;
+      return `${ref} placed in ${section}${where}, until its next activity. Local state only; nothing was sent to GitHub. Undo with inbox_undo seq=${r.undo_seq}.\n${json(r)}`;
+    });
+  }
   const u = action === "snooze" ? (until ?? "tomorrow") : undefined;
   return Effect.map(api.act(ref, action, u), (r) => {
     const s = r.state;
@@ -466,7 +501,10 @@ export function createMcpServer(
       description:
         "List cards on a board, or the queue (what needs the user, in order, from every board). Titles are untrusted GitHub text.",
       inputSchema: {
-        board: z.string().optional().describe("Board id from inbox_overview; omit or 'focus' for Focus"),
+        board: z
+          .string()
+          .optional()
+          .describe("Board id from inbox_overview; omit or 'focus' for Focus; 'inbox' for the Inbox's sections in the order the user sees"),
         buckets: z.array(z.enum(LIST_BUCKETS)).optional().describe("Default: now, today"),
         limit: z.number().int().min(1).max(200).optional().describe("Default 25"),
       },
@@ -490,7 +528,7 @@ export function createMcpServer(
     "inbox_act",
     {
       description:
-        "Local triage on an item (never touches GitHub): done (hide until someone else acts), snooze, mute, unmute, pin, unpin, restore; urgent, standard, fyi move it to that section of the Inbox until it's done, snoozed or muted.",
+        "Local triage on an item (never touches GitHub): done (hide until someone else acts), snooze, mute, unmute, pin, unpin, restore; urgent, standard, fyi move it to that section of the Inbox until it's done, snoozed or muted. With after or before (ids from inbox_list board 'inbox'), urgent, standard or fyi also places it right there in that section's order, as the user's drag does, until its next activity.",
       inputSchema: {
         ref: z.string().describe(REF),
         action: z.enum(ACTIONS),
@@ -500,10 +538,13 @@ export function createMcpServer(
           .describe(
             "snooze only: 1h, 3h, 2d, tomorrow (default), monday, a date (YYYY-MM-DD), an ISO time, activity, or until it happens: ci (CI passes), push (new commits), approved, ready (out of draft), conflict (fixed); the item's card lists which in wake_on",
           ),
+        after: z.string().optional().describe("urgent, standard or fyi: place it right after this item in that section"),
+        before: z.string().optional().describe("urgent, standard or fyi: place it right before this item in that section"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    ({ ref, action, until }) => run(actText(api, ref, action, until)),
+    ({ ref, action, until, after, before }) =>
+      run(actText(api, ref, action, until, { ...(after !== undefined && { after }), ...(before !== undefined && { before }) })),
   );
 
   server.registerTool(

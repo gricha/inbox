@@ -267,6 +267,7 @@ function state(id: string, patch: Partial<ItemState> = {}): ItemState {
     seen_at: null,
     inflight_at: null,
     section: null,
+    place: null,
     ...patch,
   };
 }
@@ -476,6 +477,8 @@ function route(api: FakeApi, method: string | undefined, url: URL, body: any): R
       const r = resolve(url.searchParams.get("id")!);
       return reply(r.status, r.body);
     }
+    case "POST /api/place":
+      return reply(200, { ok: true, undo_seq: 8 });
     case "POST /api/act": {
       const r = resolve(body.id);
       if (r.status !== 200) return reply(r.status, r.body);

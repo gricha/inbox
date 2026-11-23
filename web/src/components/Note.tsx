@@ -9,6 +9,7 @@ import { remindTime, TIMES } from "../view.ts";
 import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
 import { ProseBlocks } from "./Prose.tsx";
 import { ClockIcon, KindIcon, NoteGlyph, RowFacts } from "./RowIcons.tsx";
+import { Grip, press, type RowDrag } from "./Reorder.tsx";
 
 export const noteOf = (id: string) => `note:${id}`; // its row's id, as the right-click and the cursor read it
 
@@ -62,7 +63,7 @@ function NoteAction({
 
 // A note to yourself as a row: Note, its words, Done; when it reminds (or reminded) you where a PR's author goes. One an
 // automation raised says which, and its first button is the row's.
-export function NoteRow({ n, ctx }: { n: Note; ctx: NoteCtx }) {
+export function NoteRow({ n, ctx, drag }: { n: Note; ctx: NoteCtx; drag?: RowDrag | undefined }) {
   const id = noteOf(n.id);
   const later = !!n.remind_at && Date.parse(n.remind_at) > ctx.now;
   const kindIcon = (
@@ -99,14 +100,13 @@ export function NoteRow({ n, ctx }: { n: Note; ctx: NoteCtx }) {
   const chained = ctx.chains && steps.length > 0 ? ctx.chains : null;
   return (
     <>
-      <div className={cls("line memo", ctx.compact && "c-line", ctx.selected === id && "sel")} data-id={id}>
+      <div className={cls("line memo", ctx.compact && "c-line", ctx.selected === id && "sel")} data-id={id} {...drag}>
         <div className={cls("line-main line-row", ctx.compact && "c-row", chained && "has-chain")}>
+          {drag && <Grip />}
           <button
             type="button"
             className="row-main line-btn"
-            onMouseDown={(e) => {
-              e.preventDefault();
-            }}
+            {...press(drag)}
             onClick={() => {
               ctx.open(n);
             }}

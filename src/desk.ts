@@ -29,7 +29,7 @@ import {
 } from "./errors.ts";
 import type { Checkout } from "./checkout.ts";
 import { Automations, canOf } from "./automations.ts";
-import { Urgency } from "./urgency.ts";
+import { cardOrder, Urgency } from "./urgency.ts";
 import { asksOf, tagsOf } from "./tags.ts";
 import { Light } from "./light.ts";
 import { Attributions } from "./attribution.ts";
@@ -64,6 +64,7 @@ import {
 } from "./stage.ts";
 import { blockedOrder, dependencies, type DepFacts } from "./deps.ts";
 import { chains, loopThrough, NOTE, type Chains, type NodeState } from "./after.ts";
+import { arrange, ASK, askOrder, bare, rankAt, SECTION_WORD } from "./order.ts";
 import type {
   DocSaved,
   InlineAt,
@@ -144,6 +145,7 @@ import {
   INBOX_SECTIONS,
   isCoordinator,
   isSessionRef,
+  noteOrder,
   placeNotes,
   RANK,
   SECRET_SET,
@@ -249,6 +251,10 @@ import {
 const HOUR = 3_600_000;
 const ITEM_ACTIVITY = 8;
 const NO_CONTEXT: Context = { me: "", teams: [], affinity: {}, repo_prs: {}, orgs: {}, refreshed_at: "" };
+const dropPlace = (n: Note): Note => {
+  const { place: _, ...rest } = n;
+  return rest;
+};
 const stateOf = (s: StateRow): ItemState => {
   const { snoozed_at: _, acked_at: __, ...state } = s;
   return state;
@@ -2345,7 +2351,10 @@ export class Desk {
         }
       }
       const view: QueueView = {
-        inquiries: this.inquiries().filter((q) => !q.answer),
+        inquiries: arrange(
+          this.inquiries().filter((q) => !q.answer),
+          askOrder,
+        ),
         notes: this.notesView(snap),
         sessions: this.sessions.cards(),
         sections,
@@ -3427,7 +3436,12 @@ export class Desk {
           return yield* new BadRequest({ message: `unknown action "${action as string}"` }); // reachable: the HTTP body isn't checked against Action
       }
       // Where you moved it holds while it's on your Inbox; off it, it comes back where the desk puts it.
-      if (action === "done" || action === "snooze" || action === "mute") s.section = null;
+      if (action === "done" || action === "snooze" || action === "mute") {
+        s.section = null;
+        s.place = null;
+      }
+      // A move by its words ("Move to FYI") goes where the desk puts it in that section.
+      if (action === "urgent" || action === "standard" || action === "fyi") s.place = null;
       // An automation's pin was its opinion; once you deal with the item it's yours, and undo brings the pin back.
       if (["done", "snooze", "mute", "inflight"].includes(action) && s.pinned && this.store.lastPin(id)?.agent?.startsWith("automation:"))
         s.pinned = false;
@@ -3439,6 +3453,109 @@ export class Desk {
       this.changed();
       if (action === "inflight") this.coordinator.wake(id, "handed off");
       return { state: stateOf(s), undo_seq: seq };
+    });
+  }
+
+  // POST /api/place, and inbox_act's moves with after or before: a row (an item, "note:<id>" or "ask:<id>") put in a section
+  // between the rows of its kind you dropped it by (docs/api.md → Your order). Neither named: a plain move.
+  place(
+    ref: string,
+    section: InboxSection,
+    at: { after?: string; before?: string },
+    agent?: string,
+  ): Effect.Effect<{ undo_seq: number }, ActError> {
+    return Effect.gen({ self: this }, function* () {
+      const now = this.now().toISOString();
+      if (ref.startsWith(NOTE)) return yield* this.placeNote(ref.slice(NOTE.length), section, at, now);
+      if (ref.startsWith(ASK)) return yield* this.placeAsk(ref.slice(ASK.length), section, at, now);
+      if (isSessionRef(ref)) return yield* new Conflict({ message: "a session stays where the desk puts it; done or snooze it instead" });
+      const id = yield* this.resolve(ref);
+      const after = at.after === undefined ? undefined : yield* this.resolve(at.after);
+      const before = at.before === undefined ? undefined : yield* this.resolve(at.before);
+      const view = yield* this.queue();
+      const snap = this.snapshot();
+      const entry = snap.entries.get(id)!;
+      if (entry.inflight) return yield* new Conflict({ message: `${id} is in Merging, not on the Inbox` });
+      const from = INBOX_SECTIONS.find((x) => view.inbox[x].some((c) => c.id === id));
+      if (!from) return yield* new Conflict({ message: `${id} isn't on the Inbox` });
+      const r = rankAt(view.inbox[section], cardOrder(snap, section), id, after, before);
+      if (r === null) return yield* new BadRequest({ message: `${after ?? before} isn't in ${SECTION_WORD[section]} on the Inbox` });
+      const was = this.store.state(id);
+      const s: StateRow = {
+        ...was,
+        section: from === section ? was.section : section,
+        place: r ? { section, ...r, at: now, seen: entry.activityAt } : null,
+      };
+      this.store.putState(s);
+      const auto = agent?.startsWith("automation:") ? agent : undefined;
+      const undo_seq = this.store.logAction(id, section, was, now, auto);
+      if (!auto) for (const k of [`sorted:${id}`, `acted:${id}`]) this.store.unset(k);
+      this.changed();
+      return { undo_seq };
+    });
+  }
+
+  // A note dragged: among the notes of the section it lands in. A due one moved out of Urgent drops its reminder, as a move does.
+  private placeNote(
+    id: string,
+    section: InboxSection,
+    at: { after?: string; before?: string },
+    now: string,
+  ): Effect.Effect<{ undo_seq: number }, NotFound | BadRequest | Conflict> {
+    return Effect.gen({ self: this }, function* () {
+      const all = this.notes();
+      const n = all.find((x) => x.id === id);
+      if (!n) return yield* new NotFound({ message: `no note "${id}"` });
+      if (n.remind_at && n.remind_at > now) return yield* new Conflict({ message: "that note waits for its reminder in the Archive" });
+      const v = placeNotes(all, now);
+      const due = !!n.remind_at && section === "urgent";
+      const list = due ? v.due : { urgent: v.urgent, standard: v.open, fyi: v.fyi }[section];
+      const r = rankAt(list, noteOrder(section, due), id, bare(at.after, NOTE), bare(at.before, NOTE));
+      if (r === null) return yield* new BadRequest({ message: `that isn't a note in ${SECTION_WORD[section]}` });
+      const { place: _, ...rest } = n;
+      const next: Note = {
+        ...rest,
+        ...(!due && { remind_at: null, reminded_at: null }),
+        section,
+        ...(r && { place: { section, ...r, at: now } }),
+      };
+      this.store.set(
+        "notes",
+        all.map((x) => (x.id === id ? next : x)),
+      );
+      this.changed();
+      return { undo_seq: 0 };
+    });
+  }
+
+  // A question dragged among the questions: they lead Urgent until you answer them.
+  private placeAsk(
+    id: string,
+    section: InboxSection,
+    at: { after?: string; before?: string },
+    now: string,
+  ): Effect.Effect<{ undo_seq: number }, NotFound | BadRequest | Conflict> {
+    return Effect.gen({ self: this }, function* () {
+      if (section !== "urgent") return yield* new Conflict({ message: "a question stays in Urgent until you answer it" });
+      const all = this.inquiries();
+      if (!all.some((q) => q.id === id && !q.answer)) return yield* new NotFound({ message: `no open question "${id}"` });
+      const open = arrange(
+        all.filter((q) => !q.answer),
+        askOrder,
+      );
+      const r = rankAt(open, askOrder, id, bare(at.after, ASK), bare(at.before, ASK));
+      if (r === null) return yield* new BadRequest({ message: "that isn't a question waiting in Urgent" });
+      this.store.set(
+        "inquiries",
+        all.map((q) => {
+          if (q.id !== id) return q;
+          if (r) return Object.assign(q, { place: { section, ...r, at: now } });
+          delete q.place;
+          return q;
+        }),
+      );
+      this.changed();
+      return { undo_seq: 0 };
     });
   }
 
@@ -4470,8 +4587,11 @@ export class Desk {
       const old = id ? this.notes().find((n) => n.id === id) : undefined;
       if (id && !old) return yield* new NotFound({ message: `no note "${id}"` });
       const section = put ?? old?.section;
-      const note: Note = old
-        ? { ...old, text, remind_at, reminded_at: remind_at === old.remind_at ? old.reminded_at : null, ...(section && { section }) }
+      // Moved or reminded, it goes where the desk puts notes; only new words keep where you dragged it.
+      const same = (section ?? "standard") === (old?.section ?? "standard") && remind_at === old?.remind_at;
+      const kept = old && (same ? old : dropPlace(old));
+      const note: Note = kept
+        ? { ...kept, text, remind_at, reminded_at: remind_at === kept.remind_at ? kept.reminded_at : null, ...(section && { section }) }
         : { id: randomBytes(4).toString("hex"), at: now.toISOString(), text, remind_at, reminded_at: null, ...(section && { section }) };
       this.store.set("notes", old ? this.notes().map((n) => (n.id === note.id ? note : n)) : [...this.notes(), note]);
       this.changed();
