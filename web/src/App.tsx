@@ -1408,7 +1408,7 @@ export function App() {
       }
       const before = actedRef.current[c.id] ?? null;
       backed.show(c.id, true);
-      markActed(c.id, null);
+      markActed(c.id, { what: "Back to desk", where: "queue" });
       return api.act(c.id, "takeback").pipe(
         Effect.match({
           onSuccess: () => {

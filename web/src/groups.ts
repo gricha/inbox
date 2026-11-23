@@ -21,7 +21,7 @@ export interface Ids {
 // What a write that finished your part did, and where the item went: the Archive, or Merging.
 export interface Acted {
   what: string;
-  where: "archive" | "inflight";
+  where: "archive" | "inflight" | "queue";
   sending?: boolean;
 }
 

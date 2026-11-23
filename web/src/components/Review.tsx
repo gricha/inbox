@@ -107,6 +107,13 @@ interface Draft {
   busy: boolean;
 }
 
+// Where a write you made sent it, as the review's mark links it.
+const PLACE: Record<Acted["where"], { href: string; said: string }> = {
+  archive: { href: "#/archive", said: "in Archive" },
+  inflight: { href: "#/inflight", said: "in Merging" },
+  queue: { href: "#/", said: "on your Inbox" },
+};
+
 interface Sent {
   at: InlineAt;
   thread: string | null;
@@ -955,7 +962,7 @@ export function Review({
           <span className="rv-acted-dot" aria-hidden="true">
             ·
           </span>
-          <a href={acted.where === "inflight" ? "#/inflight" : "#/archive"}>{acted.where === "inflight" ? "in Merging" : "in Archive"}</a>
+          <a href={PLACE[acted.where].href}>{PLACE[acted.where].said}</a>
           {acted.sending && <span className="busy" aria-label="sending" />}
         </p>
       )}
@@ -1001,7 +1008,8 @@ export function Review({
         />
       )}
       {/* While you owe replies, Reply is the one filled button. */}
-      {!(acted?.where === "inflight" && !card.inflight) && (
+      {/* Hand off or Back to desk once the review's read has where you sent it. */}
+      {!(acted?.where === "inflight" && !card.inflight) && !(acted?.where === "queue" && card.inflight) && (
         <HandButton card={card} run={run} primary={card.cta !== "reply" && !asking && !acted} />
       )}
       <span className="more-wrap">
