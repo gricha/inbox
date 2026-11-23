@@ -16,7 +16,7 @@ import { Desk } from "../src/desk.ts";
 import { judgeText } from "../src/judge.ts";
 import { createMcpServer } from "../src/mcp.ts";
 import { createApp } from "../src/server.ts";
-import type { Automation, McpView } from "../src/types.ts";
+import { ACTIVITY_KINDS, VERBS, type Automation, type McpView } from "../src/types.ts";
 import { fakeDecisions } from "./helpers/decisions.ts";
 import { idle, myPr, reviewAsk, setup, teamPing, UNSCORED } from "./helpers/desk.ts";
 import { unixOnly } from "./helpers/platform.ts";
@@ -25,9 +25,6 @@ import { run as runFx, runSync } from "./helpers/run.ts";
 import { until } from "./helpers/wait.ts";
 
 const DESK = { origin: "http://localhost:47823", "sec-fetch-site": "same-origin" };
-// The event log's kinds, as an automation may name them.
-const KINDS =
-  "new, review_requested, request_removed, reviewed, pushed, ci, commented, merged, closed, reopened, mentioned, assigned, conflict, resolved, unresolved, blocked, unblocked";
 const WARDEN = {
   name: "Warden issues",
   schedule: "weekdays 09:00",
@@ -437,25 +434,20 @@ test("an agent writes or changes one and it's on as yours is; only you delete it
   for (const [bad, error] of [
     [{ schedule: "9am" }, 'schedule: write it as "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30" or "weekdays hourly"'],
     [{ prompt: " " }, "the instruction is empty"],
-    [
-      { name: 3 },
-      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, type?, rules: [{ when?, ask?, do }]?, on? }",
-    ],
-    [
-      { can: "mute" },
-      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, type?, rules: [{ when?, ask?, do }]?, on? }",
-    ],
-    [
-      { rule: "mute" },
-      "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, type?, rules: [{ when?, ask?, do }]?, on? }",
-    ],
-    [{ decide: "guess" }, 'decide: "guess" isn\'t one of rule, ask, agent'],
+    // A wrong shape is refused in Effect's words, where it is.
+    [{ name: 3 }, 'Expected string\n  at ["name"]'],
+    [{ can: "mute" }, 'Expected array | undefined\n  at ["can"]'],
+    [{ rule: "mute" }, 'Expected object | undefined\n  at ["rule"]'],
+    [{ decide: "guess" }, 'Expected "rule" | "ask" | "agent"\n  at ["decide"]'],
+    [{ colour: "red" }, 'Expected no excess property\n  at ["colour"]'],
+    [{ buttons: [{ label: "Reply", do: "ask" }] }, 'Missing key\n  at ["buttons"][0]["prompt"]'],
+    [{ buttons: [{ label: "Open", do: "open", prompt: "x" }] }, 'Expected no excess property\n  at ["buttons"][0]["prompt"]'],
     [{ decide: "rule" }, "a rule on a schedule needs when: the items it's about"],
     [{ decide: "ask" }, "a question on a schedule needs when: the items it's about"],
     [{ decide: "rule", when: "author.bot" }, "a rule needs its action, rule: { do, why, until? }"],
     [
       { decide: "rule", when: "author.bot", rule: { do: "now", why: "x" } },
-      'rule: "now" isn\'t one of add, today, later, fyi, hide, snooze, done, mute',
+      `Expected ${VERBS.map((v) => `"${v}"`).join(" | ")}\n  at ["rule"]["do"]`,
     ],
     [{ decide: "rule", when: "author.bot", rule: { do: "mute", why: "x" } }, "rule: it may not mute; add mute to can"],
     [{ decide: "rule", when: "author.bot", rule: { do: "add", why: " " } }, "the why is empty"],
@@ -465,10 +457,10 @@ test("an agent writes or changes one and it's on as yours is; only you delete it
     ],
     [{ when: "author.bot", rule: { do: "add", why: "x" } }, "rule goes with decide rule: a question or an agent says what to do itself"],
     [{ events: ["ci"] }, "give it a schedule or events, not both"],
-    [{ schedule: "", events: ["deployed"] }, `events: "deployed" isn't one of ${KINDS}`],
+    [{ schedule: "", events: ["deployed"] }, `Expected ${ACTIVITY_KINDS.map((k) => `"${k}"`).join(" | ")}\n  at ["events"][0]`],
     [{ schedule: "" }, 'schedule: write it as "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30" or "weekdays hourly"'],
     [{ when: "me.nope" }, 'when: unknown field "me.nope"'],
-    [{ can: ["now"] }, 'can: "now" isn\'t one of add, today, later, fyi, hide, snooze, done, mute'],
+    [{ can: ["now"] }, `Expected ${VERBS.map((v) => `"${v}"`).join(" | ")}\n  at ["can"][0]`],
     [{ name: " " }, "the name is empty"],
   ] as const) {
     const res = await req("PUT", "/api/automations/warden", body(bad), DESK);
@@ -859,7 +851,7 @@ test("one with events runs when they land: once per sync pass, for the items the
     author_bot: false,
     at: new Date(NOW.getTime() + minutes * 60_000).toISOString(),
   });
-  const { schedule: _, ...watch } = { ...WARDEN, name: "CI and comments", events: ["commented", "ci"] };
+  const { schedule: _, ...watch } = { ...WARDEN, name: "CI and comments", events: ["commented" as const, "ci" as const] };
   const a = runSync(t.desk.automations.set("watch", watch, true));
   assert.deepEqual([a.schedule, a.events, a.on], ["", ["ci", "commented"], true]);
   const row = t.desk.automations.view()[0]!;
@@ -1334,7 +1326,13 @@ test("with a decision model's key, a question goes to it instead of Claude: one 
   await runFx(t.desk.sync());
   const card = (id: string) => runSync(t.desk.item(id)).card;
   const prompt = "A ping to my whole team that isn't about the loader is FYI. One that is, I want today.";
-  const pings = { name: "Team pings", schedule: "weekdays hourly", when: "me.requested && !me.requested_direct", decide: "ask", prompt };
+  const pings = {
+    name: "Team pings",
+    schedule: "weekdays hourly",
+    when: "me.requested && !me.requested_direct",
+    decide: "ask" as const,
+    prompt,
+  };
   const a = runSync(t.desk.automations.set("pings", { ...pings, can: ["today", "fyi"] }, true));
   const run = await t.desk.automations.run(a, "now").p;
 
@@ -1419,7 +1417,7 @@ test("a rule on events reads on past its batch: no run again without events, you
   const t = await setup([myPr(1, { ci: "green" }), myPr(2, { ci: "green" })], { settings: { "policy.judge": false, "notify.quiet": "" } });
   c.after(t.cleanup);
   await runFx(t.desk.sync());
-  const rule = { events: ["ci"], decide: "rule" };
+  const rule = { events: ["ci" as const], decide: "rule" as const };
   runSync(
     t.desk.automations.set(
       "red",
@@ -1512,8 +1510,8 @@ test("a sort holds only while its automation is on and may sort there, and only 
   await runFx(t.desk.sync());
   const card = (id: string) => runSync(t.desk.item(id)).card;
   const ruled = card("acme/api#4").bucket;
-  const base = { name: "Sorter", schedule: "daily 09:00", when: "true", decide: "rule" };
-  const hide = { ...base, rule: { do: "hide", why: "noise" }, can: ["hide"] };
+  const base = { name: "Sorter", schedule: "daily 09:00", when: "true", decide: "rule" as const };
+  const hide = { ...base, rule: { do: "hide" as const, why: "noise" }, can: ["hide" as const] };
   const a = runSync(t.desk.automations.set("s", hide, true));
   await t.desk.automations.run(a, "now").p;
   assert.equal(card("acme/api#4").bucket, "hide");
@@ -1659,7 +1657,14 @@ test("a scheduled question asks about what's new to it: an item it was asked abo
   c.after(t.cleanup);
   await runFx(t.desk.sync());
   t.setNow(new Date(2026, 10, 4, 10, 30));
-  const q = { name: "Pings", schedule: "daily hourly", when: "me.requested", decide: "ask", prompt: "Hide the noise.", can: ["hide"] };
+  const q = {
+    name: "Pings",
+    schedule: "daily hourly",
+    when: "me.requested",
+    decide: "ask" as const,
+    prompt: "Hide the noise.",
+    can: ["hide" as const],
+  };
   runSync(t.desk.automations.set("p", q, true));
   t.desk.store.set("automations", [{ ...t.desk.automations.all()[0]!, updated_at: new Date(2026, 10, 4, 9, 0).toISOString() }]);
   const hour = async (h: number) => {
@@ -1717,7 +1722,14 @@ test("what goes to the decision model is what a decision needs: not the AI revie
   const both = t.desk.automations.lines("acme/api#4")!.join("\n");
   assert.match(both, /AI pre-flight review/, "Claude's question still reads them");
   assert.match(both, /in their areas/);
-  const q = { name: "Pings", schedule: "daily 09:00", when: "true", decide: "ask", prompt: "Hide the noise.", can: ["hide"] };
+  const q = {
+    name: "Pings",
+    schedule: "daily 09:00",
+    when: "true",
+    decide: "ask" as const,
+    prompt: "Hide the noise.",
+    can: ["hide" as const],
+  };
   await t.desk.automations.run(runSync(t.desk.automations.set("p", q, true)), "now").p;
   const sent = api.calls[0]!.body.state!.item!.join("\n");
   assert.doesNotMatch(sent, /AI pre-flight|Swaps the token store|in their areas|src\/auth/);
@@ -1742,7 +1754,14 @@ test("a question waiting on its model asks again at once when you edit it or set
   });
   c.after(t.cleanup);
   await runFx(t.desk.sync());
-  const q = { name: "Pings", schedule: "daily 09:00", when: "true", decide: "ask", prompt: "Hide the noise.", can: ["hide"] };
+  const q = {
+    name: "Pings",
+    schedule: "daily 09:00",
+    when: "true",
+    decide: "ask" as const,
+    prompt: "Hide the noise.",
+    can: ["hide" as const],
+  };
   const a = runSync(t.desk.automations.set("p", q, true));
   await t.desk.automations.run(a, "now").p;
   const waiting = () => t.desk.automations.view()[0]!.waiting;
@@ -1981,7 +2000,14 @@ test("a scheduled question your agent answered while the decision model was down
   });
   c.after(t.cleanup);
   await runFx(t.desk.sync());
-  const q = { name: "Pings", schedule: "daily 09:00", when: "true", decide: "ask", prompt: "Hide the noise.", can: ["hide"] };
+  const q = {
+    name: "Pings",
+    schedule: "daily 09:00",
+    when: "true",
+    decide: "ask" as const,
+    prompt: "Hide the noise.",
+    can: ["hide" as const],
+  };
   const a = runSync(t.desk.automations.set("p", q, true));
   fake.answer("", []);
   const fell = await t.desk.automations.run(a, "schedule").p;
@@ -2090,8 +2116,7 @@ test("an automation's notes carry a markdown body, an https link and its buttons
     refused({ mcp: undefined, buttons: [{ label: "Open", do: "open" }] }),
     /buttons: they go on the notes an automation with mcp raises/,
   );
-  assert.match(refused({ buttons: [{ label: "Reply", do: "ask" }] }), /"Reply" asks your agent: its prompt/);
-  assert.match(refused({ buttons: [{ label: "Open", do: "open", prompt: "x" }] }), /opens the note's link: no prompt/);
+  assert.match(refused({ buttons: [{ label: "Reply", do: "ask", prompt: " " }] }), /"Reply" asks your agent: its prompt/);
   assert.match(refused({ buttons: [{ label: " ", do: "open" }] }), /a label of up to 24 characters/);
   assert.match(refused({ buttons: Array.from({ length: 4 }, () => ({ label: "Open", do: "open" })) }), /up to 3/);
   const buttons = [

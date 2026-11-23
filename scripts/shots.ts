@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium, type Browser, type Locator, type Page, type Request as Sent, type Route } from "playwright-core";
 import { siGmail } from "simple-icons";
+import { AUTOMATION_BODY_KEYS } from "../src/automation-body.ts";
 import { field, isRecord, str, strings } from "../src/narrow.ts";
 import { GITHUB_CRITERIA } from "../src/connectors/github-criteria.ts";
 import { colorsOf, tokensFrom } from "../src/omarchy.ts";
@@ -509,6 +510,9 @@ const automationRows = (page: Page) =>
       on: r.querySelector(".switch")?.checked ?? null,
       review: r.querySelector(".s-cta")?.getAttribute("href") ?? null,
     }))`);
+// Puts an automation back as GET /api/automations had it (`view`, its JSON): its body's keys alone, as the desk takes them.
+const putBack = (id: string, view: string) =>
+  `((a) => fetch("/api/automations/${id}", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(Object.fromEntries(${JSON.stringify(AUTOMATION_BODY_KEYS)}.map((k) => [k, a[k]]))) }))(${view})`;
 // An automation's view, read off the page: its line, its instruction, its facts as "label: words", its buttons, each run's
 // head and what came of each item of the latest.
 const automationFacts = (page: Page) =>
@@ -4008,9 +4012,7 @@ const SHOTS: Shot[] = [
       if (JSON.stringify(shown) !== JSON.stringify(want))
         failures.push(`settings-automations-type-save: before the desk answers, the view reads ${JSON.stringify(shown)}`);
       const old = JSON.parse(was) as Record<string, unknown>;
-      const changed = ["mcp", "buttons", "icon", "type", "schedule", "prompt", "on"].filter(
-        (k) => JSON.stringify(sent[k]) !== JSON.stringify(old[k]),
-      );
+      const changed = AUTOMATION_BODY_KEYS.filter((k) => k !== "rules").filter((k) => JSON.stringify(sent[k]) !== JSON.stringify(old[k]));
       const rules = [{ ask: "Is it a newsletter or a promotion?", do: "fyi" }, ...(old.rules as object[])];
       const sorted = (v: unknown) =>
         JSON.stringify(v, (_, x: unknown) =>
@@ -4028,9 +4030,7 @@ const SHOTS: Shot[] = [
       if (JSON.stringify([back.buttons, back.icon, back.mcp]) !== JSON.stringify([old.buttons, old.icon, old.mcp]))
         failures.push(`settings-automations-type-save: read back, the desk has ${JSON.stringify(back)}`);
       await unroute(page);
-      await page.evaluate(
-        `((a) => fetch("/api/automations/gmail", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(a) }))(${was})`,
-      );
+      await page.evaluate(putBack("gmail", was));
       await page.reload();
       await page.locator(".s-view:not([hidden]) .au-facts").waitFor();
     },
@@ -5594,9 +5594,7 @@ const SHOTS: Shot[] = [
       if (said.line !== "When new commits are pushed or CI changes · on" || !said.facts[1]?.includes("snooze until tomorrow, saying"))
         failures.push(`settings-automations-edit-rule: saved, the view reads ${JSON.stringify(said)}`);
       // As it was, for the shots after this one.
-      await page.evaluate(
-        `((a) => fetch("/api/automations/my-red-ci", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(a) }))(${was})`,
-      );
+      await page.evaluate(putBack("my-red-ci", was));
       await page.reload();
       await page.locator(".s-view .au-facts").waitFor();
       form = await edit();

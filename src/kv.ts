@@ -1,6 +1,7 @@
 // What the desk keeps in kv (`Store.read()`, `Store.prefixed()`), checked as it's read back: a value in a shape it no longer
 // has reads as absent.
 import { Schema } from "effect";
+import { NoteButtonSchema } from "./automation-body.ts";
 import { schemaOf } from "./narrow.ts";
 import {
   BUCKETS,
@@ -305,11 +306,7 @@ export const KeptInquirySchema = Schema.Struct({
   ),
   place: opt(PlaceSchema),
 });
-export const NoteButtonSchema = Schema.Struct({
-  label: Schema.String,
-  do: Schema.Literals(["open", "ask"]),
-  prompt: opt(Schema.String),
-});
+
 export const NoteSchema = schemaOf<Omit<Note, "waiting" | "facts">>()(
   Schema.Struct({
     id: Schema.String,

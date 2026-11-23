@@ -245,3 +245,17 @@ export function githubTip(gh: { teams: readonly string[]; rate_limit: { remainin
   if (gh.rate_limit) said.push(`${gh.rate_limit.remaining.toLocaleString()} GitHub requests left until ${when(gh.rate_limit.reset_at)}.`);
   return said.join(" ");
 }
+
+// A new automation's or criterion's id: its name's slug, made free with -2, -3… so it never lands on one you have; "" for a
+// name with no letters or digits.
+export function freeId(name: string, taken: readonly string[]): string {
+  const base = name
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "")
+    .slice(0, 40);
+  if (!base) return "";
+  let id = base;
+  for (let n = 2; taken.includes(id); n++) id = `${base.slice(0, 36)}-${n}`;
+  return id;
+}

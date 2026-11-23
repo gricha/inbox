@@ -13,6 +13,7 @@ import { saveDoc } from "./doc.ts";
 import { fsError } from "./errors.ts";
 import { deskHome } from "./home.ts";
 import { ICON_FORMAT } from "./icons.ts";
+import { LIMITS } from "./automation-body.ts";
 import { linesText } from "./coordinator.ts";
 import { judgeText, weighedLines } from "./judge.ts";
 import { logLines } from "./placements.ts";
@@ -52,6 +53,8 @@ import {
   type SessionCard,
   type Stack,
 } from "./types.ts";
+
+const BUTTON_LABEL = z.string().min(1).max(LIMITS.label).describe('What it says: "Open in Gmail", "Draft a reply"');
 
 type Neighbours = { after?: string; before?: string };
 const LIST_BUCKETS = ["now", "today", "blocked", "later", "fyi", "hide", "cleared"] as const;
@@ -908,31 +911,34 @@ export function createMcpServer(
       inputSchema: {
         action: z.enum(["list", "set", "run"]),
         id: z.string().optional().describe('set and run: its id, lowercase letters, digits and -: "warden-issues"'),
-        name: z.string().max(80).optional().describe("set: what the owner calls it"),
+        name: z.string().max(LIMITS.name).optional().describe("set: what the owner calls it"),
         schedule: z.string().optional().describe('set: "daily 09:00", "weekdays 09:00,13:00", "mon,thu 17:30", "weekdays hourly"'),
         events: z.array(z.enum(ACTIVITY_KINDS)).optional().describe("set, in place of schedule: the kinds of event it runs on"),
-        prompt: z.string().max(8000).optional().describe("set: the instruction, in the owner's words"),
+        prompt: z.string().max(LIMITS.prompt).optional().describe("set: the instruction, in the owner's words"),
         when: z.string().optional().describe("set: its check, an expression over the rules' fields; left out: none"),
         decide: z.enum(WAYS).optional().describe("set: how it decides; left out: agent"),
         rule: z
-          .object({ do: z.enum(VERBS), why: z.string().max(300), until: z.string().optional() })
+          .object({ do: z.enum(VERBS), why: z.string().max(LIMITS.why), until: z.string().optional() })
           .optional()
           .describe("set, with decide rule: what each item gets; do must be in can, until is a snooze's (tomorrow when left out)"),
         can: z.array(z.enum(VERBS)).optional().describe('set: what it may do with an item; left out: ["add"]'),
         mcp: z
-          .array(z.string().max(100))
-          .max(10)
+          .array(z.string().max(LIMITS.server))
+          .max(LIMITS.servers)
           .optional()
           .describe("set, with decide agent: the owner's MCP servers its runs get, by name; left out: none named"),
         buttons: z
           .array(
-            z.object({
-              label: z.string().min(1).max(24).describe('What it says: "Open in Gmail", "Draft a reply"'),
-              do: z.enum(["open", "ask"]).describe("open: the note's url; ask: the owner's agent, with prompt"),
-              prompt: z.string().max(1000).optional().describe("ask's: what the agent is asked about the note"),
-            }),
+            z.discriminatedUnion("do", [
+              z.object({ label: BUTTON_LABEL, do: z.literal("open").describe("Opens the note's url") }),
+              z.object({
+                label: BUTTON_LABEL,
+                do: z.literal("ask").describe("Asks the owner's agent prompt"),
+                prompt: z.string().max(LIMITS.ask).describe("What the agent is asked about the note"),
+              }),
+            ]),
           )
-          .max(3)
+          .max(LIMITS.buttons)
           .optional()
           .describe("set, with mcp: the buttons on its notes; left out: Open, on a note with a url"),
         icon: z
@@ -941,54 +947,44 @@ export function createMcpServer(
           .describe(
             'set, with mcp: its notes\' icon, a Lucide name ("receipt") or brand:<Simple Icons slug> ("brand:gmail"); left out: a note\'s',
           ),
-        type: z.string().max(4000).optional().describe("set, with mcp: TypeScript for each note's fields; left out: none, unchecked"),
+        type: z
+          .string()
+          .max(LIMITS.type)
+          .optional()
+          .describe("set, with mcp: TypeScript for each note's fields; left out: none, unchecked"),
         rules: z
           .array(
             z.object({
               when: z.string().optional().describe("An expression over item.<field>: \"item.kind == 'statement'\""),
               ask: z
                 .string()
-                .max(1000)
+                .max(LIMITS.ask)
                 .optional()
                 .describe("A yes-or-no about the note, for a light model; with when, only of what it passes"),
               do: z.enum(ITEM_DOES).describe("What a yes does: drop it, or its section"),
             }),
           )
-          .max(10)
+          .max(LIMITS.rules)
           .optional()
           .describe("set, with type: rules on its notes, first yes decides; left out: none"),
         on: z.boolean().optional().describe("set: false saves it off; left out: on, or as it was"),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    ({ action, id, name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, icon, type, rules, on }) =>
+    ({ action, id, ...body }) =>
       run(
         Effect.gen(function* () {
           if (action === "list") return automationsText(yield* api.automations());
           if (!id) return yield* new ToolInputError({ message: `${action} needs id` });
           if (action === "run") return (yield* api.runAutomation(id), `running ${id}; its result shows in Settings`);
-          if (name === undefined || (prompt === undefined && decide !== "rule") || (schedule === undefined && !events?.length))
+          const { name } = body;
+          if (
+            name === undefined ||
+            (body.prompt === undefined && body.decide !== "rule") ||
+            (body.schedule === undefined && !body.events?.length)
+          )
             return yield* new ToolInputError({ message: "set needs id, name, prompt (but for a rule) and a schedule or events" });
-          const { automation: a } = yield* api.setAutomation(id, {
-            name,
-            schedule,
-            events,
-            prompt,
-            when,
-            decide,
-            rule,
-            can,
-            mcp,
-            buttons: buttons?.map((b) => ({ label: b.label, do: b.do, ...(b.prompt !== undefined && { prompt: b.prompt }) })),
-            icon,
-            type,
-            rules: rules?.map((r) => ({
-              do: r.do,
-              ...(r.when !== undefined && { when: r.when }),
-              ...(r.ask !== undefined && { ask: r.ask }),
-            })),
-            on,
-          });
+          const { automation: a } = yield* api.setAutomation(id, { ...body, name });
           const starts = startsOn(a);
           return a.on ? `saved ${a.id}; it's on, ${starts}` : `saved ${a.id} (${starts}); it's off`;
         }),

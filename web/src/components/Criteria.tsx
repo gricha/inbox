@@ -5,7 +5,7 @@ import { Fragment, useCallback, useState, type KeyboardEvent } from "react";
 import type { CriteriaView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed } from "../keyed.ts";
-import { ago, aiName, MOD } from "../format.ts";
+import { ago, aiName, freeId, MOD } from "../format.ts";
 import { AskChange } from "./AskChange.tsx";
 import { changeAsk } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
@@ -18,13 +18,6 @@ interface Draft {
   ask: string;
   urgent: boolean;
 }
-
-const slug = (s: string) =>
-  s
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-+|-+$/g, "")
-    .slice(0, 40);
 
 // What it says yes to, in a line: the plugin's own words, else its question, else its rule.
 const whatOf = (c: Crit) => (c.help ?? (c.ask ? `Asks: ${c.ask}` : `When ${c.when ?? ""}`)).replace(/\.$/, "");
@@ -105,8 +98,7 @@ export function Criteria({
     });
   };
   const save = (d: Draft) => {
-    let id = d.id ?? slug(d.name);
-    for (let n = 2; !d.id && view?.criteria.some((c) => c.id === id); n++) id = `${slug(d.name).slice(0, 36)}-${n}`;
+    const id = d.id ?? freeId(d.name, view?.criteria.map((c) => c.id) ?? []);
     const body = { name: d.name, when: d.when, ask: d.ask, urgent: d.urgent };
     write(api.setCriterion(id, body), d.id ? `Saved ${d.name}` : `Added ${d.name}`, () => {
       setDraft(null);

@@ -48,9 +48,10 @@ import { fetchIssue, findClone, generateIssueReview } from "./issue.ts";
 import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
 import { CHUNK_FIELDS, FIELDS } from "./signals.ts";
+import { decodeAutomationBody } from "./automation-body.ts";
 import { typeCheck } from "./automations.ts";
 import { field as fieldOf, int as intOf, isRecord, messageOf, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
-import { ACTIONS, GITHUB_ACTIONS, INBOX_SECTIONS, type AskLines, type InlineAt, type NoteButton, type RemoteView } from "./types.ts";
+import { ACTIONS, GITHUB_ACTIONS, INBOX_SECTIONS, type AskLines, type InlineAt, type RemoteView } from "./types.ts";
 
 const VERSION = stringOf(fieldOf(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")), "version")) ?? "";
 export const DEFAULT_PORT = 47823;
@@ -253,18 +254,6 @@ function inlineAtOf(b: Record<string, unknown>): InlineAt | null {
   if (!isRecord(start)) return null;
   const { line: from, side: was } = start;
   return line(from) && side(was) ? { path: file, line: at, side: on, start: { line: from, side: was } } : null;
-}
-
-// An automation's buttons as sent: each { label, do: open|ask, prompt? }; anything else, null.
-function noteButtons(v: unknown): NoteButton[] | null {
-  if (!Array.isArray(v)) return null;
-  const out: NoteButton[] = [];
-  for (const x of v) {
-    if (!isRecord(x) || typeof x.label !== "string" || (x.do !== "open" && x.do !== "ask")) return null;
-    if (x.prompt !== undefined && typeof x.prompt !== "string") return null;
-    out.push({ label: x.label, do: x.do, ...(x.prompt !== undefined && { prompt: x.prompt }) });
-  }
-  return out;
 }
 
 export function createApp(desk: Desk, port: number, remote: Remote = new Remote(desk.store)): Hono {
@@ -895,36 +884,10 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.put("/api/automations/:id", (c) => {
     const set = Effect.gen(function* () {
       yield* up;
-      const b = yield* bodyOf(c);
-      const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
-      if (
-        typeof b.name !== "string" ||
-        (b.prompt !== undefined && typeof b.prompt !== "string") ||
-        (b.decide !== undefined && typeof b.decide !== "string") ||
-        (b.rule !== undefined && (typeof b.rule !== "object" || b.rule === null || Array.isArray(b.rule))) ||
-        (b.schedule !== undefined && typeof b.schedule !== "string") ||
-        (b.events !== undefined && !strings(b.events)) ||
-        (b.when !== undefined && typeof b.when !== "string") ||
-        (b.can !== undefined && !strings(b.can)) ||
-        (b.mcp !== undefined && !strings(b.mcp)) ||
-        (b.buttons !== undefined && !noteButtons(b.buttons)) ||
-        (b.icon !== undefined && typeof b.icon !== "string") ||
-        (b.type !== undefined && typeof b.type !== "string") ||
-        (b.rules !== undefined && !(Array.isArray(b.rules) && b.rules.every(isRecord))) ||
-        (b.on !== undefined && typeof b.on !== "boolean")
-      )
-        return yield* new BadRequest({
-          message:
-            "need { name, prompt, schedule or events, when?, decide?, rule?, can?, mcp?, buttons: [{ label, do: open|ask, prompt? }]?, icon?, type?, rules: [{ when?, ask?, do }]?, on? }",
-        });
-      const { name, schedule, events, prompt, when, decide, rule, can, mcp, icon, type, on } = b;
-      const buttons = b.buttons === undefined ? undefined : (noteButtons(b.buttons) ?? undefined);
-      const rules = Array.isArray(b.rules) ? b.rules.filter(isRecord) : undefined;
-      const a = yield* desk.automations.set(
-        c.req.param("id"),
-        { name, schedule, events, prompt, when, decide, rule, can, mcp, buttons, icon, type, rules, on },
-        fromDesk(c),
+      const b = yield* Effect.fromResult(decodeAutomationBody(yield* json(c))).pipe(
+        Effect.mapError((message) => new BadRequest({ message })),
       );
+      const a = yield* desk.automations.set(c.req.param("id"), b, fromDesk(c));
       return { ok: true, automation: a };
     });
     return respond(c, set, { log });

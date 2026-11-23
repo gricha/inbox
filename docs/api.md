@@ -264,7 +264,7 @@ After you answer, the question leaves the main page and is owed to whoever asked
 | PUT    | `/api/criteria/:id/on`     | `{ on }` → `{ ok, criterion }`: switches yours or a plugin's. Own page only                                                                                                                           |              |
 | DELETE | `/api/criteria/:id`        | 400 for a plugin's                                                                                                                                                                                    |              |
 
-`PUT /api/automations/:id` checks: id is lowercase letters, digits and `-`, up to 40; `schedule` like `daily 09:00`, `weekdays 09:00`, `mon,thu 17:30`, or `events` instead, not both; an instruction up to 8,000 characters (none for a rule); `when` compiles; `decide` and a rule's `rule`; `can` (add alone when left out).
+`PUT /api/automations/:id` decodes its body with `AutomationBodySchema` (`src/automation-body.ts`, which the mock and the window share): a wrong shape, or a key it doesn't know, is a 400 in Effect's words, where it is (`Expected string\n  at ["name"]`). Then it checks: id is lowercase letters, digits and `-`, up to 40; `schedule` like `daily 09:00`, `weekdays 09:00`, `mon,thu 17:30`, or `events` instead, not both; an instruction up to 8,000 characters (none for a rule); `when` compiles; `decide` and a rule's `rule`; `can` (add alone when left out).
 
 ### Documents, events and the rest
 
@@ -756,7 +756,7 @@ interface Automation {
   help?: string; // a plugin's one line
 }
 
-// PUT /api/automations/:id: the whole automation; what's left out is its default.
+// PUT /api/automations/:id: the whole automation; what's left out is its default. automationBody(a) is a saved one's.
 type AutomationBody = {
   name: string;
   schedule?: string;

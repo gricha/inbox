@@ -15,50 +15,21 @@ import {
   type AutomationBody,
   type AutomationRun,
   type AutomationView as Auto,
-  type ItemRule,
-  type NoteButton,
-  type RuleAction,
   type Verb,
   type Way,
 } from "../../../src/types.ts";
 import { isKeyOf, oneOf } from "../../../src/narrow.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed } from "../keyed.ts";
-import { ago, cls, copyText, issueUrl, MOD, when, aiName } from "../format.ts";
+import { ago, cls, copyText, freeId, issueUrl, MOD, when, aiName } from "../format.ts";
+import { blank, bodyOf, editing, shownAs, type Draft } from "../automation-draft.ts";
+import { automationBody } from "../../../src/automation-body.ts";
 import { changeAsk, resumeCommand, routeHash } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
 import { HeldNotes, ITEM_DOES_WORDS, RulesField, TypeField, useTypeCheck } from "./TypedNotes.tsx";
 
 type Run = Auto["runs"][number];
 const RAN: Record<Run["trigger"], string> = { schedule: "on schedule", now: "run now", event: "on an event" };
-
-interface Draft {
-  id: string | null; // null: a new one, its id from its name
-  name: string;
-  schedule: string; // "" with events
-  events: ActivityKind[];
-  prompt: string;
-  when: string;
-  decide: Way;
-  rule?: RuleAction; // with decide rule
-  can: Verb[];
-  mcp: string; // an agent's MCP servers, as typed: names, comma-separated
-  // An agent writes these (inbox_automations); the editor sends them back as they are.
-  buttons?: NoteButton[];
-  icon?: string;
-  type?: string; // its notes' type and rules, which the editor writes too
-  rules?: ItemRule[];
-  on: boolean;
-}
-
-const serversOf = (t: string) => [
-  ...new Set(
-    t
-      .split(",")
-      .map((n) => n.trim())
-      .filter(Boolean),
-  ),
-];
 
 // What the desk may do with what it lists: "add to your desk, sort to FYI and snooze".
 const mayText = (can: readonly Verb[]) => {
@@ -89,32 +60,6 @@ const answers = (model: string | null) => (model ? `${model} answers, through Op
 // Codex's and OpenCode's run have only the desk's read tools: neither can hold a shell to gh's reads, so they have none.
 const agentRun = () =>
   aiName() === "Claude" ? "your Claude Code, with read-only tools" : `your ${aiName()}, read only, with the desk's read tools and no shell`;
-
-// What goes to the desk for a draft: the whole automation. A rule's verb is the one thing it may do.
-function bodyOf(d: Draft): AutomationBody {
-  const rule = d.decide === "rule" ? (d.rule ?? { do: "fyi" as const, why: "" }) : null;
-  return {
-    name: d.name,
-    ...(d.schedule ? { schedule: d.schedule } : { events: d.events }),
-    ...(d.when.trim() && { when: d.when.trim() }),
-    decide: d.decide,
-    ...(rule ? { rule, can: [rule.do] } : { prompt: d.prompt, can: d.can }),
-    ...(d.decide === "agent" && serversOf(d.mcp).length > 0 && { mcp: serversOf(d.mcp) }),
-    // Never dropped: without mcp the desk refuses them, out loud.
-    ...(d.buttons && { buttons: d.buttons }),
-    ...(d.icon && { icon: d.icon }),
-    ...(d.type && { type: d.type }),
-    ...(d.rules && { rules: d.rules }),
-    on: d.on,
-  };
-}
-
-const slug = (s: string) =>
-  s
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9]+/g, "-")
-    .replaceAll(/^-+|-+$/g, "")
-    .slice(0, 40);
 
 const viewOf = (id: string) => routeHash({ name: "settings", section: `automations/${id}` });
 
@@ -199,7 +144,7 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
   function turn(a: Auto, on: boolean): Effect.Effect<boolean> {
     return Effect.suspend(() => {
       setFlipped((f) => ({ ...f, [a.id]: on }));
-      return a.plugin ? switchPlugin(a, on) : put(a.id, bodyOf({ ...editing(a), on }), `${a.name} is ${on ? "on" : "off"}`);
+      return a.plugin ? switchPlugin(a, on) : put(a.id, { ...automationBody(a), on }, `${a.name} is ${on ? "on" : "off"}`);
     }).pipe(
       Effect.tap((ok) =>
         Effect.sync(() => {
@@ -267,13 +212,11 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
   // A new one's id is its name's, made free with -2, -3… so it never lands on one you have. Its id once it's saved, else null.
   // An edit shows as saved at once, until the list read again has it or the desk refuses it.
   function save(d: Draft, done?: string): Effect.Effect<string | null> {
-    const base = d.id ?? slug(d.name);
-    if (!base) {
+    const id = d.id ?? freeId(d.name, list?.map((a) => a.id) ?? []);
+    if (!id) {
       flash("Give it a name", true);
       return Effect.succeed(null);
     }
-    let id = base;
-    for (let n = 2; !d.id && list?.some((a) => a.id === id); n++) id = `${base.slice(0, 36)}-${n}`;
     const edit = d.id;
     return Effect.suspend(() => {
       if (edit) setSaving((s) => ({ ...s, [edit]: d }));
@@ -312,49 +255,6 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
   return { list: shown, error, busy, writing, setWriting, edits, keep, turn, runNow, remove, save, copy };
 }
 
-const editing = (a: Auto): Draft => ({
-  id: a.id,
-  name: a.name,
-  schedule: a.schedule,
-  events: a.events ?? [],
-  prompt: a.prompt,
-  when: a.when ?? "",
-  decide: a.decide ?? "agent",
-  ...(a.rule && { rule: a.rule }),
-  can: a.can ?? ["add"],
-  mcp: (a.mcp ?? []).join(", "),
-  ...(a.buttons && { buttons: a.buttons }),
-  ...(a.icon && { icon: a.icon }),
-  ...(a.type && { type: a.type }),
-  ...(a.rules && { rules: a.rules }),
-  on: a.on,
-});
-// An automation as an edit being saved makes it: drawn so until the desk's copy has it.
-function shownAs(a: Auto, d: Draft): Auto {
-  const { events: _e, when: _w, decide: _d, rule: _r, can: _c, mcp: _m, buttons: _b, icon: _i, type: _t, rules: _ru, ...kept } = a;
-  const b = bodyOf(d);
-  const starts = (x: { schedule?: string | undefined; events?: readonly string[] | undefined }) =>
-    JSON.stringify([x.schedule ?? "", x.events ?? []]);
-  return {
-    ...kept,
-    // Only the desk words a schedule: a new one's words come with the read back.
-    ...(starts(b) !== starts(a) && { trigger: "Saving\u2026" }),
-    name: b.name,
-    schedule: b.schedule ?? "",
-    prompt: b.prompt ?? "",
-    ...(b.events?.length ? { events: b.events } : {}),
-    ...(b.when ? { when: b.when } : {}),
-    ...(d.decide !== "agent" && { decide: d.decide }),
-    ...(d.decide === "rule" && d.rule ? { rule: d.rule } : {}),
-    ...(b.can && b.can.join() !== "add" ? { can: b.can } : {}),
-    ...(b.mcp ? { mcp: b.mcp } : {}),
-    ...(b.buttons ? { buttons: b.buttons } : {}),
-    ...(b.icon ? { icon: b.icon } : {}),
-    ...(b.type ? { type: b.type } : {}),
-    ...(b.rules?.length ? { rules: b.rules } : {}),
-  };
-}
-
 // A part's automation rows on its sheet: each its name (its view), when it runs (a plugin's: what it does) and its last run,
 // Run now while it's on and its switch. `plugin`: that plugin's, which you don't write; else yours, ending in New automation.
 export function AutomationRows({ au, now, plugin }: { au: Automations; now: number; plugin?: string }) {
@@ -380,18 +280,7 @@ export function AutomationRows({ au, now, plugin }: { au: Automations; now: numb
       type="button"
       className="s-edit"
       onClick={() => {
-        au.setWriting({
-          id: null,
-          name: "",
-          schedule: "weekdays 09:00",
-          events: [],
-          prompt: "",
-          when: "",
-          decide: "agent",
-          can: ["add"],
-          mcp: "",
-          on: true,
-        });
+        au.setWriting(blank());
       }}
     >
       New automation

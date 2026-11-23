@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import type {
   AiReview,
   ActivityPage,
+  AutomationView,
   AgentStatus,
   BoardView,
   ConfigError,
@@ -25,6 +26,10 @@ import type {
   SettingsView,
 } from "../../src/types.ts";
 import { CLAUDE_PAUSED, lineAt, parseReview } from "../../src/review.ts";
+import { automationBody } from "../../src/automation-body.ts";
+import { createApp } from "../../src/server.ts";
+import { setup } from "../../test/helpers/desk.ts";
+import { run } from "../../test/helpers/run.ts";
 
 const ORDER = ["failing", "cancelled", "running", "passing", "skipped"];
 
@@ -749,4 +754,50 @@ test("the mock answers every route the window calls, and the desk serves each on
     if (res.status === 404 && JSON.stringify(body).includes('"error":"not found"')) missing.push(`${method} ${path}`);
   }
   assert.deepEqual(missing, []);
+});
+
+test("an automation saved to the mock reads back as the desk's does, every key of its body", async (c) => {
+  const t = await setup([], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const app = createApp(t.desk, 47823);
+  const body = {
+    name: "Mail",
+    events: ["ci", "commented"],
+    prompt: "Read my mail.",
+    when: "!author.bot",
+    can: ["add", "fyi"],
+    mcp: ["gmail"],
+    buttons: [
+      { label: "Open in Gmail", do: "open" },
+      { label: "Draft a reply", do: "ask", prompt: "Draft a reply." },
+    ],
+    icon: "receipt",
+    type: 'type Email = { kind: "bill" | "personal"; sender: string }',
+    rules: [
+      { when: "item.kind == 'bill'", do: "urgent" },
+      { ask: "Is it a newsletter?", do: "drop" },
+    ],
+    on: false,
+  };
+  const both = async (b: object) => {
+    const put = await app.request("http://127.0.0.1:47823/api/automations/parity", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(b),
+    });
+    assert.equal(put.status, 200, await put.clone().text());
+    assert.equal((await call("PUT", "/api/automations/parity", b)).status, 200);
+    const desk = ((await (await app.request("http://127.0.0.1:47823/api/automations")).json()) as AutomationView[]).find(
+      (a) => a.id === "parity",
+    )!;
+    const mock = (await call<AutomationView[]>("GET", "/api/automations")).data.find((a) => a.id === "parity")!;
+    assert.deepEqual(automationBody(mock), automationBody(desk));
+    return automationBody(desk);
+  };
+  assert.deepEqual(await both(body), { schedule: "", decide: undefined, rule: undefined, ...body });
+  // Left out, on stays as it was, on both.
+  const { on: _, ...edit } = body;
+  assert.equal((await both({ ...edit, name: "Mail and more" })).on, false);
+  await call("DELETE", "/api/automations/parity");
 });

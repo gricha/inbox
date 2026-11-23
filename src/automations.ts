@@ -40,12 +40,12 @@ import {
   ITEM_DOES,
   VERB,
   VERBS,
-  WAYS,
   type ActivityEvent,
   type ActivityKind,
   type Automation,
   type AutomationItem,
   type AutomationRun,
+  type AutomationBody,
   type AutomationView,
   type InboxSection,
   type Inquiry,
@@ -57,7 +57,7 @@ import {
   type Verb,
 } from "./types.ts";
 import { ICON_FORMAT, iconName } from "./icons.ts";
-import { NoteButtonSchema } from "./kv.ts";
+import { automationBody, LIMITS, NoteButtonSchema } from "./automation-body.ts";
 import { report } from "./sentry.ts";
 import { secretsPath } from "./settings.ts";
 
@@ -606,27 +606,9 @@ export class Automations {
     });
   }
 
-  // Yours from the desk's window, or an agent's: on unless it says off, as it was before an edit.
-  set(
-    id: string,
-    b: {
-      name: string;
-      schedule?: string | undefined;
-      events?: readonly string[] | undefined;
-      prompt?: string | undefined;
-      when?: string | undefined;
-      decide?: string | undefined;
-      rule?: { do?: unknown; until?: unknown; why?: unknown } | undefined;
-      can?: readonly string[] | undefined;
-      mcp?: readonly string[] | undefined;
-      buttons?: readonly NoteButton[] | undefined;
-      icon?: string | undefined;
-      type?: string | undefined;
-      rules?: readonly { when?: unknown; ask?: unknown; do?: unknown }[] | undefined;
-      on?: boolean | undefined;
-    },
-    byYou: boolean,
-  ): Effect.Effect<Automation, BadRequest> {
+  // Yours from the desk's window, or an agent's: on unless it says off, as it was before an edit. Its body's shape is
+  // AutomationBodySchema's; what's checked here is what it says.
+  set(id: string, b: AutomationBody, byYou: boolean): Effect.Effect<Automation, BadRequest> {
     return Effect.gen({ self: this }, function* () {
       const plugin = this.builtIn(id);
       if (plugin)
@@ -635,27 +617,22 @@ export class Automations {
         });
       if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(id))
         return yield* new BadRequest({ message: "an automation's id is lowercase letters, digits and -, up to 40" });
-      const name = yield* this.desk.line(b.name, "name", 80);
+      const name = yield* this.desk.line(b.name, "name", LIMITS.name);
       // What starts it: a schedule, or events, never both.
       const schedule = b.schedule?.trim().toLowerCase() ?? "";
-      const stray = (b.events ?? []).find((k) => !ACTIVITY_KINDS.some((x) => x === k));
-      if (stray !== undefined) return yield* new BadRequest({ message: `events: "${stray}" isn't one of ${ACTIVITY_KINDS.join(", ")}` });
       const events = ACTIVITY_KINDS.filter((k) => b.events?.includes(k));
       if (schedule && events.length) return yield* new BadRequest({ message: "give it a schedule or events, not both" });
       const s = events.length ? null : parseSchedule(schedule);
       if (typeof s === "string") return yield* new BadRequest({ message: `schedule: ${s}` });
-      const way = WAYS.find((w) => w === (b.decide ?? "agent"));
-      if (!way) return yield* new BadRequest({ message: `decide: "${b.decide}" isn't one of ${WAYS.join(", ")}` });
+      const way = b.decide ?? "agent";
       // A rule has no model to instruct.
       const said = b.prompt?.trim() ?? "";
       if (!said && way !== "rule") return yield* new BadRequest({ message: "the instruction is empty" });
-      if (said.length > 8_000) return yield* new BadRequest({ message: "keep the instruction under 8000 characters" });
+      if (said.length > LIMITS.prompt) return yield* new BadRequest({ message: `keep the instruction under ${LIMITS.prompt} characters` });
       const when = b.when?.trim() ?? "";
       const check = when ? compile(when) : null;
       if (check && Result.isFailure(check)) return yield* new BadRequest({ message: `when: ${check.failure.message}` });
-      const unknown = (b.can ?? []).find((v) => !VERBS.some((k) => k === v));
-      if (unknown !== undefined) return yield* new BadRequest({ message: `can: "${unknown}" isn't one of ${VERBS.join(", ")}` });
-      const can = b.can ? VERBS.filter((v) => b.can!.includes(v)) : (["add"] as const);
+      const can = b.can ? VERBS.filter((v) => b.can?.includes(v)) : (["add"] as const);
       // A rule and a question are about items: its events', or on a schedule the ones its check passes.
       if (way !== "agent" && !events.length && !when)
         return yield* new BadRequest({
@@ -667,8 +644,10 @@ export class Automations {
       const mcp = [...new Set((b.mcp ?? []).map((n) => n.trim()).filter(Boolean))];
       if (mcp.length && way !== "agent")
         return yield* new BadRequest({ message: "mcp goes with an agent run: a rule or a question has no tools" });
-      if (mcp.length > 10 || mcp.some((n) => n.length > 100))
-        return yield* new BadRequest({ message: "mcp: up to 10 server names, each under 100 characters" });
+      if (mcp.length > LIMITS.servers || mcp.some((n) => n.length > LIMITS.server))
+        return yield* new BadRequest({
+          message: `mcp: up to ${LIMITS.servers} server names, each under ${LIMITS.server} characters`,
+        });
       const buttons = yield* buttonsOf(b.buttons, mcp.length > 0);
       const icon = b.icon === undefined ? undefined : iconName(b.icon);
       if (b.icon !== undefined && !icon)
@@ -717,14 +696,14 @@ export class Automations {
   }
 
   // A rule's action as it's kept: a verb it may use, a why in one line, and for a snooze how long.
-  fixed(t: { do?: unknown; until?: unknown; why?: unknown } | undefined, can: readonly Verb[]): Effect.Effect<RuleAction, BadRequest> {
+  fixed(t: AutomationBody["rule"], can: readonly Verb[]): Effect.Effect<RuleAction, BadRequest> {
     return Effect.gen({ self: this }, function* () {
       if (!t) return yield* new BadRequest({ message: "a rule needs its action, rule: { do, why, until? }" });
-      const verb = VERBS.find((v) => v === t.do);
-      if (!verb) return yield* new BadRequest({ message: `rule: "${String(t.do)}" isn't one of ${VERBS.join(", ")}` });
+      const verb = t.do;
       if (!can.includes(verb)) return yield* new BadRequest({ message: `rule: it may not ${VERB[verb]}; add ${verb} to can` });
-      const why = yield* this.desk.line(typeof t.why === "string" ? t.why : "", "why", 300);
-      const until = verb === "snooze" && typeof t.until === "string" ? t.until.trim().toLowerCase() : "";
+      const why = yield* this.desk.line(t.why, "why", LIMITS.why);
+      const until = verb === "snooze" ? (t.until?.trim().toLowerCase() ?? "") : "";
+
       if (until && !RULE_UNTIL.test(until))
         return yield* new BadRequest({
           message: `rule: can't read until "${until}"; use 1h, 3h, 2d, tomorrow, monday, activity, ci, push, approved, ready or conflict`,
@@ -1549,7 +1528,7 @@ export class Automations {
         return "released";
       }
       // A change to the automation itself: saved as an agent's, which you approved, on or off as it was.
-      const b = { ...bodyOf(a), ...(fix.do === "type" ? { type: fix.type } : { prompt: fix.prompt }) };
+      const b = { ...automationBody(a), ...(fix.do === "type" ? { type: fix.type } : { prompt: fix.prompt }) };
       const saved = yield* this.set(a.id, b, false);
       if (fix.do === "prompt") {
         this.forgetHeld(a.id, h.id); // not raised: its next run reads it again, by the new instruction
@@ -1667,19 +1646,17 @@ function buttonsOf(raw: readonly NoteButton[] | undefined, notes: boolean): Effe
   const bad = (message: string) => Effect.fail(new BadRequest({ message: `buttons: ${message}` }));
   if (!raw?.length) return Effect.succeed([]);
   if (!notes) return bad("they go on the notes an automation with mcp raises");
-  if (raw.length > 3) return bad("up to 3");
+  if (raw.length > LIMITS.buttons) return bad(`up to ${LIMITS.buttons}`);
   const out: NoteButton[] = [];
   for (const b of raw) {
     const label = b.label.replaceAll(/\s+/g, " ").trim();
-    if (!label || label.length > 24) return bad("each needs a label of up to 24 characters");
+    if (!label || label.length > LIMITS.label) return bad(`each needs a label of up to ${LIMITS.label} characters`);
     if (b.do === "open") {
-      if (b.prompt) return bad(`"${label}" opens the note's link: no prompt`);
       out.push({ label, do: "open" });
       continue;
     }
-    if (b.do !== "ask") return bad(`"${label}": do is open or ask`);
-    const asked = b.prompt?.trim() ?? "";
-    if (!asked || asked.length > 1_000) return bad(`"${label}" asks your agent: its prompt, up to 1000 characters`);
+    const asked = b.prompt.trim();
+    if (!asked || asked.length > LIMITS.ask) return bad(`"${label}" asks your agent: its prompt, up to ${LIMITS.ask} characters`);
     out.push({ label, do: "ask", prompt: asked });
   }
   return Effect.succeed(out);
@@ -1687,14 +1664,11 @@ function buttonsOf(raw: readonly NoteButton[] | undefined, notes: boolean): Effe
 
 // The rules on a typed automation's notes, checked: each a when that compiles over its type's fields, an ask, or both, and
 // what a yes does.
-function rulesOf(
-  raw: readonly { when?: unknown; ask?: unknown; do?: unknown }[] | undefined,
-  t: ItemType | null,
-): Effect.Effect<ItemRule[], BadRequest> {
+function rulesOf(raw: AutomationBody["rules"], t: ItemType | null): Effect.Effect<ItemRule[], BadRequest> {
   const bad = (message: string) => Effect.fail(new BadRequest({ message: `rules: ${message}` }));
   if (!raw?.length) return Effect.succeed([]);
   if (!t) return bad("they read the notes' fields (item.<field>): give it a type");
-  if (raw.length > 10) return bad("up to 10");
+  if (raw.length > LIMITS.rules) return bad(`up to ${LIMITS.rules}`);
   const out: ItemRule[] = [];
   for (const [i, r] of raw.entries()) {
     const read = itemRule(r, t);
@@ -1711,7 +1685,7 @@ function itemRule(r: { when?: unknown; ask?: unknown; do?: unknown }, t: ItemTyp
   const does = ITEM_DOES.find((d) => d === r.do);
   if (!when && !ask) return "give it when, ask or both";
   if (!does) return `do is one of ${ITEM_DOES.join(", ")}`;
-  if (ask.length > 1_000) return "keep ask under 1000 characters";
+  if (ask.length > LIMITS.ask) return `keep ask under ${LIMITS.ask} characters`;
   const check = when ? compile(when, t.fields) : null;
   if (check && Result.isFailure(check)) return `when: ${check.failure.message}`;
   return { ...(when && { when }), ...(ask && { ask }), do: does };
@@ -1776,24 +1750,6 @@ const RULE_SCHEMA = {
     },
   },
 };
-
-// A saved automation as set() takes it, for a change you agreed to.
-const bodyOf = (a: Automation) => ({
-  name: a.name,
-  schedule: a.schedule,
-  events: a.events,
-  prompt: a.prompt,
-  when: a.when,
-  decide: a.decide,
-  rule: a.rule,
-  can: a.can,
-  mcp: a.mcp,
-  buttons: a.buttons,
-  icon: a.icon,
-  type: a.type,
-  rules: a.rules,
-  on: a.on,
-});
 
 // What Claude answers about a held note: one thing to do, a line you read first, why, and what the change is.
 function recommendSchema(t: ItemType): object {

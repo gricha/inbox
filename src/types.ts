@@ -1446,11 +1446,9 @@ export interface BrandIcon {
 // notifies once and leads Urgent.
 // A button an automation puts on the notes its runs raise, set with the automation (your words, never a run's): open the
 // note's url, or ask your agent `prompt` about the note.
-export interface NoteButton {
-  label: string; // up to 24 characters: "Open in Gmail", "Draft a reply"
-  do: "open" | "ask";
-  prompt?: string; // ask's, and only ask's
-}
+export type NoteButton =
+  | { label: string; do: "open" } // label: up to 24 characters, "Open in Gmail"
+  | { label: string; do: "ask"; prompt: string }; // "Draft a reply": what your agent is asked about the note
 
 export interface Note {
   id: string;
@@ -1746,9 +1744,12 @@ export interface CriteriaView {
   scored: { by: string; at: string } | null; // the latest model score: who gave it, when
 }
 
-// PUT /api/automations/:id: the whole automation; what's left out (or undefined, as JSON leaves it) is its default.
-export type AutomationBody = Pick<Automation, "name"> & {
+// PUT /api/automations/:id: the whole automation; what's left out (or undefined, as JSON leaves it) is its default. Its
+// schema, keys and automationBody() are in src/automation-body.ts.
+export interface AutomationBody {
+  name: string;
   events?: ActivityKind[] | undefined;
+
   when?: string | undefined;
   rule?: { do: Verb; why: string; until?: string | undefined } | undefined;
   can?: Verb[] | undefined;
@@ -1756,12 +1757,13 @@ export type AutomationBody = Pick<Automation, "name"> & {
   buttons?: NoteButton[] | undefined;
   icon?: string | undefined;
   type?: string | undefined;
-  rules?: ItemRule[] | undefined;
+  rules?: { when?: string | undefined; ask?: string | undefined; do: ItemRule["do"] }[] | undefined;
+
   schedule?: string | undefined;
   prompt?: string | undefined;
   decide?: Way | undefined;
   on?: boolean | undefined;
-};
+}
 
 // GET /api/automations
 export interface AutomationView extends Automation {
