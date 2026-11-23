@@ -179,17 +179,20 @@ const pauseAi = (paused: boolean) => async (page: Page) => {
   await page.evaluate(`fetch("/api/mock/ai-paused", { method: "POST", body: JSON.stringify({ paused: ${paused} }) })`);
   await page.locator(".bubble", { hasText: "is paused" }).waitFor({ state: paused ? "visible" : "detached", timeout: 5000 });
 };
-// The queue as the mock serves it, changed in the browser: for states the mock's data doesn't reach.
-const queueAs = (change: (q: QueueView) => void) => async (page: Page) => {
-  await page.route("**/api/queue", async (route) => {
-    const res = await route.fetch();
-    const q = (await res.json()) as QueueView;
-    change(q);
-    await route.fulfill({ response: res, json: q });
-  });
-  await page.reload();
-  await page.locator(READY).first().waitFor({ timeout: 15_000 });
-};
+// The queue as the mock serves it, changed in the browser: for states the mock's data doesn't reach. `ready`: a page with
+// no queue on it (a question's, under 1160px) waits for its own.
+const queueAs =
+  (change: (q: QueueView) => void, ready = READY) =>
+  async (page: Page) => {
+    await page.route("**/api/queue", async (route) => {
+      const res = await route.fetch();
+      const q = (await res.json()) as QueueView;
+      change(q);
+      await route.fulfill({ response: res, json: q });
+    });
+    await page.reload();
+    await page.locator(ready).first().waitFor({ timeout: 15_000 });
+  };
 // The desk slow to answer: GETs matching `glob` wait until `release` lets them go. A reload first, so nothing the page
 // already fetched (a review a row's rest prefetched) stands in for them.
 const held: Route[] = [];
@@ -3592,7 +3595,7 @@ const SHOTS: Shot[] = [
     after: async (page) => {
       await queueAs((q) => {
         q.inquiries = q.inquiries.filter((x) => x.id !== "q1c0ffee");
-      })(page);
+      }, ".inquiry .inq-options")(page);
       // The overview says whether your agent is on: Ask your agent's absence means something once it's in.
       const overview = page.waitForResponse((r) => r.url().endsWith("/api/overview"));
       await page.reload();
