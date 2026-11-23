@@ -495,6 +495,9 @@ interface Batch {
   happened: Map<string, string[]>;
   upto: number;
 }
+// How a run's way of deciding ended: it ran (recorded), its automation was deleted meanwhile (nothing to record), or its
+// model couldn't answer and it waits, unspent.
+type Ended = "ran" | "gone" | "held";
 // A run in progress: p settles with it however it ends, and interrupting its fiber stops it.
 type Running = { p: Promise<AutomationRun>; fiber: Fiber.Fiber<void> | null };
 
@@ -502,8 +505,8 @@ export class Automations {
   desk: Host;
   timer: NodeJS.Timeout | null = null;
   running = new Map<string, Running>();
-  // A question whose model couldn't answer, or an event's run that failed (failed): why, and when it runs again.
-  held = new Map<string, { why: string; until: number; failed?: boolean }>();
+  // A question whose model couldn't answer (waiting), or an event's run that failed: why, and when it runs again.
+  held = new Map<string, { kind: "waiting" | "failed"; why: string; until: number }>();
   // Held notes Claude is being asked about now: a run's end doesn't ask again about one a comment's re-ask has out.
   asking = new Set<string>();
 
@@ -569,7 +572,8 @@ export class Automations {
     return this.all().map((a) => {
       const s = parseSchedule(a.schedule);
       // A failed run says why itself, and it was spent: waiting is a question's model that couldn't answer.
-      const held = this.waits(a.id) && !this.held.get(a.id)!.failed ? this.held.get(a.id)! : null;
+      const was = this.held.get(a.id);
+      const held = was?.kind === "waiting" && this.waits(a.id) ? was : null;
       return Object.assign(a, {
         trigger: a.events?.length ? eventsWords(a.events) : scheduleWords(a.schedule),
         next_at: a.on && typeof s === "object" ? nextAt(s, now).toISOString() : null,
@@ -909,12 +913,12 @@ export class Automations {
       const passed = a.when || batch ? yield* Effect.fromResult(this.passing(a, batch && [...batch.happened.keys()])) : null;
       if (passed && !passed.length) {
         run.summary = NOTHING;
-        return true;
+        return "ran" as const;
       }
       if (way === "agent") return yield* this.byAgent(a, run, last, passed, batch);
       if (!passed) {
         run.summary = NO_ITEMS;
-        return true;
+        return "ran" as const;
       }
       if (way === "rule") return yield* this.byRule(a, run, passed);
       return yield* this.byAsking(a, run, passed, batch);
@@ -923,22 +927,22 @@ export class Automations {
       Effect.sync(() => {
         report(e, "automation", a.id);
         run.error = message.trim() || "the run failed";
-        return true;
+        return "ran" as const;
       });
     return body.pipe(
       Effect.catchDefect((bug) => failed(bug, messageOf(bug))),
       // Its model can't answer now, which is nothing about these items: the run waits, unspent, and asks again later.
       Effect.catch((e) => (way === "ask" && agentDown(e) ? Effect.sync(() => this.hold(a, run, e.message)) : failed(e, e.message))),
-      Effect.map((kept) => {
-        if (kept === null) return false;
-        if (!kept) return true;
-        const again = this.held.get(a.id)?.failed === true;
+      Effect.map((ended) => {
+        if (ended === "held") return false;
+        if (ended === "gone") return true;
+        const again = this.held.get(a.id)?.kind === "failed";
         this.held.delete(a.id);
         run.done_at = this.desk.now().toISOString();
         if (this.desk.stopped) return true;
         this.record(run);
         // An event's run that failed waits as a held question does, or every pass with events would fail it again; said once.
-        if (run.error && batch) this.held.set(a.id, { why: run.error, until: this.desk.now().getTime() + HOLD, failed: true });
+        if (run.error && batch) this.held.set(a.id, { kind: "failed", why: run.error, until: this.desk.now().getTime() + HOLD });
         if (!(run.error && again)) this.tell(a, run);
         return true;
       }),
@@ -946,25 +950,25 @@ export class Automations {
   }
 
   // A question's model couldn't answer: its run is dropped, not spent, and nothing of its asks again for a while; said once.
-  hold(a: Automation, run: AutomationRun, why: string): null {
+  hold(a: Automation, run: AutomationRun, why: string): Ended {
     const first = !this.held.has(a.id);
-    this.held.set(a.id, { why, until: this.desk.now().getTime() + HOLD });
+    this.held.set(a.id, { kind: "waiting", why, until: this.desk.now().getTime() + HOLD });
     this.desk.store.set(
       RUNS,
       this.runs().filter((r) => r.id !== run.id),
     );
     this.desk.log(`automation ${a.id} waits: ${why}`);
     if (first && this.desk.mayNotify()) this.desk.notify(`${a.name} is waiting`, why.split("\n")[0] ?? "");
-    return null;
+    return "held";
   }
 
   // A rule: no model. Every item its check passed gets its action.
-  byRule(a: Automation, run: AutomationRun, passed: string[]): Effect.Effect<boolean> {
+  byRule(a: Automation, run: AutomationRun, passed: string[]): Effect.Effect<Ended> {
     return Effect.gen({ self: this }, function* () {
       const act = a.rule!; // set() keeps no rule without one
       for (const id of passed)
         run.items.push(yield* this.apply(a, { ref: id, why: act.why, do: act.do, ...(act.until !== undefined && { until: act.until }) }));
-      return true;
+      return "ran" as const;
     });
   }
 
@@ -978,7 +982,7 @@ export class Automations {
       const fresh = run.trigger === "schedule" ? this.unasked(a, who, passed) : passed;
       if (!fresh.length) {
         run.summary = "Nothing new to it passed its check since it last asked, so nothing ran.";
-        return true;
+        return "ran" as const;
       }
       const asked = fresh.slice(0, ITEMS_MAX);
       const gone: string[] = [];
@@ -989,7 +993,7 @@ export class Automations {
           return this.askClaude(a, asked, batch);
         },
       );
-      if (!this.all().some((x) => x.id === a.id)) return false; // deleted while it ran
+      if (!this.all().some((x) => x.id === a.id)) return "gone" as const; // deleted while it ran
       this.asked(a, by, asked);
       const seen = new Set<string>();
       for (const x of said) {
@@ -1005,7 +1009,7 @@ export class Automations {
       if (fresh.length < passed.length) run.summary += ` (It had asked about ${passed.length - fresh.length} more, unchanged since.)`;
       if (gone.length)
         run.summary += ` (${gone.join(", ")} left the desk during the run, so ${gone.length === 1 ? "it was" : "they were"} skipped.)`;
-      return true;
+      return "ran" as const;
     });
   }
 
@@ -1143,7 +1147,7 @@ export class Automations {
           }),
         ),
       );
-      if (!this.all().some((x) => x.id === a.id)) return false; // deleted while it ran
+      if (!this.all().some((x) => x.id === a.id)) return "gone" as const; // deleted while it ran
       run.session = sessionOf(out);
       const env = yield* claudeEnvelope(out);
       yield* meter(env.usage);
@@ -1175,7 +1179,7 @@ export class Automations {
         timeout: TIMEOUT,
       };
       const got = yield* agent === "codex" ? codexRun(said, opts) : opencodeRun(said, opts);
-      if (!this.all().some((x) => x.id === a.id)) return false; // deleted while it ran
+      if (!this.all().some((x) => x.id === a.id)) return "gone" as const; // deleted while it ran
       run.session = got.session;
       run.agent = agent;
       return yield* this.took(a, run, got.answer, JSON.stringify(got.answer), passed);
@@ -1208,7 +1212,7 @@ export class Automations {
       if (passed && passed.length > ITEMS_MAX)
         run.summary += ` (${passed.length} items passed its check; it was handed the ${ITEMS_MAX} with the latest activity.)`;
       yield* this.recommendAll(a);
-      return true;
+      return "ran" as const;
     });
   }
 
