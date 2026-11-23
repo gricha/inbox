@@ -6,3 +6,5 @@ process.env.DESK_CLAUDE_HOME = "/nonexistent/.claude";
 process.env.DESK_CODEX_HOME = "/nonexistent/.codex";
 process.env.DESK_CLAUDE_APP = "/nonexistent/claude-code-sessions";
 process.env.DESK_OPENCODE = "/nonexistent/opencode";
+// Claude Code's config dir, if the shell sets one: tests point HOME at their own .claude.json.
+process.env.CLAUDE_CONFIG_DIR = "";

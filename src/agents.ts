@@ -27,6 +27,10 @@ const ALT = "inbox-desk"; // the skill's folder, and a server's name, beside ano
 export const TOKEN_VAR = "INBOX_TOKEN"; // where Codex and OpenCode read a desk's token on another machine
 const OLD = "review-desk"; // both, before the rename to Inbox
 
+// Claude Code's own config: in CLAUDE_CONFIG_DIR when that's set, as Claude Code keeps it, else the home folder.
+export const claudeJson = (home = os.homedir()): string =>
+  path.join(process.env.CLAUDE_CONFIG_DIR?.trim() ? process.env.CLAUDE_CONFIG_DIR : home, ".claude.json");
+
 interface Driver {
   bin: string;
   add: (name: string, url: string) => string[]; // registers the desk's MCP server for every project
@@ -37,7 +41,7 @@ interface Driver {
 }
 
 const DRIVERS = {
-  // ~/.claude.json's top-level mcpServers is Claude Code's user scope.
+  // .claude.json's top-level mcpServers is Claude Code's user scope.
   "claude-code": {
     bin: "claude",
     add: (name, url) => ["mcp", "add", "--transport", "http", "--scope", "user", name, url],
@@ -54,7 +58,7 @@ const DRIVERS = {
       `Authorization: Bearer ${token}`,
     ],
     remove: (name) => ["mcp", "remove", "--scope", "user", name],
-    servers: (home) => field(JSON.parse(fs.readFileSync(path.join(home, ".claude.json"), "utf8")), "mcpServers"),
+    servers: (home) => field(JSON.parse(fs.readFileSync(claudeJson(home), "utf8")), "mcpServers"),
     skills: (home) => path.join(home, ".claude", "skills"),
   },
   // Codex reads user skills from ~/.agents/skills (developers.openai.com/codex/skills).
@@ -467,7 +471,7 @@ export const connect = Effect.fn("agents.connect")(function* (
 
 const AGENT_NAME: Record<DriverId, string> = { "claude-code": "Claude Code", codex: "Codex", opencode: "OpenCode" };
 const CONFIG: Record<DriverId, (home: string) => string> = {
-  "claude-code": (h) => path.join(h, ".claude.json"),
+  "claude-code": (h) => claudeJson(h),
   codex: (h) => path.join(h, ".codex", "config.toml"),
   opencode: (h) => path.join(h, ".config", "opencode", "opencode.json"),
 };

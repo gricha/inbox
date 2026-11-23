@@ -8,7 +8,19 @@ import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Cause, Effect, Exit, Fiber } from "effect";
-import { addMcp, checkMcp, connect, mcpServers, parseMcpList, plan, refreshSkills, removeMcp, serverName, status } from "../src/agents.ts";
+import {
+  addMcp,
+  checkMcp,
+  claudeServers as yourServers,
+  connect,
+  mcpServers,
+  parseMcpList,
+  plan,
+  refreshSkills,
+  removeMcp,
+  serverName,
+  status,
+} from "../src/agents.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 import { posix } from "./helpers/platform.ts";
 
@@ -677,4 +689,21 @@ test("MCP servers: added and removed through your agent's CLI at user level; the
   const why = await refused(addMcp("claude-code", MCP, { name: "k", url: "https://k.example", header: "Authorization: Bearer t0p" }));
   assert.match(why, /Run it yourself: claude mcp add .* '<header>'/);
   assert.ok(!why.includes("t0p"));
+});
+
+// Claude Code keeps .claude.json in CLAUDE_CONFIG_DIR when it's set, so a scratch desk's runs read their own servers there.
+test("your Claude Code's servers are read where CLAUDE_CONFIG_DIR keeps them", (c) => {
+  const dir = join(home, "elsewhere");
+  mkdirSync(dir);
+  write(".claude.json", JSON.stringify({ mcpServers: { home: { type: "http", url: "https://home.example/mcp" } } }));
+  writeFileSync(join(dir, ".claude.json"), JSON.stringify({ mcpServers: { tracker: { command: "node", args: ["tracker.ts"] } } }));
+  const was = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = dir;
+  c.after(() => {
+    if (was === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = was;
+  });
+  assert.deepEqual(yourServers(), { tracker: { command: "node", args: ["tracker.ts"] } });
+  const view = mcpServers("claude-code", MCP);
+  assert.deepEqual([view.config, view.servers.map((s) => s.name)], [join(dir, ".claude.json"), ["tracker"]]);
 });

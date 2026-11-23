@@ -10,6 +10,7 @@ import path from "node:path";
 import { Effect, Result, Schema } from "effect";
 import type { Desk } from "./desk.ts";
 import { parse } from "smol-toml";
+import { claudeJson } from "./agents.ts";
 import { kill, OWN_GROUP, track } from "./children.ts";
 import {
   ClaudeApiError,
@@ -1106,7 +1107,7 @@ export class Coordinator {
 // The coordinator's folder is the desk's own: it made it and wrote everything in it (the deny list, its settings). So the
 // desk answers Claude Code's trust prompt for it, in Claude Code's own config, and the agent starts without a trip to a
 // terminal. True when it wrote; false when it's trusted already, or there's no config to write to (Claude Code never ran).
-export function trustClaude(dir: string, file = claudeConfig()): boolean {
+export function trustClaude(dir: string, file = claudeJson()): boolean {
   const read = Result.try({ try: (): unknown => JSON.parse(fs.readFileSync(file, "utf8")), catch: () => null });
   const conf = Result.getOrNull(read);
   if (!isRecord(conf)) return false;
@@ -1145,8 +1146,6 @@ export function trustCodex(dir: string, file: string): boolean {
     }),
   );
 }
-
-const claudeConfig = () => path.join(process.env.CLAUDE_CONFIG_DIR?.trim() ? process.env.CLAUDE_CONFIG_DIR : os.homedir(), ".claude.json");
 
 // ---------------------------------------------------------------------------- what it's doing
 
