@@ -6039,9 +6039,10 @@ const SHOTS: Shot[] = [
             : h,
         );
       }
-      const step = (h: string) => (h.startsWith("#/inquiry/") ? "question" : h.replace(/^#\/review\/|^#\/ open /, ""));
+      // Each step lands on the row in that place, a question (however many lead) on its page.
+      const step = (h: string) => h.replace(/^#\/inquiry\//, "ask:").replace(/^#\/review\/|^#\/ open /, "");
       const went = seen.map(step);
-      if (went[0] !== "question" || went[1] !== "question" || went[2] !== ids[2] || went[3] !== "question" || seen[3] !== seen[1])
+      if (went.join() !== [ids[0], ids[1], ids[2], ids[1]].join())
         failures.push(`keys: ${mod}+] x3 then ${mod}+[ went to ${JSON.stringify(seen)}, the list starting ${JSON.stringify(ids)}`);
       // An issue opens in place on its list, so the review before it gives way to the list; Merging steps through its PRs.
       await at("#/")(page);
