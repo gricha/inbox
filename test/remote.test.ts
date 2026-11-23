@@ -17,6 +17,7 @@ import type { GitHubWriter } from "../src/github/write.ts";
 import { myPr, reviewAsk } from "./helpers/desk.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
 import { unixOnly } from "./helpers/platform.ts";
+import { codeOf } from "../src/narrow.ts";
 import { run } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
 import { until } from "./helpers/wait.ts";
@@ -376,7 +377,9 @@ if (a.join(" ") === "status --json") process.stdout.write(fs.readFileSync(path.j
 else if (a.join(" ") === "serve status --json") process.stdout.write(fs.existsSync(serve) ? fs.readFileSync(serve) : "{}");
 else if (a[0] === "serve" && a[1] === "--bg" && a[2] === "--https=443") {
   const name = JSON.parse(fs.readFileSync(path.join(__dirname, "status.json"))).Self.DNSName.replace(/\\.$/, "");
-  fs.writeFileSync(serve, JSON.stringify({ TCP: { 443: { HTTPS: true } }, Web: { [name + ":443"]: { Handlers: { "/": { Proxy: a[3] } } } } }));
+  // Whole or not at all, as tailscale's own state is: the test reads it while this runs.
+  fs.writeFileSync(serve + ".tmp", JSON.stringify({ TCP: { 443: { HTTPS: true } }, Web: { [name + ":443"]: { Handlers: { "/": { Proxy: a[3] } } } } }));
+  fs.renameSync(serve + ".tmp", serve);
 } else if (a.join(" ") === "serve --https=443 off") fs.rmSync(serve, { force: true });
 else { process.stderr.write("unexpected: " + a.join(" ")); process.exit(1); }
 `,
@@ -391,9 +394,15 @@ else { process.stderr.write("unexpected: " + a.join(" ")); process.exit(1); }
           .map((l) => (JSON.parse(l) as string[]).join(" "))
       : [];
   const served = (): string | null => {
-    const f = path.join(dir, "serve.json");
-    if (!fs.existsSync(f)) return null;
-    const cfg = JSON.parse(fs.readFileSync(f, "utf8")) as { Web: Record<string, { Handlers: Record<string, { Proxy: string }> }> };
+    // One read, not exists-then-read: serve off may remove it in between.
+    let text: string;
+    try {
+      text = fs.readFileSync(path.join(dir, "serve.json"), "utf8");
+    } catch (e) {
+      if (codeOf(e) === "ENOENT") return null;
+      throw e;
+    }
+    const cfg = JSON.parse(text) as { Web: Record<string, { Handlers: Record<string, { Proxy: string }> }> };
     return Object.values(cfg.Web)[0]!.Handlers["/"]!.Proxy;
   };
   return { dir, calls, served };
