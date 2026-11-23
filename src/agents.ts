@@ -26,6 +26,8 @@ const NAME = "inbox"; // the MCP server's name, and the skill's folder, unless s
 const ALT = "inbox-desk"; // the skill's folder, and a server's name, beside another of yours named inbox
 export const TOKEN_VAR = "INBOX_TOKEN"; // where Codex and OpenCode read a desk's token on another machine
 const OLD = "review-desk"; // both, before the rename to Inbox
+// The desk's MCP server's own names: an agent connected before the rename keeps the old one until the desk renames it.
+export const DESK_NAMES: readonly string[] = [NAME, OLD];
 
 // Claude Code's own config: in CLAUDE_CONFIG_DIR when that's set, as Claude Code keeps it, else the home folder.
 export const claudeJson = (home = os.homedir()): string =>
@@ -150,7 +152,7 @@ export const claudeServers = (): Record<string, unknown> => listed(DRIVERS["clau
 // This desk's entry under any name: inbox, review-desk from before the rename, or the name Connect gave it beside another.
 export function serverName(driver: DriverId, url: string): string | null {
   const servers = listed(DRIVERS[driver], os.homedir());
-  return [NAME, OLD, ...Object.keys(servers)].find((n) => Object.hasOwn(servers, n) && desks(servers[n], url)) ?? null;
+  return [...DESK_NAMES, ...Object.keys(servers)].find((n) => Object.hasOwn(servers, n) && desks(servers[n], url)) ?? null;
 }
 
 // A desk answers its /health; nothing there, or something else, means its entry was left by a desk that's gone.
@@ -255,7 +257,7 @@ const look = Effect.fnUntraced(function* (driver: DriverId, url: string): Effect
   const { dir, state } = yield* skillDir(d.skills(home));
   const skill = { state, path: path.join(dir, "SKILL.md"), command: copyCommand(dir) };
   const notes = [
-    ...(at.name === NAME || at.name === OLD
+    ...(DESK_NAMES.includes(at.name)
       ? []
       : [`${as ? "Connected" : "Connects"} as ${at.name}${Object.hasOwn(servers, NAME) ? `: ${keeper(servers[NAME])}` : ""}`]),
     ...(at.replaces ? [`Connect replaces inbox${shown(servers[NAME])}, left by a desk that isn't running`] : []),

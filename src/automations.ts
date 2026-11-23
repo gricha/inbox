@@ -7,7 +7,8 @@ import fs from "node:fs";
 import { as, meter } from "./usage.ts";
 import path from "node:path";
 import { Effect, Result, Schema, type Fiber } from "effect";
-import { claudeServers, serverName } from "./agents.ts";
+import { claudeServers, DESK_NAMES, serverName } from "./agents.ts";
+
 import { DENY as COORDINATOR_DENY, denyDir, wakeFor } from "./coordinator.ts";
 import type { Core, Desk, Entry } from "./desk.ts";
 import { decide, type Question } from "./decisions.ts";
@@ -183,9 +184,7 @@ const HOLD = 30 * 60_000; // how long a question waits after its model couldn't 
 const SURE = 0.8;
 const AT_ONCE = 4; // decision requests in flight: one per item
 const DAYS = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-// The desk's MCP server, and its name before the rename to Inbox, which an agent connected then keeps until the desk renames it.
-const NAMES = ["inbox", "review-desk"];
-const desks = (tools: string[], names: string[]) => names.flatMap((s) => tools.map((t) => `mcp__${s}__inbox_${t}`));
+const desks = (tools: string[], names: readonly string[]) => names.flatMap((s) => tools.map((t) => `mcp__${s}__inbox_${t}`));
 const READ_TOOLS = ["list", "item", "overview", "events", "brief", "merging"];
 // Codex's and OpenCode's run have only these: no shell, no web, no MCP server but the desk's.
 const CODEX_TOOLS =
@@ -219,7 +218,7 @@ const allow = (name: string | null) => [
     "release view",
     "repo view",
   ].map((c) => `Bash(gh ${c}:*)`),
-  ...desks(READ_TOOLS, name ? [name] : NAMES),
+  ...desks(READ_TOOLS, name ? [name] : DESK_NAMES),
 ];
 // Even where your settings allow more: nothing that writes as you, pushes, merges or edits files, and none of the desk's writes.
 const deny = (name: string | null) => [
@@ -269,7 +268,7 @@ const deny = (name: string | null) => [
       "automations",
       "criteria",
     ],
-    [...new Set([...NAMES, ...(name ? [name] : [])])],
+    [...new Set([...DESK_NAMES, ...(name ? [name] : [])])],
   ),
 ];
 // The secrets file is the desk's: no tool of a run reads it. A rule's absolute path starts with //.

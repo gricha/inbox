@@ -29,7 +29,8 @@ import {
   type CommandError,
   type FsError,
 } from "./errors.ts";
-import type { DriverId } from "./agents.ts";
+import { DESK_NAMES, type DriverId } from "./agents.ts";
+
 import { BUDGETS, skillText, type OwnSkill } from "./connectors/github-review.ts";
 import { parseDiagram } from "./diagram.ts";
 import { GH_MISSING } from "./github/client.ts";
@@ -694,7 +695,7 @@ export const toolPart = (name: string) => name.replaceAll(/[^A-Za-z0-9_-]/g, "_"
 
 // The desk's own entry in a Codex or OpenCode list: its name, or a loopback address at its port.
 const deskOwn = (s: { name: string; url: string | null }, desk: string | null) => {
-  if (s.name === "inbox" || s.name === "review-desk") return true;
+  if (DESK_NAMES.includes(s.name)) return true;
   const at = URL.parse(s.url ?? "");
   const its = URL.parse(desk ?? "");
   return !!at && !!its && at.port === its.port && ["localhost", "127.0.0.1", "[::1]"].includes(at.hostname);
