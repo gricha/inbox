@@ -2,7 +2,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { Effect, Result, Schema } from "effect";
 import { decode, num, oneOf, schemaOf, str } from "./narrow.ts";
-import { PlaceSchema } from "./kv.ts";
+import { KV, KV_PREFIX, PlaceSchema } from "./kv.ts";
 import type { Usage } from "./usage.ts";
 import {
   ACTIVITY_KINDS,
@@ -609,6 +609,25 @@ export class Store {
       if (v !== undefined) out.set(text(r.key).slice(prefix.length), v);
     }
     return out;
+  }
+
+  // A registered key's value (src/kv.ts KV), checked as read() does, and written in its shape.
+  kv<K extends keyof typeof KV>(key: K): (typeof KV)[K]["Type"] | null {
+    return this.read(key, KV[key]);
+  }
+  putKv<K extends keyof typeof KV>(key: K, value: (typeof KV)[K]["Type"]): void {
+    this.set(key, value);
+  }
+
+  // The same for a registered prefix's keys (KV_PREFIX): one by its id, or all of them by id.
+  kvAt<P extends keyof typeof KV_PREFIX>(prefix: P, id: string): (typeof KV_PREFIX)[P]["Type"] | null {
+    return this.read(prefix + id, KV_PREFIX[prefix]);
+  }
+  putKvAt<P extends keyof typeof KV_PREFIX>(prefix: P, id: string, value: (typeof KV_PREFIX)[P]["Type"]): void {
+    this.set(prefix + id, value);
+  }
+  byPrefix<P extends keyof typeof KV_PREFIX>(prefix: P): Map<string, (typeof KV_PREFIX)[P]["Type"]> {
+    return this.prefixed(prefix, KV_PREFIX[prefix]);
   }
 
   // Drops `prefix<id>` rows whose id isn't in `keep`.

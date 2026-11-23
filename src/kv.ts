@@ -72,7 +72,7 @@ export const ActedSchema = schemaOf<Acted>()(Schema.Struct({ name: Schema.String
 const HandoffSchema = schemaOf<Handoff>()(Schema.Struct({ why: Schema.String, from: Schema.String }));
 export const AddedSchema = schemaOf<Added>()(Schema.Record(Schema.String, HandoffSchema));
 // An automation's find (kv `pushed:<id>`): who found it and why, and what it was each time it added it (`once`).
-export const PushedSchema = Schema.Struct({
+const PushedSchema = Schema.Struct({
   name: Schema.String,
   why: Schema.String,
   once: opt(Schema.Record(Schema.String, Schema.String)),
@@ -85,7 +85,7 @@ export const MergingSchema = schemaOf<Merging>()(
     back: opt(Schema.String),
   }),
 );
-export const BlockedSchema = Schema.Record(Schema.String, Schema.Struct({ since: Schema.String, by: Schema.String }));
+const BlockedSchema = Schema.Record(Schema.String, Schema.Struct({ since: Schema.String, by: Schema.String }));
 export type Blocked = typeof BlockedSchema.Type;
 const ReviewNoteSchema = Schema.Struct({ path: Schema.String, line: Schema.Number, side: lineSide, body: Schema.String });
 const DiagramGraphSchema = Schema.Union([
@@ -222,7 +222,7 @@ export const IssueReviewSchema = schemaOf<IssueReview>()(
     base: opt(Schema.String),
   }),
 );
-export const IssueFailSchema = Schema.Struct({ updated_at: Schema.String, error: Schema.String, at: Schema.String });
+const IssueFailSchema = Schema.Struct({ updated_at: Schema.String, error: Schema.String, at: Schema.String });
 export type IssueFail = typeof IssueFailSchema.Type;
 const ReviewFileSchema = schemaOf<ReviewFile>()(
   Schema.Struct({
@@ -330,3 +330,8 @@ export const NoteSchema = schemaOf<Omit<Note, "waiting" | "facts">>()(
     place: opt(PlaceSchema),
   }),
 );
+
+// The kv keys with a shape of their own, and the prefixes whose keys (`issue_fail:<id>`) share one, read and written typed
+// through Store.kv(), putKv(), kvAt(), putKvAt() and byPrefix(). The rest still go through read() and set().
+export const KV = { blocked: BlockedSchema } as const;
+export const KV_PREFIX = { "issue_fail:": IssueFailSchema, "pushed:": PushedSchema } as const;

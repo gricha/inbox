@@ -199,16 +199,13 @@ import {
   AiReviewSchema,
   arrayOf,
   AskSchema,
-  BlockedSchema,
   type Blocked,
-  IssueFailSchema,
   type IssueFail,
   IssueReviewSchema,
   KeptInquirySchema,
   MergingSchema,
   NoteSchema,
   PrTextSchema,
-  PushedSchema,
   SortedSchema,
   type Acted,
   type Merging,
@@ -1684,7 +1681,7 @@ export class Desk {
     const best = new Map<string, Placement>();
     const reviews = this.store.prefixed("review:", AiReviewSchema);
     const pins = new Map<string, string>();
-    const pushed = this.store.prefixed("pushed:", PushedSchema);
+    const pushed = this.store.byPrefix("pushed:");
     const added = this.store.prefixed("added:", AddedSchema);
     const auto = new Map<string, string>();
     const handed = new Map<string, Handoff>();
@@ -2312,7 +2309,7 @@ export class Desk {
         snap,
         [...byPart([...sections.now, ...sections.today]), ...sections.later, ...sections.fyi, ...lifted].map(quick),
       );
-      const blockedSince = this.store.read("blocked", BlockedSchema) ?? {};
+      const blockedSince = this.store.kv("blocked") ?? {};
       const aged = (c: Card): Card => {
         const e = snap.entries.get(c.id)!;
         const asked = e.analysis.signals.me.author && e.analysis.signals.pr.waiting_on.length > 0;
@@ -2984,7 +2981,7 @@ export class Desk {
 
   // Its last failed try: on which version of the issue, why, and when.
   issueFailure(id: string): IssueFail | null {
-    return this.store.read(`issue_fail:${id}`, IssueFailSchema);
+    return this.store.kvAt("issue_fail:", id);
   }
 
   // ~/.inbox/issue.md, read on each run: the owner's changes to the analysis's instructions (the issue skill).
@@ -3053,7 +3050,7 @@ export class Desk {
         ),
         Effect.tapError((err) =>
           Effect.sync(() => {
-            this.store.set(`issue_fail:${id}`, { updated_at: it.updated_at, error: err.message, at: this.now().toISOString() });
+            this.store.putKvAt("issue_fail:", id, { updated_at: it.updated_at, error: err.message, at: this.now().toISOString() });
             this.log(`issue pre-review of ${id}: ${err.message}`);
           }),
         ),
@@ -3711,7 +3708,7 @@ export class Desk {
     return Effect.gen({ self: this }, function* () {
       const id = yield* this.hold(ref);
       const note = yield* this.line(why, "why");
-      const once = { ...this.store.read(`pushed:${id}`, PushedSchema)?.once };
+      const once = { ...this.store.kvAt("pushed:", id)?.once };
       const snap = this.snapshot();
       const e = snap.entries.get(id)!;
       const queued = ["now", "today"].includes(snap.best.get(id)?.bucket ?? "");
@@ -3731,7 +3728,7 @@ export class Desk {
         }
       }
       const said = { automation: a.id, name: a.name, why: note, at: this.now().toISOString() };
-      this.store.set(`pushed:${id}`, { ...said, ...(Object.keys(once).length > 0 && { once }) });
+      this.store.putKvAt("pushed:", id, { ...said, ...(Object.keys(once).length > 0 && { once }) });
       this.changed(); // the pump reads the snapshot: it must have the pin
       return { item_id: id, why: note, outcome };
     });
@@ -4114,7 +4111,7 @@ export class Desk {
   trackBlocked(): void {
     if (!this.loaded) return;
     const snap = this.snapshot();
-    const prev = this.store.read("blocked", BlockedSchema);
+    const prev = this.store.kv("blocked");
     const listed = new Set<string>();
     for (const b of snap.boards.values()) for (const id of b.result.placements.keys()) listed.add(id);
     const now = this.now().toISOString();
@@ -4134,7 +4131,7 @@ export class Desk {
         events.push({ at: now, item_id: it.id, kind: "unblocked", actor: "", data: { was: was.by, merged, closed } });
       }
     }
-    this.store.set("blocked", next);
+    this.store.putKv("blocked", next);
     if (!events.length) return;
     this.record("desk", events);
     this.changed(); // a held hand-back's why reads the unblocked event
