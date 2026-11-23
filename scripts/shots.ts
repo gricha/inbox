@@ -8,6 +8,7 @@ import path from "node:path";
 import { chromium, type Browser, type Page, type Request as Sent, type Route } from "playwright-core";
 import { siGmail } from "simple-icons";
 import { field, isRecord, str, strings } from "../src/narrow.ts";
+import { GITHUB_CRITERIA } from "../src/connectors/github-criteria.ts";
 import { colorsOf, tokensFrom } from "../src/omarchy.ts";
 import { isTestPath } from "../src/sections.ts";
 import { THEMES } from "../src/themes.ts";
@@ -4953,7 +4954,8 @@ const SHOTS: Shot[] = [
       const says = await settingsSays(page);
       if (says !== onPart("Automations")) failures.push(`settings-criteria: the head and the sidebar read ${JSON.stringify(says)}`);
       const rows = await page.locator("#s-criteria .cr-row").count();
-      if (rows !== 7) failures.push(`settings-criteria: ${rows} rows, not the mock's one and GitHub's six`);
+      if (rows !== 1 + GITHUB_CRITERIA.length)
+        failures.push(`settings-criteria: ${rows} rows, not the mock's one and GitHub's ${GITHUB_CRITERIA.length}`);
       if ((await page.locator("#s-criteria .switch:checked").count()) !== rows) failures.push("settings-criteria: a criterion is off");
     },
   },
