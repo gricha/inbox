@@ -29,6 +29,7 @@ import {
   VERB,
   VERBS,
   WAYS,
+  type Action,
   type ActivityEvent,
   type AskLines,
   type AskNote,
@@ -56,7 +57,18 @@ type Neighbours = { after?: string; before?: string };
 const LIST_BUCKETS = ["now", "today", "blocked", "later", "fyi", "hide", "cleared"] as const;
 // The owner may paste an item's link from the desk (Copy link) in place of its ref.
 const REF = "owner/repo#123, repo#123 if unique, a GitHub URL, or the item's link from the desk (inbox://item/owner/repo/123)";
-const ACTIONS = ["done", "snooze", "mute", "unmute", "pin", "unpin", "restore", "urgent", "standard", "fyi"] as const;
+const ACTIONS = [
+  "done",
+  "snooze",
+  "mute",
+  "unmute",
+  "pin",
+  "unpin",
+  "restore",
+  "urgent",
+  "standard",
+  "fyi",
+] as const satisfies readonly Action[];
 
 const json = (v: unknown) => "```json\n" + JSON.stringify(v) + "\n```";
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point

@@ -48,8 +48,8 @@ import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
 import { CHUNK_FIELDS, FIELDS } from "./signals.ts";
 import { typeCheck } from "./automations.ts";
-import { field as fieldOf, isRecord, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
-import { GITHUB_ACTIONS, INBOX_SECTIONS, type Action, type AskLines, type InlineAt, type NoteButton, type RemoteView } from "./types.ts";
+import { field as fieldOf, int as intOf, isRecord, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
+import { ACTIONS, GITHUB_ACTIONS, INBOX_SECTIONS, type AskLines, type InlineAt, type NoteButton, type RemoteView } from "./types.ts";
 
 const VERSION = stringOf(fieldOf(JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")), "version")) ?? "";
 export const DEFAULT_PORT = 47823;
@@ -359,11 +359,15 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     );
   // A body that isn't a JSON object reads as {}: each route says what it needs.
   const bodyOf = (c: Req) => Effect.orElseSucceed(json(c), (): Record<string, unknown> => ({}));
-  // A string the body may leave out.
-  const str = (b: Record<string, unknown>, k: string): Effect.Effect<string | undefined, BadRequest> => {
+  // A field the body may leave out, when it's what `check` takes; else a 400 that says what it must be.
+  const opt = <T>(b: Record<string, unknown>, k: string, check: (v: unknown) => T | undefined, must: string) => {
     const v = b[k] ?? undefined;
-    return v === undefined || typeof v === "string" ? Effect.succeed(v) : Effect.fail(new BadRequest({ message: `${k} must be a string` }));
+    const x = v === undefined ? undefined : check(v);
+    return v !== undefined && x === undefined
+      ? Effect.fail(new BadRequest({ message: `${k} must be ${must}` }))
+      : Effect.succeed<T | undefined>(x);
   };
+  const str = (b: Record<string, unknown>, k: string) => opt(b, k, stringOf, "a string");
   // A string the body must have.
   const field = (c: Req, key: string) =>
     Effect.flatMap(bodyOf(c), (b): Effect.Effect<string, BadRequest> =>
@@ -413,9 +417,12 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.post("/api/act", (c) => {
     const act = Effect.gen(function* () {
       yield* up;
-      const b = (yield* json(c)) as { id?: string; action?: Action; until?: string };
-      if (!b.id || !b.action) return yield* new BadRequest({ message: "need { id, action }" });
-      return { ok: true, ...(yield* desk.act(b.id, b.action, b.until, fromDesk(c) ? undefined : "agent")) };
+      const b = yield* json(c);
+      const id = stringOf(b.id);
+      if (!id || b.action === undefined) return yield* new BadRequest({ message: "need { id, action }" });
+      const action = oneOf(ACTIONS, b.action);
+      if (!action) return yield* new BadRequest({ message: `unknown action ${JSON.stringify(b.action)}` });
+      return { ok: true, ...(yield* desk.act(id, action, yield* str(b, "until"), fromDesk(c) ? undefined : "agent")) };
     });
     return respond(c, act, { log });
   });
@@ -993,7 +1000,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.post("/api/undo", (c) => {
     const undo = Effect.gen(function* () {
       yield* up;
-      const { seq } = (yield* bodyOf(c)) as { seq?: number };
+      const seq = yield* opt(yield* bodyOf(c), "seq", intOf, "an integer");
       const { id, action } = yield* desk.undo(seq, fromDesk(c) ? undefined : "agent");
       return { ok: true, id, action };
     });
@@ -1022,7 +1029,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.post("/api/config/preview", (c) => {
     const preview = Effect.gen(function* () {
       yield* up;
-      const { text } = (yield* json(c)) as { text?: string };
+      const text = yield* str(yield* json(c), "text");
       return desk.preview(text ?? "");
     });
     return respond(c, preview, { log });
@@ -1030,8 +1037,9 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.put("/api/config", (c) => {
     const put = Effect.gen(function* () {
       yield* up;
-      const { text, base } = (yield* json(c)) as { text?: string; base?: string };
-      return yield* desk.putConfig(text ?? "", base);
+      const b = yield* json(c);
+      const text = yield* str(b, "text");
+      return yield* desk.putConfig(text ?? "", yield* str(b, "base"));
     });
     return respond(c, put, { log });
   });
@@ -1051,12 +1059,13 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.get("/api/settings", (c) => total(c, () => desk.getSettings()));
   app.put("/api/settings", (c) => {
     const put = Effect.gen(function* () {
-      const b = (yield* json(c)) as { set?: Record<string, unknown>; reset?: string[] };
+      const b = yield* json(c);
+      const set = yield* opt(b, "set", (v) => (isRecord(v) ? v : undefined), "an object");
+      const reset = yield* opt(b, "reset", stringsOf, "a list of keys");
       // A key (a secret setting) is set or cleared in the desk's window only, as approve is: no agent, CLI or curl reaches it.
-      const keys = [...(b.set && typeof b.set === "object" ? Object.keys(b.set) : []), ...(Array.isArray(b.reset) ? b.reset : [])];
-      if (keys.some((k) => typeof k === "string" && isSecret(k)) && !fromDesk(c))
+      if ([...Object.keys(set ?? {}), ...(reset ?? [])].some(isSecret) && !fromDesk(c))
         return yield* new Forbidden({ message: "set or clear a key in the desk's window: Settings → Agent" });
-      return yield* desk.putSettings({ set: b.set, reset: b.reset });
+      return yield* desk.putSettings({ set, reset });
     });
     return respond(c, put, { log });
   });

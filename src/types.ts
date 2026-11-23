@@ -523,6 +523,22 @@ export interface Reviewer {
 
 export type Action =
   "done" | "snooze" | "mute" | "unmute" | "pin" | "unpin" | "seen" | "restore" | "inflight" | "takeback" | "undo" | InboxSection; // move it to that section of the Inbox
+export const ACTIONS: readonly Action[] = [
+  "done",
+  "snooze",
+  "mute",
+  "unmute",
+  "pin",
+  "unpin",
+  "seen",
+  "restore",
+  "inflight",
+  "takeback",
+  "undo",
+  "urgent",
+  "standard",
+  "fyi",
+];
 // The More menu's GitHub writes, only from the desk's window: close (your PR, or an issue you opened or are assigned), draft and
 // merge your open PR, reopen your closed one, request changes on someone else's (in its review, with what you wrote).
 export type GitHubAction = "close" | "draft" | "ready" | "merge" | "reopen" | "request_changes" | "rerequest" | "unrequest";

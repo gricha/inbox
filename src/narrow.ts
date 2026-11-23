@@ -10,6 +10,7 @@ export const field = (v: unknown, key: string): unknown => (isRecord(v) ? v[key]
 
 export const str = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 export const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+export const int = (v: unknown): number | undefined => (typeof v === "number" && Number.isInteger(v) ? v : undefined);
 export const strings = (v: unknown): string[] | undefined =>
   Array.isArray(v) && v.every((x) => typeof x === "string") ? v.filter((x) => typeof x === "string") : undefined;
 

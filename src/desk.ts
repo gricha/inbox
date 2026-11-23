@@ -3432,8 +3432,10 @@ export class Desk {
           s.inflight_at = null;
           this.store.set(`sitter:${id}`, { ...this.merging(id), back: now.toISOString() }); // yours now: not sent to rebase
           break;
-        default:
-          return yield* new BadRequest({ message: `unknown action "${action as string}"` }); // reachable: the HTTP body isn't checked against Action
+        default: {
+          const unknown: never = action;
+          return yield* new BadRequest({ message: `unknown action "${String(unknown)}"` });
+        }
       }
       // Where you moved it holds while it's on your Inbox; off it, it comes back where the desk puts it.
       if (action === "done" || action === "snooze" || action === "mute") {
@@ -3610,8 +3612,10 @@ export class Desk {
         case "standard":
         case "fyi":
           return yield* new Conflict({ message: `a session takes done, snooze, mute, unmute and restore; not ${action}` });
-        default:
-          return yield* new BadRequest({ message: `unknown action "${action as string}"` });
+        default: {
+          const unknown: never = action;
+          return yield* new BadRequest({ message: `unknown action "${String(unknown)}"` });
+        }
       }
       this.store.putState(s);
       const auto = agent?.startsWith("automation:") ? agent : undefined;

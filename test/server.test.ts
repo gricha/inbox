@@ -974,6 +974,32 @@ test("the desk's refusals answer through respond with their tag, words and statu
   assert.match(why.error, /settings\.json/);
 });
 
+test("a route's body in the wrong shape is a 400 that says which field, not a 500 or a write of whatever came", async (c) => {
+  const t = await withItems([reviewAsk(1)], { settings: { "policy.judge": false } });
+  c.after(t.cleanup);
+  await run(t.desk.sync());
+  const app = createApp(t.desk, 47823);
+  const call = async (method: string, p: string, body: unknown) => {
+    const res = await app.request(`http://127.0.0.1:47823${p}`, {
+      method,
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return [res.status, await res.json()];
+  };
+  const no = (error: string) => [400, { error, tag: "BadRequest" }];
+  assert.deepEqual(await call("POST", "/api/act", { id: "api#1", action: "bogus" }), no('unknown action "bogus"'));
+  assert.deepEqual(await call("POST", "/api/act", { id: "api#1", action: "snooze", until: 5 }), no("until must be a string"));
+  assert.deepEqual(await call("POST", "/api/act", { id: 1, action: "done" }), no("need { id, action }"), "it was a TypeError 500");
+  assert.deepEqual(await call("POST", "/api/undo", { seq: "x" }), no("seq must be an integer"), "it was a 404");
+  assert.deepEqual(await call("POST", "/api/undo", { seq: 1.5 }), no("seq must be an integer"));
+  assert.deepEqual(await call("POST", "/api/config/preview", { text: 5 }), no("text must be a string"), "it was a 200");
+  assert.deepEqual(await call("PUT", "/api/config", { text: "x", base: 5 }), no("base must be a string"), "it was a 409 Stale");
+  assert.deepEqual(await call("PUT", "/api/settings", { set: ["x"] }), no("set must be an object"), "it was a 200");
+  assert.deepEqual(await call("PUT", "/api/settings", { reset: [1] }), no("reset must be a list of keys"), "it was a 200");
+  assert.equal(t.desk.store.state("acme/api#1").snooze_until, null, "nothing was written");
+});
+
 test("the desk's GitHub writes answer through respond: GitHub's refusal is Upstream in its words, a moved head Stale, a second press Busy", async (c) => {
   let release = () => {};
   const held = new Promise<void>((r) => {
