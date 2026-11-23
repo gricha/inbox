@@ -6165,7 +6165,8 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
-    // A person picked under Author: only dana's rows, the button counts one, and the sidebar's search keeps its words.
+    // A person picked under Author: only dana's rows (a bot's opened for her among them), the button counts one, and the
+    // sidebar's search keeps its words.
     name: "filter-pick",
     go: async (page) => {
       await at("#/")(page);
@@ -6175,7 +6176,7 @@ const SHOTS: Shot[] = [
       const count = await page.locator(".page-head .head-filter .pill-count").textContent();
       if (count !== "1") failures.push(`filter-pick: the button counts ${JSON.stringify(count)}`);
       const by = await page.locator(".queue .line:not(.inq) .line-by").allTextContents();
-      if (!by.length || by.some((b) => b.trim() !== "by dana")) failures.push(`filter-pick: rows by ${JSON.stringify(by)}`);
+      if (!by.length || by.some((b) => !/^by dana( via \S+)?$/.test(b.trim()))) failures.push(`filter-pick: rows by ${JSON.stringify(by)}`);
       const words = await page.locator(".side-search .search input").inputValue();
       if (words !== "") failures.push(`filter-pick: the search box reads ${JSON.stringify(words)}`);
       await page.keyboard.press("Escape");
