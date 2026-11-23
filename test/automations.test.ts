@@ -2188,16 +2188,18 @@ test("a note's icon is a Lucide name or brand:<Simple Icons slug>; one neither p
   runSync(t.desk.automations.set("mail", { ...mail, icon: "mail" }, true));
   assert.equal(shown()["Airline: your flight moved"], "mail", "its automation's icon as it is now");
   assert.equal(t.desk.notes()[2]!.icon, undefined, "nothing is written to the note");
-  // With one set, a run isn't asked for an icon, and one it gives anyway isn't kept.
+  // With one set, a run isn't asked for an icon; one it gives anyway is kept as given, and shows once its automation's is cleared.
   runSync(t.desk.automations.set("mail", { ...mail, icon: "brand:gmail" }, true));
   fake.answer("One.", [], { notes: [{ key: "t6", text: "Netlify: deploy failed", icon: "brand:netlify" }] });
   await t.desk.automations.run(gmail, "now").p;
-  assert.equal(t.desk.notes().at(-1)!.icon, undefined);
+  assert.equal(shown()["Netlify: deploy failed"], "brand:gmail", "its automation's icon wins");
   const asked = JSON.parse(fake.args(2)[fake.args(2).indexOf("--json-schema") + 1]!) as {
     properties: { notes: { items: { properties: object } } };
   };
   assert.ok(!("icon" in asked.properties.notes.items.properties), "no icon in its schema");
   assert.doesNotMatch(fake.stdin(2), /the icon that fits what it is/);
+  runSync(t.desk.automations.set("mail", mail, true));
+  assert.equal(shown()["Netlify: deploy failed"], "brand:netlify", "its automation's icon cleared: the run's");
 
   const schema = JSON.parse(fake.args(1)[fake.args(1).indexOf("--json-schema") + 1]!) as {
     properties: { notes: { items: { properties: { icon: { enum?: string[]; description: string } } } } };

@@ -1315,7 +1315,8 @@ export class Automations {
         ...(n.url && { url: n.url }),
         ...(section && { section }),
         buttons: buttons.filter((b) => b.do !== "open" || n.url),
-        ...(n.icon && !a.icon && { icon: n.icon }),
+        ...(n.icon && { icon: n.icon }), // the run's pick; Desk.notesView() shows its automation's over it
+
         ...(n.fields && { fields: n.fields }),
       },
     );

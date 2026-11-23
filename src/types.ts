@@ -1464,7 +1464,8 @@ export interface Note {
   body?: string; // markdown, drawn as prose: no HTML, no images, its links as text
   url?: string; // https only: where it lives (the email in Gmail), for an open button
   buttons?: NoteButton[]; // the automation's, as it was when it raised this; the first is the row's
-  icon?: string; // its row's, an icon pack's name ("receipt", "brand:gmail"): the run's pick; on a view, else its automation's
+  icon?: string; // its row's, an icon pack's name ("receipt", "brand:gmail"): the run's pick; on a view, its automation's when it has one
+
   fields?: Record<string, unknown>; // a typed automation's: the note's fields as its type decoded them, untrusted text
   facts?: NoteFact[]; // on a view: its fields as its automation's type reads them, for the opened note; never stored
   waiting?: WaitingStep[]; // on QueueView.notes: the head of an "after" chain, as on a Card; never stored
