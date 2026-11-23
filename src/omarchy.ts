@@ -111,7 +111,7 @@ export function tokensFrom(colors: Record<string, string>, scheme: "light" | "da
   const red = tone(meant(pick("red", "color1"), 330, 20, dark ? "#ffb4ab" : "#b42318"));
   const amber = tone(meant(pick("yellow", "color3"), 20, 65, dark ? "#ebc076" : "#8a4b08"));
   const green = meant(pick("green", "color2"), 75, 170, dark ? "#8dceaf" : "#176847");
-  const accent = pick("accent", "blue", "color4") ?? (dark ? "#a8cacb" : "#365d60");
+  const accent = pick("accent", "blue", "color4") ?? (dark ? "#bfa2f2" : "#6236b3");
   const accentWash = mix(sheet, accent, 0.14);
   return {
     "--paper": paper,

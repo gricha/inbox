@@ -13,25 +13,26 @@ two filled paths in a 64×64 viewBox.
 - **Never** redraw, stretch, stroke, shadow, gradient or badge the mark.
 - **Keep its viewBox.** The silhouette spans x 8–56 and y 19.6–44.5; the room around it is deliberate.
 - **A status dot goes on the tile's corner** (the tray's alert), never on the mark.
-- **Colours.** The tile is petrol `#365D60` with a warm-white `#F7F6F2` mark, the same in every theme. In the window the
+- **Colours.** The tile is violet `#6A3DBD` with a near-white `#F6F3FC` mark, the same in every theme. In the window the
   mark is `--accent-ink` (purple in Light, a light purple in Dark, each theme's accent elsewhere). A coloured mark on a
-  light surface, a light one on a dark surface; never dark petrol on a dark panel.
+  light surface, a light one on a dark surface; never the violet tile on a dark violet panel.
 - **In the window** it's `Mark` (`web/src/components/Mark.tsx`): inline SVG at 24px (a silhouette about 18×9px),
   `aria-hidden`, on the first-run page. The sidebar's brand row has no mark: the word "Inbox" in a browser, nothing
   beside the traffic lights in the macOS app.
 
 `npm run icons` (`scripts/icons.ts`, run in Electron, which rasterizes) reads the master's paths and writes:
 
-| File                                 | What                                                                                      | Size       |
-| ------------------------------------ | ----------------------------------------------------------------------------------------- | ---------- |
-| `assets/brand/tile.svg`              | the petrol tile, corner 13.5 of 64, the warm-white mark at the kit's proportions          | 64 viewBox |
-| `assets/icon.svg`, `assets/icon.png` | the app icon (macOS, Windows, Linux): the tile on the macOS grid (824px at 100,100), flat | 1024       |
-| `assets/trayTemplate.png`, `@2x`     | the macOS menu bar: the mark alone in black (macOS tints it), cropped with a margin       | 22×16, 2x  |
-| `assets/tray.png`, `@2x`             | the Windows and Linux tray: the tile                                                      | 16, 32     |
-| `assets/tray-alert.png`, `@2x`       | the same, with a red dot in the corner the pill leaves clear                              | 16, 32     |
-| `assets/overlay-alert.png`           | the Windows taskbar's badge: a red dot                                                    | 16         |
-| `web/public/icon.svg`                | the favicon and the manifest's icon: the tile                                             | any        |
-| `web/public/icon-maskable.svg`       | the manifest's maskable icon: full bleed, the mark at three quarters inside the safe zone | any        |
+| File                                     | What                                                                                      | Size       |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------- | ---------- |
+| `assets/brand/tile.svg`                  | the violet tile, corner 13.5 of 64, the near-white mark at the kit's proportions          | 64 viewBox |
+| `assets/icon.svg`, `assets/icon.png`     | the app icon (macOS, Windows, Linux): the tile on the macOS grid (824px at 100,100), flat | 1024       |
+| `assets/trayTemplate.png`, `@2x`         | the macOS menu bar: the mark alone in black (macOS tints it), cropped with a margin       | 22×16, 2x  |
+| `assets/tray.png`, `@2x`                 | the Windows and Linux tray: the tile                                                      | 16, 32     |
+| `assets/tray-alert.png`, `@2x`           | the same, with a red dot in the corner the pill leaves clear                              | 16, 32     |
+| `assets/overlay-alert.png`               | the Windows taskbar's badge: a red dot                                                    | 16         |
+| `web/public/icon.svg`                    | the favicon and the manifest's icon: the tile                                             | any        |
+| `web/public/icon-maskable.svg`           | the manifest's maskable icon: full bleed, the mark at three quarters inside the safe zone | any        |
+| `ios/…/AppIcon.appiconset/icon-1024.png` | the iPhone app's icon: the maskable icon, which iOS rounds                                | 1024       |
 
 `Mark.tsx` carries its own copy of the paths (inline, so it takes the colour). `web/test/mark.test.ts` fails when it or
 any SVG above differs from the master. The manifest's colours are Light's paper.
@@ -257,7 +258,7 @@ doesn't have.
 | The navigation collapses to a 64px rail               | the sidebar compacts to 148px and keeps its words: the window names every action in words        |
 | A separate Focus mode, a theme switcher in a bar      | not built: themes stay in Settings → This device                                                 |
 | 14px titles, 80px rows                                | 14px titles; a table row is one line, a row beside a review two                                  |
-| Six brand colours, petrol recommended                 | petrol for the mark, Light and Dark; no brand colour picker                                      |
+| Six brand colours, petrol recommended                 | violet for the mark, Light and Dark; no brand colour picker                                      |
 
 ## Taking in a design handoff
 

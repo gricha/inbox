@@ -9,44 +9,44 @@ const paths = [...fs.readFileSync(path.join(dir, "brand", "mark.svg"), "utf8").m
 if (!paths.length) throw new Error("assets/brand/mark.svg has no <path d>");
 const mark = paths.map((m) => `<path d="${m[1]}"/>`).join("");
 
-const PETROL = "#365D60";
-const WARM_WHITE = "#F7F6F2";
+const VIOLET = "#6A3DBD";
+const MARK_WHITE = "#F6F3FC";
 const svg = (viewBox: string, body: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${body}</svg>`;
 
 // The alert's dot sits in the corner the pill leaves clear, never on the mark.
 const tile = (alert: boolean) =>
   svg(
     "0 0 64 64",
-    `<rect width="64" height="64" rx="13.5" fill="${PETROL}"/><g fill="${WARM_WHITE}">${mark}</g>` +
+    `<rect width="64" height="64" rx="13.5" fill="${VIOLET}"/><g fill="${MARK_WHITE}">${mark}</g>` +
       (alert ? `<circle cx="54" cy="10" r="10" fill="#E5484D"/>` : ""),
   );
 
 // The app icon on the macOS grid (an 824 tile at 100,100, its corner), the kit's tile scaled to it: flat, no highlight.
 const icon = svg(
   "0 0 1024 1024",
-  `<rect x="100" y="100" width="824" height="824" rx="185" fill="${PETROL}"/><g fill="${WARM_WHITE}" transform="translate(100 100) scale(12.875)">${mark}</g>`,
+  `<rect x="100" y="100" width="824" height="824" rx="185" fill="${VIOLET}"/><g fill="${MARK_WHITE}" transform="translate(100 100) scale(12.875)">${mark}</g>`,
 );
 
 // A build that isn't the release says so in the Dock and menu bar (appVariant in electron/lib.ts): its own colour, and on
 // the app icon its name under the mark.
-const VARIANTS = { dev: { fill: "#C2410C", label: "DEV" }, qa: { fill: "#6E56CF", label: "QA" } } as const;
+const VARIANTS = { dev: { fill: "#C2410C", label: "DEV" }, qa: { fill: "#2F5BD3", label: "QA" } } as const;
 const variantIcon = (fill: string, label: string) =>
   svg(
     "0 0 1024 1024",
-    `<rect x="100" y="100" width="824" height="824" rx="185" fill="${fill}"/><g fill="${WARM_WHITE}" transform="translate(152 90) scale(11.25)">${mark}</g>` +
-      `<text x="512" y="842" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-weight="800" font-size="168" letter-spacing="14" fill="${WARM_WHITE}">${label}</text>`,
+    `<rect x="100" y="100" width="824" height="824" rx="185" fill="${fill}"/><g fill="${MARK_WHITE}" transform="translate(152 90) scale(11.25)">${mark}</g>` +
+      `<text x="512" y="842" text-anchor="middle" font-family="-apple-system, system-ui, sans-serif" font-weight="800" font-size="168" letter-spacing="14" fill="${MARK_WHITE}">${label}</text>`,
   );
 const variantTile = (fill: string, alert: boolean) =>
   svg(
     "0 0 64 64",
-    `<rect width="64" height="64" rx="13.5" fill="${fill}"/><g fill="${WARM_WHITE}">${mark}</g>` +
+    `<rect width="64" height="64" rx="13.5" fill="${fill}"/><g fill="${MARK_WHITE}">${mark}</g>` +
       (alert ? `<circle cx="54" cy="10" r="10" fill="#E5484D"/>` : ""),
   );
 
 // Maskable: full bleed, the mark at three quarters so it stays inside the platform's safe zone.
 const maskable = svg(
   "0 0 64 64",
-  `<rect width="64" height="64" fill="${PETROL}"/><g fill="${WARM_WHITE}" transform="translate(8 8) scale(.75)">${mark}</g>`,
+  `<rect width="64" height="64" fill="${VIOLET}"/><g fill="${MARK_WHITE}" transform="translate(8 8) scale(.75)">${mark}</g>`,
 );
 
 // The menu bar's template image (alpha only): the silhouette (x 8–56, y 19.6–44.5) and a margin, 22×16 pt like its neighbours.
@@ -69,6 +69,7 @@ const rasters: [file: string, svg: string, width: number, height: number][] = [
   ["tray-alert.png", tile(true), 16, 16],
   ["tray-alert@2x.png", tile(true), 32, 32],
   ["overlay-alert.png", dot, 16, 16],
+  ["../ios/Inbox/Assets.xcassets/AppIcon.appiconset/icon-1024.png", maskable, 1024, 1024],
   ...Object.entries(VARIANTS).flatMap(([name, v]): [string, string, number, number][] => [
     [`icon-${name}.png`, variantIcon(v.fill, v.label), 1024, 1024],
     [`tray-${name}.png`, variantTile(v.fill, false), 16, 16],

@@ -560,4 +560,4 @@ Not built at all: notifications, an iPad layout.
 | The connect screen                          | `Inbox/Views/ConnectView.swift`                                                        |
 | Test mode (no desk; App Review)             | `Inbox/Demo.swift` (`DemoDesk`); its answers `Inbox/Demo.json`, from `npm run ios:demo` (`scripts/ios-demo.ts`); `Store.testMode()`; `DeskAddress.isDemo` |
 | Scan the code (the camera, the QR it reads) | `Inbox/Views/ScanView.swift`; what counts as a desk's link: `DeskAddress.scanned()`    |
-| The app icon                                | `Inbox/Assets.xcassets/AppIcon.appiconset` (the mark, full-bleed on petrol)            |
+| The app icon                                | `Inbox/Assets.xcassets/AppIcon.appiconset` (the mark, full-bleed on violet; `npm run icons` writes it)            |
