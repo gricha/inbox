@@ -257,6 +257,7 @@ export const AskSchema = schemaOf<Ask>()(
         body: opt(Schema.String),
         url: opt(Schema.String),
         from: opt(Schema.Struct({ id: Schema.String, name: Schema.String })),
+        fields: opt(Schema.Record(Schema.String, Schema.Unknown)),
       }),
     ),
     answer: Schema.NullOr(Schema.Struct({ text: Schema.String, at: Schema.String })),
@@ -310,5 +311,6 @@ export const NoteSchema = schemaOf<Omit<Note, "waiting">>()(
     url: opt(Schema.String),
     buttons: opt(Schema.mutable(Schema.Array(NoteButtonSchema))),
     icon: opt(Schema.String),
+    fields: opt(Schema.Record(Schema.String, Schema.Unknown)),
   }),
 );

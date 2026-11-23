@@ -1368,7 +1368,7 @@ export interface AskPlace {
 }
 
 // The note an Ask button was pressed on, kept with the ask (the note itself is done): untrusted, an automation's run wrote it.
-export type AskNote = Pick<Note, "text" | "body" | "url" | "from">;
+export type AskNote = Pick<Note, "text" | "body" | "url" | "from" | "fields">;
 
 // A question an agent session put to you through the desk (inbox_inquire): a row on the main page until you answer it, and
 // its own page with all you need to decide without opening anything else. Everything but the answer is untrusted: an agent wrote it.
@@ -1435,6 +1435,7 @@ export interface Note {
   url?: string; // https only: where it lives (the email in Gmail), for an open button
   buttons?: NoteButton[]; // the automation's, as it was when it raised this; the first is the row's
   icon?: string; // its row's, an icon pack's name ("receipt", "brand:gmail"): the run's pick; on a view, else its automation's
+  fields?: Record<string, unknown>; // a typed automation's: the note's fields as its type decoded them, untrusted text
   waiting?: WaitingStep[]; // on QueueView.notes: the head of an "after" chain, as on a Card; never stored
 }
 

@@ -1287,6 +1287,7 @@ export class Automations {
         ...(section && { section }),
         buttons: buttons.filter((b) => b.do !== "open" || n.url),
         ...(n.icon && { icon: n.icon }),
+        ...(a.type && isRecord(n.fields) && { fields: n.fields }), // what its type checked, never an untyped run's
       },
     );
     return { item_id: `note:${note.id}`, why: n.text.slice(0, 300), outcome: "added" };

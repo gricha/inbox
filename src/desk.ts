@@ -4477,7 +4477,15 @@ export class Desk {
   // An automation's run raised it: in the section it or its rule said, with the automation's buttons as they are now.
   raiseNote(
     from: { id: string; name: string },
-    b: { text: string; body?: string; url?: string; section?: InboxSection; buttons?: NoteButton[]; icon?: string },
+    b: {
+      text: string;
+      body?: string;
+      url?: string;
+      section?: InboxSection;
+      buttons?: NoteButton[];
+      icon?: string;
+      fields?: Record<string, unknown>;
+    },
   ): Note {
     const note: Note = {
       id: randomBytes(4).toString("hex"),
@@ -4491,6 +4499,7 @@ export class Desk {
       ...(b.url && { url: b.url }),
       ...(b.buttons?.length && { buttons: b.buttons }),
       ...(b.icon && { icon: b.icon }),
+      ...(b.fields && { fields: b.fields }),
     };
     this.store.set("notes", [...this.notes(), note]);
     this.changed();
@@ -4507,7 +4516,13 @@ export class Desk {
       if (b?.do !== "ask" || !b.prompt) return yield* new BadRequest({ message: "that button doesn't ask your agent anything" });
       const a = yield* this.ask({
         text: b.prompt,
-        note: { text: n.text, ...(n.body && { body: n.body }), ...(n.url && { url: n.url }), ...(n.from && { from: n.from }) },
+        note: {
+          text: n.text,
+          ...(n.body && { body: n.body }),
+          ...(n.url && { url: n.url }),
+          ...(n.from && { from: n.from }),
+          ...(n.fields && { fields: n.fields }),
+        },
       });
       yield* Effect.ignore(this.doneNote(id));
       return a;

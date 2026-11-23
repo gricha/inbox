@@ -173,6 +173,15 @@ test("an automation over a tracker's MCP server: cards with icon, body and butto
   assert.deepEqual(q.notes.fyi.map(line), [
     ["standup-bot in #eng: Daily digest: 4 threads mention you", "message-circle", false, "https://tracker.example/m/m4", both],
   ]);
+  // Each keeps its fields as its type decoded them, untrusted text the window shows as such.
+  assert.deepEqual(q.notes.open[0]!.fields, {
+    kind: "review_request",
+    author: "priya",
+    channel: "design",
+    mentions: ["me"],
+    due: "2026-11-27",
+    points: 3,
+  });
 
   // The held three aren't on the desk; their recommendations are questions on it.
   const recs = q.inquiries.filter((x) => x.fix);
