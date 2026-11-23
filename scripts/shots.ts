@@ -608,6 +608,7 @@ const headSays = (page: Page) =>
 // In Settings: the page head's words, then the sidebar's items, the one it marks current in brackets:
 // "Agent: Inbox Inbox and notifications [Agent] Your automations This device GitHub"; null outside Settings.
 const SETTINGS_SIDE = SETTINGS_PARTS.filter((p) => !p.plugin).map((p) => p.name);
+const SETTINGS_PLUGINS = SETTINGS_PARTS.filter((p) => p.plugin).map((p) => p.name);
 const settingsSays = (page: Page) =>
   page.evaluate<string | null>(`(() => {
     const nav = document.querySelector('.side-nav[aria-label="Settings"]');
@@ -620,7 +621,7 @@ const settingsSays = (page: Page) =>
 // What settingsSays reads on the part named `on`.
 // Its way back, the divider (no words), then the App group's parts and the Integrations group's.
 const onPart = (on: string) =>
-  `${on}: ${["Inbox", "", "App", ...SETTINGS_SIDE, "Integrations", "GitHub", "Sessions"].map((p) => (p === on ? `[${p}]` : p)).join(" ")}`;
+  `${on}: ${["Inbox", "", "App", ...SETTINGS_SIDE, "Integrations", ...SETTINGS_PLUGINS].map((p) => (p === on ? `[${p}]` : p)).join(" ")}`;
 // The sidebar's pages in order; null where it's hidden.
 const sidePages = (page: Page) =>
   page.evaluate<string | null>(`(() => {
