@@ -5,6 +5,7 @@ import { Fragment, useCallback, useState, type KeyboardEvent } from "react";
 import type { CriteriaView } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed } from "../keyed.ts";
+import { useShown } from "../pending.ts";
 import { ago, aiName, freeId, MOD } from "../format.ts";
 import { AskChange } from "./AskChange.tsx";
 import { changeAsk } from "../view.ts";
@@ -40,8 +41,9 @@ export function Criteria({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [flipped, setFlipped] = useState<Record<string, boolean>>({}); // switched here, until the list read again agrees
-  const [gone, setGone] = useState<string[]>([]); // deleted here, until the list read again has them gone
+  // Switched or deleted here, until the list read again agrees.
+  const flipped = useShown<string, boolean>(view, (id, on) => !view?.criteria.some((c) => c.id === id && c.on !== on));
+  const gone = useShown<string, true>(view, (id) => !view?.criteria.some((c) => c.id === id));
 
   const load = useCallback(
     (): Effect.Effect<void> =>
@@ -49,10 +51,6 @@ export function Criteria({
         Effect.match({
           onSuccess: (v) => {
             setView(v);
-            setFlipped((f) =>
-              Object.fromEntries(Object.entries(f).filter(([id, on]) => v.criteria.some((c) => c.id === id && c.on !== on))),
-            );
-            setGone((g) => g.filter((id) => v.criteria.some((c) => c.id === id)));
             setError("");
           },
           onFailure: (e) => {
@@ -92,9 +90,9 @@ export function Criteria({
   };
   const turn = (c: Crit) => {
     const on = !c.on;
-    setFlipped((f) => ({ ...f, [c.id]: on }));
+    flipped.show(c.id, on);
     write(api.switchCriterion(c.id, on), `${c.name} is ${on ? "on" : "off"}`, undefined, () => {
-      setFlipped((f) => Object.fromEntries(Object.entries(f).filter(([id]) => id !== c.id)));
+      flipped.drop(c.id);
     });
   };
   const save = (d: Draft) => {
@@ -107,10 +105,10 @@ export function Criteria({
   const remove = (d: Draft) => {
     const id = d.id;
     if (!id) return;
-    setGone((g) => [...g, id]);
+    gone.show(id, true);
     setDraft(null);
     write(api.deleteCriterion(id), `Deleted ${d.name}`, undefined, () => {
-      setGone((g) => g.filter((x) => x !== id));
+      gone.drop(id);
       setDraft(d);
     });
   };
@@ -132,7 +130,9 @@ export function Criteria({
         )}
       </div>
     );
-  const criteria = view.criteria.filter((c) => !gone.includes(c.id)).map((c) => Object.assign({}, c, { on: flipped[c.id] ?? c.on }));
+  const criteria = view.criteria
+    .filter((c) => !gone.shown.has(c.id))
+    .map((c) => Object.assign({}, c, { on: flipped.shown.get(c.id) ?? c.on }));
   const own = criteria.filter((c) => !c.plugin);
   const plugins = [...new Set(criteria.flatMap((c) => (c.plugin ? [c.plugin] : [])))];
   const row = (c: Crit) => (

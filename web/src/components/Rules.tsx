@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { BUCKETS, type ConfigDoc, type ConfigError, type FieldDoc, type PlacingRule, type PreviewResult } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed, useKeyedLayout } from "../keyed.ts";
+import { useShown } from "../pending.ts";
 import { BUCKET_LABEL, cls, MOD, shortId, tilde, aiName } from "../format.ts";
 import { lineOf, weightText } from "../view.ts";
 import { ActButton } from "./Detail.tsx";
@@ -33,7 +34,6 @@ export function Rules({
   const [errors, setErrors] = useState<ConfigError[]>([]);
   const [hard, setHard] = useState<ConfigDoc["hard"]>([]);
   const [builtins, setBuiltins] = useState<ConfigDoc["builtins"]>([]);
-  const [flipped, setFlipped] = useState<Record<string, boolean>>({}); // built-ins switched here by `board rule`, until the file read again agrees
   const [preview, setPreview] = useState<{ text: string; result: PreviewResult } | null>(null);
   const [busy, setBusy] = useState<"" | "preview" | "save">("");
   const [fields, setFields] = useState<FieldDoc[]>([]);
@@ -42,7 +42,15 @@ export function Rules({
   const [lit, setLit] = useState<string | null>(null); // a built-in rule a row asked for, by flipKey, marked until the next
   const ta = useRef<HTMLTextAreaElement>(null);
   const dirty = doc !== null && text !== doc.text;
-  const shownBuiltins = builtins.map((b) => ({ ...b, rules: b.rules.map((r) => ({ ...r, on: flipped[flipKey(b.board, r.id)] ?? r.on })) }));
+  // Built-ins switched here, by flipKey, until the file read again agrees.
+  const flipped = useShown<string, boolean>(
+    builtins,
+    (k, on) => !builtins.some((b) => b.rules.some((r) => flipKey(b.board, r.id) === k && r.on !== on)),
+  );
+  const shownBuiltins = builtins.map((b) => ({
+    ...b,
+    rules: b.rules.map((r) => ({ ...r, on: flipped.shown.get(flipKey(b.board, r.id)) ?? r.on })),
+  }));
   const latest = useRef({ doc, text });
   latest.current = { doc, text };
 
@@ -61,13 +69,6 @@ export function Rules({
             setErrors(c.errors);
             setHard(c.hard);
             setBuiltins(c.builtins);
-            setFlipped((f) =>
-              Object.fromEntries(
-                Object.entries(f).filter(([k, on]) =>
-                  c.builtins.some((b) => b.rules.some((r) => flipKey(b.board, r.id) === k && r.on !== on)),
-                ),
-              ),
-            );
             setLoadError("");
           },
           onFailure: (e) => {
@@ -198,10 +199,10 @@ export function Rules({
   function turn(board: string, rule: string, on: boolean) {
     const key = flipKey(board, rule);
     const back = () => {
-      setFlipped((f) => Object.fromEntries(Object.entries(f).filter(([k]) => k !== key)));
+      flipped.drop(key);
     };
     setBusy("save");
-    setFlipped((f) => ({ ...f, [key]: on }));
+    flipped.show(key, on);
     runUi(
       api.switchRule(board, rule, on, doc?.text).pipe(
         Effect.match({
