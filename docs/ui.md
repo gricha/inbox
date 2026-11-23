@@ -781,23 +781,23 @@ Code: `onKey` and `onCapture` (`SIDE_PAGES`, `stepTo()`) in `web/src/App.tsx`, p
 
 ## Files
 
-| File                                                                              | What                                                                                 |
-| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| `web/src/App.tsx`                                                                 | state, data loading, SSE, keys, routes wired to pages                                |
-| `web/src/view.ts`                                                                 | routes, grouping, filter, settings parts and helpers (pure, tested in `web/test`)    |
-| `web/src/notices.ts`, `components/Bubbles.tsx`                                    | the bubbles: which, in what words, dismissals                                        |
-| `web/src/components/Sidebar.tsx`, `PageHead.tsx`                                  | the sidebar (pages, Ask your agent, the update line, Settings); each page's head     |
-| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx`                       | the Inbox, Blocked and the Archive: rows, an item opened in place                    |
-| `web/src/components/Chain.tsx`                                                    | a chain's head button (N after this) and its waiting steps' rows                     |
-| `web/src/components/Inquiry.tsx`, `Session.tsx`                                   | agents' questions (rows and page); sessions that need you                            |
-| `web/src/components/RowMenu.tsx`, `More.tsx`                                      | a row's right-click menu; a review's More                                            |
-| `web/src/components/Beside.tsx`                                                   | the list beside a review or a question                                               |
-| `web/src/components/Review.tsx`, `Conversation.tsx`, `Reviewers.tsx`              | a PR's review: header, AI review, conversations, diffs and notes, actions, reviewers |
-| `web/src/components/Inflight.tsx`                                                 | Merging and Claude's work                                                            |
-| `web/src/components/Chat.tsx`, `Prose.tsx`                                        | Ask your agent; drawing an agent's text                                              |
-| `web/src/components/Settings.tsx`, `Rules.tsx`, `Automations.tsx`, `Criteria.tsx` | Settings and its views                                                               |
-| `web/src/components/Setup.tsx`                                                    | the first-run page                                                                   |
-| `web/src/styles.css`, `web/src/theme.ts`                                          | tokens per theme and layout ([visual.md](visual.md)); the device's theme             |
-| `web/src/components/Mark.tsx`, `assets/brand/mark.svg`                            | the mark ([visual.md → The brand](visual.md#the-brand))                              |
-| `web/src/fonts/`                                                                  | bundled fonts, so nothing loads from the network                                     |
-| `web/mock/server.ts`, `diffs.ts`                                                  | an in-memory API for UI work without GitHub: `node web/mock/server.ts`               |
+| File                                                                                                                 | What                                                                                 |
+| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `web/src/App.tsx`                                                                                                    | state, data loading, SSE, keys, routes wired to pages                                |
+| `web/src/view.ts`                                                                                                    | routes, grouping, filter, settings parts and helpers (pure, tested in `web/test`)    |
+| `web/src/notices.ts`, `components/Bubbles.tsx`                                                                       | the bubbles: which, in what words, dismissals                                        |
+| `web/src/components/Sidebar.tsx`, `PageHead.tsx`                                                                     | the sidebar (pages, Ask your agent, the update line, Settings); each page's head     |
+| `web/src/components/Queue.tsx`, `CardRow.tsx`, `Detail.tsx`                                                          | the Inbox, Blocked and the Archive: rows, an item opened in place                    |
+| `web/src/components/Chain.tsx`                                                                                       | a chain's head button (N after this) and its waiting steps' rows                     |
+| `web/src/components/Inquiry.tsx`, `Session.tsx`                                                                      | agents' questions (rows and page); sessions that need you                            |
+| `web/src/components/RowMenu.tsx`, `More.tsx`                                                                         | a row's right-click menu; a review's More                                            |
+| `web/src/components/Beside.tsx`                                                                                      | the list beside a review or a question                                               |
+| `web/src/components/Review.tsx`, `Conversation.tsx`, `Reviewers.tsx`                                                 | a PR's review: header, AI review, conversations, diffs and notes, actions, reviewers |
+| `web/src/components/Inflight.tsx`                                                                                    | Merging and Claude's work                                                            |
+| `web/src/components/Chat.tsx`, `Prose.tsx`                                                                           | Ask your agent; drawing an agent's text                                              |
+| `web/src/components/Settings.tsx`, `SettingFields.tsx`, `Remote.tsx`, `Rules.tsx`, `Automations.tsx`, `Criteria.tsx` | Settings and its views                                                               |
+| `web/src/components/Setup.tsx`                                                                                       | the first-run page                                                                   |
+| `web/src/styles.css`, `web/src/theme.ts`                                                                             | tokens per theme and layout ([visual.md](visual.md)); the device's theme             |
+| `web/src/components/Mark.tsx`, `assets/brand/mark.svg`                                                               | the mark ([visual.md → The brand](visual.md#the-brand))                              |
+| `web/src/fonts/`                                                                                                     | bundled fonts, so nothing loads from the network                                     |
+| `web/mock/server.ts`, `diffs.ts`                                                                                     | an in-memory API for UI work without GitHub: `node web/mock/server.ts`               |
