@@ -3,6 +3,7 @@ import { age, cls } from "../format.ts";
 import { afterText, chainLabel, stepGuides, WAIT, type Guide } from "../view.ts";
 import { Avatar } from "./Avatar.tsx";
 import { ChainIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
+import { parseItemId } from "../../../src/links.ts";
 
 // What a chain's rows need from the app: which heads are open on this device, and a step's own click.
 export interface ChainCtx {
@@ -59,7 +60,7 @@ export function WaitingRows({
   return steps.map((s, i) => {
     const g = guides[i]!;
     const after = afterText(s);
-    const [name = "", num = ""] = s.ref.split("#");
+    const { repo: name, number: num } = parseItemId(s.ref);
     const who = s.by === "you" ? me : s.by;
     return (
       <div key={s.id} className={cls("line wait-line", selected === `${WAIT}${s.id}` && "sel")} data-id={`${WAIT}${s.id}`}>

@@ -18,9 +18,10 @@ import { linesText } from "./coordinator.ts";
 import { judgeText, weighedLines } from "./judge.ts";
 import { logLines } from "./placements.ts";
 import { permalink, placeOf } from "./links.ts";
-import { ASK } from "./order.ts";
 import { renderText } from "./render.ts";
 import {
+  askRef,
+  noteRef,
   ACTIVITY_KINDS,
   isSessionRef,
   ITEM_DOES,
@@ -292,9 +293,9 @@ const inboxText = Effect.fnUntraced(function* (api: DeskClient, limit: number) {
   const v = yield* api.queue();
   const notes: Record<InboxSection, Note[]> = { urgent: [...v.notes.due, ...v.notes.urgent], standard: v.notes.open, fyi: v.notes.fyi };
   const rows = INBOX_SECTIONS.flatMap((s) => [
-    ...(s === "urgent" ? v.inquiries.map((q) => ({ s, id: `${ASK}${q.id}`, line: `question: ${oneLine(q.question)}` })) : []),
+    ...(s === "urgent" ? v.inquiries.map((q) => ({ s, id: askRef(q.id), line: `question: ${oneLine(q.question)}` })) : []),
     ...(s === "urgent" ? v.sessions.filter((x) => x.status === "active").map((x) => ({ s, id: x.id, line: oneLine(x.name) })) : []),
-    ...notes[s].map((n) => ({ s, id: `note:${n.id}`, line: `note: ${oneLine(n.text)}` })),
+    ...notes[s].map((n) => ({ s, id: noteRef(n.id), line: `note: ${oneLine(n.text)}` })),
     ...v.inbox[s].map((c) => ({ s, id: c.id, line: `${oneLine(c.title)}  [${oneLine(c.reason ?? c.why)}]${stackNote(c)}` })),
   ]);
   const shown = rows.slice(0, limit);
@@ -309,7 +310,7 @@ const inboxText = Effect.fnUntraced(function* (api: DeskClient, limit: number) {
 
 // The user's note to themselves, by the id inbox_after names it with.
 const noteJson = (n: Note) => ({
-  id: `note:${n.id}`,
+  id: noteRef(n.id),
   text: n.text,
   at: n.at,
   remind_at: n.remind_at,

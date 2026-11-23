@@ -1,7 +1,7 @@
 import "./helpers/no-agent.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hashOf, linkRef, permalink, placeOf } from "../src/links.ts";
+import { hashOf, itemIdOf, linkRef, normRef, parseItemId, permalink, placeOf } from "../src/links.ts";
 
 test("an item's permalink reads as its repo and number, and reads back as its id", () => {
   assert.equal(permalink({ item: "getsentry/sentry#129460" }), "inbox://item/getsentry/sentry/129460");
@@ -100,4 +100,24 @@ test("the desk's link from another device, at its tailnet address, reads as the 
   assert.deepEqual(linkRef("https://desk.tail1234.ts.net/#/item/acme%2Fapi%237"), { id: "acme/api#7" });
   assert.equal(placeOf("https://evil.example/#/review/acme%2Fapi%237"), null);
   assert.equal(linkRef("https://ts.net.evil.example/#/review/x"), null);
+});
+
+test("an item's id splits at its #, and a GitHub link to a PR or an issue is read as its id", () => {
+  const ids: [string, { repo: string; number: string }][] = [
+    ["acme/api#12", { repo: "acme/api", number: "12" }],
+    ["api#12", { repo: "api", number: "12" }],
+    ["acme/api", { repo: "acme/api", number: "" }],
+    ["linear:ENG-12", { repo: "linear:ENG-12", number: "" }],
+  ];
+  for (const [id, want] of ids) assert.deepEqual(parseItemId(id), want, id);
+  assert.equal(itemIdOf("acme/api", 12), "acme/api#12");
+  const refs: [string, string][] = [
+    ["https://github.com/acme/api/pull/12", "acme/api#12"],
+    ["https://github.com/acme/api/issues/7/files?x=1", "acme/api#7"],
+    ["https://github.com/acme/api/commit/abc", "https://github.com/acme/api/commit/abc"],
+    ["http://github.com/acme/api/pull/12", "http://github.com/acme/api/pull/12"],
+    [" https://github.com/acme/api/pull/12", " https://github.com/acme/api/pull/12"],
+    ["api#12", "api#12"],
+  ];
+  for (const [ref, want] of refs) assert.equal(normRef(ref), want, ref);
 });

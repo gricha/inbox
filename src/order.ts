@@ -2,8 +2,6 @@
 // list by (a score, a time), so what the desk adds or rescores still lands around it.
 import type { InboxSection, Inquiry, Place } from "./types.ts";
 
-export const ASK = "ask:"; // an agent's question as a row: "ask:<its id>"
-
 export interface Ranked<T> {
   id: (r: T) => string;
   key: (r: T) => number; // the desk's own: the list comes sorted by it, highest first

@@ -25,6 +25,8 @@ import type {
 import { onLines, type Section } from "../../src/sections.ts";
 import { ago, BUCKET_LABEL, shortRef, aiName, snoozeOptions } from "./format.ts";
 import { SETTINGS_PARTS } from "./settings-parts.ts";
+import { askRef } from "../../src/types.ts";
+import { itemIdOf } from "../../src/links.ts";
 
 // The Inbox (`queue`: Urgent, Standard and FYI), a PR's review in its place, Blocked, your PRs in Merging, the Archive
 // (what's done, snoozed, muted or hidden), and Settings (with the rules).
@@ -63,7 +65,7 @@ export interface Group {
   variant: Variant;
 }
 
-export const inquiryOf = (id: string) => `ask:${id}`; // an agent's question on the main page
+export const inquiryOf = askRef; // an agent's question on the main page
 
 // The groups each list page shows.
 export const PAGE_GROUPS: Record<"queue" | "archive" | "blocked", GroupKey[]> = {
@@ -394,7 +396,7 @@ const isYou = (who: string) => who === "you" || who === "me";
 // A GitHub link to a PR or an issue (any tab of it) as the desk's id, owner/repo#123; null for anything else.
 export function githubRef(s: string): string | null {
   const m = /^https?:\/\/(?:www\.)?github\.com\/([\w.-]+)\/([\w.-]+)\/(?:pull|issues)\/(\d+)(?:[/?#]\S*)?$/i.exec(s.trim());
-  return m ? `${m[1]!}/${m[2]!}#${m[3]!}` : null;
+  return m ? itemIdOf(`${m[1]!}/${m[2]!}`, m[3]!) : null;
 }
 
 export function matches(c: Card, q: string, me: string): boolean {

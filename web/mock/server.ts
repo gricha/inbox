@@ -113,11 +113,17 @@ import type {
 } from "../../src/types.ts";
 import {
   ACTIVITY_KINDS,
+  ASK_PREFIX,
+  askRef,
   byPart,
   COORDINATOR_NAME,
   GITHUB_ACTIONS,
   INBOX_SECTIONS,
+  isAskRef,
+  isNoteRef,
+  NOTE_PREFIX,
   noteOrder,
+  noteRef,
   placeNotes,
   RANK,
   SECRET_SET,
@@ -125,7 +131,7 @@ import {
   VERBS,
 } from "../../src/types.ts";
 import { decode, isKeyOf, isRecord, messageOf, num, oneOf, strings } from "../../src/narrow.ts";
-import { arrange, ASK, askOrder, bare as unprefixed, rankAt, SECTION_WORD, type Ranked } from "../../src/order.ts";
+import { arrange, askOrder, bare as unprefixed, rankAt, SECTION_WORD, type Ranked } from "../../src/order.ts";
 
 const PORT = process.env.MOCK_PORT ? Number(process.env.MOCK_PORT) : 47824;
 const ME = "me";
@@ -3312,8 +3318,8 @@ function placeRow(b: Record<string, unknown>): { ok: true; undo_seq: number } {
   const after = typeof b.after === "string" ? b.after : undefined;
   const before = typeof b.before === "string" ? b.before : undefined;
   const at = new Date(now()).toISOString();
-  if (id.startsWith("note:")) {
-    const n = NOTES.find((x) => `note:${x.id}` === id);
+  if (isNoteRef(id)) {
+    const n = NOTES.find((x) => noteRef(x.id) === id);
     if (!n) throw new HttpError(404, `no note "${id}"`);
     const v = notesView();
     const due = !!n.remind_at && section === "urgent";
@@ -3321,8 +3327,8 @@ function placeRow(b: Record<string, unknown>): { ok: true; undo_seq: number } {
       due ? v.due : { urgent: v.urgent, standard: v.open, fyi: v.fyi }[section],
       noteOrder(section, due),
       n.id,
-      unprefixed(after, "note:"),
-      unprefixed(before, "note:"),
+      unprefixed(after, NOTE_PREFIX),
+      unprefixed(before, NOTE_PREFIX),
     );
     if (r === null) throw new HttpError(400, `that isn't a note in ${SECTION_WORD[section]}`);
     if (!due) Object.assign(n, { remind_at: null, reminded_at: null });
@@ -3332,15 +3338,15 @@ function placeRow(b: Record<string, unknown>): { ok: true; undo_seq: number } {
     bump();
     return { ok: true, undo_seq: 0 };
   }
-  if (id.startsWith(ASK)) {
+  if (isAskRef(id)) {
     if (section !== "urgent") throw new HttpError(409, "a question stays in Urgent until you answer it");
-    const q = INQUIRIES.find((x) => `${ASK}${x.id}` === id && !x.answer);
+    const q = INQUIRIES.find((x) => askRef(x.id) === id && !x.answer);
     if (!q) throw new HttpError(404, `no open question "${id}"`);
     const open = arrange(
       INQUIRIES.filter((x) => !x.answer),
       askOrder,
     );
-    const r = rankAt(open, askOrder, q.id, unprefixed(after, ASK), unprefixed(before, ASK));
+    const r = rankAt(open, askOrder, q.id, unprefixed(after, ASK_PREFIX), unprefixed(before, ASK_PREFIX));
     if (r === null) throw new HttpError(400, "that isn't a question waiting in Urgent");
     if (r) q.place = { section, ...r, at };
     else delete q.place;

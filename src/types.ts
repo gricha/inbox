@@ -1535,6 +1535,17 @@ export interface InquiryLink {
 // A Claude Code or Codex session on this machine that needs you (the Sessions source): blocked on you, or stalled.
 export const SESSION_PREFIX = "session:";
 export const isSessionRef = (ref: string): boolean => ref.startsWith(SESSION_PREFIX);
+// A note as a row or a chain's step, and an agent's question as a row, by ref; an item's ref is its id ("owner/repo#1").
+export const NOTE_PREFIX = "note:";
+export type NoteRef = `note:${string}`;
+export const noteRef = (id: string): NoteRef => `note:${id}`;
+export const isNoteRef = (ref: string): ref is NoteRef => ref.startsWith(NOTE_PREFIX);
+export const noteIdOf = (ref: NoteRef): string => ref.slice(NOTE_PREFIX.length);
+export const ASK_PREFIX = "ask:";
+export type AskRef = `ask:${string}`;
+export const askRef = (id: string): AskRef => `ask:${id}`;
+export const isAskRef = (ref: string): ref is AskRef => ref.startsWith(ASK_PREFIX);
+export const askIdOf = (ref: AskRef): string => ref.slice(ASK_PREFIX.length);
 export type SessionKind = "cli" | "background" | "desktop" | "codex";
 export const SESSION_KIND: Record<SessionKind, string> = { cli: "CLI", background: "Background", desktop: "Desktop", codex: "Codex" };
 // kick: start a background one again; resume: a terminal's whose process is gone, in the background; attach: copy

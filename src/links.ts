@@ -88,3 +88,16 @@ export function linkRef(ref: string): { id: string } | { refused: string } | nul
   if (p) return { refused: `"${s}" is the ${PAGES[p.page].name} page's link, not an item's: give a PR's or an issue's` };
   return { refused: `can't read "${s}"; an item's link is inbox://item/owner/repo/123` };
 }
+
+// An item's id: owner/repo#123, split at its #.
+export const itemIdOf = (repo: string, n: number | string): string => `${repo}#${n}`;
+export function parseItemId(id: string): { repo: string; number: string } {
+  const at = id.lastIndexOf("#");
+  return at < 0 ? { repo: id, number: "" } : { repo: id.slice(0, at), number: id.slice(at + 1) };
+}
+
+// A GitHub link to a PR or an issue (any tab of it) as its id; any other ref as it is.
+export const normRef = (ref: string): string =>
+  ref.replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:pull|issues)\/(\d+).*$/, (_, o: string, r: string, n: string) =>
+    itemIdOf(`${o}/${r}`, n),
+  );

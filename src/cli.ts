@@ -20,7 +20,7 @@ import { renderText } from "./render.ts";
 import { install, uninstall } from "./launchd.ts";
 import { startSentry, stopSentry } from "./sentry.ts";
 import { openCommand } from "./notify.ts";
-import { UNTIL, type Action, type Bucket, type Card, type SettingDef, type SettingValue } from "./types.ts";
+import { noteRef, UNTIL, type Action, type Bucket, type Card, type SettingDef, type SettingValue } from "./types.ts";
 
 export interface Out {
   write(s: string): unknown;
@@ -246,7 +246,7 @@ const ls = Effect.fnUntraced(function* (x: Ctx) {
     x.out("\n" + x.c.bold(`NOTES ${notes.length}`));
     for (const m of notes) {
       const steps = m.waiting?.length ? `  (${m.waiting.length} after this)` : "";
-      x.out(`${GLYPH.fyi} ${clip(`note:${m.id}  ${plain(m.text.split("\n")[0] ?? "")}`, x.width - steps.length)}${steps}`);
+      x.out(`${GLYPH.fyi} ${clip(`${noteRef(m.id)}  ${plain(m.text.split("\n")[0] ?? "")}`, x.width - steps.length)}${steps}`);
     }
   }
   const counts: [number, string][] = x.opts.all

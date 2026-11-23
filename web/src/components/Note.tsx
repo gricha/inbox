@@ -10,8 +10,9 @@ import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
 import { ProseBlocks } from "./Prose.tsx";
 import { ClockIcon, KindIcon, NoteGlyph, RowFacts } from "./RowIcons.tsx";
 import { Grip, press, type RowDrag } from "./Reorder.tsx";
+import { noteRef } from "../../../src/types.ts";
 
-export const noteOf = (id: string) => `note:${id}`; // its row's id, as the right-click and the cursor read it
+export const noteOf = noteRef; // its row's id, as the right-click and the cursor read it
 
 export interface NoteCtx {
   now: number;

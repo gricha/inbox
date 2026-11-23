@@ -33,6 +33,7 @@ import {
   withMcpConfig,
 } from "./review.ts";
 import {
+  noteRef,
   ACTIVITY_KINDS,
   BRAND,
   AGREE,
@@ -64,6 +65,7 @@ import { ICON_FORMAT, iconName } from "./icons.ts";
 import { automationBody, LIMITS, NoteButtonSchema } from "./automation-body.ts";
 import { report } from "./sentry.ts";
 import { secretsPath } from "./settings.ts";
+import { normRef } from "./links.ts";
 
 type Host = Core &
   Pick<
@@ -1285,7 +1287,7 @@ export class Automations {
         ...(n.fields && { fields: n.fields }),
       },
     );
-    return { item_id: `note:${note.id}`, why: n.text.slice(0, 300), outcome: "added" };
+    return { item_id: noteRef(note.id), why: n.text.slice(0, 300), outcome: "added" };
   }
 
   noted(id: string): string[] {
@@ -1908,7 +1910,7 @@ export function didntText(items: AutomationItem[]): string {
 
 // As the run wrote it, on one short line: it shows in the desk, and never goes into a later prompt.
 function failedItem(x: { ref: string; why: string }, error: string): AutomationItem {
-  const ref = x.ref.replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:pull|issues)\/(\d+).*$/, "$1/$2#$3");
+  const ref = normRef(x.ref);
   const one = (t: string, n: number) => t.replaceAll(/\s+/g, " ").trim().slice(0, n);
   return { item_id: one(ref, 100), why: one(x.why, 300), outcome: "failed", error };
 }

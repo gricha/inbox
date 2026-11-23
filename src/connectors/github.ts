@@ -25,6 +25,7 @@ import { botCheck } from "../signals.ts";
 import { onBehalf } from "../github/behalf.ts";
 import { mergeOwed } from "../stage.ts";
 import { report } from "../sentry.ts";
+import { normRef, parseItemId } from "../links.ts";
 
 type Host = Core & Pick<Desk, "ingest" | "synced" | "record" | "isResolved" | "attributions">;
 
@@ -43,7 +44,6 @@ const DEP_TTL = 10 * 60_000; // a stored PR another one needs is refreshed after
 const MAX_DEP_PROBES = 20; // probes a pass for PRs a listed one needs that the desk doesn't hold, apart from the stacks'
 const DEP_MISS_TTL = 24 * HOUR; // a number that's no PR (an issue, gone, no access) isn't asked again before this
 
-const normRef = (ref: string) => ref.trim().replace(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:pull|issues)\/(\d+).*$/, "$1/$2#$3");
 const REF = /^(?:(?:([\w.-]+)\/)?([\w.-]+)#|#)?(\d+)$/;
 
 interface Feed {
@@ -638,13 +638,13 @@ export class GitHubConnector implements Connector {
 
   // owner/repo#123, repo#123, #123, 123 or a GitHub URL; owner/repo#123 and a URL name one exactly, which fetchOne reads.
   refOf(text: string, held: readonly string[]): { held: string[]; id?: string } | null {
-    const r = normRef(text);
+    const r = normRef(text.trim());
     const m = REF.exec(r);
     if (!m) return null;
     const [, owner, name, num] = m;
     const found = held.filter((id) => {
       if (id.includes(":")) return false; // another source's: a bare id is GitHub's
-      const [repo = "", n] = id.split("#");
+      const { repo, number: n } = parseItemId(id);
       const [o = "", repoName = ""] = repo.split("/");
       return n === num && (!name || repoName.toLowerCase() === name.toLowerCase()) && (!owner || o.toLowerCase() === owner.toLowerCase());
     });
@@ -655,8 +655,8 @@ export class GitHubConnector implements Connector {
   fetchOne(id: string): Effect.Effect<string, Upstream | NotFound> {
     const upstream = (e: GitHubReadError | GitHubNotFetched) => new Upstream({ message: e.message, cause: e });
     return Effect.gen({ self: this }, function* () {
-      const at = id.lastIndexOf("#");
-      const hit = yield* this.api.lookup(id.slice(0, at), Number(id.slice(at + 1))).pipe(Effect.mapError(upstream));
+      const { repo, number } = parseItemId(id);
+      const hit = yield* this.api.lookup(repo, Number(number)).pipe(Effect.mapError(upstream));
       if (!hit) return yield* new NotFound({ message: `GitHub has no PR or issue ${id}` });
       const [item] = yield* this.details([hit]).pipe(Effect.mapError(upstream));
       if (!item) return yield* upstream(new GitHubNotFetched({ id: hit.id })); // details skips a batch that failed

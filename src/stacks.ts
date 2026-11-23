@@ -1,6 +1,7 @@
 // Stacks of PRs, from the PRs the desk holds: in one repo, each based on the head branch of the one below it. Pure.
 import { sameOrg } from "./deps.ts";
 import type { Bucket, Card, Item, Stack, StackMember, StackRef } from "./types.ts";
+import { parseItemId } from "./links.ts";
 
 const SLACK = 5 * 60_000; // GitHub moves a stacked PR to main seconds after the one below it merges
 const DEPTH = 5; // hops followed down what listed PRs need, through the PRs the desk stores
@@ -301,9 +302,9 @@ export function toFetch(
   const probes = new Map<string, Probe>();
   const add = (p: Probe) => probes.set(probeKey(p), p);
   for (const ref of asks.missing) {
-    const at = ref.lastIndexOf("#");
-    const n = Number(ref.slice(at + 1));
-    const p: Probe = { repo: ref.slice(0, at), dir: "pr", branch: String(n), stacked: false };
+    const { repo, number } = parseItemId(ref);
+    const n = Number(number);
+    const p: Probe = { repo, dir: "pr", branch: String(n), stacked: false };
     // A number past GraphQL's Int fails the whole query, and the repo's stack probes with it.
     if (n >= 1 && n <= 2 ** 31 - 1 && !misses.has(probeKey(p))) add(p);
   }

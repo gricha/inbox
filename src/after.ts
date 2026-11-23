@@ -1,8 +1,6 @@
 // The owner's "after" links (kv `after:<id>`): "B after A" means B waits until A is complete. The desk keeps them and
 // GitHub never sees them, so they chain anyone's PRs, issues and notes. Pure.
 
-export const NOTE = "note:"; // a note as a node: "note:<its id>"
-
 // complete: a merged PR, a closed issue, a note marked done (gone); broken: a PR closed without merging, which never completes.
 export type NodeState = "open" | "complete" | "broken";
 

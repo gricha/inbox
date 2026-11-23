@@ -4,6 +4,7 @@ import { Dots } from "./Detail.tsx";
 import { withCode } from "./Prose.tsx";
 import { SkRows } from "./Skeleton.tsx";
 import { attachCommand } from "../view.ts";
+import { parseItemId } from "../../../src/links.ts";
 
 // Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note;
 // then Claude's work. Beside a review (compact), its rows alone, two lines each.
@@ -133,13 +134,13 @@ function WorkRow({ w, now, onWork }: { w: Work; now: number; onWork: (w: Work, k
               error,
             ]
           : [review ? "Waiting its turn" : "Waiting for your agent"];
-  const [repo, num] = (w.item ?? "").split("#");
+  const { repo, number: num } = parseItemId(w.item ?? "");
   const ref = (
     <span className="lane-ref">
       {w.item && (
         <>
           <span className="line-ref" title={w.item}>
-            {repo!.split("/")[1]}
+            {repo.split("/")[1]}
           </span>
           <span className="line-num">#{num}</span>
         </>

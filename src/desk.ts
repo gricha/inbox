@@ -63,8 +63,8 @@ import {
   waitsOn,
 } from "./stage.ts";
 import { blockedOrder, dependencies, type DepFacts } from "./deps.ts";
-import { chains, loopThrough, NOTE, type Chains, type NodeState } from "./after.ts";
-import { arrange, ASK, askOrder, bare, rankAt, SECTION_WORD } from "./order.ts";
+import { chains, loopThrough, type Chains, type NodeState } from "./after.ts";
+import { arrange, askOrder, bare, rankAt, SECTION_WORD } from "./order.ts";
 import type {
   DocSaved,
   InlineAt,
@@ -138,6 +138,13 @@ import type {
   Recommendation,
 } from "./types.ts";
 import {
+  noteRef,
+  isNoteRef,
+  noteIdOf,
+  isAskRef,
+  askIdOf,
+  NOTE_PREFIX,
+  ASK_PREFIX,
   AGENT_NAME,
   AGREE,
   byPart,
@@ -1334,7 +1341,7 @@ export class Desk {
     this.store.pruneKv("score:", kept);
     this.store.pruneKv("attribution:", kept);
     this.store.pruneKv("pushed:", kept);
-    this.store.pruneKv("after:", new Set([...kept, ...this.notes().map((n) => `${NOTE}${n.id}`)])); // a step gone is in no chain
+    this.store.pruneKv("after:", new Set([...kept, ...this.notes().map((n) => noteRef(n.id))])); // a step gone is in no chain
     this.store.pruneKv("brief:", new Set()); // the AI review replaced briefs
     if (this.loaded) {
       const top = this.top(this.snapshot(), new Set());
@@ -1523,7 +1530,7 @@ export class Desk {
     // A chain's step coming onto the Inbox notifies once, pinned or not: what finished before it says it's next.
     const notes = this.notesView(snap);
     const shown = [...now, ...today].map((c) => c.id);
-    shown.push(...onInbox(notes).map((n) => `${NOTE}${n.id}`));
+    shown.push(...onInbox(notes).map((n) => noteRef(n.id)));
     const chained = new Set([...snap.links.keys(), ...[...snap.links.values()].flat()]);
     const was = strings(this.store.get("shown_chain")) ?? null;
     this.store.set("shown_chain", shown);
@@ -1556,7 +1563,7 @@ export class Desk {
   // A chain's next step, in its notification: what it is, and what finished before it when that's known.
   nextText(id: string, snap: Snapshot, notes: NotesView): string {
     const e = snap.entries.get(id);
-    const n = onInbox(notes).find((x) => `${NOTE}${x.id}` === id);
+    const n = onInbox(notes).find((x) => noteRef(x.id) === id);
     const what = e ? shortRef(e.item) : (n?.text.split("\n")[0] ?? "your note");
     const done = (state: Item["state"]) =>
       (snap.links.get(id) ?? []).flatMap((p) => {
@@ -1568,7 +1575,7 @@ export class Desk {
     const finished = [
       ...(merged.length ? [`${andMore(merged)} merged`] : []),
       ...(closed.length ? [`${andMore(closed)} closed`] : []),
-      ...((snap.links.get(id) ?? []).some((p) => p.startsWith(NOTE)) ? ["your note is done"] : []),
+      ...((snap.links.get(id) ?? []).some((p) => isNoteRef(p)) ? ["your note is done"] : []),
     ];
     if (finished.length) return `${what} is next \u00b7 ${finished.join(", ")}`;
     const why = e ? (snap.needs.get(id) ?? snap.best.get(id)?.why ?? "") : "";
@@ -1657,9 +1664,9 @@ export class Desk {
     }
     // Your "after" chains: a PR completes once merged, an issue once closed, a note once done; one closed unmerged never does.
     const notes = this.notes();
-    const noteIds = new Set(notes.map((n) => `${NOTE}${n.id}`));
+    const noteIds = new Set(notes.map((n) => noteRef(n.id)));
     const nodeState = (id: string): NodeState => {
-      if (id.startsWith(NOTE)) return noteIds.has(id) ? "open" : "complete";
+      if (isNoteRef(id)) return noteIds.has(id) ? "open" : "complete";
       const it = entries.get(id)?.item;
       if (!it) return "complete"; // the desk no longer holds it: nothing left to wait on
       if (it.state === "open") return "open";
@@ -1897,15 +1904,15 @@ export class Desk {
   // A waiting step as its chain's head carries it.
   waitingStep(id: string, after: Chains, entries: Map<string, Entry>, notes: Note[]): WaitingStep {
     const said = (x: string) => {
-      if (!x.startsWith(NOTE)) {
+      if (!isNoteRef(x)) {
         const it = entries.get(x)?.item;
         return it ? shortRef(it) : x.slice(x.indexOf("/") + 1);
       }
-      const words = notes.find((n) => `${NOTE}${n.id}` === x)?.text.split("\n")[0] ?? "your note";
+      const words = notes.find((n) => noteRef(n.id) === x)?.text.split("\n")[0] ?? "your note";
       return words.length > 40 ? `${words.slice(0, 39)}\u2026` : words;
     };
     const waits = andMore(after.waits.get(id)!.map(said));
-    const n = id.startsWith(NOTE) ? notes.find((x) => `${NOTE}${x.id}` === id) : undefined;
+    const n = isNoteRef(id) ? notes.find((x) => noteRef(x.id) === id) : undefined;
     if (n) return { id, kind: "note", ref: "", repo: "", title: n.text, url: "", by: "", since: n.at, after: waits, note: n };
     const e = entries.get(id)!;
     const it = e.item;
@@ -1926,8 +1933,8 @@ export class Desk {
   // A step of an "after" chain: an item the desk holds, or a note as note:<id>.
   node(ref: string): Effect.Effect<string, RefError> {
     const r = ref.trim();
-    if (!r.startsWith(NOTE)) return this.resolve(r);
-    return this.notes().some((n) => `${NOTE}${n.id}` === r)
+    if (!isNoteRef(r)) return this.resolve(r);
+    return this.notes().some((n) => noteRef(n.id) === r)
       ? Effect.succeed(r)
       : Effect.fail(new NotFound({ message: `no note "${r}": inbox_list lists your notes with their ids` }));
   }
@@ -1945,7 +1952,7 @@ export class Desk {
       const links = this.afterLinks();
       const loop = loopThrough(links, id, ids);
       if (loop !== null) {
-        const what = (x: string) => (x.startsWith(NOTE) ? x : x.slice(x.indexOf("/") + 1));
+        const what = (x: string) => (isNoteRef(x) ? x : x.slice(x.indexOf("/") + 1));
         return yield* new BadRequest({
           message:
             loop === id
@@ -3470,8 +3477,8 @@ export class Desk {
   ): Effect.Effect<{ undo_seq: number }, ActError> {
     return Effect.gen({ self: this }, function* () {
       const now = this.now().toISOString();
-      if (ref.startsWith(NOTE)) return yield* this.placeNote(ref.slice(NOTE.length), section, at, now);
-      if (ref.startsWith(ASK)) return yield* this.placeAsk(ref.slice(ASK.length), section, at, now);
+      if (isNoteRef(ref)) return yield* this.placeNote(noteIdOf(ref), section, at, now);
+      if (isAskRef(ref)) return yield* this.placeAsk(askIdOf(ref), section, at, now);
       if (isSessionRef(ref)) return yield* new Conflict({ message: "a session stays where the desk puts it; done or snooze it instead" });
       const id = yield* this.resolve(ref);
       const after = at.after === undefined ? undefined : yield* this.resolve(at.after);
@@ -3514,7 +3521,7 @@ export class Desk {
       const v = placeNotes(all, now);
       const due = !!n.remind_at && section === "urgent";
       const list = due ? v.due : { urgent: v.urgent, standard: v.open, fyi: v.fyi }[section];
-      const r = rankAt(list, noteOrder(section, due), id, bare(at.after, NOTE), bare(at.before, NOTE));
+      const r = rankAt(list, noteOrder(section, due), id, bare(at.after, NOTE_PREFIX), bare(at.before, NOTE_PREFIX));
       if (r === null) return yield* new BadRequest({ message: `that isn't a note in ${SECTION_WORD[section]}` });
       const { place: _, ...rest } = n;
       const next: Note = {
@@ -3547,7 +3554,7 @@ export class Desk {
         all.filter((q) => !q.answer),
         askOrder,
       );
-      const r = rankAt(open, askOrder, id, bare(at.after, ASK), bare(at.before, ASK));
+      const r = rankAt(open, askOrder, id, bare(at.after, ASK_PREFIX), bare(at.before, ASK_PREFIX));
       if (r === null) return yield* new BadRequest({ message: "that isn't a question waiting in Urgent" });
       this.store.set(
         "inquiries",
@@ -4556,7 +4563,7 @@ export class Desk {
   // by its automation's type as it is now too.
   notesView(snap: Snapshot): NotesView {
     const v = placeNotes(
-      this.notes().filter((n) => !snap.chains.head.has(`${NOTE}${n.id}`)),
+      this.notes().filter((n) => !snap.chains.head.has(noteRef(n.id))),
       this.now().toISOString(),
     );
     const own = this.automations.own();
@@ -4564,7 +4571,7 @@ export class Desk {
     const types = new Map(own.map((a) => [a.id, typeOf(a)]));
     const withSteps = (ns: Note[]) =>
       ns.map((n) => {
-        const waiting = snap.steps.get(`${NOTE}${n.id}`);
+        const waiting = snap.steps.get(noteRef(n.id));
         const icon = (n.from && icons.get(n.from.id)) ?? n.icon;
         const facts = n.fields ? factsOf((n.from && types.get(n.from.id)) ?? null, n.fields) : [];
         return { ...n, ...(icon && { icon }), ...(facts.length > 0 && { facts }), ...(waiting && { waiting }) };
@@ -4673,7 +4680,7 @@ export class Desk {
         "notes",
         this.notes().filter((n) => n.id !== id),
       );
-      this.store.unset(`after:${NOTE}${id}`);
+      this.store.unset(`after:${noteRef(id)}`);
       this.changed();
       this.notifyNew(); // what came after it is next
       return Effect.void;

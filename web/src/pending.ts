@@ -1,5 +1,8 @@
-import { ASK } from "../../src/order.ts";
 import {
+  askRef,
+  isNoteRef,
+  isAskRef,
+  NOTE_PREFIX,
   INBOX_SECTIONS,
   placeNotes,
   type Card,
@@ -75,8 +78,6 @@ export interface Drop {
   before?: string;
 }
 
-const NOTE = "note:";
-
 // Into `list` beside the row the drop names, else where the desk's key puts it.
 function insert<T>(list: readonly T[], x: T, d: Drop, id: (t: T) => string, below: (t: T) => boolean): T[] {
   const a = d.after === undefined ? -1 : list.findIndex((t) => id(t) === d.after);
@@ -87,7 +88,7 @@ function insert<T>(list: readonly T[], x: T, d: Drop, id: (t: T) => string, belo
 }
 
 function dropNote(v: QueueView, d: Drop): QueueView {
-  const id = d.id.slice(NOTE.length);
+  const id = d.id.slice(NOTE_PREFIX.length);
   const n = [...v.notes.due, ...v.notes.urgent, ...v.notes.open, ...v.notes.fyi].find((x) => x.id === id);
   if (!n) return v;
   const due = v.notes.due.includes(n) && d.section === "urgent";
@@ -102,7 +103,11 @@ function dropNote(v: QueueView, d: Drop): QueueView {
   };
   const key = { urgent: "urgent", standard: "open", fyi: "fyi" } as const;
   const into = due ? "due" : key[d.section];
-  const nd = { ...d, ...(d.after && { after: d.after.slice(NOTE.length) }), ...(d.before && { before: d.before.slice(NOTE.length) }) };
+  const nd = {
+    ...d,
+    ...(d.after && { after: d.after.slice(NOTE_PREFIX.length) }),
+    ...(d.before && { before: d.before.slice(NOTE_PREFIX.length) }),
+  };
   notes[into] = insert(
     notes[into],
     moved,
@@ -114,7 +119,7 @@ function dropNote(v: QueueView, d: Drop): QueueView {
 }
 
 function dropAsk(v: QueueView, d: Drop): QueueView {
-  const q = v.inquiries.find((x) => `${ASK}${x.id}` === d.id);
+  const q = v.inquiries.find((x) => askRef(x.id) === d.id);
   if (!q || d.section !== "urgent") return v;
   const rest = v.inquiries.filter((x) => x !== q);
   return {
@@ -123,7 +128,7 @@ function dropAsk(v: QueueView, d: Drop): QueueView {
       rest,
       q,
       d,
-      (x) => `${ASK}${x.id}`,
+      (x) => askRef(x.id),
       (x) => x.at > q.at,
     ),
   };
@@ -146,5 +151,5 @@ function dropCard(v: QueueView, d: Drop): QueueView {
 
 // The desk's view with your drops on it, in the order you made them.
 export function withDrops(v: QueueView, drops: readonly Drop[]): QueueView {
-  return drops.reduce((w, d) => (d.id.startsWith(NOTE) ? dropNote(w, d) : d.id.startsWith(ASK) ? dropAsk(w, d) : dropCard(w, d)), v);
+  return drops.reduce((w, d) => (isNoteRef(d.id) ? dropNote(w, d) : isAskRef(d.id) ? dropAsk(w, d) : dropCard(w, d)), v);
 }

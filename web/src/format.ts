@@ -10,6 +10,7 @@ import {
   type NoteFact,
 } from "../../src/types.ts";
 import { ClipboardUnavailable } from "./api.ts";
+import { parseItemId } from "../../src/links.ts";
 
 export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 export const MOD = MAC ? "⌘" : "Ctrl+";
@@ -34,8 +35,8 @@ export function byOf(c: Pick<Card, "by" | "author" | "author_bot" | "attribution
 export const shortRef = (c: { repo: string; number: number }) => `${c.repo.split("/")[1]}#${c.number}`;
 export const shortId = (id: string) => id.replace(/^[^/]+\//, "");
 export const issueUrl = (id: string) => {
-  const [repo, n] = id.split("#");
-  return `https://github.com/${repo}/issues/${n}`; // GitHub sends a PR's number on to its pull page
+  const { repo, number } = parseItemId(id);
+  return `https://github.com/${repo}/issues/${number}`; // GitHub sends a PR's number on to its pull page
 };
 
 const MIN = 60_000;
