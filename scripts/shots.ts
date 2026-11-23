@@ -6442,7 +6442,8 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // The letters that were shortcuts do nothing now: no menu, toast, chat or page change, and the row keeps the focus.
+    // The letters that were shortcuts do nothing now: no menu, toast, chat or page change, and the row keeps the focus. Only
+    // "/" works, as on GitHub: it puts you in the sidebar's search.
     name: "no-keys",
     go: async (page) => {
       await fresh(page);
@@ -6456,7 +6457,7 @@ const SHOTS: Shot[] = [
         tabs++;
       };
       page.context().on("page", opened);
-      for (const k of ["j", "k", "e", "d", "s", "m", "p", "a", ".", "u", "r", "/", "?", "g", "l", "t", "w", "i", "o"]) {
+      for (const k of ["j", "k", "e", "d", "s", "m", "p", "a", ".", "u", "r", "?", "g", "l", "t", "w", "i", "o"]) {
         await page.keyboard.press(k);
         await page.waitForTimeout(100);
       }
@@ -6466,6 +6467,10 @@ const SHOTS: Shot[] = [
       const focused = await page.evaluate<string | null>(`document.activeElement?.closest(".line")?.dataset.id ?? null`);
       if (open || hash !== "#/" || focused !== id || tabs)
         failures.push(`no-keys: after the old shortcuts, ${JSON.stringify({ open, hash, focused, tabs })}`);
+      await page.keyboard.press("/");
+      const search = await page.evaluate<boolean>(`document.activeElement?.matches(".side-search .search-box input") ?? false`);
+      if (!search) failures.push("no-keys: / doesn't put you in the sidebar's search");
+      await row.locator(".row-main").focus();
     },
   },
   // Someone else's PR whose head you approved: no Approve to press, it says you approved.
