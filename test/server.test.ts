@@ -24,6 +24,7 @@ import { connectTo, unusedPort } from "./helpers/fake-api.ts";
 import { FakeGitHub, hoursAgo, makeItem, NOW } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { refuseWrites } from "./helpers/writer.ts";
+import { until } from "./helpers/wait.ts";
 
 // An agent the desk started inherits these; the tests that want them set their own.
 delete process.env.DESK_UI_ORIGIN;
@@ -880,6 +881,7 @@ test("a route's Effect answers a refusal with its status and tag, a client that 
   const gone = new AbortController();
   const req = new Request("http://127.0.0.1/wait", { signal: gone.signal });
   const waiting = app.request(req);
+  // Nothing says the route has started waiting; aborting before it does is another path.
   await sleep(20);
   gone.abort();
   assert.equal((await waiting).status, 499, "nothing to answer, and nothing logged");
@@ -1274,8 +1276,7 @@ test("the desk's reviews, AI, asks, wakes, agents and event log answer through r
   // The request kept here: a Request built from init follows its signal only while something holds it.
   const gone = new AbortController();
   const waiting = app.request(new Request("http://127.0.0.1:47823/api/activity?after=99&wait=30", { signal: gone.signal }));
-  await sleep(20);
-  assert.equal(t.desk.waiters.size, 1);
+  await until(() => t.desk.waiters.size === 1, "the request waits");
   gone.abort();
   assert.equal((await waiting).status, 499);
   assert.equal(t.desk.waiters.size, 0, "the wait ends with the client");

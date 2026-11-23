@@ -8,6 +8,7 @@ import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { readOmarchy, watchOmarchy } from "../src/omarchy.ts";
 import { run } from "./helpers/run.ts";
+import { until } from "./helpers/wait.ts";
 
 let home = "";
 beforeEach(() => {
@@ -95,13 +96,10 @@ test("a switch is heard: Omarchy writes theme.name last", async () => {
     home,
     20,
   );
+  // fs.watchFile takes its first look later: a switch before that is never heard.
   await sleep(100);
   wear("hackerman", { "colors.toml": HACKERMAN });
-  for (let i = 0; i < 100; i++) {
-    if (heard) break;
-    await sleep(20);
-  }
+  await until(() => heard > 0, "no switch heard");
   stop();
-  assert.ok(heard > 0, "no switch heard");
   assert.equal((await run(readOmarchy(home)))?.name, "hackerman");
 });

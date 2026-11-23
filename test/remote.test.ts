@@ -5,7 +5,6 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Desk } from "../src/desk.ts";
@@ -476,9 +475,8 @@ test("Settings says in plain words why it can't serve over Tailscale, and leaves
   if (unixOnly(c)) return;
   const { srv, ts } = await started(c, { ...RUNNING, BackendState: "NeedsLogin" }, { "app.tailscale": true });
   const text = async () => ((await (await fetch(`${srv.url}/api/remote`)).json()) as { text: string }).text;
-  await until(() => ts.calls().length > 0, "asked tailscale");
-  await sleep(50);
-  assert.equal(await text(), "Tailscale isn't running or signed in here: open Tailscale and sign in.");
+  const SIGNED_OUT = "Tailscale isn't running or signed in here: open Tailscale and sign in.";
+  await until(async () => (await text()) === SIGNED_OUT, `Settings says: ${SIGNED_OUT}`);
   fs.writeFileSync(path.join(ts.dir, "status.json"), JSON.stringify(RUNNING));
   fs.writeFileSync(
     path.join(ts.dir, "serve.json"),
@@ -486,9 +484,8 @@ test("Settings says in plain words why it can't serve over Tailscale, and leaves
   );
   await run(srv.desk.putSettings({ set: { "app.tailscale": false } }));
   await run(srv.desk.putSettings({ set: { "app.tailscale": true } }));
-  await until(() => ts.calls().includes("serve status --json"), "looked at what's served");
-  await sleep(50);
-  assert.equal(await text(), `tailscale serve already serves https://${NAME}/: turn that off first (tailscale serve --https=443 off)`);
+  const THEIRS = `tailscale serve already serves https://${NAME}/: turn that off first (tailscale serve --https=443 off)`;
+  await until(async () => (await text()) === THEIRS, `Settings says: ${THEIRS}`);
   assert.equal(ts.served(), "http://127.0.0.1:3000", "yours, untouched");
   await srv.close();
   assert.equal(ts.served(), "http://127.0.0.1:3000", "nor turns it off when it stops");
@@ -497,7 +494,7 @@ test("Settings says in plain words why it can't serve over Tailscale, and leaves
 test("with no tailscale installed, Settings says so", async (c) => {
   const { srv } = await started(c, RUNNING, { "app.tailscale": true }, false);
   const text = async () => ((await (await fetch(`${srv.url}/api/remote`)).json()) as { text: string }).text;
-  for (let i = 0; i < 100 && (await text()) === "Off."; i++) await sleep(20);
+  await until(async () => (await text()) !== "Off.", "Settings looked for tailscale");
   assert.equal(await text(), "Tailscale isn't installed here: there's no tailscale command.");
   await srv.close();
 });

@@ -7,7 +7,6 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { setTimeout as sleep } from "node:timers/promises";
 import { Cause, Effect, Exit, Fiber } from "effect";
 import {
   addMcp,
@@ -24,6 +23,7 @@ import {
 } from "../src/agents.ts";
 import { failure, failureSync, run, runSync } from "./helpers/run.ts";
 import { posix } from "./helpers/platform.ts";
+import { until } from "./helpers/wait.ts";
 
 const SKILL = readFileSync(join(import.meta.dirname, "..", "skills", "inbox", "SKILL.md"), "utf8");
 const MCP = "http://localhost:47961/mcp";
@@ -201,7 +201,7 @@ test(
     fake("claude", `echo $$ > "$HOME/claude-pid"; /bin/sleep 30 & echo $! > "$HOME/child-pid"; wait`);
     const fiber = Effect.runFork(connect("claude-code", MCP));
     const pidOf = (name: string) => (existsSync(join(home, name)) ? Number(readFileSync(join(home, name), "utf8")) : 0);
-    while (!pidOf("claude-pid") || !pidOf("child-pid")) await sleep(10);
+    await until(() => pidOf("claude-pid") > 0 && pidOf("child-pid") > 0, "the CLI and its child started");
     await Effect.runPromise(Fiber.interrupt(fiber));
     const exit = await Effect.runPromise(Fiber.await(fiber));
     assert.ok(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause));
@@ -215,8 +215,7 @@ test(
         return true;
       }
     };
-    for (let i = 0; i < 100 && !gone(); i++) await sleep(20);
-    assert.ok(gone(), "what the CLI started is stopped too");
+    await until(gone, "what the CLI started is stopped too");
   },
 );
 

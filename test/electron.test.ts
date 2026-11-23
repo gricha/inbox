@@ -1,4 +1,5 @@
 import "./helpers/no-agent.ts";
+import { once } from "node:events";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
@@ -8,7 +9,6 @@ import type { AddressInfo } from "node:net";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { setTimeout as sleep } from "node:timers/promises";
 import { Effect, Fiber, Scheduler, Schema } from "effect";
 import { BadRequest } from "../src/errors.ts";
 import { failure, run } from "./helpers/run.ts";
@@ -71,6 +71,7 @@ import {
   type SSEvent,
 } from "../electron/lib.ts";
 import { freePort, reap, startSource } from "../electron/source.ts";
+import { until } from "./helpers/wait.ts";
 
 // A local server for what the app asks its desk; close() also ends any stream it holds open.
 const serve = (handler: http.RequestListener) =>
@@ -107,8 +108,7 @@ test(
     assert.equal(timedOut, true);
     const pid = Number(stdout.trim());
     assert.ok(pid > 0, `the background job's pid: ${JSON.stringify(stdout)}`);
-    for (let i = 0; i < 20 && isAlive(pid); i++) await sleep(50);
-    assert.equal(isAlive(pid), false, "the rc's child is gone too");
+    await until(() => !isAlive(pid), "the rc's child is gone too");
     if (fs.existsSync("/bin/zsh")) {
       const zdot = fs.mkdtempSync(path.join(os.tmpdir(), "desk-zdot-"));
       try {
@@ -536,12 +536,11 @@ test("commandOutput interrupted stops its whole group before it ends", { skip: p
   try {
     const file = path.join(dir, "pid");
     const fiber = Effect.runFork(commandOutput("/bin/sh", ["-c", `sleep 30 & echo $! > ${file}; wait`], 60_000));
-    for (let i = 0; i < 100 && !fs.existsSync(file); i++) await sleep(20);
+    await until(() => fs.existsSync(file) && fs.readFileSync(file, "utf8").trim() !== "", "the shell started its job");
     const pid = Number(fs.readFileSync(file, "utf8").trim());
     assert.ok(isAlive(pid));
     await Effect.runPromise(Fiber.interrupt(fiber));
-    for (let i = 0; i < 20 && isAlive(pid); i++) await sleep(50);
-    assert.equal(isAlive(pid), false, "what the shell started went with it");
+    await until(() => !isAlive(pid), "what the shell started went with it");
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -780,8 +779,7 @@ test("reap stops only what an earlier run left going from source, then forgets i
 
     fs.writeFileSync(file, JSON.stringify({ pids: [left.pid, other.pid, 999_999_999] }));
     await run(reap(home, log));
-    for (let i = 0; i < 20 && isAlive(left.pid!); i++) await sleep(50);
-    assert.equal(isAlive(left.pid!), false, "the desk an earlier run left going");
+    await until(() => !isAlive(left.pid!), "the desk an earlier run left going");
     assert.equal(isAlive(other.pid!), true, "a pid that went to something else since");
     assert.deepEqual(lines, [`stopping what an earlier run left going from source (pid ${left.pid})`]);
     assert.equal(fs.existsSync(file), false);
@@ -859,7 +857,7 @@ test(
     const liveLog = () => tryRead(path.join(home, "live.log"));
     const lines = () => liveLog().split("\n");
     // Real time, by setImmediate: setTimeout and Date are the test's.
-    const until = async (cond: () => boolean, what: string) => {
+    const untilReal = async (cond: () => boolean, what: string) => {
       const deadline = performance.now() + 10_000;
       while (!cond()) {
         if (performance.now() > deadline) assert.fail(`timed out waiting for ${what}:\n${liveLog()}`);
@@ -872,7 +870,7 @@ test(
     const viteBackoff = (s: number) => new RegExp(`vite: node exited \\(1\\); starting it again in ${s}s$`);
     const source = await run(startSource({ dir, node, port: 1, home, log: () => {} }));
     try {
-      await until(() => count(viteBackoff(2)) === 1, "vite's first backoff");
+      await untilReal(() => count(viteBackoff(2)) === 1, "vite's first backoff");
       for (const [waited, next] of [
         [2, 4],
         [4, 8],
@@ -880,23 +878,23 @@ test(
         [16, 30],
       ] as const) {
         t.mock.timers.tick(waited * 1000);
-        await until(() => count(viteBackoff(next)) === 1, `vite backing off ${next}s`);
+        await untilReal(() => count(viteBackoff(next)) === 1, `vite backing off ${next}s`);
       }
       // Up for over a minute before it exits: the count starts again.
       fs.writeFileSync(hold, "");
       const starts = count(/app \| .* starting .*vite/);
       t.mock.timers.tick(30_000);
-      await until(() => count(/app \| .* starting .*vite/) === starts + 1, "vite started again");
+      await untilReal(() => count(/app \| .* starting .*vite/) === starts + 1, "vite started again");
       t.mock.timers.tick(61_000);
       fs.rmSync(hold);
-      await until(() => count(viteBackoff(1)) === 1, "vite's backoff starting over");
+      await untilReal(() => count(viteBackoff(1)) === 1, "vite's backoff starting over");
 
       // npm install: the desk's node is stopped and started again with no backoff (watchFile polls every 2 s).
-      await until(() => liveLog().includes("desk | desk up"), "the desk up");
+      await untilReal(() => liveLog().includes("desk | desk up"), "the desk up");
       const desks = count(/app \| .* starting .*--watch/);
       const later = new Date(Date.now() + 5000);
       fs.utimesSync(lock, later, later);
-      await until(() => count(/app \| .* starting .*--watch/) === desks + 1, "the desk started again");
+      await untilReal(() => count(/app \| .* starting .*--watch/) === desks + 1, "the desk started again");
       const changed = lines().findIndex((l) => l.includes("node_modules changed; starting the desk again"));
       assert.ok(changed >= 0, liveLog());
       assert.ok(
@@ -935,7 +933,7 @@ test("echoTo stops writing once the terminal is gone, without an uncaught EPIPE"
   echo("one\n");
   broken = true;
   echo("two\n");
-  await sleep(10);
+  await once(stream, "error");
   echo("three\n");
   assert.deepEqual(written, ["one\n"]);
 });

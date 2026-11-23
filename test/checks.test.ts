@@ -3,7 +3,6 @@
 import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { setTimeout as sleep } from "node:timers/promises";
 import { Effect } from "effect";
 import { checksView } from "../src/checks.ts";
 import { GitHubHttpError } from "../src/errors.ts";
@@ -13,6 +12,7 @@ import type { Check } from "../src/types.ts";
 import { idle, reviewAsk, setup } from "./helpers/desk.ts";
 import { NOW } from "./helpers/items.ts";
 import { run } from "./helpers/run.ts";
+import { until } from "./helpers/wait.ts";
 
 const job = (name: string, conclusion: string | null, o: Partial<RawCheck> = {}): RawCheck => ({
   __typename: "CheckRun",
@@ -178,7 +178,7 @@ test("a review carries its PR's checks: asked of GitHub when it's opened, never 
   t.gh.checkLists.set("PR_acme/api_4", [check("build", "passing"), check("e2e", "running"), check("unit", "failing")]);
   await run(t.desk.sync());
   await idle(t.desk);
-  while (t.desk.warming) await sleep(1);
+  await until(() => !t.desk.warming, "the reviews fetched ahead");
   assert.deepEqual(t.gh.checkCalls, [], "a sync, and the reviews it fetches ahead, ask for no checks");
 
   const v = await run(t.desk.reviewView("api#4", true));
