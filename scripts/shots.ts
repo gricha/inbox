@@ -2777,8 +2777,10 @@ const SHOTS: Shot[] = [
       };
       await part.locator(".rv-rev-tool[title='Remove kofi as a reviewer']").click();
       await after("removing kofi", (rs) => !rs.some((r) => r.startsWith("kofi:")));
+      // Asked again, sam keeps the verdict and says both.
+      const sam = (await rows()).find((r) => r.startsWith("sam: "));
       await part.locator(".rv-rev-tool[title='Ask sam to review again']").click();
-      await after("asking sam again", (rs) => rs.includes("sam: asked"));
+      await after("asking sam again", (rs) => !!sam && rs.includes(`${sam} · asked again`));
       await part.locator(".rv-part-more", { hasText: "Add reviewers" }).click();
       await part.locator(".rv-reviewers-input").fill("dana");
       await page.waitForTimeout(400);
