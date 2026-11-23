@@ -2,7 +2,7 @@
 // Schema the desk decodes each note with, the JSON Schema a run fills them by, and the item.<field> paths its rules read.
 // TypeScript 7 has no JS API, so this reads a small subset itself and refuses the rest, saying what it doesn't support.
 import { Result, Schema } from "effect";
-import type { NoteFact } from "./types.ts";
+import type { ItemField, NoteFact, TypeRefusal } from "./types.ts";
 
 const SUBSET =
   'a type here is an object literal ({ a: string }) of string, number, boolean, string literals ("a" | "b"), unions of those, optional fields (a?: T), nested object literals and arrays (T[])';
@@ -23,11 +23,18 @@ export interface ItemType {
   json: object; // the JSON Schema a run's notes fill their `fields` by
   fields: ReadonlySet<string>; // what a rule may name: item.kind, item.sender, item.amount
   shape: Shape; // what the note's facts are read by
+  declared: ItemField[]; // the same, each with its type as written, for the editor
 }
 
 type Tok = { k: "id" | "str" | "num" | "p"; v: string; at: number };
 
-class Refused extends Error {}
+class Refused extends Error {
+  at: number | null; // where in the source; null for the whole of it
+  constructor(message: string, at: number | null) {
+    super(message);
+    this.at = at;
+  }
+}
 
 function tokens(src: string): Tok[] {
   const out: Tok[] = [];
@@ -47,16 +54,20 @@ function tokens(src: string): Tok[] {
       continue;
     }
     const p = /^(=>|\.\.\.|[{}[\]()<>|&;,:?=.])/.exec(rest);
-    if (!p) throw new Refused(`${where(src, i)}: "${src.charAt(i)}" isn't TypeScript the desk reads`);
+    if (!p) throw new Refused(`${where(src, i)}: "${src.charAt(i)}" isn't TypeScript the desk reads`, i);
     out.push({ k: "p", v: p[0], at: i });
     i += p[0].length;
   }
   return out;
 }
 
-const where = (src: string, at: number) => {
+const lineCol = (src: string, at: number) => {
   const before = src.slice(0, at).split("\n");
-  return `line ${before.length}, column ${before.at(-1)!.length + 1}`;
+  return { line: before.length, column: before.at(-1)!.length + 1 };
+};
+const where = (src: string, at: number) => {
+  const { line, column } = lineCol(src, at);
+  return `line ${line}, column ${column}`;
 };
 
 // A string literal's value: JSON's escapes, either quote.
@@ -64,7 +75,7 @@ const unquote = (s: string): string => {
   const body = s.slice(1, -1);
   const json = s.startsWith("'") ? body.replaceAll("\\'", "'").replaceAll('"', '\\"') : body;
   const v: unknown = Result.getOrNull(Result.try({ try: (): unknown => JSON.parse(`"${json}"`), catch: () => null }));
-  if (typeof v !== "string") throw new Refused(`can't read the string ${s}`);
+  if (typeof v !== "string") throw new Refused(`can't read the string ${s}`, null);
   return v;
 };
 
@@ -73,12 +84,13 @@ function parse(src: string): { name: string; shape: Shape } {
   let i = 0;
   const peek = () => ts[i];
   const at = (t: Tok | undefined) => (t ? where(src, t.at) : "the end");
+  const pos = (t: Tok | undefined) => t?.at ?? src.length;
   const refuse = (t: Tok | undefined, what: string): never => {
-    throw new Refused(`${at(t)}: ${what} isn't supported; ${SUBSET}`);
+    throw new Refused(`${at(t)}: ${what} isn't supported; ${SUBSET}`, pos(t));
   };
   const take = (v: string) => {
     const t = ts[i];
-    if (t?.v !== v) throw new Refused(`${at(t)}: expected "${v}"${t ? `, got "${t.v}"` : ""}`);
+    if (t?.v !== v) throw new Refused(`${at(t)}: expected "${v}"${t ? `, got "${t.v}"` : ""}`, pos(t));
     i++;
   };
   const eat = (v: string) => {
@@ -106,7 +118,7 @@ function parse(src: string): { name: string; shape: Shape } {
   }
   function primary(): Shape {
     const t = ts[i++];
-    if (!t) throw new Refused(`the type ends early: expected a type at the end`);
+    if (!t) throw new Refused(`the type ends early: expected a type at the end`, src.length);
     if (t.k === "str") return { t: "lit", v: unquote(t.v) };
     if (t.k === "num") return refuse(t, `the number literal ${t.v}`);
     if (t.v === "{") return object();
@@ -144,12 +156,12 @@ function parse(src: string): { name: string; shape: Shape } {
     while (!eat("}")) {
       if (peek()?.v === "readonly" && ts[i + 1]?.v !== ":" && ts[i + 1]?.v !== "?") i++;
       const k = ts[i++];
-      if (!k) throw new Refused("the type ends early: a { isn't closed");
+      if (!k) throw new Refused("the type ends early: a { isn't closed", src.length);
       if (k.v === "[") refuse(k, "an index signature ([key: string]: T)");
       if (k.k !== "id" && k.k !== "str") refuse(k, `"${k.v}" as a field's name`);
       const key = k.k === "str" ? unquote(k.v) : k.v;
       if (!/^[a-z_][a-z0-9_]*$/i.test(key)) refuse(k, `the field name "${key}" (rules read item.<name>: letters, digits and _)`);
-      if (fields.some((f) => f.key === key)) throw new Refused(`${at(k)}: "${key}" is there twice`);
+      if (fields.some((f) => f.key === key)) throw new Refused(`${at(k)}: "${key}" is there twice`, k.at);
       const optional = eat("?");
       if (peek()?.v === "(" || peek()?.v === "<") refuse(peek(), "a method");
       take(":");
@@ -161,9 +173,9 @@ function parse(src: string): { name: string; shape: Shape } {
 
   eat("export");
   const kw = ts[i++];
-  if (kw?.v !== "type" && kw?.v !== "interface") throw new Refused(`start it with type Name = { … } or interface Name { … }`);
+  if (kw?.v !== "type" && kw?.v !== "interface") throw new Refused(`start it with type Name = { … } or interface Name { … }`, pos(kw));
   const n = ts[i++];
-  if (n?.k !== "id" || !/^[A-Z]/.test(n.v)) throw new Refused(`${at(n)}: name the type, capitalized: type Email = { … }`);
+  if (n?.k !== "id" || !/^[A-Z]/.test(n.v)) throw new Refused(`${at(n)}: name the type, capitalized: type Email = { … }`, pos(n));
   if (peek()?.v === "<") refuse(peek(), "a generic type");
   if (kw.v === "interface") {
     if (peek()?.v === "extends") refuse(peek(), "extends");
@@ -171,8 +183,8 @@ function parse(src: string): { name: string; shape: Shape } {
   } else take("=");
   const shape = kw.v === "interface" ? object() : union();
   eat(";");
-  if (i < ts.length) throw new Refused(`${at(ts[i])}: one type only, and nothing after it`);
-  if (shape.t !== "object") throw new Refused(`${n.v} is an object literal: the item's fields`);
+  if (i < ts.length) throw new Refused(`${at(ts[i])}: one type only, and nothing after it`, pos(ts[i]));
+  if (shape.t !== "object") throw new Refused(`${n.v} is an object literal: the item's fields`, n.at);
   return { name: n.v, shape };
 }
 
@@ -202,27 +214,40 @@ const leaf = (s: Shape): boolean =>
   (s.t === "union" && s.of.every(leaf)) ||
   (s.t === "array" && leaf(s.of));
 
-function paths(s: Shape, at: string): string[] {
-  if (s.t !== "object") return leaf(s) ? [at] : [];
-  return s.fields.flatMap((f) => paths(f.of, `${at}.${f.key}`));
+// A leaf's shape as TypeScript, for the editor's list of fields.
+function typeText(s: Shape): string {
+  if (s.t === "lit") return JSON.stringify(s.v);
+  if (s.t === "union") return s.of.map(typeText).join(" | ");
+  if (s.t === "array") return s.of.t === "union" ? `(${typeText(s.of)})[]` : `${typeText(s.of)}[]`;
+  return s.t;
 }
 
-// The automation's type, read: its Schema, its JSON Schema and its rules' fields; or what about it isn't supported.
-export function itemType(source: string): Result.Result<ItemType, string> {
-  if (source.length > MAX) return Result.fail(`keep it under ${MAX} characters`);
+// An optional object's fields are as optional as it is.
+function paths(s: Shape, at: string, optional: boolean): ItemField[] {
+  if (s.t !== "object") return leaf(s) ? [{ path: at, type: typeText(s), optional }] : [];
+  return s.fields.flatMap((f) => paths(f.of, `${at}.${f.key}`, optional || f.optional));
+}
+
+// The automation's type, read: its Schema, its JSON Schema and its rules' fields; or what about it isn't supported, and where.
+export function readType(source: string): Result.Result<ItemType, TypeRefusal> {
+  if (source.length > MAX) return Result.fail({ message: `keep it under ${MAX} characters`, line: null, column: null });
   return Result.try({
     try: (): ItemType => {
       const { name, shape } = parse(source);
       const schema = schemaOf(shape);
       const json = Schema.toJsonSchemaDocument(schema, { onExcessProperty: "error" }).schema;
-      return { name, schema, json, fields: new Set(paths(shape, "item")), shape };
+      const declared = paths(shape, "item", false);
+      return { name, schema, json, fields: new Set(declared.map((f) => f.path)), shape, declared };
     },
-    catch: (e) => {
-      if (e instanceof Refused) return e.message;
-      throw e; // a bug here, not in the type
+    catch: (e): TypeRefusal => {
+      if (!(e instanceof Refused)) throw e; // a bug here, not in the type
+      return { message: e.message, ...(e.at === null ? { line: null, column: null } : lineCol(source, e.at)) };
     },
   });
 }
+
+// The same, its refusal in words alone.
+export const itemType = (source: string): Result.Result<ItemType, string> => Result.mapError(readType(source), (r) => r.message);
 
 // A note's fields checked against its type: them, decoded; or every way they don't fit, as Effect words it.
 export function fit(t: ItemType, fields: unknown): Result.Result<unknown, string> {

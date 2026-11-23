@@ -9,7 +9,8 @@ import path from "node:path";
 import { Effect, Result } from "effect";
 import { compile } from "../src/expr.ts";
 import { factsOf, fit, itemType } from "../src/itemtype.ts";
-import { AGREE, DISAGREE, type Recommendation } from "../src/types.ts";
+import { createApp } from "../src/server.ts";
+import { AGREE, DISAGREE, type AutomationView, type Recommendation, type TypeCheck } from "../src/types.ts";
 import { setup } from "./helpers/desk.ts";
 import { unixOnly } from "./helpers/platform.ts";
 import { run as runFx, runSync } from "./helpers/run.ts";
@@ -451,6 +452,14 @@ test("a recommendation that doesn't hold up fails the run, and the next run asks
   const r = await t.desk.automations.run(a, "now").p;
   assert.match(r.error ?? "", /^its recommendation for a held note doesn't fit Email either: Expected "statement"/);
   assert.equal(t.desk.inquiries().length, 0);
+  assert.deepEqual(
+    t.desk.automations
+      .view()
+      .find((x) => x.id === "mail")!
+      .held.map((h) => [h.text, h.rec]),
+    [[RECEIPT.text, null]],
+    "its page lists it, with no recommendation yet",
+  );
   fake.answer(run("Read 1 unread thread.", [RECEIPT]), 3);
   fake.answer({ do: "drop", says: "Drop it?", why: "A receipt needs nothing." }, 4);
   const again = await t.desk.automations.run(a, "now").p;
@@ -520,4 +529,124 @@ test("deleting the automation forgets what it held, and its recommendation", asy
   const { t } = await held(c, { do: "drop", says: "Drop it?", why: "x" });
   await runFx(t.desk.automations.remove("mail"));
   assert.deepEqual([t.desk.automations.heldOf("mail"), t.desk.inquiries()], [[], []]);
+});
+
+const http =
+  (app: ReturnType<typeof createApp>) =>
+  async (method: string, p: string, body?: unknown): Promise<[number, any]> => {
+    const res = await app.request(`http://127.0.0.1:47823${p}`, {
+      method,
+      headers: { "content-type": "application/json", "sec-fetch-site": "same-origin", "x-desk-client": "web" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return [res.status, await res.json()];
+  };
+
+test("the editor's check says what saving its type and rules would, each where it is, and saves nothing", async (c) => {
+  if (unixOnly(c)) return;
+  const { t } = await mailDesk(c);
+  const req = http(createApp(t.desk, 47823));
+  const check = async (b: object): Promise<TypeCheck> => {
+    const [status, body] = await req("POST", "/api/automations/check", b);
+    assert.equal(status, 200, JSON.stringify(body));
+    return body;
+  };
+  const rules = [{ when: 'item.kind == "statement"', do: "drop" }, { when: "item.knd == 'bill'", do: "urgent" }, { do: "fyi" }];
+  assert.deepEqual(await check({ type: EMAIL, rules }), {
+    name: "Email",
+    error: null,
+    fields: [
+      { path: "item.kind", type: '"statement" | "bill" | "personal" | "security" | "booking" | "order"', optional: false },
+      { path: "item.sender", type: "string", optional: false },
+      { path: "item.amount", type: "number", optional: true },
+      { path: "item.due", type: "string", optional: true },
+    ],
+    rules: [null, 'when: unknown field "item.knd"; did you mean "item.kind"?', "give it when, ask or both"],
+  });
+  const nested = await check({ type: "type Order = { ship?: { carrier: string }; tags: ('gift' | 'refund')[] }" });
+  assert.deepEqual(nested.fields, [
+    { path: "item.ship.carrier", type: "string", optional: true },
+    { path: "item.tags", type: '("gift" | "refund")[]', optional: false },
+  ]);
+
+  // The parser's own words, and where: a rule can't be checked until the type reads.
+  assert.deepEqual(await check({ type: "type Email = {\n  at: Date\n}", rules }), {
+    name: null,
+    error: {
+      message: `line 2, column 7: "Date" (use string, an ISO date) isn't supported; ${runSync(Effect.flip(t.desk.automations.set("x", { ...MAIL, type: "type E = { a: Date }" }, true))).message.split("supported; ")[1]}`,
+      line: 2,
+      column: 7,
+    },
+    fields: [],
+    rules: [null, null, null],
+  });
+  assert.deepEqual((await check({ type: "type E = { a: string" })).error, {
+    message: "the type ends early: a { isn't closed",
+    line: 1,
+    column: 21,
+  });
+  assert.deepEqual((await check({ type: "x".repeat(4_001) })).error, {
+    message: "keep it under 4000 characters",
+    line: null,
+    column: null,
+  });
+  assert.deepEqual(
+    (await check({ rules })).rules,
+    [0, 1, 2].map(() => "they read the notes' fields (item.<field>): give it a type"),
+  );
+  assert.deepEqual(await check({}), { name: null, error: null, fields: [], rules: [] });
+  assert.deepEqual(await req("POST", "/api/automations/check", { type: 3 }), [
+    400,
+    { error: "need { type?, rules: [{ when?, ask?, do }]? }", tag: "BadRequest" },
+  ]);
+  assert.deepEqual(t.desk.automations.own(), [], "nothing saved");
+});
+
+test("a PUT of a typed automation keeps every part of it, and its page reads them back", async (c) => {
+  if (unixOnly(c)) return;
+  const { t } = await mailDesk(c);
+  const req = http(createApp(t.desk, 47823));
+  const whole = {
+    ...MAIL,
+    can: ["add", "fyi"],
+    buttons: [
+      { label: "Open in Gmail", do: "open" },
+      { label: "Draft a reply", do: "ask", prompt: "Draft a reply in my Gmail drafts; don't send it." },
+    ],
+    icon: "brand:gmail",
+    rules: [...MAIL.rules, { ask: "Is it a newsletter?", do: "fyi" }, { when: "item.amount > 100", ask: "Is it a bill?", do: "standard" }],
+    on: false,
+  };
+  const [status] = await req("PUT", "/api/automations/mail", whole);
+  assert.equal(status, 200);
+  const [, list] = await req("GET", "/api/automations");
+  const a = (list as AutomationView[]).find((x) => x.id === "mail")!;
+  const { schedule, prompt, mcp, can, buttons, icon, type, rules, on, name } = a;
+  assert.deepEqual({ name, schedule, prompt, mcp, can, buttons, icon, type, rules, on }, whole);
+  assert.deepEqual(a.held, []);
+});
+
+test("an automation's page lists what it held, each with its error and its open recommendation", async (c) => {
+  if (unixOnly(c)) return;
+  const { fake, t, q } = await held(c, { do: "type", says: "Allow receipts?", why: "A receipt.", type: WIDER });
+  const req = http(createApp(t.desk, 47823));
+  const page = async () => ((await req("GET", "/api/automations"))[1] as AutomationView[]).find((x) => x.id === "mail")!.held;
+  const h = t.desk.automations.heldOf("mail")[0]!;
+  assert.deepEqual(await page(), [
+    {
+      id: h.id,
+      at: h.at,
+      text: RECEIPT.text,
+      fields: RECEIPT.fields,
+      error: 'Expected "statement" | "bill" | "personal" | "security" | "booking" | "order"\n  at ["kind"]',
+      rec: q.id,
+    },
+  ]);
+  // A comment sends it back for a revised one, which it then links.
+  fake.answer({ do: "drop", says: "Drop receipts?", why: "You said they need nothing." }, 3);
+  await runFx(t.desk.answerInquiry(q.id, "They need nothing from me"));
+  await until(() => t.desk.inquiries().length === 1, "a revised recommendation");
+  assert.equal((await page())[0]?.rec, t.desk.inquiries()[0]!.id);
+  await runFx(t.desk.answerInquiry(t.desk.inquiries()[0]!.id, DISAGREE));
+  assert.deepEqual(await page(), []);
 });

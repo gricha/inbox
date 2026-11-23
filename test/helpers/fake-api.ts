@@ -137,6 +137,7 @@ const AUTO: AutomationView = {
   next_at: ago(-20),
   running: false,
   waiting: null,
+  held: [],
   runs: [
     {
       id: "r1",
@@ -177,6 +178,7 @@ const BUILT_IN: AutomationView = {
   next_at: null,
   running: false,
   waiting: null,
+  held: [],
   runs: [],
 };
 

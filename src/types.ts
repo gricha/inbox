@@ -1571,6 +1571,29 @@ export interface ItemRule {
   do: (typeof ITEM_DOES)[number];
 }
 
+// A field a typed automation's rules may name, with its type in TypeScript ('"bill" | "statement"', "string[]"); optional
+// when a note may leave it out.
+export interface ItemField {
+  path: string; // item.kind
+  type: string;
+  optional: boolean;
+}
+
+// What about a type isn't read, in the parser's words, and where: 1-based, or null for the whole of it (its length).
+export interface TypeRefusal {
+  message: string;
+  line: number | null;
+  column: number | null;
+}
+
+// POST /api/automations/check: a type and its rules as an editor has them, checked as saving them would.
+export interface TypeCheck {
+  name: string | null; // the type's, once it reads
+  error: TypeRefusal | null;
+  fields: ItemField[]; // what its rules' item. can name; none while it doesn't read
+  rules: (string | null)[]; // each rule's refusal, as a save words it after "rules: <n>: "; null where it holds
+}
+
 // What a plugin comes with: an automation in its own file, whose id ("<plugin>.<id>"), name and definition are the code's;
 // the desk keeps only whether you switched it on or off, and `on` is what it is until you do.
 export type BuiltInAutomation = Pick<Automation, "name" | "schedule" | "events" | "prompt" | "when" | "decide" | "rule" | "can"> & {
@@ -1711,6 +1734,17 @@ export interface AutomationView extends Automation {
   // Newest first, the last 10. did: what it did, by verb ("put 2 on your desk, sorted 3 to FYI, snoozed 1"); didnt: what it couldn't
   // ("couldn't add 1, refused 2"); each "" when there's nothing to say.
   runs: (AutomationRun & { did: string; didnt: string })[];
+  held: HeldNoteView[]; // its notes whose fields don't fit its type, off your desk, oldest first
+}
+
+// A note an automation held, as its page lists it. text and fields are what its run read from others' words: untrusted.
+export interface HeldNoteView {
+  id: string;
+  at: string;
+  text: string;
+  fields: unknown;
+  error: string; // how its fields don't fit, in Effect's words
+  rec: string | null; // the open question with your agent's recommendation for it (an inquiry's id); null while it's to come
 }
 
 // GET /api/asks

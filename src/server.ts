@@ -47,6 +47,7 @@ import { fetchIssue, findClone, generateIssueReview } from "./issue.ts";
 import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
 import { CHUNK_FIELDS, FIELDS } from "./signals.ts";
+import { typeCheck } from "./automations.ts";
 import { field as fieldOf, isRecord, oneOf, str as stringOf, strings as stringsOf } from "./narrow.ts";
 import { GITHUB_ACTIONS, type Action, type AskLines, type InlineAt, type NoteButton, type RemoteView } from "./types.ts";
 
@@ -850,6 +851,19 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   // plugin's is listed too, and only switched, only from the window.
   app.get("/api/automations", (c) => total(c, () => desk.automations.view()));
   app.get("/api/icons/brand/:slug", (c) => respond(c, brandIcon(c.req.param("slug")), { log, read: true }));
+  // An editor's type and rules, checked as a save would check them; nothing is saved.
+  app.post("/api/automations/check", (c) => {
+    const check = Effect.gen(function* () {
+      const b = yield* bodyOf(c);
+      if (
+        (b.type !== undefined && typeof b.type !== "string") ||
+        (b.rules !== undefined && !(Array.isArray(b.rules) && b.rules.every(isRecord)))
+      )
+        return yield* new BadRequest({ message: "need { type?, rules: [{ when?, ask?, do }]? }" });
+      return typeCheck(b.type ?? "", Array.isArray(b.rules) ? b.rules.filter(isRecord) : []);
+    });
+    return respond(c, check, { log, read: true });
+  });
   app.put("/api/automations/:id", (c) => {
     const set = Effect.gen(function* () {
       yield* up;

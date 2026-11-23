@@ -11,7 +11,7 @@ import { areaFiles } from "../../src/areas.ts";
 import { attributionOf, onBehalf } from "../../src/github/behalf.ts";
 import { plan } from "../../src/agents.ts";
 import { agentView, githubView } from "../../src/setup.ts";
-import { didntText, didText, eventsWords, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
+import { didntText, didText, eventsWords, nextAt, parseSchedule, scheduleWords, typeCheck } from "../../src/automations.ts";
 import { GITHUB_AUTOMATIONS } from "../../src/connectors/github-automations.ts";
 import { brandIcon } from "../../src/icons.ts";
 import { factsOf as noteFacts, itemType } from "../../src/itemtype.ts";
@@ -47,6 +47,7 @@ import type {
   Automation,
   AutomationRun,
   AutomationView,
+  HeldNoteView,
   RuleAction,
   BoardConfig,
   BoardSummary,
@@ -2813,6 +2814,8 @@ function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
   if (!dismissed && !text) throw new HttpError(400, "the answer is empty");
   // A recommendation's answer is the desk's to act on: it's gone.
   if (q.fix) {
+    const { automation, held } = q.fix;
+    HELD[automation] = (HELD[automation] ?? []).filter((h) => h.id !== held);
     INQUIRIES.splice(INQUIRIES.indexOf(q), 1);
     bump();
     return { ...q, answer: { text, at: new Date().toISOString(), dismissed } };
@@ -2884,6 +2887,28 @@ const AUTOMATIONS: Automation[] = [
     updated_at: iso(500),
   },
 ];
+// What Gmail held off your desk: a receipt its type has no kind for, with Claude's recommendation; a bill whose amount came as
+// text, which Claude is still to recommend about.
+const HELD: Record<string, HeldNoteView[]> = {
+  gmail: [
+    {
+      id: "h7c2e9a1",
+      at: iso(0.3),
+      text: "Your receipt from Blue Bottle Coffee",
+      fields: { kind: "receipt", sender: "Blue Bottle Coffee", amount: 6.5 },
+      error: 'Expected "statement" | "bill" | "personal" | "security" | "booking" | "order"\n  at ["kind"]',
+      rec: "q5e1a11d",
+    },
+    {
+      id: "h3b81f0c",
+      at: iso(0.3),
+      text: "City of Oakland: parking ticket, pay by Dec 5",
+      fields: { kind: "bill", sender: "City of Oakland", amount: "$64.00", due: "2026-12-05" },
+      error: 'Expected number\n  at ["amount"]',
+      rec: null,
+    },
+  ],
+};
 // What GitHub comes with, as the desk lists it: its definition the code's, on or off as you switched it.
 const SWITCHED = new Map<string, boolean>();
 const builtIns = (): Automation[] =>
@@ -3051,6 +3076,7 @@ function automationsView(): AutomationView[] {
       runs: RUNS.filter((r) => r.automation === a.id)
         .toReversed()
         .map((r) => Object.assign({}, r, { did: didText(r.items), didnt: didntText(r.items) })),
+      held: (HELD[a.id] ?? []).map((h) => Object.assign({}, h, { rec: INQUIRIES.some((q) => q.id === h.rec && !q.answer) ? h.rec : null })),
     });
   });
 }
@@ -4688,6 +4714,10 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return { on: setting("agent.coordinator"), asks: ASKS, coordinator, options };
   }
   if (route === "GET /api/automations") return automationsView();
+  if (route === "POST /api/automations/check") {
+    const b = await readBody(req);
+    return typeCheck(typeof b.type === "string" ? b.type : "", Array.isArray(b.rules) ? b.rules.filter(isRecord) : []);
+  }
   const auto = /^\/api\/automations\/([^/]+)(\/run|\/on)?$/.exec(url.pathname);
   if (auto) {
     const id = decodeURIComponent(auto[1]!);

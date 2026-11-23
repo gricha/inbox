@@ -12,7 +12,7 @@ import { DENY as COORDINATOR_DENY, denyDir, wakeFor } from "./coordinator.ts";
 import type { Desk, Entry } from "./desk.ts";
 import { decide, type Question } from "./decisions.ts";
 import { compile } from "./expr.ts";
-import { fit, itemType, type ItemType } from "./itemtype.ts";
+import { fit, itemType, readType, type ItemType } from "./itemtype.ts";
 import { describe, sortKey, textHash } from "./judge.ts";
 import { decodeEach, decodeValues, field, isRecord, jsonOf, schemaOf, str } from "./narrow.ts";
 import { BadRequest, ClaudeBadOutput, McpServerMissing, messageOf, NotFound, type FsError } from "./errors.ts";
@@ -52,6 +52,7 @@ import {
   type NoteButton,
   type Recommendation,
   type RuleAction,
+  type TypeCheck,
   type Verb,
 } from "./types.ts";
 import { ICON_FORMAT, iconName } from "./icons.ts";
@@ -543,6 +544,7 @@ export class Automations {
   view(): AutomationView[] {
     const now = this.desk.now();
     const runs = this.runs();
+    const open = new Set(this.desk.inquiries().flatMap((q) => (q.answer ? [] : [q.id])));
     return this.all().map((a) => {
       const s = parseSchedule(a.schedule);
       // A failed run says why itself, and it was spent: waiting is a question's model that couldn't answer.
@@ -556,6 +558,14 @@ export class Automations {
           .filter((r) => r.automation === a.id)
           .toReversed()
           .map((r) => Object.assign(r, { did: didText(r.items), didnt: didntText(r.items) })),
+        held: this.heldOf(a.id).map((h) => ({
+          id: h.id,
+          at: h.at,
+          text: h.note.text,
+          fields: h.note.fields,
+          error: h.error,
+          rec: h.rec !== null && open.has(h.rec) ? h.rec : null,
+        })),
       });
     });
   }
@@ -1648,17 +1658,42 @@ function rulesOf(
   if (raw.length > 10) return bad("up to 10");
   const out: ItemRule[] = [];
   for (const [i, r] of raw.entries()) {
-    const when = typeof r.when === "string" ? r.when.trim() : "";
-    const ask = typeof r.ask === "string" ? r.ask.trim() : "";
-    const does = ITEM_DOES.find((d) => d === r.do);
-    if (!when && !ask) return bad(`${i + 1}: give it when, ask or both`);
-    if (!does) return bad(`${i + 1}: do is one of ${ITEM_DOES.join(", ")}`);
-    if (ask.length > 1_000) return bad(`${i + 1}: keep ask under 1000 characters`);
-    const check = when ? compile(when, t.fields) : null;
-    if (check && Result.isFailure(check)) return bad(`${i + 1}: when: ${check.failure.message}`);
-    out.push({ ...(when && { when }), ...(ask && { ask }), do: does });
+    const read = itemRule(r, t);
+    if (typeof read === "string") return bad(`${i + 1}: ${read}`);
+    out.push(read);
   }
   return Effect.succeed(out);
+}
+
+// One rule on its notes, as it's kept; or what's wrong with it.
+function itemRule(r: { when?: unknown; ask?: unknown; do?: unknown }, t: ItemType): ItemRule | string {
+  const when = typeof r.when === "string" ? r.when.trim() : "";
+  const ask = typeof r.ask === "string" ? r.ask.trim() : "";
+  const does = ITEM_DOES.find((d) => d === r.do);
+  if (!when && !ask) return "give it when, ask or both";
+  if (!does) return `do is one of ${ITEM_DOES.join(", ")}`;
+  if (ask.length > 1_000) return "keep ask under 1000 characters";
+  const check = when ? compile(when, t.fields) : null;
+  if (check && Result.isFailure(check)) return `when: ${check.failure.message}`;
+  return { ...(when && { when }), ...(ask && { ask }), do: does };
+}
+
+// POST /api/automations/check: what saving this type and these rules would say, each where it is, saving nothing.
+export function typeCheck(type: string, rules: readonly { when?: unknown; ask?: unknown; do?: unknown }[]): TypeCheck {
+  const source = type.trim();
+  const read = source ? readType(source) : null;
+  const t = read && Result.isSuccess(read) ? read.success : null;
+  return {
+    name: t?.name ?? null,
+    error: read && Result.isFailure(read) ? read.failure : null,
+    fields: t?.declared ?? [],
+    rules: rules.map((r) => {
+      if (read && !t) return null; // nothing to compile against until the type reads, which says why
+      if (!t) return "they read the notes' fields (item.<field>): give it a type";
+      const checked = itemRule(r, t);
+      return typeof checked === "string" ? checked : null;
+    }),
+  };
 }
 
 // A note of a run's answer, as the desk keeps it; null without a key or a line of text.
