@@ -8,11 +8,13 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { Effect, Result } from "effect";
 import { alive, claude, halt, readTail, type Agent } from "../coordinator.ts";
-import type { Desk } from "../desk.ts";
+import type { Core, Desk } from "../desk.ts";
 import { Conflict, NotFound, type CommandError } from "../errors.ts";
 import { isRecord, jsonOf, num, str } from "../narrow.ts";
 import { runCommand } from "../review.ts";
 import { isCoordinator, SESSION_PREFIX, type SessionAction, type SessionCard, type SessionKind } from "../types.ts";
+
+type Host = Core & Pick<Desk, "light">;
 
 export const TAIL = 64 * 1024; // bytes of a transcript or rollout read, from its end
 const POLL = 30_000;
@@ -509,7 +511,7 @@ function desksOwn(cwd: string, name: string | undefined, home: string): boolean 
 export class Sessions {
   readonly id = "sessions";
   readonly name = "Sessions";
-  desk: Desk;
+  desk: Host;
   roots: Roots;
   found = new Map<string, Found>();
   timer: NodeJS.Timeout | null = null;
@@ -519,7 +521,7 @@ export class Sessions {
   askFailed = 0; // when a model call last failed: none again for a while
   records = new Map<string, { key: string; record: DesktopRecord | null }>(); // the desktop app's, by file
 
-  constructor(desk: Desk, at: Roots = roots()) {
+  constructor(desk: Host, at: Roots = roots()) {
     this.desk = desk;
     this.roots = at;
   }
