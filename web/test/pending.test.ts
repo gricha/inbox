@@ -2,7 +2,7 @@ import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { placeNotes, type Card, type Inquiry, type Note, type QueueView, type Standing } from "../../src/types.ts";
-import { hasNoteEdit, settle, settleReviewerAsks, withDrops, withNoteEdits, withReviewerAsks } from "../src/pending.ts";
+import { hasNoteEdit, hasReviewerAsk, settle, withDrops, withNoteEdits, withReviewerAsks, type ReviewerAsks } from "../src/pending.ts";
 
 const NOW = "2026-11-17T12:00:00.000Z";
 const note = (id: string, extra: Partial<Note> = {}): Note => ({
@@ -56,21 +56,27 @@ test("a reviewer change shows at once and drops once the review's requests have 
     { who: "Sam", state: "asked" },
     { who: "kofi", state: "commented" },
   ];
-  const asks = { sam: "removed", kofi: "asked", dana: "asked" } as const;
+  const asks: ReviewerAsks = new Map([
+    ["sam", "removed"],
+    ["kofi", "asked"],
+    ["dana", "asked"],
+  ]);
   assert.deepEqual(withReviewerAsks(list, asks), [
     { who: "kofi", state: "asked" },
     { who: "dana", state: "asked" },
   ]);
-  assert.equal(withReviewerAsks(list, {}), list);
+  assert.equal(withReviewerAsks(list, new Map()), list);
   assert.deepEqual(
-    withReviewerAsks([{ who: "marco", state: "approved" }], { marco: "asked" }),
+    withReviewerAsks([{ who: "marco", state: "approved" }], new Map([["marco", "asked"]])),
     [{ who: "marco", state: "approved", again: true }],
     "asked again keeps their verdict, as the desk lists it",
   );
   const user = (reviewer: string) => ({ reviewer, type: "user" as const, codeowner: false });
-  assert.equal(settleReviewerAsks([user("Sam")], asks), asks);
-  assert.deepEqual(settleReviewerAsks([user("kofi"), user("dana")], asks), {});
-  assert.deepEqual(settleReviewerAsks([{ reviewer: "web", type: "team", codeowner: false }], { "@web": "asked" }), {});
+  const has = (requests: Parameters<typeof hasReviewerAsk>[0]) => (who: string, how: "asked" | "removed") =>
+    hasReviewerAsk(requests, who, how);
+  assert.equal(settle(asks, has([user("Sam")])), asks);
+  assert.deepEqual([...settle(asks, has([user("kofi"), user("dana")]))], []);
+  assert.ok(hasReviewerAsk([{ reviewer: "web", type: "team", codeowner: false }], "@web", "asked"));
 });
 
 test("a drop shows at once: the row where you let it go, in its section, among its kind", () => {

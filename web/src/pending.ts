@@ -52,9 +52,6 @@ export type NoteEdits = Shown<string, Note | null>;
 const notesOf = (v: NotesView) => [...v.due, ...v.urgent, ...v.open, ...v.fyi, ...v.later];
 const isNote = (n: Note | null): n is Note => n !== null;
 
-export const dropKey = <T>(r: Readonly<Record<string, T>>, key: string): Record<string, T> =>
-  Object.fromEntries(Object.entries(r).filter(([k]) => k !== key));
-
 // The desk's notes with yours on them, placed as the desk places them.
 export function withNoteEdits(v: NotesView, edits: NoteEdits, now: string): NotesView {
   if (!edits.size) return v;
@@ -69,16 +66,16 @@ export function hasNoteEdit(v: NotesView, id: string, n: Note | null): boolean {
 }
 
 // Your reviewer changes a review's read doesn't show yet, by who as its list names them (a login, or @team), lower case.
-export type ReviewerAsks = Readonly<Record<string, "asked" | "removed">>;
+export type ReviewerAsks = Shown<string, "asked" | "removed">;
 
 const ORDER: readonly Standing["state"][] = ["changes requested", "asked", "approved", "commented"];
 
 // A review's reviewers with your changes on them: a removed one off the list, an added one asked, and one asked again
 // keeps their verdict, asked again, as the desk will list them.
 export function withReviewerAsks(list: Standing[], asks: ReviewerAsks): Standing[] {
-  if (!Object.keys(asks).length) return list;
+  if (!asks.size) return list;
   const by = new Map(list.map((s) => [s.who.toLowerCase(), s]));
-  for (const [who, how] of Object.entries(asks)) {
+  for (const [who, how] of asks) {
     if (how === "removed") by.delete(who);
     else {
       const had = by.get(who);
@@ -89,12 +86,9 @@ export function withReviewerAsks(list: Standing[], asks: ReviewerAsks): Standing
   return [...by.values()].toSorted((a, b) => ORDER.indexOf(a.state) - ORDER.indexOf(b.state));
 }
 
-// Your changes the review's read now has drop off: an asked one among its review requests, a removed one not.
-export function settleReviewerAsks(requests: Item["review_requests"], asks: ReviewerAsks): ReviewerAsks {
-  const asked = new Set(requests.map((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer).toLowerCase()));
-  const left = Object.entries(asks).filter(([who, how]) => asked.has(who) !== (how === "asked"));
-  return left.length === Object.keys(asks).length ? asks : Object.fromEntries(left);
-}
+// The review's read has your change: an asked one among its review requests, a removed one not.
+export const hasReviewerAsk = (requests: Item["review_requests"], who: string, how: "asked" | "removed"): boolean =>
+  requests.some((r) => (r.type === "team" ? `@${r.reviewer}` : r.reviewer).toLowerCase() === who) === (how === "asked");
 
 // A row you dragged (or moved up or down) on the Inbox, drawn there until the desk's view is read back: its id as the row's
 // ("note:<id>", "ask:<id>" or an item's), the section, and the rows of its kind it went between.

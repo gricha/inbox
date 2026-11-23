@@ -37,7 +37,7 @@ import { Signal } from "./RowIcons.tsx";
 import { age, byOf, cls, handoffLabel, MOD, modelName, sinceText, shortRef, when } from "../format.ts";
 import { inline, unlinked, urlPlace } from "../../../src/prose.ts";
 import { reviewOf } from "../reviews.ts";
-import { dropKey, settleReviewerAsks, withReviewerAsks, type ReviewerAsks } from "../pending.ts";
+import { hasReviewerAsk, useShown, withReviewerAsks } from "../pending.ts";
 import {
   boxBack,
   boxGone,
@@ -249,10 +249,7 @@ export function Review({
   const [peek, setPeek] = useState<ReadonlySet<string>>(new Set()); // sections you viewed and opened again, by key
   const [shutDirs, setShutDirs] = useState<ReadonlySet<string>>(new Set()); // folders you folded in the sidebar's files
   const [draft, setDraft] = useState<Draft | null>(() => restored(id, 1));
-  const [sent, setSent] = useState<Sent[]>([]);
-  const [said, setSaid] = useState<Said[]>([]);
   const [poke, setPoke] = useState(0); // a read again while what you sent isn't back yet
-  const [asks, setAsks] = useState<ReviewerAsks>({}); // reviewers you added, removed or asked again, until the read has it
   const draftText = useRef(keptDraft(id)?.text ?? ""); // here, so a box Pierre redraws keeps your words without a render per keystroke
   const drafts = useRef(1);
   const alive = useRef(true);
@@ -266,6 +263,21 @@ export function Review({
   const seq = useRef(0);
   const jumped = useRef(0); // when a click last scrolled the page to a file
   const v = typeof view === "object" ? view : null;
+  // Yours from here that the review's read has: by its link, or your words on a comment of yours.
+  const inRead = (s: { body: string; url: string }) =>
+    !!v?.conversation.some((c) =>
+      c.comments.some((k) => (s.url && k.url === s.url) || (k.author.toLowerCase() === me.toLowerCase() && k.body.trim() === s.body)),
+    );
+  // What you wrote on a line (by its link) and on the PR or a thread, and reviewers you added, removed or asked again,
+  // until the read has them.
+  const sent = useShown<string, Sent>(v, (_, s) => inRead(s));
+  const said = useShown<string, Said>(v, (_, s) => inRead(s));
+  const asks = useShown<string, "asked" | "removed">(v, (who, how) => !!v && hasReviewerAsk(v.item.review_requests, who, how));
+  const pending = [...sent.shown.values()].filter((s) => !inRead(s));
+  const saying = [...said.shown.values()].filter((s) => !inRead(s));
+  const say = (s: Said) => {
+    said.show(s.url || `${s.convo ?? ""}:${s.body}`, s);
+  };
   const latest = v?.asks.at(-1);
   const waiting = !!latest && !latest.answer; // your latest ask about it: the sidebar's Ask says it's waiting
   useEffect(() => {
@@ -332,15 +344,7 @@ export function Review({
   });
 
   // What you sent and GitHub hasn't given back yet: read the review again every 3 seconds, ten times at most.
-  const unread = (() => {
-    if (!view || typeof view !== "object") return 0;
-    const me_ = me.toLowerCase();
-    const back = (s: { body: string; url: string }) =>
-      view.conversation.some((c) =>
-        c.comments.some((k) => (s.url && k.url === s.url) || (k.author.toLowerCase() === me_ && k.body.trim() === s.body)),
-      );
-    return [...sent, ...said].filter((s) => !back(s)).length + Object.keys(asks).length;
-  })();
+  const unread = pending.length + saying.length + asks.shown.size;
   const tries = useRef(0);
   useKeyed(unread && tries.current < 10 ? `${unread} ${poke}` : null, () => {
     const t = setTimeout(() => {
@@ -352,19 +356,16 @@ export function Review({
     };
   });
 
-  useEffect(() => {
-    if (v) setAsks((a) => settleReviewerAsks(v.item.review_requests, a));
-  }, [v]);
   // A reviewer change shows at once and is read back until the review has it; a refusal puts it back.
   function askReviewer(who: string, how: "asked" | "removed", write: Effect.Effect<boolean>) {
     const key = who.toLowerCase();
     tries.current = 0;
-    setAsks((a) => ({ ...a, [key]: how }));
+    asks.show(key, how);
     runUi(
       write.pipe(
         Effect.tap((ok) =>
           Effect.sync(() => {
-            if (!ok) setAsks((a) => dropKey(a, key));
+            if (!ok) asks.drop(key);
           }),
         ),
       ),
@@ -660,7 +661,7 @@ export function Review({
             flash(d.thread ? `Sent your reply on ${ref} on GitHub` : `Commented on ${lineName(d.at)} on GitHub`);
             if (!alive.current) return; // a review you've left doesn't touch the one you're on
             tries.current = 0;
-            setSent((s) => [...s, { at: d.at, thread: d.thread, body: text.trim(), url }]);
+            sent.show(url, { at: d.at, thread: d.thread, body: text.trim(), url });
             setDraft((cur) => (cur?.n === d.n ? null : cur));
             if (drafts.current === d.n) {
               draftText.current = "";
@@ -833,14 +834,7 @@ export function Review({
     );
   // A box whose line a refresh took off the diff, or put under the closed rest, is drawn above the diff instead.
   const orphanAt = draft ? drawnAt(draft, list, view.conversation, view.diff_head) : 0;
-  // Yours from here that the refreshed conversation doesn't have yet.
-  const back = (s: { body: string; url: string }) =>
-    view.conversation.some((c) =>
-      c.comments.some((k) => (s.url && k.url === s.url) || (k.author.toLowerCase() === me.toLowerCase() && k.body.trim() === s.body)),
-    );
-  const pending = sent.filter((s) => !back(s));
-  const saying = said.filter((s) => !back(s));
-  const reviewers = withReviewerAsks(view.reviewers.list, asks);
+  const reviewers = withReviewerAsks(view.reviewers.list, asks.shown);
   // Pierre's "more lines" around a hunk: the file at the PR's head, and before it the same file run back through its patch.
   const wholeFile = (f: ReviewFile): Promise<FileDiffLoadedFiles> => {
     const key = `${view.diff_head ?? ""}:${f.path}`;
@@ -1157,7 +1151,7 @@ export function Review({
               saying={saying}
               onSaid={(s) => {
                 tries.current = 0;
-                setSaid((x) => [...x, s]);
+                say(s);
               }}
               foot={
                 // Still there once you've acted, so you can comment on what you did; while Request changes is open its box
@@ -1176,7 +1170,7 @@ export function Review({
                           Effect.sync(() => {
                             if (!ok) return;
                             tries.current = 0;
-                            setSaid((x) => [...x, { convo: null, body: b.trim(), url: "" }]);
+                            say({ convo: null, body: b.trim(), url: "" });
                           }),
                         ),
                       )
@@ -1315,7 +1309,7 @@ export function Review({
             <SidePart
               id="reviewers"
               name="Reviewers"
-              line={reviewers.length ? "" : Object.keys(asks).length ? "Nobody's asked" : view.reviewers.line}
+              line={reviewers.length ? "" : asks.shown.size ? "Nobody's asked" : view.reviewers.line}
               bad={view.reviewers.changes ? "t-warn" : ""}
               tone={calm(card)}
               // oxlint-disable-next-line no-map-spread -- each row is a new object with optional fields, not a reviewer copied
