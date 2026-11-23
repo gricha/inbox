@@ -141,9 +141,9 @@ const AREAS: Areas = {
   "acme/ml-pipeline": { "pipeline/": 11, "tests/": 4 },
 };
 const HOUR = 3_600_000;
-const T0 = Date.now();
+const T0 = Number(process.env.MOCK_T0) || Date.now(); // MOCK_T0: the shots' jobs share one start
 // The mock's clock: real time less what the shots wound it back by (POST /api/mock/clock), so each shot starts at T0.
-let wound = 0;
+let wound = Date.now() - T0;
 const now = () => Date.now() - wound;
 const iso = (hoursAgo: number) => new Date(T0 - hoursAgo * HOUR).toISOString();
 // Settings → Usage's graph: a few months of finished items, quiet weekends, busier lately; the same on every run.

@@ -1,7 +1,8 @@
-// npm run shots [-- --url http://localhost:47823] [--out .shots] [--only queue,review]: visual QA.
-// Screenshots every key state in light and dark at its window sizes (SIZES, and a browser at 200 % zoom), and each theme,
-// and fails on sideways scrolling and console errors. docs/visual.md → Checking a design change says what to look at.
-// Without --url it starts the mock API and Vite, so the data is the same on every run.
+// npm run shots [-- --url http://localhost:47823] [--out .shots] [--only queue,review] [--jobs 4] [--pass light-wide,dark-mid]
+// [--no-icons]: visual QA. Screenshots every key state in light and dark at its window sizes (SIZES, and a browser at 200 %
+// zoom), and each theme, and fails on sideways scrolling and console errors. docs/visual.md → Checking a design change says
+// what to look at. Without --url it starts the mock API and Vite, so the data is the same on every run. A pass (a theme at a
+// size) runs in one of --jobs processes, each with its own mock and Vite on SHOTS_MOCK_PORT + n and SHOTS_VITE_PORT + n.
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -121,9 +122,12 @@ async function start(): Promise<string> {
     MOCK_PORT: String(MOCK),
     MOCK_AI_MS: "3600000",
     MOCK_NO_POLL: "1",
+    MOCK_T0: process.env.SHOTS_T0 ?? "",
   });
+  // Its own deps cache per port, so the jobs' Vites never rewrite one another's.
   node(["node_modules/vite/bin/vite.js", "--config", "web/vite.config.ts", "--port", String(VITE), "--strictPort"], {
     DESK_API: `http://127.0.0.1:${MOCK}`,
+    SHOTS_VITE_CACHE: path.join(root, "node_modules/.vite", `shots-${VITE}`),
   });
   await up(`http://127.0.0.1:${MOCK}/health`);
   await up(`http://localhost:${VITE}/`);
@@ -6861,36 +6865,126 @@ async function iconSheets(browser: Browser, url: string): Promise<string[]> {
   return sheets;
 }
 
+const real = arg("--url");
+// --only keeps the shots whose names contain one of its words, for a quick loop on one page.
+const only = arg("--only")?.split(",");
+const shots = SHOTS.filter((s) => !(real && s.writes) && (!only || only.some((o) => s.name.includes(o))));
+// A pass is one theme at one size, in one page. --pass keeps only those named; --job is set on the processes --jobs starts.
+const PASSES = (["light", "dark"] as const).flatMap((theme) =>
+  SIZES.map((size) => ({
+    name: `${theme}-${size.name}`,
+    theme,
+    size,
+    these: shots.filter((shot) => (shot.sizes ? shot.sizes.includes(size.name) : !size.asked)),
+  })),
+);
+const picked = arg("--pass")?.split(",");
+for (const p of picked ?? [])
+  if (!PASSES.some((x) => x.name === p)) throw new Error(`--pass ${p}: no such pass; they are ${PASSES.map((x) => x.name).join(", ")}`);
+const passes = PASSES.filter((p) => p.these.length && (!picked || picked.includes(p.name)));
+const job = arg("--job");
+const asked = Number(arg("--jobs") ?? (real || picked ? 1 : 4));
+if (!(asked >= 1)) throw new Error(`--jobs ${arg("--jobs")}: give a count, 1 or more`);
+if (real && asked > 1) throw new Error("--jobs runs a mock per job: drop it with --url");
+const jobs = Math.min(asked, passes.length);
+const icons = !process.argv.includes("--no-icons") && (!only || only.some((o) => "icons".includes(o)));
+
+// The passes split into `jobs` processes, the biggest first onto the job with the fewest shots so far; each runs its own
+// mock and Vite on its own ports, so each starts fresh as a whole run does. Only the first draws the icons.
+async function fork(): Promise<void> {
+  const buckets = Array.from({ length: jobs }, () => ({ passes: [] as string[], n: 0 }));
+  for (const p of [...passes].sort((a, b) => b.these.length - a.these.length)) {
+    const least = buckets.reduce((m, b) => (b.n < m.n ? b : m));
+    least.passes.push(p.name);
+    least.n += p.these.length;
+  }
+  for (const [i, b] of buckets.entries()) console.log(`job ${i}: ${b.passes.join(", ")} (${b.n} shots)`);
+  // One start for every job's mock, so a time of day on screen reads the same in each, as in one process.
+  const t0 = process.env.SHOTS_T0 ?? String(Date.now());
+  const ended = await Promise.all(
+    buckets.map((b, i) => {
+      const flags = ["--job", String(i), "--pass", b.passes.join(","), "--out", out, ...(only ? ["--only", only.join(",")] : [])];
+      const child = spawn(
+        process.execPath,
+        ["--disable-warning=ExperimentalWarning", path.join(root, "scripts/shots.ts"), ...flags, ...(i || !icons ? ["--no-icons"] : [])],
+        {
+          cwd: root,
+          stdio: "inherit",
+          env: { ...process.env, SHOTS_MOCK_PORT: String(MOCK + i), SHOTS_VITE_PORT: String(VITE + i), SHOTS_T0: t0 },
+        },
+      );
+      kids.push(child);
+      return new Promise<string | null>((done) => {
+        child.on("exit", (code, signal) => {
+          done(code === 0 ? null : (signal ?? `code ${code}`));
+        });
+      });
+    }),
+  );
+  for (const [i, stop] of ended.entries()) {
+    const file = path.join(out, `.pass-${i}.json`);
+    if (stop) {
+      failures.push(`job ${i} (${buckets[i]!.passes.join(", ")}) stopped with ${stop}: its error is above`);
+      continue;
+    }
+    const got: unknown = JSON.parse(fs.readFileSync(file, "utf8"));
+    const shot = strings(field(got, "files"));
+    const failed = strings(field(got, "failures"));
+    if (!shot || !failed) throw new Error(`${file} isn't { files, failures }`);
+    files.push(...shot);
+    failures.push(...failed);
+    fs.rmSync(file);
+  }
+  // In the order one process shoots them, the icons last.
+  const order = new Map(passes.flatMap((p) => p.these.map((s) => `${p.name}-${s.name}.png`)).map((f, i) => [f, i]));
+  files.sort((a, b) => (order.get(a) ?? order.size) - (order.get(b) ?? order.size));
+}
+
 const files: string[] = [];
 try {
-  const real = arg("--url");
+  if (!only && !picked) fs.rmSync(out, { recursive: true, force: true });
+  fs.mkdirSync(out, { recursive: true });
+  if (jobs > 1) await fork();
+  else await shoot();
+  if (job !== undefined) fs.writeFileSync(path.join(out, `.pass-${job}.json`), JSON.stringify({ files, failures }));
+  else {
+    const sheet = files.map((f) => `<figure><img src="${f}" loading="lazy"><figcaption>${f}</figcaption></figure>`).join("\n");
+    fs.writeFileSync(
+      path.join(out, "index.html"),
+      `<!doctype html><meta charset="utf-8"><title>Inbox shots</title><style>body{font:13px system-ui;margin:24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:24px}img{width:100%;border:1px solid #ccc}figure{margin:0}</style>${sheet}`,
+    );
+    console.log(`${files.length} shots in ${out} (open index.html)`);
+  }
+} finally {
+  for (const k of kids) k.kill();
+}
+if (job === undefined && failures.length) {
+  console.error(`\n${failures.length} problem(s):\n${failures.map((f) => `  ${f}`).join("\n")}`);
+  process.exit(1);
+}
+if (job === undefined) console.log("no problems found");
+
+async function shoot(): Promise<void> {
   const url = real ?? (await start());
   if (!real) clock.t0 = Number(field(await (await fetch(`http://127.0.0.1:${MOCK}/api/mock/clock`)).json(), "t0"));
-  // --only keeps the shots whose names contain one of its words, for a quick loop on one page.
-  const only = arg("--only")?.split(",");
-  const shots = SHOTS.filter((s) => !(real && s.writes) && (!only || only.some((o) => s.name.includes(o))));
-  if (!only) fs.rmSync(out, { recursive: true, force: true });
-  fs.mkdirSync(out, { recursive: true });
   const browser = await chromium.launch({ channel: "chrome" });
-  for (const theme of ["light", "dark"] as const) {
-    for (const size of SIZES) {
-      const these = shots.filter((shot) => (shot.sizes ? shot.sizes.includes(size.name) : !size.asked));
-      // A full run takes about an hour and says nothing until it ends: this line tells slow from stuck.
-      if (these.length) console.log(`${theme}-${size.name}: ${these.length} shots, from ${new Date().toLocaleTimeString()}`);
-      const page = await browser.newPage({
-        viewport: { width: size.width, height: size.height },
-        colorScheme: theme,
-        deviceScaleFactor: 2,
-      });
-      // The macOS app's bridge (electron/preload.cjs) with only status() faked: App takes the shell's markers from it, and
-      // Settings → This device draws the app's rows. No theme, so the theme stays in localStorage as in a browser.
-      if (size.mac) {
-        await page.addInitScript(
-          `window.desktop = { platform: "darwin", version: "0.0.0", status: async () => window.__deskStatus ?? { hotkey: { accelerator: "Control+Alt+D", ok: true }, open_at_login: false, source: null } };`,
-        );
-        // The window's traffic lights as the app places them (electron/main.ts: 18,19), drawn only, so the shots show the row
-        // the owner sees beside the mark.
-        await page.addInitScript(`document.addEventListener("DOMContentLoaded", () => {
+  for (const { name, theme, size, these } of passes) {
+    // A full run takes a while and says nothing until it ends: this line tells slow from stuck.
+    console.log(`${name}: ${these.length} shots${job === undefined ? "" : ` in job ${job}`}, from ${new Date().toLocaleTimeString()}`);
+    const page = await browser.newPage({
+      viewport: { width: size.width, height: size.height },
+      colorScheme: theme,
+      deviceScaleFactor: 2,
+    });
+    // The macOS app's bridge (electron/preload.cjs) with only status() faked: App takes the shell's markers from it, and
+    // Settings → This device draws the app's rows. No theme, so the theme stays in localStorage as in a browser.
+    if (size.mac) {
+      await page.addInitScript(
+        `window.desktop = { platform: "darwin", version: "0.0.0", status: async () => window.__deskStatus ?? { hotkey: { accelerator: "Control+Alt+D", ok: true }, open_at_login: false, source: null } };`,
+      );
+      // The window's traffic lights as the app places them (electron/main.ts: 18,19), drawn only, so the shots show the row
+      // the owner sees beside the mark.
+      await page.addInitScript(`document.addEventListener("DOMContentLoaded", () => {
           const lights = document.createElement("div");
           lights.setAttribute("aria-hidden", "true");
           lights.style.cssText = "position:fixed;left:18px;top:19px;z-index:2147483647;display:flex;gap:8px;pointer-events:none";
@@ -6901,51 +6995,51 @@ try {
           }
           document.documentElement.append(lights);
         });`);
-      }
-      await offline(page);
-      if (clock.t0) await page.clock.install({ time: clock.t0 });
-      // A review document's frame runs no script, so the stand-ins above, which Playwright puts in every frame, are refused there.
-      const docFrame = (m: string) => m.startsWith("Blocked script execution in") && m.includes("/api/docs/");
-      page.on("console", (m) => {
-        const from = m.location().url;
-        if (
-          m.type() === "error" &&
-          !from.startsWith("https://avatars.githubusercontent.com/") &&
-          !docFrame(m.text()) &&
-          ![...refusing].some((r) => from.includes(r))
-        )
-          failures.push(`${theme}/${size.name}: console error: ${m.text()}`);
-      });
-      await page.goto(`${url}/#/`);
-      await page.locator(READY).first().waitFor({ timeout: 15_000 });
-      for (const shot of these) {
-        await windBack(page);
-        await page.keyboard.press("Escape");
-        await shot.go(page);
-        if (!shot.held) await page.mouse.move(0, 0); // no hover state left over from a click
-        const file = `${theme}-${size.name}-${shot.name}.png`;
-        // The pictures on screen have loaded, or gone for good: none is a broken box.
-        const box = (await page.waitForFunction(AVATARS_DRAWN, undefined, { timeout: 3000 }).catch(() => null)) === null;
-        if (box) failures.push(`${file}: a person's picture on screen hasn't loaded`);
-        await page.screenshot({ path: path.join(out, file) });
-        files.push(file);
-        const sideways = await page.evaluate<number>("document.documentElement.scrollWidth - innerWidth");
-        if (sideways > 0) failures.push(`${file}: the page scrolls sideways by ${sideways}px`);
-        // The window names no key: a button's tooltip names its own.
-        const chips = await page.evaluate<number>(`[...document.querySelectorAll("kbd")].filter((k) => k.getClientRects().length).length`);
-        if (chips) failures.push(`${file}: ${chips} key chip(s) on screen`);
-        // The sidebar's words fit it (in a row, at 640px and below, it scrolls sideways inside itself instead), and so does the head.
-        const spill = await page.evaluate<number>(`(() => {
+    }
+    await offline(page);
+    if (clock.t0) await page.clock.install({ time: clock.t0 });
+    // A review document's frame runs no script, so the stand-ins above, which Playwright puts in every frame, are refused there.
+    const docFrame = (m: string) => m.startsWith("Blocked script execution in") && m.includes("/api/docs/");
+    page.on("console", (m) => {
+      const from = m.location().url;
+      if (
+        m.type() === "error" &&
+        !from.startsWith("https://avatars.githubusercontent.com/") &&
+        !docFrame(m.text()) &&
+        ![...refusing].some((r) => from.includes(r))
+      )
+        failures.push(`${theme}/${size.name}: console error: ${m.text()}`);
+    });
+    await page.goto(`${url}/#/`);
+    await page.locator(READY).first().waitFor({ timeout: 15_000 });
+    for (const shot of these) {
+      await windBack(page);
+      await page.keyboard.press("Escape");
+      await shot.go(page);
+      if (!shot.held) await page.mouse.move(0, 0); // no hover state left over from a click
+      const file = `${theme}-${size.name}-${shot.name}.png`;
+      // The pictures on screen have loaded, or gone for good: none is a broken box.
+      const box = (await page.waitForFunction(AVATARS_DRAWN, undefined, { timeout: 3000 }).catch(() => null)) === null;
+      if (box) failures.push(`${file}: a person's picture on screen hasn't loaded`);
+      await page.screenshot({ path: path.join(out, file) });
+      files.push(file);
+      const sideways = await page.evaluate<number>("document.documentElement.scrollWidth - innerWidth");
+      if (sideways > 0) failures.push(`${file}: the page scrolls sideways by ${sideways}px`);
+      // The window names no key: a button's tooltip names its own.
+      const chips = await page.evaluate<number>(`[...document.querySelectorAll("kbd")].filter((k) => k.getClientRects().length).length`);
+      if (chips) failures.push(`${file}: ${chips} key chip(s) on screen`);
+      // The sidebar's words fit it (in a row, at 640px and below, it scrolls sideways inside itself instead), and so does the head.
+      const spill = await page.evaluate<number>(`(() => {
           const side = document.querySelector(".side"), head = document.querySelector(".page-head");
           const over = (el) => (el ? el.scrollWidth - el.clientWidth : 0);
           const row = !side || getComputedStyle(side).flexDirection === "row";
           const items = row ? [] : [side, ...side.querySelectorAll(".side-item, .side-name")];
           return Math.max(over(head), ...items.map(over));
         })()`);
-        if (spill > 0) failures.push(`${file}: the sidebar or the page head runs ${spill}px past its edge`);
-        // A table cuts a repo to 6 letters' room and a why to 10 at most: who it's from goes first (styles.css @container). A
-        // row beside a review cuts its last fact to 8, its dot included.
-        const squeezed = await page.evaluate<string[]>(`(() => {
+      if (spill > 0) failures.push(`${file}: the sidebar or the page head runs ${spill}px past its edge`);
+      // A table cuts a repo to 6 letters' room and a why to 10 at most: who it's from goes first (styles.css @container). A
+      // row beside a review cuts its last fact to 8, its dot included.
+      const squeezed = await page.evaluate<string[]>(`(() => {
           const out = [];
           const table = ".lines .line:not(.c-line, .lane-row, .blocked-row) ";
           for (const [sel, n] of [[table + ".line-ref", 6], [table + ".line-note", 10], [".c-line .c-meta > :last-child", 8]])
@@ -6960,39 +7054,25 @@ try {
             }
           return out;
         })()`);
-        if (squeezed.length) failures.push(`${file}: a table cuts ${squeezed.map((t) => JSON.stringify(t)).join(", ")} to a few letters`);
-        const wraps = await page.evaluate<boolean>(`(() => {
+      if (squeezed.length) failures.push(`${file}: a table cuts ${squeezed.map((t) => JSON.stringify(t)).join(", ")} to a few letters`);
+      const wraps = await page.evaluate<boolean>(`(() => {
           const words = document.querySelector(".side-brand span"), r = document.createRange();
           if (!words?.getClientRects().length) return false;
           r.selectNodeContents(words);
           return r.getClientRects().length > 1;
         })()`);
-        if (wraps) failures.push(`${file}: the sidebar's "Inbox" wraps`);
-        // The macOS app's traffic lights (electron/main.ts: at 18,19) sit over no control.
-        if (size.mac) {
-          const under = await page.evaluate<string[]>(`[...document.querySelectorAll("a, button, input, select, textarea")]
+      if (wraps) failures.push(`${file}: the sidebar's "Inbox" wraps`);
+      // The macOS app's traffic lights (electron/main.ts: at 18,19) sit over no control.
+      if (size.mac) {
+        const under = await page.evaluate<string[]>(`[...document.querySelectorAll("a, button, input, select, textarea")]
             .filter((el) => { const r = el.getBoundingClientRect(); return r.width && r.left < 80 && r.right > 12 && r.top < 38 && r.bottom > 12; })
             .map((el) => el.textContent.trim() || el.className)`);
-          if (under.length) failures.push(`${file}: the traffic lights sit over ${under.join(", ")}`);
-        }
-        await shot.after?.(page);
+        if (under.length) failures.push(`${file}: the traffic lights sit over ${under.join(", ")}`);
       }
-      await page.close();
+      await shot.after?.(page);
     }
+    await page.close();
   }
-  if (!only || only.some((o) => "icons".includes(o))) files.push(...(await iconSheets(browser, url)));
+  if (icons) files.push(...(await iconSheets(browser, url)));
   await browser.close();
-  const sheet = files.map((f) => `<figure><img src="${f}" loading="lazy"><figcaption>${f}</figcaption></figure>`).join("\n");
-  fs.writeFileSync(
-    path.join(out, "index.html"),
-    `<!doctype html><meta charset="utf-8"><title>Inbox shots</title><style>body{font:13px system-ui;margin:24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(480px,1fr));gap:24px}img{width:100%;border:1px solid #ccc}figure{margin:0}</style>${sheet}`,
-  );
-  console.log(`${files.length} shots in ${out} (open index.html)`);
-} finally {
-  for (const k of kids) k.kill();
 }
-if (failures.length) {
-  console.error(`\n${failures.length} problem(s):\n${failures.map((f) => `  ${f}`).join("\n")}`);
-  process.exit(1);
-}
-console.log("no problems found");

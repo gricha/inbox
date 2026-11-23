@@ -31,6 +31,8 @@ export default defineConfig({
     },
   ],
   customLogger: logger,
+  // The shots' own deps cache per port (scripts/shots.ts); unset, Vite's default.
+  ...(process.env.SHOTS_VITE_CACHE ? { cacheDir: process.env.SHOTS_VITE_CACHE } : {}),
   build: { outDir: "dist", emptyOutDir: true },
   server: {
     // The desk's own pages send these too; without them any site could frame this UI and click approve or Send in it.
