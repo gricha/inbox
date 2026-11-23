@@ -1,20 +1,9 @@
 // Realistic diffs and AI reviews for the mock API, so the review view (and npm run shots) has real-looking code to show.
 import type { AiReview, ReviewFile } from "../../src/types.ts";
+import { file } from "./patch.ts";
+import { REVIEWS } from "./reviews/index.ts";
 
-type Canned = { files: ReviewFile[]; ai: Omit<AiReview, "head_oid" | "at" | "model"> | null };
-
-// Blank lines below are unchanged blank lines, which a patch writes as a single space.
-const file = (path: string, status: ReviewFile["status"], text: string): ReviewFile => {
-  const lines = text.split("\n").map((l) => l || " ");
-  return {
-    path,
-    previous_path: null,
-    status,
-    additions: lines.filter((l) => l.startsWith("+")).length,
-    deletions: lines.filter((l) => l.startsWith("-")).length,
-    patch: lines.join("\n"),
-  };
-};
+export type Canned = { files: ReviewFile[]; ai: Omit<AiReview, "head_oid" | "at" | "model"> | null };
 
 const planner: ReviewFile[] = [
   file(
@@ -460,5 +449,5 @@ function generic(repo: string, n: number, title: string, size?: [number, number,
 }
 
 export function canned(id: string, repo: string, n: number, title: string, size?: [number, number, number]): Canned {
-  return CANNED[id] ?? generic(repo, n, title, size);
+  return CANNED[id] ?? REVIEWS[id] ?? generic(repo, n, title, size);
 }

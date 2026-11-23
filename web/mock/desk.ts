@@ -3821,7 +3821,9 @@ function extras(path: string, line: number): Partial<AiReview> {
 
 function written(r: Rec, head: string): AiReview {
   const sig = signals(r);
-  const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
+  const { files, ai } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
+  // A written review comes back as written when it's asked for again.
+  if (ai) return { ...ai, head_oid: head, model: MODEL, at: new Date(now()).toISOString() };
   const [f] = files;
   // The date picker's move has nothing to note: a note would bring its hunk back into the reading list.
   const notes: ReviewNote[] =
