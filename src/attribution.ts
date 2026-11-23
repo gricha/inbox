@@ -4,12 +4,14 @@
 import { randomBytes } from "node:crypto";
 import { as } from "./usage.ts";
 import { Effect, Result, Schema } from "effect";
-import type { Desk } from "./desk.ts";
+import type { Core, Desk } from "./desk.ts";
 import { textHash } from "./judge.ts";
 import { decode, field, messageOf, str } from "./narrow.ts";
 import { agentDown } from "./review.ts";
 import { report } from "./sentry.ts";
 import type { Item } from "./types.ts";
+
+type Host = Core & Pick<Desk, "light">;
 
 const PER_HOUR = 60;
 const BATCH = 10;
@@ -66,12 +68,12 @@ function readPrompt(items: Item[], me: string): string {
 }
 
 export class Attributions {
-  desk: Desk;
+  desk: Host;
   running = false;
   retryAt = 0;
   timer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(desk: Desk) {
+  constructor(desk: Host) {
     this.desk = desk;
   }
 
