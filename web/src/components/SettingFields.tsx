@@ -151,21 +151,18 @@ function ListField(p: FieldProps) {
   return <textarea className="input area" rows={Math.max(2, d.draft.split("\n").length + 1)} placeholder={hint} {...d.bind} />;
 }
 
+// What you picked shows until the save answers; by then `value` is what the desk saved (or kept, refused).
 function BooleanField({ value, commit, id, disabled }: FieldProps) {
-  const [on, setOn] = useState(value === true);
-  const [synced, setSynced] = useState(value);
-  if (value !== synced) {
-    setSynced(value);
-    setOn(value === true);
-  }
+  const [mine, setMine] = useState<boolean | null>(null);
+  const on = mine ?? value === true;
 
   function flip(v: boolean) {
-    setOn(v);
+    setMine(v);
     runUi(
       commit(v).pipe(
-        Effect.tap((saved) =>
+        Effect.ensuring(
           Effect.sync(() => {
-            if (saved === null) setOn(!v);
+            setMine(null);
           }),
         ),
       ),
@@ -190,21 +187,16 @@ function BooleanField({ value, commit, id, disabled }: FieldProps) {
 }
 
 function SelectField({ def, value, commit, id, invalid, disabled }: FieldProps) {
-  const [picked, setPicked] = useState(String(value));
-  const [synced, setSynced] = useState(value);
-  if (value !== synced) {
-    setSynced(value);
-    setPicked(String(value));
-  }
+  const [mine, setMine] = useState<string | null>(null); // as BooleanField's
+  const picked = mine ?? String(value);
 
   function pick(v: string) {
-    const was = picked;
-    setPicked(v);
+    setMine(v);
     runUi(
       commit(v).pipe(
-        Effect.tap((saved) =>
+        Effect.ensuring(
           Effect.sync(() => {
-            if (saved === null) setPicked(was);
+            setMine(null);
           }),
         ),
       ),
