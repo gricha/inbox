@@ -39,71 +39,56 @@ import {
   weightText,
   acceleratorOf,
   authProblem,
-  automationOf,
-  beside,
-  cardFacts,
-  currentFile,
-  DEFAULT_OPEN,
-  diffRows,
   DISABLED,
-  drawUpTo,
   draftOf,
-  groupsOf,
   hotkeyHelp,
   macKeys,
-  inboxCount,
-  inlineAt,
   judgeStatusText,
   onePause,
   judgeStepText,
-  lineName,
   lineOf,
-  linesLabel,
-  navigable,
-  pageOf,
   parseList,
-  PAGE_GROUPS,
-  parseRoute,
   quietTimes,
+  changeAsk,
+  SHOWN,
+  valueOf,
+  type KeyLike,
+} from "../src/settingValues.ts";
+import { automationOf, beside, pageOf, parseRoute, routeHash, settingsBack, settingsPart, partName, SETTINGS_VIEWS } from "../src/route.ts";
+import {
+  cardFacts,
+  DEFAULT_OPEN,
+  groupsOf,
+  inboxCount,
+  navigable,
+  PAGE_GROUPS,
   withoutRows,
-  resolvedHead,
   resumeCommand,
   attachCommand,
-  routeHash,
   says,
-  settingsBack,
-  settingsPart,
-  partName,
-  changeAsk,
-  SETTINGS_VIEWS,
-  SHOWN,
   stops,
-  threadsOn,
   treeGuides,
-  pathTree,
-  valueOf,
   whereIs,
-  type KeyLike,
-  checkDot,
-  checkGroups,
+} from "../src/groups.ts";
+import {
+  currentFile,
+  diffRows,
+  drawUpTo,
+  inlineAt,
+  lineName,
+  linesLabel,
+  resolvedHead,
+  threadsOn,
+  pathTree,
   oldFromNew,
   wholeFor,
-} from "../src/view.ts";
+} from "../src/diffLines.ts";
+import { checkDot, checkGroups } from "../src/checks.ts";
 import { hashOf } from "../../src/links.ts";
-import {
-  bulkMenu,
-  filterOf,
-  filterPeople,
-  filterRest,
-  fyiShown,
-  githubRef,
-  parseFilter,
-  logLine,
-  pickRange,
-  pickToggle,
-} from "../src/view.ts";
-import { afterText, chainLabel, stepGuides, stepOf, toggled, waitingSteps } from "../src/view.ts";
-import { remindTime } from "../src/view.ts";
+import { bulkMenu, fyiShown, logLine, pickRange, pickToggle } from "../src/groups.ts";
+import { filterOf, filterPeople, filterRest, githubRef, parseFilter } from "../src/filter.ts";
+import { afterText, chainLabel, stepGuides, stepOf, toggled, waitingSteps } from "../src/groups.ts";
+import { remindTime } from "../src/groups.ts";
 import type { WaitingStep } from "../../src/types.ts";
 import { isTestPath, onLines, sections, tagTip, traditional, walk } from "../../src/sections.ts";
 import { keepDraft, keptDraft } from "../src/drafts.ts";

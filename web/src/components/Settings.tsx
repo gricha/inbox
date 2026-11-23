@@ -16,19 +16,8 @@ import { SkLines } from "./Skeleton.tsx";
 import { SourceLine } from "./Source.tsx";
 import { BY_KEY, ChoiceField, CONTROLS, StringField } from "./SettingFields.tsx";
 import { RemoteRows } from "./Remote.tsx";
-import {
-  authProblem,
-  automationOf,
-  DISABLED,
-  draftOf,
-  hotkeyHelp,
-  judgeStatusText,
-  onePause,
-  routeHash,
-  SETTINGS_VIEWS,
-  settingsBack,
-  SHOWN,
-} from "../view.ts";
+import { authProblem, DISABLED, draftOf, hotkeyHelp, judgeStatusText, onePause, SHOWN } from "../settingValues.ts";
+import { automationOf, routeHash, SETTINGS_VIEWS, settingsBack } from "../route.ts";
 import { applyTheme, desktop, isThemeId, omarchyName, omarchyTheme, onOmarchy, savedTheme, THEME_GROUPS, type ThemeId } from "../theme.ts";
 
 type DesktopStatus = Awaited<ReturnType<DesktopBridge["status"]>>;

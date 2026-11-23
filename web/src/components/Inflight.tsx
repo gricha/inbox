@@ -3,7 +3,7 @@ import { age, cls, fromName, aiName } from "../format.ts";
 import { Dots } from "./Detail.tsx";
 import { withCode } from "./Prose.tsx";
 import { SkRows } from "./Skeleton.tsx";
-import { attachCommand } from "../view.ts";
+import { attachCommand } from "../groups.ts";
 import { parseItemId } from "../../../src/links.ts";
 
 // Merging: your PRs handed off for merge, one line each like the main page's: what each waits on and the coordinator's note;

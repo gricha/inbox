@@ -15,7 +15,7 @@ import { useKeyedLayout } from "../keyed.ts";
 import { MORE, rowActions } from "./More.tsx";
 import { isKeyOf } from "../../../src/narrow.ts";
 import { SESSION_ACTION } from "./Session.tsx";
-import { bulkMenu } from "../view.ts";
+import { bulkMenu } from "../groups.ts";
 
 // Where a row on the Inbox can move: one section up or down.
 const MOVES: Record<InboxSection, InboxSection[]> = { urgent: ["standard"], standard: ["urgent", "fyi"], fyi: ["standard"] };

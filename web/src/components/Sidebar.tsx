@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Overview } from "../../../src/types.ts";
 import { cls, MOD } from "../format.ts";
 import { SETTINGS_PARTS } from "../settings-parts.ts";
-import { pageOf, routeHash, settingsPart, type ListPage, type Route } from "../view.ts";
+import { pageOf, routeHash, settingsPart, type ListPage, type Route } from "../route.ts";
 import { AgentMark } from "./Chat.tsx";
 import { ArchiveIcon, BlockedIcon, InboxIcon, MergingIcon, SettingsIcon } from "./SideIcons.tsx";
 import { Splitter, type Width } from "./Splitter.tsx";

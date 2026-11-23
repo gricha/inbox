@@ -6,7 +6,7 @@ import type { ActivityEvent, ItemDetail, PlacedEntry, PlacingRule } from "../../
 import { api, runUi } from "../api.ts";
 import { cls, eventText } from "../format.ts";
 import { useKeyed } from "../keyed.ts";
-import { logLine } from "../view.ts";
+import { logLine } from "../groups.ts";
 
 type Line = { at: string; key: string; placed?: PlacedEntry; event?: ActivityEvent };
 

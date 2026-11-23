@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type ComponentType, type
 import type { SettingDef, SettingType, SettingValue } from "../../../src/types.ts";
 import { runUi } from "../api.ts";
 import { cls, MAC } from "../format.ts";
-import { acceleratorOf, draftOf, macKeys, quietTimes, valueOf } from "../view.ts";
+import { acceleratorOf, draftOf, macKeys, quietTimes, valueOf } from "../settingValues.ts";
 
 // The value the server saved, or null when it was rejected (the row shows why): it never fails.
 type Commit = (v: SettingValue) => Effect.Effect<SettingValue | null>;

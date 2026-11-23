@@ -24,7 +24,9 @@ import { useKeyed } from "../keyed.ts";
 import { ago, cls, copyText, freeId, issueUrl, MOD, when, aiName } from "../format.ts";
 import { blank, bodyOf, editing, shownAs, type Draft } from "../automation-draft.ts";
 import { automationBody } from "../../../src/automation-body.ts";
-import { changeAsk, resumeCommand, routeHash } from "../view.ts";
+import { changeAsk } from "../settingValues.ts";
+import { resumeCommand } from "../groups.ts";
+import { routeHash } from "../route.ts";
 import { SkLines } from "./Skeleton.tsx";
 import { HeldNotes, ITEM_DOES_WORDS, RulesField, TypeField, useTypeCheck } from "./TypedNotes.tsx";
 

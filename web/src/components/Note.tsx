@@ -5,7 +5,7 @@ import type { InboxSection, Note, NoteButton } from "../../../src/types.ts";
 import { runUi } from "../api.ts";
 import { age, cls, factText, when } from "../format.ts";
 import { useKeyedLayout } from "../keyed.ts";
-import { remindTime, TIMES } from "../view.ts";
+import { remindTime, TIMES } from "../groups.ts";
 import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
 import { ProseBlocks } from "./Prose.tsx";
 import { ClockIcon, KindIcon, NoteGlyph, RowFacts } from "./RowIcons.tsx";

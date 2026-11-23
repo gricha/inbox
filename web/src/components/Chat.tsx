@@ -6,7 +6,7 @@ import { api, runUi } from "../api.ts";
 import { useKeyed, useKeyedLayout } from "../keyed.ts";
 import { useShown } from "../pending.ts";
 import { cls, copyText, shortId, sinceText } from "../format.ts";
-import { linesLabel } from "../view.ts";
+import { linesLabel } from "../diffLines.ts";
 import { Prose } from "./Prose.tsx";
 
 const kept = new Map<string, string>(); // what you'd typed to it, per item, in this window

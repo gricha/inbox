@@ -5,7 +5,7 @@ import { api, runUi } from "../api.ts";
 import { useKeyed, useKeyedLayout } from "../keyed.ts";
 import { useShown } from "../pending.ts";
 import { BUCKET_LABEL, cls, MOD, shortId, tilde, aiName } from "../format.ts";
-import { lineOf, weightText } from "../view.ts";
+import { lineOf, weightText } from "../settingValues.ts";
 import { ActButton } from "./Detail.tsx";
 
 // A row's "See the rule that put it here": the rule, and when it was asked for, so asking again shows it again.

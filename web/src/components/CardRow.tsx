@@ -1,6 +1,6 @@
 import type { Card, ItemDetail } from "../../../src/types.ts";
 import { age, byOf, clearedText, cls } from "../format.ts";
-import type { Guide, Variant } from "../view.ts";
+import type { Guide, Variant } from "../groups.ts";
 import { Avatar } from "./Avatar.tsx";
 import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
 import { Detail } from "./Detail.tsx";

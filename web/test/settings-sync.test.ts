@@ -8,7 +8,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { SECTIONS, SETTINGS } from "../../src/settings.ts";
 import { SETTINGS_PARTS } from "../src/settings-parts.ts";
-import { SETTINGS_VIEWS } from "../src/view.ts";
+import { SETTINGS_VIEWS } from "../src/route.ts";
 
 const root = path.join(import.meta.dirname, "../..");
 const read = (f: string) => fs.readFileSync(path.join(root, f), "utf8");

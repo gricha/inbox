@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { MOD } from "../format.ts";
-import { partName, routeHash, settingsBack, type ListPage, type Route } from "../view.ts";
+import { partName, routeHash, settingsBack, type ListPage, type Route } from "../route.ts";
 
 const BACK = { queue: "the Inbox", blocked: "Blocked", inflight: "Merging", archive: "the Archive" };
 export const PAGE_NAME: Record<ListPage, string> = {

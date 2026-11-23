@@ -8,7 +8,7 @@ import { oneOf } from "../../../src/narrow.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed } from "../keyed.ts";
 import { aiName, cls, when } from "../format.ts";
-import { routeHash } from "../view.ts";
+import { routeHash } from "../route.ts";
 
 // What a rule on its notes does with a yes.
 export const ITEM_DOES_WORDS: Record<ItemRule["do"], string> = {

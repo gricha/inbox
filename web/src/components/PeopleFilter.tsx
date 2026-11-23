@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cls } from "../format.ts";
-import { FILTER_KEYS, filterOf, filterRest, parseFilter, type FilterKey } from "../view.ts";
+import { FILTER_KEYS, filterOf, filterRest, parseFilter, type FilterKey } from "../filter.ts";
 import { Avatar } from "./Avatar.tsx";
 import type { FilterPerson } from "./Filter.tsx";
 

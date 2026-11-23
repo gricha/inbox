@@ -1,5 +1,5 @@
 import { useRef, type ClipboardEvent, type KeyboardEvent } from "react";
-import { filterOf, filterRest, githubRef, parseFilter } from "../view.ts";
+import { filterOf, filterRest, githubRef, parseFilter } from "../filter.ts";
 import { SearchIcon } from "./SideIcons.tsx";
 
 export interface FilterPerson {

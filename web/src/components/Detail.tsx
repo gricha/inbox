@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import type { Bucket, Card, IssueReview, ItemDetail, Placement, ReviewDecision, Signals } from "../../../src/types.ts";
 import { age, BUCKET_LABEL, cls, eventText, handoffLabel, aiName } from "../format.ts";
-import { cardFacts, judgeStepText, says } from "../view.ts";
+import { cardFacts, says } from "../groups.ts";
+import { judgeStepText } from "../settingValues.ts";
 import type { RowCtx } from "./CardRow.tsx";
 import { Prose } from "./Prose.tsx";
 import { SkLines } from "./Skeleton.tsx";

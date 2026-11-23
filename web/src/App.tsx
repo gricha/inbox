@@ -34,32 +34,25 @@ import { useKeyed, useKeyedLayout } from "./keyed.ts";
 import { hasNoteEdit, useShown, withDrops, withNoteEdits, type Drop } from "./pending.ts";
 import {
   attachCommand,
-  beside,
   DEFAULT_OPEN,
-  filterPeople,
   groupsOf,
   inboxCount,
   inquiryOf,
   navigable,
-  pageOf,
-  parseRoute,
   pickRange,
   pickToggle,
-  routeHash,
   PAGE_GROUPS,
-  settingsBack,
   stepOf,
   toggled,
   type Acted,
-  type ListPage,
   stops,
   type GroupKey,
-  matches,
-  type Route,
   waitingSteps,
   whereIs,
   withoutRows,
-} from "./view.ts";
+} from "./groups.ts";
+import { beside, pageOf, parseRoute, routeHash, settingsBack, type ListPage, type Route } from "./route.ts";
+import { filterPeople, matches } from "./filter.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
 import { CommentBar } from "./components/CommentBar.tsx";

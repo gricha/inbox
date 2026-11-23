@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Card, Inquiry, Note, Overview, QueueView, SessionCard } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import { fyiShown, inquiryOf, PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
+import { fyiShown, inquiryOf, PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../groups.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
 import { noteOf, NoteRow, type NoteCtx } from "./Note.tsx";

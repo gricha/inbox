@@ -1,6 +1,6 @@
 import type { WaitingStep } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
-import { afterText, chainLabel, stepGuides, WAIT, type Guide, type Ids } from "../view.ts";
+import { afterText, chainLabel, stepGuides, WAIT, type Guide, type Ids } from "../groups.ts";
 import { Avatar } from "./Avatar.tsx";
 import { ChainIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 import { parseItemId } from "../../../src/links.ts";

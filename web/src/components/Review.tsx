@@ -54,9 +54,8 @@ import {
   watchKept,
   type Kept,
 } from "../drafts.ts";
+import { checkDot, checkGroups, type Dot } from "../checks.ts";
 import {
-  checkDot,
-  checkGroups,
   currentFile,
   oldFromNew,
   pathTree,
@@ -69,13 +68,12 @@ import {
   linesLabel,
   sectionOf,
   resolvedHead,
-  routeHash,
   splitPath,
   threadsOn,
-  type Acted,
-  type Dot,
   type PathNode,
-} from "../view.ts";
+} from "../diffLines.ts";
+import { routeHash } from "../route.ts";
+import { type Acted } from "../groups.ts";
 import { isTestPath, LEVEL, onLines, STATUS, tagTip, traditional, VERDICT, walk, type Section } from "../../../src/sections.ts";
 import "../diffThemes.ts";
 import { diffTheme, omarchyTheme, onOmarchy } from "../theme.ts";

@@ -5,7 +5,8 @@ import { api, runUi } from "../api.ts";
 import { useKeyed } from "../keyed.ts";
 import { age, ago, cls, fromName, issueUrl, MOD } from "../format.ts";
 import { shownUrl, urlPlace } from "../../../src/prose.ts";
-import { inquiryOf, routeHash } from "../view.ts";
+import { inquiryOf } from "../groups.ts";
+import { routeHash } from "../route.ts";
 import { AgentIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 import { Grip, press, type RowDrag } from "./Reorder.tsx";
 

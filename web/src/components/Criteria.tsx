@@ -8,7 +8,7 @@ import { useKeyed } from "../keyed.ts";
 import { useShown } from "../pending.ts";
 import { ago, aiName, freeId, MOD } from "../format.ts";
 import { AskChange } from "./AskChange.tsx";
-import { changeAsk } from "../view.ts";
+import { changeAsk } from "../settingValues.ts";
 import { SkLines } from "./Skeleton.tsx";
 
 type Crit = CriteriaView["criteria"][number];
