@@ -10,7 +10,7 @@ const KEY = "desk.crash_reload_at";
 // A render error would leave the window blank (a hot update that changes state shapes does it): reload instead, unless
 // the page just came back from a reload and broke again.
 class Reload extends Component<{ children: ReactNode }, { error: Error | null }> {
-  override state = { error: null as Error | null };
+  override state: { error: Error | null } = { error: null };
 
   static getDerivedStateFromError(error: Error) {
     return { error };

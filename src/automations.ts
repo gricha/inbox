@@ -1569,10 +1569,8 @@ export class Automations {
       if (connectors.length) return Effect.succeed({ servers: null, desk: this.serverName() });
       const desk = this.serverName() ?? "inbox";
       const entry: unknown = this.serverName() ? servers[desk] : this.desk.mcpUrl && { type: "http", url: this.desk.mcpUrl };
-      const picked: [string, unknown][] = [
-        ...(entry ? [[desk, entry] as [string, unknown]] : []),
-        ...names.map((n): [string, unknown] => [n, servers[n]]),
-      ];
+      const own: [string, unknown][] = entry ? [[desk, entry]] : [];
+      const picked = [...own, ...names.map((n): [string, unknown] => [n, servers[n]])];
       return Effect.succeed({ servers: Object.fromEntries(picked), desk });
     });
   }

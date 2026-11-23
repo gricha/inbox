@@ -397,7 +397,7 @@ export function createGitHub(opts: { token?: string; fetch?: typeof fetch; log?:
     if (first && failed.length === parts.length) return yield* Effect.fail(first);
     for (const e of failed) log(`context: ${e.message}`);
     const ok = <T, E>(r: Result.Result<T, E>, empty: T) => (Result.isSuccess(r) ? r.success : empty);
-    const none = { hits: [] as SearchHit[], total: 0 };
+    const none: { hits: SearchHit[]; total: number } = { hits: [], total: 0 };
     const teams = ok(settled.teams, { viewer: { organizations: { nodes: [] } } });
     const reviewed = ok(settled.reviewed, none);
     const commented = ok(settled.commented, none);

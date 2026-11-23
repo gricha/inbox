@@ -14,6 +14,9 @@ export const int = (v: unknown): number | undefined => (typeof v === "number" &&
 export const strings = (v: unknown): string[] | undefined =>
   Array.isArray(v) && v.every((x) => typeof x === "string") ? v.filter((x) => typeof x === "string") : undefined;
 
+// An array's elements, or none when it isn't one.
+export const elements = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+
 // A string that is one of a record's keys (a Record<Id, …> table's id).
 export const isKeyOf = <T extends object>(o: T, k: PropertyKey): k is keyof T => Object.hasOwn(o, k);
 
@@ -21,12 +24,12 @@ export const isKeyOf = <T extends object>(o: T, k: PropertyKey): k is keyof T =>
 export const oneOf = <const T extends string>(list: readonly T[], v: unknown): T | undefined => list.find((x) => x === v);
 
 // An object's own keys, typed as its keys: Object.keys widens them to string.
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Object.keys of a T are T's own keys
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion, typescript/consistent-type-assertions -- Object.keys of a T are T's own keys
 export const keysOf = <T extends object>(o: T): (keyof T & string)[] => Object.keys(o) as (keyof T & string)[];
 
 // An object built from entries whose keys are all of K, typed as such: Object.fromEntries widens them to string.
 export const fromEntries = <K extends string, V>(entries: Iterable<readonly [K, V]>): Record<K, V> =>
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- every key came from K
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion, typescript/consistent-type-assertions -- every key came from K
   Object.fromEntries(entries) as Record<K, V>;
 
 // JSON text's value; null when it isn't JSON.

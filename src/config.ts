@@ -248,7 +248,7 @@ export function parseConfig(
     });
     const rules = set ? resolveRules(set, off, own) : own.map(placed);
     const sort = str(t.sort, `${path}.sort`, "waiting");
-    if (!(SORTS as readonly string[]).includes(sort)) err(`${path}.sort`, `must be one of ${SORTS.join(", ")}`);
+    if (oneOf(SORTS, sort) === undefined) err(`${path}.sort`, `must be one of ${SORTS.join(", ")}`);
     const caps = table(t.caps, `${path}.caps`);
     known(caps, `${path}.caps`, ["now", "today"]);
     const filter = t.filter === undefined ? undefined : str(t.filter, `${path}.filter`, "");

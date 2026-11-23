@@ -17,6 +17,8 @@ const ENDPOINT = "https://api.github.com/graphql";
 const REST = "https://api.github.com";
 const RETRYABLE = new Set([502, 503, 504]);
 const RETRIES = 2;
+// JSON.parse throws on bad text, which decode() catches; what it gives is checked after.
+const parsed = (text: string): unknown => JSON.parse(text);
 const MIN_REMAINING = 200;
 // Per-node errors that leave the rest of the response usable: a deleted node, or one the token can't see (e.g. SAML).
 const PARTIAL = new Set(["NOT_FOUND", "FORBIDDEN"]);
@@ -241,9 +243,7 @@ export function createClient(opts: ClientOptions = {}): Client {
     const headers = { accept: "application/vnd.github+json", "x-github-api-version": "2022-11-28", ...init.headers };
     return retrying(
       send(REST + path, { method: "GET", headers }).pipe(
-        Effect.flatMap((r) =>
-          decode(() => ({ status: r.status, headers: r.headers, data: r.status === 304 ? null : (JSON.parse(r.text) as unknown) })),
-        ),
+        Effect.flatMap((r) => decode(() => ({ status: r.status, headers: r.headers, data: r.status === 304 ? null : parsed(r.text) }))),
       ),
     );
   }

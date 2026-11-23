@@ -1,5 +1,5 @@
-// What the linters ban stays banned: an unchecked cast (typescript/no-unsafe-type-assertion) is allowed in src/narrow.ts,
-// whose helpers check first, and in the few reads of what the desk itself wrote, counted here so the list only shrinks; and
+// What the linters ban stays banned: a cast (typescript/no-unsafe-type-assertion, or consistent-type-assertions for any `as`
+// but `as const`) is allowed in src/narrow.ts, whose helpers check first, and in the few reads of what the desk itself wrote, counted here so the list only shrinks; and
 // no effect may skip its dependencies (react/exhaustive-effect-dependencies).
 import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
@@ -28,7 +28,7 @@ const KNOWN: Record<string, number> = { "src/store.ts": 4, "src/client.ts": 1, "
 
 test("unchecked casts live only in src/narrow.ts and the known reads of the desk's own data", () => {
   const per: Record<string, number> = {};
-  for (const at of disabling(/no-unsafe-type-assertion/)) {
+  for (const at of disabling(/no-unsafe-type-assertion|consistent-type-assertions/)) {
     const f = at.slice(0, at.indexOf(":"));
     if (f !== "src/narrow.ts") per[f] = (per[f] ?? 0) + 1;
   }

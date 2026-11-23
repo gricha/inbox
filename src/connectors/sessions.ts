@@ -10,7 +10,7 @@ import { Effect, Result } from "effect";
 import { alive, claude, halt, readTail, type Agent } from "../coordinator.ts";
 import type { Core, Desk } from "../desk.ts";
 import { Conflict, NotFound, type CommandError } from "../errors.ts";
-import { isRecord, jsonOf, num, str } from "../narrow.ts";
+import { elements, isRecord, jsonOf, num, str } from "../narrow.ts";
 import { runCommand } from "../review.ts";
 import { isCoordinator, SESSION_PREFIX, type SessionAction, type SessionCard, type SessionKind } from "../types.ts";
 
@@ -130,12 +130,10 @@ const toolLine = (name: string, input: Record<string, unknown> | null): string =
 };
 
 const blocks = (m: Record<string, unknown> | null): Record<string, unknown>[] =>
-  Array.isArray(m?.content)
-    ? (m.content as unknown[]).flatMap((b) => {
-        const o = obj(b);
-        return o ? [o] : [];
-      })
-    : [];
+  elements(m?.content).flatMap((b) => {
+    const o = obj(b);
+    return o ? [o] : [];
+  });
 
 // null: no main-thread turn in it, or one it can't read.
 export function readTranscript(text: string): Tail | null {

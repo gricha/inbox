@@ -582,7 +582,8 @@ export class GitHubConnector implements Connector {
             ? Effect.fail(e)
             : Effect.sync(() => {
                 desk.log(`stack probes in ${repo} failed: ${e.message}`);
-                return { ps: [] as Probe[], hits: [] as SearchHit[] }; // nothing learned, so no misses
+                const none: { ps: Probe[]; hits: SearchHit[] } = { ps: [], hits: [] }; // nothing learned, so no misses
+                return none;
               }),
         ),
       );

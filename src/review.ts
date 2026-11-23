@@ -35,7 +35,7 @@ import { BUDGETS, skillText, type OwnSkill } from "./connectors/github-review.ts
 import { parseDiagram } from "./diagram.ts";
 import { GH_MISSING } from "./github/client.ts";
 import type { PrContext } from "./github/index.ts";
-import { field, isRecord, jsonOf, num, str, strings } from "./narrow.ts";
+import { elements, field, isRecord, jsonOf, num, str, strings } from "./narrow.ts";
 import { as, claudeUsage, meter, type Usage } from "./usage.ts";
 import type {
   AiReview,
@@ -1797,7 +1797,7 @@ export function parseSteps(raw: unknown, files: ReviewFile[], ranking: ChunkRank
   for (const st of list(raw)) {
     const title = text(st?.title).slice(0, 60);
     const own: { id: string; path: string }[] = [];
-    for (const id of Array.isArray(st?.hunks) ? (st.hunks as unknown[]) : []) {
+    for (const id of elements(st?.hunks)) {
       const n = /^h?(\d+)$/i.exec(text(id))?.[1];
       const h = n ? byId.get(`h${Number(n)}`) : undefined;
       if (h && read.has(h.id) && !taken.has(h.id) && !own.some((o) => o.id === h.id)) own.push({ id: h.id, path: h.path });

@@ -179,7 +179,7 @@ export class Store {
       this.db
         .prepare("SELECT data FROM items")
         .all()
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk wrote it (putItems); plugins' items carry fields of their own
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion, typescript/consistent-type-assertions -- the desk wrote it (putItems); plugins' items carry fields of their own
         .map((r) => JSON.parse(text(r.data)) as Item)
     );
   }
@@ -189,7 +189,7 @@ export class Store {
     const out = new Map<string, Item>();
     for (const id of ids) {
       const r = stmt.get(id);
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk wrote it (putItems)
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion, typescript/consistent-type-assertions -- the desk wrote it (putItems)
       if (r) out.set(id, JSON.parse(text(r.data)) as Item);
     }
     return out;
@@ -208,7 +208,7 @@ export class Store {
       rows.map((r) => {
         const meta: ItemMeta = {
           node_id: text(r.node_id),
-          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- read from the item the desk wrote
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion, typescript/consistent-type-assertions -- read from the item the desk wrote
           kind: r.kind as Item["kind"],
           author: str(r.author) ?? "",
           author_bot: r.author_bot === 1,
@@ -243,7 +243,7 @@ export class Store {
     const out = new Map<string, Item | null>();
     for (const id of ids) {
       const r = stmt.get(id);
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk wrote it (putItems, quietly)
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion, typescript/consistent-type-assertions -- the desk wrote it (putItems, quietly)
       if (r) out.set(id, JSON.parse(text(r.said)) as Item | null);
     }
     return out;

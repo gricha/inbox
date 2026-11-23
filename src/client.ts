@@ -166,7 +166,7 @@ export function createClient(send: (path: string, init: RequestInit) => Response
         () => null,
       );
       if (!res.ok) return yield* refusal(res.status, data);
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk's own answer, typed by src/types.ts on both ends
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion, typescript/consistent-type-assertions -- the desk's own answer, typed by src/types.ts on both ends
       return data as T;
     });
   }

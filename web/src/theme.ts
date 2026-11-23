@@ -18,7 +18,12 @@ export const THEME_GROUPS: { label: string; themes: Theme[] }[] = [
 ];
 
 export const isThemeId = (t: unknown): t is ThemeId => t === "system" || t === "omarchy" || themeOf(t) !== undefined;
-export const desktop = (window as Window & { desktop?: DesktopBridge }).desktop;
+declare global {
+  interface Window {
+    desktop?: DesktopBridge;
+  }
+}
+export const desktop = window.desktop;
 
 function stored(): ThemeId | null {
   const t = getStored(KEY);

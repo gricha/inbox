@@ -447,8 +447,8 @@ export const followEvents = (url: string, on: { connected(): void; event(e: SSEv
 // A desk's `event: notify`, which it sends to the app attached with ?notify=1 instead of notifying itself.
 export function parseNotice(data: string): { title: string; body: string } | null {
   const n = parseJson(data);
-  if (typeof n !== "object" || n === null) return null;
-  const { title, body } = n as { title?: unknown; body?: unknown };
+  const title = field(n, "title");
+  const body = field(n, "body");
   return typeof title === "string" && typeof body === "string" ? { title, body } : null;
 }
 
@@ -463,7 +463,7 @@ export interface DesktopSettings {
 
 // An older desk may not know the app.* settings; fall back to the defaults.
 export function desktopSettings(values?: Record<string, unknown>): DesktopSettings {
-  const v = { ...DEFAULTS, ...values } as Record<string, unknown>;
+  const v: Record<string, unknown> = { ...DEFAULTS, ...values };
   return {
     hotkey: typeof v["app.hotkey"] === "string" ? v["app.hotkey"] : DEFAULTS["app.hotkey"],
     open_at_login: v["app.open_at_login"] === true,

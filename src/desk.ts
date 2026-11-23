@@ -2532,7 +2532,8 @@ export class Desk {
             const err = Cause.squash(cause);
             return Effect.sync(() => {
               report(err, "diff", id);
-              return { files: [] as ReviewFile[], head: null, error: messageOf(err) };
+              const none: { files: ReviewFile[]; head: string | null; error: string } = { files: [], head: null, error: messageOf(err) };
+              return none;
             });
           },
           onSuccess: (t) => Effect.succeed({ files: t.files, head: t.head ?? null, error: null }),

@@ -147,7 +147,7 @@ function call<T>(method: string, path: string, body?: unknown): Effect.Effect<T,
         try: (): Promise<unknown> => res.json(),
         catch: (cause) => new DeskBadResponse({ status: res.status, cause }),
       });
-      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the desk's own answer, typed by src/types.ts on both ends
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion, typescript/consistent-type-assertions -- the desk's own answer, typed by src/types.ts on both ends
       if (res.ok) return (yield* json) as T;
       // A refusal whose body doesn't parse still says what it is by its status.
       const answer = yield* json.pipe(Effect.orElseSucceed(() => null));

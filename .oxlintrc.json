@@ -36,7 +36,13 @@
     "unicorn/no-array-callback-reference": "off",
     "unicorn/consistent-function-scoping": "off",
     "unicorn/no-negated-condition": "off",
-    "unicorn/prefer-top-level-await": "off"
+    "unicorn/prefer-top-level-await": "off",
+    "typescript/consistent-type-assertions": [
+      "error",
+      {
+        "assertionStyle": "never"
+      }
+    ]
   },
   "ignorePatterns": ["node_modules", "web/dist", "release", "research", "integrations", ".claude/workflows"],
   "overrides": [
@@ -50,7 +56,14 @@
         "typescript/no-unsafe-return": "off",
         "typescript/no-unsafe-argument": "off",
         "typescript/no-explicit-any": "off",
-        "typescript/no-unsafe-type-assertion": "off"
+        "typescript/no-unsafe-type-assertion": "off",
+        "typescript/consistent-type-assertions": "off"
+      }
+    },
+    {
+      "files": ["web/mock/**", "scripts/**"],
+      "rules": {
+        "typescript/consistent-type-assertions": "off"
       }
     },
     {

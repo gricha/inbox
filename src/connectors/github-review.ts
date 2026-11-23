@@ -175,7 +175,7 @@ export function readOwnSkill(md: string): OwnSkill {
       continue;
     }
     if (off && at === null) {
-      for (const id of off[1]!.split(",").map((s) => s.trim())) if ((OPTIONAL as readonly string[]).includes(id)) own.off.add(id);
+      for (const id of off[1]!.split(",").map((s) => s.trim())) if (OPTIONAL.some((x) => x === id)) own.off.add(id);
       continue;
     }
     if (at) own.replaced.set(at, `${own.replaced.get(at)}${own.replaced.get(at) ? "\n" : ""}${line}`);
