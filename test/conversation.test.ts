@@ -3,9 +3,6 @@
 import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import { buildTakePrompt, conversation, parseTakes, talked } from "../src/conversation.ts";
 import { owesReply } from "../src/stage.ts";
 import type { PrContext } from "../src/github/index.ts";
@@ -20,6 +17,7 @@ import { run, runSync } from "./helpers/run.ts";
 import { Cache, Effect } from "effect";
 import { posix } from "./helpers/platform.ts";
 import { until } from "./helpers/wait.ts";
+import { fakeAgent } from "./helpers/fake-agent.ts";
 
 const say = (id: string, author: string, body: string, h: number) => ({
   id,
@@ -249,29 +247,18 @@ test("Claude's prompt fences GitHub's text, and its answers are checked against 
 
 // A fake claude: records each call's stdin and args, and answers every "- id:" it's asked about.
 function fakeClaude(c: TestContext) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-fake-takes-"));
-  const bin = path.join(dir, "claude");
-  fs.writeFileSync(
-    bin,
-    `#!/bin/sh
-d="$(dirname "$0")"
-n=$(($(cat "$d/count" 2>/dev/null || echo 0) + 1))
+  const f = fakeAgent(
+    c,
+    "claude",
+    `n=$(($(cat "$d/count" 2>/dev/null || echo 0) + 1))
 printf '%s\\n' "$@" > "$d/args.$n"; cat > "$d/stdin.$n"; echo $n > "$d/count"
 items=$(sed -n 's/^- id: //p' "$d/stdin.$n" | awk '{ printf "%s{\\"id\\":\\"%s\\",\\"gist\\":\\"gist of %s\\",\\"take\\":\\"A nit: fake\\"}", (NR > 1 ? "," : ""), $0, $0 }')
-echo "{\\"type\\":\\"result\\",\\"is_error\\":false,\\"structured_output\\":{\\"items\\":[$items]}}"
-`,
+echo "{\\"type\\":\\"result\\",\\"is_error\\":false,\\"structured_output\\":{\\"items\\":[$items]}}"`,
   );
-  fs.chmodSync(bin, 0o755);
-  const before = process.env.DESK_CLAUDE;
-  process.env.DESK_CLAUDE = bin;
-  c.after(() => {
-    process.env.DESK_CLAUDE = before;
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
   return {
-    calls: () => Number(fs.existsSync(path.join(dir, "count")) ? fs.readFileSync(path.join(dir, "count"), "utf8") : 0),
-    stdin: (n: number) => fs.readFileSync(path.join(dir, `stdin.${n}`), "utf8"),
-    args: (n: number) => fs.readFileSync(path.join(dir, `args.${n}`), "utf8").split("\n"),
+    calls: () => Number(f.read("count") || 0),
+    stdin: (n: number) => f.read(`stdin.${n}`),
+    args: (n: number) => f.read(`args.${n}`).split("\n"),
   };
 }
 
