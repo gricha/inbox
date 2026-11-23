@@ -44,6 +44,8 @@ export function Criteria({
   // Switched or deleted here, until the list read again agrees.
   const flipped = useShown<string, boolean>(view, (id, on) => !view?.criteria.some((c) => c.id === id && c.on !== on));
   const gone = useShown<string, true>(view, (id) => !view?.criteria.some((c) => c.id === id));
+  // Saved here: as you wrote it, then as the desk saved it, until the list read again has that save.
+  const saved = useShown<string, Crit>(view, (id, c) => !!view?.criteria.some((x) => x.id === id && x.updated_at === c.updated_at));
 
   const load = useCallback(
     (): Effect.Effect<void> =>
@@ -98,9 +100,37 @@ export function Criteria({
   const save = (d: Draft) => {
     const id = d.id ?? freeId(d.name, view?.criteria.map((c) => c.id) ?? []);
     const body = { name: d.name, when: d.when, ask: d.ask, urgent: d.urgent };
-    write(api.setCriterion(id, body), d.id ? `Saved ${d.name}` : `Added ${d.name}`, () => {
-      setDraft(null);
-    });
+    const was = view?.criteria.find((c) => c.id === id);
+    const drawn: Crit = {
+      id,
+      on: was?.on ?? true,
+      by: was?.by ?? "you",
+      yes: was?.yes ?? 0,
+      waiting: was?.waiting ?? 0,
+      ...(was?.weight !== undefined && { weight: was.weight }),
+      name: d.name,
+      ...(d.when.trim() && { when: d.when.trim() }),
+      ...(d.ask.trim() && { ask: d.ask.trim() }),
+      urgent: d.urgent,
+      updated_at: new Date().toISOString(), // not the desk's: only its own save settles it
+    };
+    saved.show(id, drawn);
+    setDraft(null);
+    write(
+      api.setCriterion(id, body).pipe(
+        Effect.tap(({ criterion }) =>
+          Effect.sync(() => {
+            saved.show(id, { ...drawn, ...criterion });
+          }),
+        ),
+      ),
+      d.id ? `Saved ${d.name}` : `Added ${d.name}`,
+      undefined,
+      () => {
+        saved.drop(id);
+        setDraft(d);
+      },
+    );
   };
   const remove = (d: Draft) => {
     const id = d.id;
@@ -130,7 +160,8 @@ export function Criteria({
         )}
       </div>
     );
-  const criteria = view.criteria
+  const added = [...saved.shown.values()].filter((s) => !view.criteria.some((c) => c.id === s.id));
+  const criteria = [...view.criteria.map((c) => saved.shown.get(c.id) ?? c), ...added]
     .filter((c) => !gone.shown.has(c.id))
     .map((c) => Object.assign({}, c, { on: flipped.shown.get(c.id) ?? c.on }));
   const own = criteria.filter((c) => !c.plugin);

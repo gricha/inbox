@@ -5239,6 +5239,26 @@ const SHOTS: Shot[] = [
     },
     after: drop,
   },
+  // Saving a criterion shows it as saved at once, its editor closed, before the desk (here never) answers.
+  {
+    name: "settings-criteria-save-shows",
+    sizes: ["wide"],
+    go: async (page) => {
+      await page.route("**/api/criteria/*", async (route) => {
+        if (route.request().method() === "PUT") stall(route);
+        else await route.fallback();
+      });
+      await at("#/settings/criteria")(page);
+      await page.locator("#s-criteria .cr-name").first().click();
+      await page.locator("#s-criteria .au-editor input").first().fill("Auth, keys and tokens");
+      await page.locator("#s-criteria .au-editor").getByRole("button", { name: "Save" }).click();
+      await page.waitForTimeout(150);
+      const name = await page.locator("#s-criteria .cr-name").first().textContent();
+      if (name !== "Auth, keys and tokens" || (await page.locator("#s-criteria .au-editor").count()))
+        failures.push(`settings-criteria-save-shows: the row reads ${JSON.stringify(name)} with its editor open until the desk answers`);
+    },
+    after: drop,
+  },
   // Deleting takes it off at once; the desk (here never) answers after.
   {
     name: "settings-criteria-delete",
