@@ -6156,9 +6156,10 @@ const SHOTS: Shot[] = [
       await page.locator(".page-head .head-filter").click();
       const groups = await page.locator(".people-pop .pop-title").allTextContents();
       if (groups.join(" ") !== "Author Involves") failures.push(`filter-people: the popover's groups are ${JSON.stringify(groups)}`);
+      // Any part of a login finds it: jordan has "da" too.
       await page.keyboard.type("da");
       const offered = await page.locator(".people-pop .people-who").allTextContents();
-      if (offered.join(" ") !== "dana dana") failures.push(`filter-people: "da" finds ${JSON.stringify(offered)}`);
+      if (offered.join(" ") !== "dana jordan dana jordan") failures.push(`filter-people: "da" finds ${JSON.stringify(offered)}`);
       await page.waitForTimeout(300);
     },
     after: fresh,
