@@ -2753,9 +2753,14 @@ const SHOTS: Shot[] = [
       );
       if (!rows.includes("dana")) failures.push(`review-add-reviewers: a pick isn't asked: the reviewers read ${rows.join(" | ")}`);
     },
+    // dana unasked, or every later shot of this PR lists her.
     after: async (page) => {
+      await page.evaluate(
+        `fetch("/api/review/" + encodeURIComponent("acme/api#4154") + "/reviewer", { method: "POST", body: JSON.stringify({ login: "dana", act: "remove" }) })`,
+      );
       await fresh(page);
     },
+    writes: true,
   },
   // Removing, asking again and adding a reviewer show in the sidebar at once, before GitHub answers (it never does here).
   {

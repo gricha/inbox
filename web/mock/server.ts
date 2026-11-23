@@ -4607,6 +4607,19 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     bump();
     return { ok: true };
   }
+  // One reviewer of your PR removed or asked again: { login, act: "remove" | "rerequest" }.
+  const oneReviewer = /^\/api\/review\/(.+)\/reviewer$/.exec(url.pathname);
+  if (oneReviewer && req.method === "POST") {
+    const r = resolve(decodeURIComponent(oneReviewer[1]!));
+    const b = await readBody(req);
+    if (!mineOf(r.seed)) throw new HttpError(409, `${r.id} isn't your PR`);
+    if (typeof b.login !== "string" || (b.act !== "remove" && b.act !== "rerequest"))
+      throw new HttpError(400, 'need { login, act: "remove" | "rerequest" }');
+    const others = (r.seed.asked ?? []).filter((a) => a !== b.login);
+    r.seed.asked = b.act === "remove" ? others : [...others, b.login];
+    bump();
+    return { ok: true };
+  }
   // A comment on the PR: the mock only remembers that you acted.
   const commented = /^\/api\/review\/(.+)\/comment$/.exec(url.pathname);
   if (commented && req.method === "POST") {

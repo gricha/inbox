@@ -664,3 +664,17 @@ test("an answer nobody picked up: Claude's work lists it with who asked, its que
     ],
   );
 });
+
+test("one reviewer of your PR removed or asked again, as the review's sidebar does", async () => {
+  const id = encodeURIComponent("acme/api#4154");
+  const who = async () => (await call<ReviewView>("GET", `/api/review/${id}?ahead=1`)).data.reviewers.list.map((r) => r.who);
+  const one = (login: string, act: string, pr = id) => call("POST", `/api/review/${pr}/reviewer`, { login, act });
+  assert.equal((await call("POST", `/api/review/${id}/reviewers`, { users: ["U_dana"], keep: true })).status, 200);
+  assert.ok((await who()).includes("dana"));
+  assert.equal((await one("dana", "remove")).status, 200);
+  assert.ok(!(await who()).includes("dana"));
+  assert.equal((await one("dana", "rerequest")).status, 200);
+  assert.ok((await who()).includes("dana"));
+  assert.equal((await one("dana", "remove")).status, 200);
+  assert.equal((await one("dana", "remove", encodeURIComponent("acme/api#4127"))).status, 409, "not yours");
+});
