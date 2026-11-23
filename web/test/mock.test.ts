@@ -665,6 +665,18 @@ test("an answer nobody picked up: Claude's work lists it with who asked, its que
   );
 });
 
+test("POST /api/mock/clock winds the mock's clock back to its start, where the shots start each shot", async () => {
+  const { data } = await call<{ t0: number }>("GET", "/api/mock/clock");
+  const stamped = async () =>
+    Date.parse((await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/api#4154")}?ahead=1`)).data.item.detail_at);
+  await new Promise((r) => {
+    setTimeout(r, 1200);
+  });
+  assert.ok((await stamped()) - data.t0 >= 1200, "real time until wound back");
+  await call("POST", "/api/mock/clock");
+  assert.ok((await stamped()) - data.t0 < 1000);
+});
+
 test("one reviewer of your PR removed or asked again, as the review's sidebar does", async () => {
   const id = encodeURIComponent("acme/api#4154");
   const who = async () => (await call<ReviewView>("GET", `/api/review/${id}?ahead=1`)).data.reviewers.list.map((r) => r.who);

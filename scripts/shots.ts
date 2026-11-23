@@ -38,6 +38,16 @@ const MOCK = Number(process.env.SHOTS_MOCK_PORT ?? 47830); // separate ports let
 const VITE = Number(process.env.SHOTS_VITE_PORT ?? 5190);
 const kids: ChildProcess[] = [];
 const failures: string[] = [];
+// The mock's clock: each shot starts at the mock's start, t0 (POST /api/mock/clock, and the page's clock with it), so ages
+// read the same however long the run has gone. What a shot makes up is dated by it. Real time against a desk at --url.
+const clock = { t0: 0, from: 0 };
+const mockNow = () => (clock.t0 ? clock.t0 + Date.now() - clock.from : Date.now());
+const windBack = async (page: Page) => {
+  if (!clock.t0) return;
+  await fetch(`http://127.0.0.1:${MOCK}/api/mock/clock`, { method: "POST" });
+  clock.from = Date.now();
+  await page.clock.setSystemTime(clock.t0);
+};
 
 // GitHub never answers a shot: a person's picture is a pattern made from their login, and NO_AVATAR's fails, to show the
 // name standing alone.
@@ -311,7 +321,7 @@ const echoAsks = async (page: Page, id: string) => {
     if (isRecord(b)) posted.push(b);
     sent = {
       id,
-      at: new Date().toISOString(),
+      at: new Date(mockNow()).toISOString(),
       text: field(b, "text"),
       item_id: field(b, "item_id") ?? null,
       thread_id: field(b, "thread_id") ?? null,
@@ -470,16 +480,6 @@ const automationsAs = (change: (v: AutomationView[]) => void) => async (page: Pa
   await at("#/")(page);
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
-};
-// Its last run `minutes` before the page reads it, not before the mock started: a whole round of shots outlasts an hour.
-const ranAgo = (id: string, minutes: number) => (v: AutomationView[]) => {
-  const runs = v.find((a) => a.id === id)!.runs;
-  const by = Date.now() - minutes * 60_000 - Date.parse(runs[0]!.at);
-  for (const r of runs)
-    Object.assign(r, {
-      at: new Date(Date.parse(r.at) + by).toISOString(),
-      done_at: r.done_at && new Date(Date.parse(r.done_at) + by).toISOString(),
-    });
 };
 // Each automation's row in Automations: its name, its help (and the part of it in red), and its controls.
 const automationRows = (page: Page) =>
@@ -1206,7 +1206,7 @@ const SHOTS: Shot[] = [
       await overviewAs((o) => {
         o.sync_error = error;
         o.connectors = o.connectors.map((c) => ({ ...c, status: "paused", error }));
-        o.rate_limit = { remaining: 0, reset_at: new Date(Date.now() + 40 * 60_000).toISOString() };
+        o.rate_limit = { remaining: 0, reset_at: new Date(mockNow() + 40 * 60_000).toISOString() };
       })(page);
       await page.reload();
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
@@ -2506,7 +2506,7 @@ const SHOTS: Shot[] = [
     // A try that failed, the next one waiting out its backoff: why, and when Claude tries again.
     name: "review-ai-retrying",
     go: async (page) => {
-      const retry = new Date(Date.now() + 2 * 60_000).toISOString();
+      const retry = new Date(mockNow() + 2 * 60_000).toISOString();
       await reviewAs((v) => {
         const error = "no answer in 5 minutes, so it was stopped";
         Object.assign(v, { ai: null, generating: false, ai_error: error });
@@ -2540,7 +2540,7 @@ const SHOTS: Shot[] = [
     name: "review-ai-running",
     go: async (page) => {
       await reviewAs((v) => {
-        if (v.ai_job) v.ai_job.started_at = new Date(Date.now() - 4 * 60_000).toISOString();
+        if (v.ai_job) v.ai_job.started_at = new Date(mockNow() - 4 * 60_000).toISOString();
       })(page);
       await review("acme/web#2301")(page);
       const ai = await page.locator(".rv-ai").textContent();
@@ -3959,7 +3959,7 @@ const SHOTS: Shot[] = [
     go: async (page) => {
       const sent: Ask = {
         id: "shot0001",
-        at: new Date().toISOString(),
+        at: new Date(mockNow()).toISOString(),
         text: "Confirm we addressed priya's question so I can reply",
         item_id: "me/notes-app#12",
         thread_id: "IC_freeze",
@@ -5089,7 +5089,6 @@ const SHOTS: Shot[] = [
     // that runs on events says what it reacts to, and each says what its last run did by verb; New automation last.
     name: "settings-automations",
     go: async (page) => {
-      await automationsAs(ranAgo("team-pings", 30))(page);
       await at("#/settings/queue")(page);
       const setting = await page.evaluate<number>(`document.querySelector('[id="setting-notify.enabled"]').getBoundingClientRect().right`);
       await at("#/settings/automations")(page);
@@ -5554,7 +5553,6 @@ const SHOTS: Shot[] = [
     name: "settings-github-automations",
     writes: true,
     go: async (page) => {
-      await automationsAs(ranAgo("github.pick-reviewer", 42))(page);
       await at("#/settings/github")(page);
       const rows = await page.evaluate<string[]>(`[...document.querySelectorAll("#s-github .au-row")].map((r) =>
         r.querySelector(".s-name").textContent.trim() + " " + (r.querySelector("input.switch").checked ? "on" : "off"))`);
@@ -6134,7 +6132,7 @@ const SHOTS: Shot[] = [
       await page.route("**/api/notes/n2", async (r) => {
         sent = r.request().postDataJSON();
         await r.fulfill({
-          json: { ok: true, note: { id: "n2", at: new Date().toISOString(), text: "x", remind_at: null, reminded_at: null } },
+          json: { ok: true, note: { id: "n2", at: new Date(mockNow()).toISOString(), text: "x", remind_at: null, reminded_at: null } },
         });
       });
       await page.locator(".ctx-sub .ctx-item", { hasText: "3 hours" }).click();
@@ -6634,6 +6632,7 @@ const files: string[] = [];
 try {
   const real = arg("--url");
   const url = real ?? (await start());
+  if (!real) clock.t0 = Number(field(await (await fetch(`http://127.0.0.1:${MOCK}/api/mock/clock`)).json(), "t0"));
   // --only keeps the shots whose names contain one of its words, for a quick loop on one page.
   const only = arg("--only")?.split(",");
   const shots = SHOTS.filter((s) => !(real && s.writes) && (!only || only.some((o) => s.name.includes(o))));
@@ -6671,6 +6670,7 @@ try {
         });`);
       }
       await offline(page);
+      if (clock.t0) await page.clock.install({ time: clock.t0 });
       // A review document's frame runs no script, so the stand-ins above, which Playwright puts in every frame, are refused there.
       const docFrame = (m: string) => m.startsWith("Blocked script execution in") && m.includes("/api/docs/");
       page.on("console", (m) => {
@@ -6686,6 +6686,7 @@ try {
       await page.goto(`${url}/#/`);
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
       for (const shot of these) {
+        await windBack(page);
         await page.keyboard.press("Escape");
         await shot.go(page);
         await page.mouse.move(0, 0); // no hover state left over from a click

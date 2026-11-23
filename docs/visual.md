@@ -300,7 +300,8 @@ against the design rules, and a skeptic per finding.
 ### The shots
 
 `npm run shots` drives Chrome against the mock and writes `.shots/` (`index.html` shows them all). The data is the same
-on every run: it syncs only when a shot asks, never on a timer.
+on every run: it syncs only when a shot asks, never on a timer, and each shot starts at the mock's start time
+(`POST /api/mock/clock`, and the page's clock with it), so an hour-long run reads the same ages throughout.
 
 | Size | Window                                                                                                              | Which shots                                                              |
 | ---- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |

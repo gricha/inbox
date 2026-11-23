@@ -4,6 +4,7 @@
 // MOCK_AI_PAUSED=1 starts with Claude Code logged out (AI reviews and the judge paused);
 // POST /api/mock/ai-paused { paused } flips it, and POST /api/mock/agents-busy { busy } sets the judge to work.
 // POST /api/mock/setup { needed, github } shows the first-run page (GitHub signed out when github is false).
+// POST /api/mock/clock winds the mock's clock back to when it started (GET says when): the shots start each shot there.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Effect, Result, Schema } from "effect";
 import { homedir } from "node:os";
@@ -132,6 +133,9 @@ const AREAS: Areas = {
 };
 const HOUR = 3_600_000;
 const T0 = Date.now();
+// The mock's clock: real time less what the shots wound it back by (POST /api/mock/clock), so each shot starts at T0.
+let wound = 0;
+const now = () => Date.now() - wound;
 const iso = (hoursAgo: number) => new Date(T0 - hoursAgo * HOUR).toISOString();
 // Settings → Usage's graph: a few months of finished items, quiet weekends, busier lately; the same on every run.
 function closedDays(): Record<string, number> {
@@ -145,7 +149,7 @@ function closedDays(): Record<string, number> {
   return out;
 }
 
-const hoursSince = (at: string) => Math.round((Date.now() - Date.parse(at)) / HOUR);
+const hoursSince = (at: string) => Math.round((now() - Date.parse(at)) / HOUR);
 const BUCKET_LIST = new Set<Bucket>(["now", "today", "blocked", "later", "fyi", "hide"]);
 // Every action /api/act takes, so a body's is checked.
 const ACTIONS = {
@@ -1659,7 +1663,7 @@ function signals(r: Rec): Signals {
   const needs = needsOf(s);
   const named = (s.asked2 ?? []).filter((a) => !a.startsWith("@"));
   // The seeds don't say when it went ready or who was asked when: both since it opened.
-  const ready = pr && !s.draft ? weekdayHours(iso(s.age), new Date()) : -1;
+  const ready = pr && !s.draft ? weekdayHours(iso(s.age), new Date(now())) : -1;
   return {
     item: {
       kind,
@@ -1808,7 +1812,7 @@ function itemOf(r: Rec): Item {
     threads_total: s.threads?.[1] ?? 0,
     threads_unresolved: s.threads?.[0] ?? 0,
     thread_last: [],
-    detail_at: new Date().toISOString(),
+    detail_at: new Date(now()).toISOString(),
   };
 }
 
@@ -1819,7 +1823,7 @@ function status(r: Rec): Status {
   if (st.done_at && r.activity_at <= st.done_at) return "done";
   if (st.snooze_when) return "snoozed";
   if (st.snooze_on_activity && r.activity_at <= r.snoozed_at) return "snoozed";
-  if (st.snooze_until && Date.parse(st.snooze_until) > Date.now()) return "snoozed";
+  if (st.snooze_until && Date.parse(st.snooze_until) > now()) return "snoozed";
   return "active";
 }
 
@@ -2471,7 +2475,7 @@ function setJob(kind: Job["kind"], key: string, o: Partial<Job>): Job {
     head: r ? itemOf(r).head_oid : null,
     state: "queued",
     attempts: 0,
-    queued_at: new Date().toISOString(),
+    queued_at: new Date(now()).toISOString(),
     started_at: null,
     finished_at: null,
     retry_at: null,
@@ -2577,7 +2581,7 @@ const NOTES: Note[] = [
     id: "n3",
     at: iso(1),
     text: "Check the p95 dashboard after the search deploy",
-    remind_at: new Date(Date.now() + 18 * HOUR).toISOString(),
+    remind_at: new Date(now() + 18 * HOUR).toISOString(),
     reminded_at: null,
   },
   // An automation's, from what its run read: its body is untrusted markdown, its link a mail thread.
@@ -2646,16 +2650,16 @@ function trackerNote(): Note {
   };
 }
 const notesView = (): NotesView => {
-  const now = new Date().toISOString();
+  const stamp = new Date(now()).toISOString();
   const soonest = (a: Note, b: Note) => a.remind_at!.localeCompare(b.remind_at!);
   const waiting = (s: Note["section"]) =>
     NOTES.filter((n) => !n.remind_at && (n.section ?? "standard") === s).sort((a, b) => b.at.localeCompare(a.at));
   return {
-    due: NOTES.filter((n) => n.remind_at && n.remind_at <= now).sort(soonest),
+    due: NOTES.filter((n) => n.remind_at && n.remind_at <= stamp).sort(soonest),
     urgent: waiting("urgent"),
     open: waiting("standard"),
     fyi: waiting("fyi"),
-    later: NOTES.filter((n) => n.remind_at && n.remind_at > now).sort(soonest),
+    later: NOTES.filter((n) => n.remind_at && n.remind_at > stamp).sort(soonest),
   };
 };
 function saveNote(id: string | null, b: Record<string, unknown>): Note {
@@ -2666,13 +2670,13 @@ function saveNote(id: string | null, b: Record<string, unknown>): Note {
   const t = !r
     ? null
     : rel
-      ? Date.now() + Number(rel[1]) * HOUR
+      ? now() + Number(rel[1]) * HOUR
       : r === "tomorrow"
-        ? Date.now() + 18 * HOUR
+        ? now() + 18 * HOUR
         : r === "monday"
-          ? Date.now() + 90 * HOUR
+          ? now() + 90 * HOUR
           : Date.parse(r);
-  if (t !== null && (Number.isNaN(t) || t <= Date.now())) throw new HttpError(400, `can't read the reminder "${r}": pick a time to come`);
+  if (t !== null && (Number.isNaN(t) || t <= now())) throw new HttpError(400, `can't read the reminder "${r}": pick a time to come`);
   const remind_at = t === null ? null : new Date(t).toISOString();
   const old = id ? NOTES.find((n) => n.id === id) : undefined;
   if (id && !old) throw new HttpError(404, `no note "${id}"`);
@@ -2682,8 +2686,8 @@ function saveNote(id: string | null, b: Record<string, unknown>): Note {
   const note: Note = old
     ? { ...old, text, remind_at, reminded_at: remind_at === old.remind_at ? old.reminded_at : null, ...(section && { section }) }
     : {
-        id: `n${NOTES.length + 1}${Date.now() % 1000}`,
-        at: new Date().toISOString(),
+        id: `n${NOTES.length + 1}${now() % 1000}`,
+        at: new Date(now()).toISOString(),
         text,
         remind_at,
         reminded_at: null,
@@ -2826,9 +2830,9 @@ function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
     HELD[automation] = (HELD[automation] ?? []).filter((h) => h.id !== held);
     INQUIRIES.splice(INQUIRIES.indexOf(q), 1);
     bump();
-    return { ...q, answer: { text, at: new Date().toISOString(), dismissed } };
+    return { ...q, answer: { text, at: new Date(now()).toISOString(), dismissed } };
   }
-  q.answer = { text: dismissed ? "" : text, at: new Date().toISOString(), dismissed, ...(!dismissed && { read_at: null }) };
+  q.answer = { text: dismissed ? "" : text, at: new Date(now()).toISOString(), dismissed, ...(!dismissed && { read_at: null }) };
   if (!dismissed) setJob("answer", q.id, { item: q.item_id });
   bump();
   return q;
@@ -3083,7 +3087,7 @@ function automationsView(): AutomationView[] {
     return Object.assign({}, a, {
       trigger: a.events ? eventsWords(a.events) : scheduleWords(a.schedule),
       // As the desk works it out: the schedule's next time, so every run of the shots says the same.
-      next_at: a.on && typeof s === "object" ? nextAt(s, new Date()).toISOString() : null,
+      next_at: a.on && typeof s === "object" ? nextAt(s, new Date(now())).toISOString() : null,
       running: false,
       waiting: null,
       runs: RUNS.filter((r) => r.automation === a.id)
@@ -3139,7 +3143,7 @@ function addAsk(b: Record<string, unknown>): Ask {
   const str = (k: string) => (typeof b[k] === "string" && b[k] ? b[k] : null);
   const a: Ask = {
     id: `mock${++askN}`,
-    at: new Date().toISOString(),
+    at: new Date(now()).toISOString(),
     text,
     item_id: str("item_id"),
     thread_id: str("thread_id"),
@@ -3149,7 +3153,7 @@ function addAsk(b: Record<string, unknown>): Ask {
   };
   ASKS.push(a);
   setTimeout(() => {
-    a.answer = { text: "Done: I checked it and took care of it.\n\nNothing's left for you there.", at: new Date().toISOString() };
+    a.answer = { text: "Done: I checked it and took care of it.\n\nNothing's left for you there.", at: new Date(now()).toISOString() };
     bump();
   }, 4000);
   bump();
@@ -3237,10 +3241,10 @@ const events: Event[] = [];
 let seq = 0;
 
 function snoozeUntil(until: string): Pick<ItemState, "snooze_until" | "snooze_on_activity"> {
-  const d = new Date();
+  const d = new Date(now());
   if (until === "activity") return { snooze_until: null, snooze_on_activity: true };
   if (until === "1h" || until === "3h")
-    return { snooze_until: new Date(Date.now() + (until === "1h" ? 1 : 3) * HOUR).toISOString(), snooze_on_activity: false };
+    return { snooze_until: new Date(now() + (until === "1h" ? 1 : 3) * HOUR).toISOString(), snooze_on_activity: false };
   if (until === "tomorrow" || until === "monday") {
     d.setDate(d.getDate() + (until === "tomorrow" ? 1 : (8 - d.getDay()) % 7 || 7));
     d.setHours(9, 0, 0, 0);
@@ -3258,9 +3262,9 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
     return { ok: true, state: r.state, undo_seq: 0 };
   }
   const before = { ...r.state };
-  const now = new Date().toISOString();
+  const stamp = new Date(now()).toISOString();
   const st = r.state;
-  if (action === "done") st.done_at = now;
+  if (action === "done") st.done_at = stamp;
   else if (action === "snooze" && until && isKeyOf(UNTIL, until)) {
     if (!waitable(signals(r), itemOf(r), ME).includes(until)) throw new HttpError(409, `${r.id} can't wait until ${UNTIL[until]}`);
     Object.assign(st, {
@@ -3269,15 +3273,15 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
       snooze_on_activity: false,
       done_at: null,
     });
-    r.snoozed_at = now;
+    r.snoozed_at = stamp;
   } else if (action === "snooze") {
     Object.assign(st, snoozeUntil(until ?? "tomorrow"), { snooze_when: null });
-    r.snoozed_at = now;
+    r.snoozed_at = stamp;
   } else if (action === "mute" || action === "unmute") st.muted = action === "mute";
   else if (action === "pin" || action === "unpin") st.pinned = action === "pin";
   else if (action === "restore")
     Object.assign(st, { done_at: null, snooze_until: null, snooze_on_activity: false, snooze_when: null, muted: false });
-  else if (action === "seen") st.seen_at = now;
+  else if (action === "seen") st.seen_at = stamp;
   else if (action === "urgent" || action === "standard" || action === "fyi") st.section = action;
   else if (action === "inflight") {
     if (itemOf(r).state !== "open" || (r.seed.kind ?? "pr") !== "pr")
@@ -3286,7 +3290,7 @@ function act(r: Rec, action: Action, until?: string): { ok: true; state: ItemSta
       throw new HttpError(409, `${r.id} isn't yours, so it's handed off for merge once it's approved`);
     if (st.inflight_at) throw new HttpError(409, `${r.id} is in Merging already`);
     if (r.seed.draft) throw new HttpError(409, `${r.id} is a draft: mark it ready first (a a)`);
-    st.inflight_at = now;
+    st.inflight_at = stamp;
     delete r.seed.back;
   } else if (action === "takeback") {
     if (!st.inflight_at) throw new HttpError(409, `${r.id} isn't in Merging`);
@@ -3484,7 +3488,7 @@ const VIEWED = new Map<string, Set<string>>(); // the marks you marked viewed, b
 const LOGGED_OUT = "Claude Code isn't logged in. Run `claude auth login` in a terminal.";
 let aiPaused: string | null = process.env.MOCK_AI_PAUSED ? LOGGED_OUT : null; // why AI reviews nobody asked for are paused
 let agentsBusy = false; // the judge at work: POST /api/mock/agents-busy { busy }
-const retryAt = () => new Date(Date.now() + 26 * 60_000).toISOString();
+const retryAt = () => new Date(now() + 26 * 60_000).toISOString();
 const autoAiOn = () => setting("review.auto_ai");
 
 // What the agent wrote (or will write) for the other PRs in Now and Today, so every card has something real to skim.
@@ -3759,7 +3763,7 @@ function written(r: Rec, head: string): AiReview {
     ...(guide && { guide }),
     head_oid: head,
     model: MODEL,
-    at: new Date().toISOString(),
+    at: new Date(now()).toISOString(),
   };
 }
 
@@ -3782,7 +3786,7 @@ async function generate(r: Rec, ms = Number(process.env.MOCK_AI_MS ?? 2500)): Pr
   setJob("ai_review", r.id, {
     state: "running",
     attempts: was?.state === "queued" ? was.attempts + 1 : 1,
-    started_at: new Date().toISOString(),
+    started_at: new Date(now()).toISOString(),
     finished_at: null,
     retry_at: null,
   });
@@ -3809,10 +3813,10 @@ async function generate(r: Rec, ms = Number(process.env.MOCK_AI_MS ?? 2500)): Pr
       setJob("ai_review", r.id, {
         state: "queued",
         attempts: Math.max(0, jobs.get(`ai_review ${r.id}`)!.attempts - 1),
-        retry_at: new Date(Date.now() + 120_000).toISOString(),
+        retry_at: new Date(now() + 120_000).toISOString(),
         error: why,
       });
-    else setJob("ai_review", r.id, { state: "failed", finished_at: new Date().toISOString(), error: why });
+    else setJob("ai_review", r.id, { state: "failed", finished_at: new Date(now()).toISOString(), error: why });
     throw e;
   } finally {
     generating.delete(r.id);
@@ -3958,7 +3962,7 @@ function sync() {
   setTimeout(() => {
     syncing = false;
     syncCount++;
-    syncedAt = new Date().toISOString();
+    syncedAt = new Date(now()).toISOString();
     syncError =
       process.env.MOCK_SYNC_ERROR === "auth"
         ? "GitHub rejected the token (HTTP 401): run `gh auth login`"
@@ -3971,7 +3975,7 @@ function sync() {
     if (r) {
       r.fresh = true;
       r.pushes++;
-      r.activity_at = new Date().toISOString();
+      r.activity_at = new Date(now()).toISOString();
       // Its review is for the old commit now; the desk would write a new one.
       if (reviews.has(r.id) && !generating.has(r.id) && autoAiOn() && !aiPaused) void generate(r).catch(() => {});
     }
@@ -4328,7 +4332,7 @@ const settingsView = (): SettingsView => ({
   errors: [],
   github: github(),
   paused: {
-    ai: autoAiOn() && aiPaused ? { why: aiPaused, until: new Date(Date.now() + 30 * 60_000).toISOString() } : null,
+    ai: autoAiOn() && aiPaused ? { why: aiPaused, until: new Date(now() + 30 * 60_000).toISOString() } : null,
   },
   judge: judgeStatus(),
 });
@@ -4340,10 +4344,10 @@ const paired = (): RemoteView["devices"] => [
     id: "a1",
     name: "Browser on iPhone",
     kind: "browser",
-    created_at: new Date(Date.now() - 6 * 86_400_000).toISOString(),
-    last_used_at: new Date(Date.now() - 40 * 60_000).toISOString(),
+    created_at: new Date(now() - 6 * 86_400_000).toISOString(),
+    last_used_at: new Date(now() - 40 * 60_000).toISOString(),
   },
-  { id: "b2", name: "work-laptop", kind: "device", created_at: new Date(Date.now() - 2 * 86_400_000).toISOString(), last_used_at: null },
+  { id: "b2", name: "work-laptop", kind: "device", created_at: new Date(now() - 2 * 86_400_000).toISOString(), last_used_at: null },
 ];
 const DEVICES = paired();
 function remoteView(): RemoteView {
@@ -4562,7 +4566,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const x = SESSIONS.find((y) => y.id === decodeURIComponent(sessionAt[1]!));
     if (!x) throw new HttpError(404, "no session needs you now");
     if (sessionAt[2] === "open") return { ok: true, url: x.open_url };
-    if (x.resets_at && Date.parse(x.resets_at) > Date.now()) throw new HttpError(409, `${x.name} is ${x.reason}; kick it after that`);
+    if (x.resets_at && Date.parse(x.resets_at) > now()) throw new HttpError(409, `${x.name} is ${x.reason}; kick it after that`);
     return { ok: true, args: ["--resume", x.session_id, "--bg", "Continue where you left off."] };
   }
   // Ready for review on your own draft, and the reviewers picked with it: the mock only remembers them. `done` as the desk
@@ -4662,7 +4666,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     if (action === "request_changes" && !body.head_oid) throw new HttpError(400, "need head_oid");
     if (action === "close" || action === "merge") {
       r.seed.resolved = action === "close" ? "closed" : "merged";
-      r.seed.upd = (T0 - Date.now()) / HOUR;
+      r.seed.upd = (T0 - now()) / HOUR;
     } else if (action === "reopen") delete r.seed.resolved;
     else if (action === "draft") r.seed.draft = true;
     else if (action === "ready") r.seed.draft = false;
@@ -4700,7 +4704,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       c.comments.push(said(`mine-${c.comments.length}`, ME, 0, String(body.body)));
       c.waiting_on_you = false;
       c.take = null;
-      if (only && !replyOnly(r)) r.state.done_at = new Date().toISOString();
+      if (only && !replyOnly(r)) r.state.done_at = new Date(now()).toISOString();
       bump();
       return { ok: true, url: `${urlOf(r.seed)}#discussion-mock` };
     }
@@ -4713,10 +4717,10 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       approved.add(r.id);
       // Like the desk: your approval resolves it, as of now.
       r.seed.resolved = "you approved";
-      r.seed.upd = (T0 - Date.now()) / HOUR;
+      r.seed.upd = (T0 - now()) / HOUR;
       EVENTS.push({
         seq: EVENTS.length + 1,
-        at: new Date().toISOString(),
+        at: new Date(now()).toISOString(),
         source: "github",
         item_id: r.id,
         kind: "resolved",
@@ -4791,7 +4795,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
         }),
         on: b.on !== false,
         by: "you",
-        updated_at: new Date().toISOString(),
+        updated_at: new Date(now()).toISOString(),
       };
       if (i >= 0) AUTOMATIONS[i] = a;
       else AUTOMATIONS.push(a);
@@ -4862,7 +4866,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
         urgent: b.urgent === true,
         on: b.on !== false,
         by: "you",
-        updated_at: new Date().toISOString(),
+        updated_at: new Date(now()).toISOString(),
       };
       if (i >= 0) criteria[i] = c;
       else criteria.push(c);
@@ -4886,7 +4890,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
       ok: true,
       ask: {
         id: "a5e7c0de",
-        at: new Date().toISOString(),
+        at: new Date(now()).toISOString(),
         text: "Draft a reply.",
         item_id: null,
         thread_id: null,
@@ -5029,7 +5033,7 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   if (route === "POST /api/pair/code") {
     const r = remoteView();
     if (!r.url) throw new HttpError(409, "turn on Settings → Network → Tailscale → Use it from your other devices first");
-    return { code: "7KQM-X4RT", expires_at: new Date(Date.now() + 600_000).toISOString(), url: r.url, pair_url: `${r.url}/pair#7KQM-X4RT` };
+    return { code: "7KQM-X4RT", expires_at: new Date(now() + 600_000).toISOString(), url: r.url, pair_url: `${r.url}/pair#7KQM-X4RT` };
   }
   const device = /^\/api\/devices\/([^/]+)$/.exec(url.pathname);
   if (device && req.method === "DELETE") {
@@ -5043,6 +5047,11 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return { ok: true };
   }
   if (route === "GET /api/omarchy") return null; // not an Omarchy machine: the shots answer for one
+  if (route === "GET /api/mock/clock") return { t0: T0 };
+  if (route === "POST /api/mock/clock") {
+    wound = Date.now() - T0;
+    return { t0: T0 };
+  }
   if (route === "POST /api/mock/ai-paused") {
     pauseAi((await readBody(req)).paused !== false);
     return { ok: true, paused: aiPaused };
