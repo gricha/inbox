@@ -485,6 +485,8 @@ export class Automations {
   running = new Map<string, Running>();
   // A question whose model couldn't answer, or an event's run that failed (failed): why, and when it runs again.
   held = new Map<string, { why: string; until: number; failed?: boolean }>();
+  // Held notes Claude is being asked about now: a run's end doesn't ask again about one a comment's re-ask has out.
+  asking = new Set<string>();
 
   constructor(desk: Desk) {
     this.desk = desk;
@@ -1410,10 +1412,26 @@ export class Automations {
     );
   }
 
+  // One at a time per held note: none while one is out or waits on you (null then).
+  recommend(a: Automation, held: HeldNote) {
+    return Effect.suspend(() => {
+      const h = this.heldOf(a.id).find((x) => x.id === held.id);
+      if (!h || h.rec !== null || this.asking.has(h.id)) return Effect.succeed(null);
+      this.asking.add(h.id);
+      return this.ask(a, h).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            this.asking.delete(h.id);
+          }),
+        ),
+      );
+    });
+  }
+
   // Your agent, without tools, on its own model: what should happen to a note that doesn't fit, given the automation, its
   // type, the note as data and how it doesn't fit, and what you said of what it recommended before. Its answer is checked
   // (a fix must fit, a new type must parse and fit the note) and goes on your desk as a question you agree or disagree with.
-  recommend(a: Automation, h: HeldNote) {
+  private ask(a: Automation, h: HeldNote) {
     return Effect.gen({ self: this }, function* () {
       const desk = this.desk;
       const t = typeOf(a.type ?? "");

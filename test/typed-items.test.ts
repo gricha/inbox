@@ -159,6 +159,7 @@ function fakeClaude(c: TestContext) {
 d="$(dirname "$0")"
 n=$(($(cat "$d/count" 2>/dev/null || echo 0) + 1)); echo $n > "$d/count"
 printf '%s\\n' "$@" > "$d/args.$n"; cat > "$d/stdin.$n"
+while [ -f "$d/wait.$n" ]; do sleep 0.05; done
 if [ -f "$d/answer.$n" ]; then cat "$d/answer.$n"; else cat "$d/answer"; fi
 `,
   );
@@ -175,6 +176,13 @@ if [ -f "$d/answer.$n" ]; then cat "$d/answer.$n"; else cat "$d/answer"; fi
     // The answer to call n; without n, to every call that has none of its own.
     answer: (out: object, n?: number) => {
       fs.writeFileSync(path.join(dir, n === undefined ? "answer" : `answer.${n}`), envelope(out));
+    },
+    // Call n waits until the returned release is called.
+    hold: (n: number) => {
+      fs.writeFileSync(path.join(dir, `wait.${n}`), "");
+      return () => {
+        fs.rmSync(path.join(dir, `wait.${n}`));
+      };
     },
     calls: () => (fs.existsSync(path.join(dir, "count")) ? Number(read("count")) : 0),
     args: (n: number) => read(`args.${n}`).split("\n"),
@@ -523,6 +531,27 @@ test("a comment goes back to Claude, with what it recommended, for a revised rec
   );
   await runFx(t.desk.answerInquiry(revised.id, AGREE));
   assert.deepEqual([t.desk.automations.heldOf("mail"), t.desk.notes(), t.desk.inquiries()], [[], [], []]);
+});
+
+test("a run while a comment's re-ask is out leaves the held note one recommendation", async (c) => {
+  if (unixOnly(c)) return;
+  const { fake, t, a, q } = await held(c, { do: "type", says: "Allow receipts?", why: "A receipt.", type: WIDER });
+  const release = fake.hold(3);
+  fake.answer({ do: "drop", says: "Drop receipts?", why: "You said so." }, 3);
+  await runFx(t.desk.answerInquiry(q.id, "Coffee receipts need nothing from me"));
+  await until(() => fake.calls() === 3, "the re-ask is out");
+  fake.answer(run("Nothing new.", []), 4);
+  fake.answer({ do: "drop", says: "Drop it, again?", why: "A second ask." }, 5);
+  await t.desk.automations.run(a, "schedule").p;
+  release();
+  await until(() => t.desk.inquiries().some((x) => x.question === "Drop receipts?"), "the revised recommendation");
+  const recs = t.desk.inquiries().map((x) => x.question);
+  assert.deepEqual(recs, ["Drop receipts?"]);
+  assert.equal(fake.calls(), 4, "the run didn't ask again about a note already being asked about");
+  assert.deepEqual(
+    t.desk.automations.heldOf("mail").map((h) => h.rec),
+    [t.desk.inquiries()[0]!.id],
+  );
 });
 
 test("deleting the automation forgets what it held, and its recommendation", async (c) => {
