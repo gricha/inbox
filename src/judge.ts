@@ -5,7 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { as } from "./usage.ts";
 import { Effect, Schema, type Fiber } from "effect";
 import { areaFiles, areasFor, touched } from "./areas.ts";
-import type { Desk } from "./desk.ts";
+import type { Core, Desk } from "./desk.ts";
 import { field, oneOf, schemaOf, str } from "./narrow.ts";
 import { notLoggedIn } from "./review.ts";
 import { agentName } from "./settings.ts";
@@ -25,6 +25,8 @@ import {
   type Signals,
 } from "./types.ts";
 import { report } from "./sentry.ts";
+
+type Host = Core & Pick<Desk, "urgency" | "retryAgents" | "notifyNew" | "light" | "ctx" | "agent">;
 
 const BucketSchema = Schema.Literals(BUCKETS);
 export const JudgeAnswerSchema = schemaOf<JudgeAnswer>()(
@@ -373,7 +375,7 @@ export function parseVerdicts(raw: unknown, ids: string[]): Map<string, { bucket
 }
 
 export class Judge {
-  desk: Desk;
+  desk: Host;
   running = false;
   error: string | null = null;
   failures = 0;
@@ -382,7 +384,7 @@ export class Judge {
   call: Fiber.Fiber<void> | null = null; // the call in flight, which stop() interrupts
   timer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(desk: Desk) {
+  constructor(desk: Host) {
     this.desk = desk;
   }
 
