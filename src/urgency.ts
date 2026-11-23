@@ -8,7 +8,7 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { Effect, Result, Schema, type Fiber } from "effect";
 import { decide, type Answer, type DecideOpts, type Question } from "./decisions.ts";
-import type { Desk, Entry, Snapshot } from "./desk.ts";
+import type { Core, Desk, Entry, Snapshot } from "./desk.ts";
 import { BadRequest, DecisionModelDown, fsError, messageOf, NotFound } from "./errors.ts";
 import { compile, type Compiled } from "./expr.ts";
 import { sortKey, textHash } from "./judge.ts";
@@ -17,6 +17,8 @@ import { arrange, type Ranked } from "./order.ts";
 import { agentDown } from "./review.ts";
 import { report } from "./sentry.ts";
 import { BUCKETS, type Bucket, type Card, type CriteriaView, type Criterion, type InboxSection } from "./types.ts";
+
+type Host = Core & Pick<Desk, "light" | "judge" | "line" | "connectors" | "automations">;
 
 const KEY = "criteria";
 const SWITCHED = "criteria_builtin"; // by a plugin's criterion's id: whether you switched it, and when
@@ -167,7 +169,7 @@ const SCALE_ME = [
 type Work = { kind: "ask"; items: { id: string; cs: Criterion[] }[] } | { kind: "score"; items: { id: string; key: string }[] };
 
 export class Urgency {
-  desk: Desk;
+  desk: Host;
   running = false;
   held: { why: string; until: number } | null = null;
   lastScore: { by: string; at: string } | null = null;
@@ -175,7 +177,7 @@ export class Urgency {
   timer: ReturnType<typeof setTimeout> | undefined;
   checks = new Map<string, Result.Result<Compiled, unknown>>(); // compiled `when`s, by source
 
-  constructor(desk: Desk) {
+  constructor(desk: Host) {
     this.desk = desk;
   }
 
