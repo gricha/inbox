@@ -118,6 +118,9 @@
       "!**/node_modules/**/*.{ts,mts,cts,map}"
     ],
     "npmRebuild": false,
+    "toolsets": {
+      "appimage": "1.0.3"
+    },
     "publish": [
       {
         "provider": "github",
