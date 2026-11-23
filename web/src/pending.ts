@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   askRef,
   isNoteRef,
@@ -43,7 +43,7 @@ export function useShown<K, V>(read: unknown, has: (key: K, value: V) => boolean
       return next;
     });
   }, []);
-  return { shown, show, drop };
+  return useMemo(() => ({ shown, show, drop }), [shown, show, drop]); // one object until a write or a read
 }
 
 // Note writes the desk's view doesn't show yet, by id: the note as you left it, null once done; a new one under a temporary id.
