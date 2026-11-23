@@ -36,18 +36,14 @@ import {
   claudeCommand,
   claudeMissing,
   claudeSpawn,
-  codexCommand,
-  codexError,
   codexMcp,
-  codexMissing,
+  codexFailure,
   codexThread,
   deskMcp,
+  HARNESS,
   OPENCODE_DOWN,
-  opencodeCommand,
   opencodeConfig,
-  opencodeError,
   opencodeFailure,
-  opencodeMissing,
   opencodeRunArgs,
   opencodeSession,
   runCommand,
@@ -125,15 +121,6 @@ interface TurnKind {
   error: (why: string) => ClaudeNotLoggedIn | ClaudeApiError;
 }
 
-function codexFailure(line: string): string | null {
-  const e = jsonOf(line);
-  const type = field(e, "type");
-  const message = str(field(e, "message"));
-  if (type === "error" && message !== undefined) return message;
-  if (type === "turn.failed") return str(field(field(e, "error"), "message")) ?? "codex failed";
-  return null;
-}
-
 // What the agent said, in one event: Codex's finished agent message, OpenCode's text part.
 function codexSaid(line: string): string | null {
   const e = jsonOf(line);
@@ -145,26 +132,14 @@ function opencodeSaid(line: string): string | null {
   return field(e, "type") === "text" ? (str(field(field(e, "part"), "text")) ?? null) : null;
 }
 
-const turnKind = (agent: "codex" | "opencode"): TurnKind =>
-  agent === "codex"
-    ? {
-        command: codexCommand(),
-        missing: codexMissing(codexCommand()),
-        id: codexThread,
-        failed: codexFailure,
-        said: codexSaid,
-        down: CODEX_DOWN,
-        error: codexError,
-      }
-    : {
-        command: opencodeCommand(),
-        missing: opencodeMissing(opencodeCommand()),
-        id: opencodeSession,
-        failed: opencodeFailure,
-        said: opencodeSaid,
-        down: OPENCODE_DOWN,
-        error: opencodeError,
-      };
+const turnKind = (agent: "codex" | "opencode"): TurnKind => {
+  const { command, missing, failure } = HARNESS[agent];
+  const events =
+    agent === "codex"
+      ? { id: codexThread, failed: codexFailure, said: codexSaid, down: CODEX_DOWN }
+      : { id: opencodeSession, failed: opencodeFailure, said: opencodeSaid, down: OPENCODE_DOWN };
+  return { command: command(), missing: missing(command()), error: failure, ...events };
+};
 
 // Every message is one line of ids, URLs, kinds and the owner's asks: never PR text, and an argument cmd.exe can pass (claudeSpawn).
 // The desk runs two seats, each its own background session with its own folder and saved state: the coordinator gets

@@ -911,10 +911,15 @@ export interface DeskMcp {
 const kin = (listed: Listed[], yours?: YourMcp) =>
   yours ? listed.filter((s) => s.enabled && !deskOwn(s, yours.desk)).map((s) => s.name) : [];
 
-// The kept names the agent doesn't list fail the run before it starts.
-const missing = (listed: Listed[], kept: readonly string[] | undefined, agent: string) => {
-  const gone = (kept ?? []).filter((n) => !listed.some((s) => s.name === n));
-  return gone.length ? Effect.fail(new McpServerMissing({ names: gone, agent })) : Effect.void;
+// What a Codex or OpenCode run's servers come to: the name the desk's goes by (inbox when yours of that name is the desk's,
+// else inbox_desk, since a url merged into another server's entry wouldn't parse) and the servers of yours it keeps. A kept
+// name the agent doesn't list fails the run before it starts.
+const deskEntry = (listed: Listed[], agent: string, desk?: DeskMcp, yours?: YourMcp) => {
+  const gone = (desk?.keep ?? []).filter((n) => !listed.some((s) => s.name === n));
+  if (gone.length) return Effect.fail(new McpServerMissing({ names: gone, agent }));
+  const theirs = listed.find((s) => s.name === "inbox");
+  const name = desk && theirs && theirs.url !== desk.url ? "inbox_desk" : "inbox";
+  return Effect.succeed({ name, kept: new Set([...(desk?.keep ?? []), ...kin(listed, yours)]) });
 };
 
 // A desk with no server has no MCP address to give Codex: a bug, since only a served desk runs agents.
@@ -926,10 +931,7 @@ export const deskMcp = (url: string | null): Effect.Effect<string> =>
 // inbox_desk, since a url merged into another transport's entry wouldn't parse.
 export const codexMcp = Effect.fnUntraced(function* (command: string, dir: string, desk?: DeskMcp, yours?: YourMcp) {
   const listed = yield* codexServers(command, dir);
-  yield* missing(listed, desk?.keep, "Codex");
-  const theirs = listed.find((s) => s.name === "inbox");
-  const name = desk && theirs && theirs.url !== desk.url ? "inbox_desk" : "inbox";
-  const kept = new Set([...(desk?.keep ?? []), ...kin(listed, yours)]);
+  const { name, kept } = yield* deskEntry(listed, "Codex", desk, yours);
   const off = listed.filter((s) => s.enabled && !(desk && s.name === name) && !kept.has(s.name)).map((s) => s.name);
   return [
     ...off.flatMap((n) => ["-c", `mcp_servers.${tomlKey(n)}.enabled=false`]),
@@ -1048,10 +1050,20 @@ const CODEX_LIMIT = /\b429\b|too many requests|usage limit|rate.?limit/i;
 export const CODEX_DOWN = new RegExp(`${CODEX_LOGIN.source}|${CODEX_LIMIT.source}`, "i");
 
 // codex's error words: a login it needs is the same pause as Claude Code's, with codex's fix; a limit is the agent's, held.
-export function codexError(raw: string): ClaudeNotLoggedIn | ClaudeApiError {
+function codexError(raw: string): ClaudeNotLoggedIn | ClaudeApiError {
   const msg = raw.trim();
   if (CODEX_LOGIN.test(msg)) return new ClaudeNotLoggedIn({ detail: msg, agent: "codex" });
   return new ClaudeApiError({ message: msg || "codex failed", ...(CODEX_LIMIT.test(msg) && { status: 429 }) });
+}
+
+// What one of `codex exec --json`'s events says failed: an error's message, or a failed turn's.
+export function codexFailure(line: string): string | null {
+  const e = jsonOf(line);
+  const type = field(e, "type");
+  const message = str(field(e, "message"));
+  if (type === "error" && message !== undefined) return message;
+  if (type === "turn.failed") return str(field(field(e, "error"), "message")) ?? "codex failed";
+  return null;
 }
 
 // `codex exec --json`'s events and its last message: the message is the answer; with none, the turn's failure says why.
@@ -1063,8 +1075,7 @@ const codexAnswer = Effect.fnUntraced(function* (events: string, last: string): 
     const e = jsonOf(line);
     if (!isRecord(e)) continue;
     if (typeof e.model === "string" && e.model) model = e.model;
-    if (e.type === "error" && typeof e.message === "string") failed = e.message;
-    if (e.type === "turn.failed") failed = str(field(e.error, "message")) ?? "codex failed";
+    failed = codexFailure(line) ?? failed;
   }
   if (!last.trim() && failed !== null) return yield* codexError(failed);
   if (!last.trim()) return yield* new ClaudeBadOutput({ message: "codex gave no answer", excerpt: events.slice(-500) });
@@ -1143,10 +1154,7 @@ export const opencodeConfig = Effect.fnUntraced(function* (
   yours?: YourMcp,
 ) {
   const listed = yield* opencodeServers(command, dir);
-  yield* missing(listed, desk?.keep, "OpenCode");
-  const theirs = listed.find((s) => s.name === "inbox");
-  const name = desk && theirs && theirs.url !== desk.url ? "inbox_desk" : "inbox";
-  const kept = new Set([...(desk?.keep ?? []), ...kin(listed, yours)]);
+  const { name, kept } = yield* deskEntry(listed, "OpenCode", desk, yours);
   const mcp: Record<string, object> = Object.fromEntries(
     listed.filter((s) => s.enabled && !(desk && s.name === name)).map((s) => [s.name, { enabled: kept.has(s.name) }]),
   );
@@ -1241,7 +1249,7 @@ const OPENCODE_LIMIT = /\b429\b|\b402\b|too many requests|usage limit|rate.?limi
 export const OPENCODE_DOWN = new RegExp(`${OPENCODE_LOGIN.source}|${OPENCODE_LIMIT.source}`, "i");
 
 // opencode's error words: a login it needs pauses the desk with OpenCode's fix; a limit (or credits run out) is held.
-export function opencodeError(raw: string): ClaudeNotLoggedIn | ClaudeApiError {
+function opencodeError(raw: string): ClaudeNotLoggedIn | ClaudeApiError {
   const msg = raw.trim();
   if (OPENCODE_LOGIN.test(msg)) return new ClaudeNotLoggedIn({ detail: msg, agent: "opencode" });
   return new ClaudeApiError({ message: msg || "opencode failed", ...(OPENCODE_LIMIT.test(msg) && { status: 429 }) });
@@ -1267,12 +1275,37 @@ const opencodeAnswer = Effect.fnUntraced(function* (events: string): Effect.fn.R
 export const CLAUDE_PAUSED = "Claude Code isn't logged in, so nothing is being sorted or reviewed. Run `claude auth login`.";
 export const CODEX_PAUSED = "Codex isn't logged in, so nothing is being sorted or reviewed. Run `codex login`.";
 export const OPENCODE_PAUSED = "OpenCode isn't logged in, so nothing is being sorted or reviewed. Run `opencode auth login`.";
-export const pausedWords = (agent: DriverId) => (agent === "codex" ? CODEX_PAUSED : agent === "opencode" ? OPENCODE_PAUSED : CLAUDE_PAUSED);
-// The agent's not-logged-in words: what a success on it retries, by suffix.
-export const notLoggedIn = (agent: DriverId) =>
-  agent === "codex" ? CODEX_NOT_LOGGED_IN : agent === "opencode" ? OPENCODE_NOT_LOGGED_IN : NOT_LOGGED_IN;
 
-const agentCommand = (agent: DriverId) => (agent === "codex" ? codexCommand() : agent === "opencode" ? opencodeCommand() : claudeCommand());
+// Each agent's CLI as the desk drives it: its command (DESK_CLAUDE and the rest point it at a fake), the words when it isn't
+// installed, the queue's line and the not-logged-in words when it's logged out (what a success on it retries, by suffix),
+// and its error from its own words.
+interface Harness {
+  command: () => string;
+  missing: (command: string) => string;
+  paused: string;
+  notLoggedIn: string;
+  failure: (raw: string) => ClaudeNotLoggedIn | ClaudeApiError;
+}
+export const HARNESS: Record<DriverId, Harness> = {
+  "claude-code": {
+    command: claudeCommand,
+    missing: claudeMissing,
+    paused: CLAUDE_PAUSED,
+    notLoggedIn: NOT_LOGGED_IN,
+    failure: (raw) => claudeError(raw),
+  },
+  codex: { command: codexCommand, missing: codexMissing, paused: CODEX_PAUSED, notLoggedIn: CODEX_NOT_LOGGED_IN, failure: codexError },
+  opencode: {
+    command: opencodeCommand,
+    missing: opencodeMissing,
+    paused: OPENCODE_PAUSED,
+    notLoggedIn: OPENCODE_NOT_LOGGED_IN,
+    failure: opencodeError,
+  },
+};
+export const pausedWords = (agent: DriverId) => HARNESS[agent].paused;
+export const notLoggedIn = (agent: DriverId) => HARNESS[agent].notLoggedIn;
+const agentCommand = (agent: DriverId) => HARNESS[agent].command();
 
 // Whether the agent's CLI is on PATH (or where DESK_CLAUDE and the rest point), without running it.
 export function installed(agent: DriverId): boolean {
