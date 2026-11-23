@@ -374,3 +374,7 @@ It installs that release as a QA copy at `~/.inbox-qa/Inbox.app`, with its own h
 A desk run from a checkout (`npm run app`, `inbox serve`, Run from a checkout) never checks.
 
 **npm.** `npm publish` from the tagged commit ships `@gricha/inbox`: `prepack` compiles `src/` to `lib/` (Node won't run TypeScript from `node_modules`) and builds the web UI. An npm install has no Sentry SDK, so it reports nothing.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

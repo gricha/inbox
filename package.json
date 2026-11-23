@@ -3,7 +3,7 @@
   "productName": "Inbox",
   "version": "0.2.94",
   "description": "A local desk that sorts your GitHub review load into boards and a priority queue.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/gricha/inbox.git"
