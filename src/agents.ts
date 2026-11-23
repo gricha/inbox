@@ -93,7 +93,8 @@ const urlOf = (u: unknown) => Result.getOrNull(Result.try({ try: () => new URL(S
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 // cli.ts from source, cli.js in the published package.
-const CLI = fileURLToPath(new URL(`cli${path.extname(import.meta.filename)}`, import.meta.url));
+// Joined, not a template: a browser bundle (site/) would take a template here for an asset to ship.
+const CLI = fileURLToPath(new URL("cli" + path.extname(import.meta.filename ?? ""), import.meta.url));
 
 // An Inbox desk's entry, on any port: its /mcp on a loopback address, or `inbox mcp` (once `desk mcp`) over stdio (bin/inbox, bin/inbox.cmd, or
 // node on this desk's src/cli.ts) at the port `inbox mcp` takes from DESK_PORT as the desk does. Where that desk answers, or
