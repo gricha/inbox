@@ -444,7 +444,7 @@ Every commit keeps `npm run check` green and changes nothing you see. `test/plug
 10. **Order:** first pin the order and cap tests, then add `part`, `weight`, `capped`, `arrive` (read by `byPart`, the caps, `top()`, `notifyNew()`). `shown:` becomes generic.
 11. **`row()`:** `card()` fills its basics from it and gains `ref`. `Row.rank` carries `queueOrder`'s terms; `oneLinePerStack` reads `fold`.
 12. **The tray:** `cardLabel` (`electron/lib.ts`) reads `Card.ref`. Lands alone: it needs a rebuilt app (`npm run dist:mac`).
-13. **`row.extra`:** with every reader: CardRow, Review, Inflight, `web/src/view.ts` (`handsOff()`), Detail.tsx, RowMenu.tsx, mcp.ts, cli.ts. Run `npm run shots` (queue, review, merging, row menu) in every theme.
+13. **`row.extra`:** with every reader: CardRow, Review, Inflight, `Desk.handsOff()` in `src/desk.ts` (it sets `Card.hands_off`), Detail.tsx, RowMenu.tsx, mcp.ts, cli.ts. Run `npm run shots` (queue, review, merging, row menu) in every theme.
 14. **Events:** `ActivityKind` becomes `string` in the core (GitHub keeps its union); `wake()` replaces `wakeFor`.
 15. **`Desk.write` with approve** (`canApprove` moves into `write`). Tests: refusals keep their words; a second press is `Busy`; a comment during an approve goes through; a failed read-again still answers the url.
 16. **More menu, ready, Ask reviewers via `Desk.write`:** draft is `keep`, reopen `restore`, each read-again `then`, ready's reviewers `next`. Tests: a comment the read-again brings in still brings a closed or readied item back; a refused ready is still read again; a refused request_reviews answers `ReviewersNotAsked` with the ready kept; every write route answers 403 to anything but the window.
