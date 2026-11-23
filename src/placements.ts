@@ -2,9 +2,11 @@
 // with why: its row's why, the rule that placed it, Claude's answer, the criteria that said yes, its score, your moves. Kept
 // from the queue as the desk computes it (Desk.queue()), so it says what you'd have seen, and only when something moved.
 import { Result, Schema } from "effect";
-import type { Desk, Snapshot } from "./desk.ts";
+import type { Core, Desk, Snapshot } from "./desk.ts";
 import { decode } from "./narrow.ts";
 import { BUCKETS, type Card, type Placed, type PlacedEntry, type QueueView, type Where } from "./types.ts";
+
+type Host = Core & Pick<Desk, "urgency" | "card" | "placementOf">;
 
 const Bucketed = Schema.Literals(BUCKETS);
 const PlacedSchema = Schema.Struct({
@@ -46,10 +48,10 @@ function changes(was: Placed | undefined, is: Placed): string[] {
 }
 
 export class Placements {
-  desk: Desk;
+  desk: Host;
   last: Map<string, Placed> | null = null; // every item's latest, read once from the store
 
-  constructor(desk: Desk) {
+  constructor(desk: Host) {
     this.desk = desk;
   }
 

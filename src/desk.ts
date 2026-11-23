@@ -461,6 +461,12 @@ type IssueError = Conflict | FetchIssueError | ClaudeError;
 
 const PER_AGENT = ["agent.coordinator_model", "agent.coordinator_effort", "agent.light_model", "agent.light_effort"] as const;
 
+// What most of the desk's modules need of it; each adds the few of its own it calls.
+export type Core = Pick<
+  Desk,
+  "store" | "runner" | "log" | "changed" | "now" | "settings" | "stopped" | "home" | "me" | "snapshot" | "loaded" | "notify" | "mayNotify"
+>;
+
 export class Desk {
   store: Store;
   gh: GitHubConnector;
