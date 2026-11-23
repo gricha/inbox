@@ -3134,26 +3134,31 @@ export class Desk {
       const can = this.canApprove(e);
       if (!can.ok) return yield* new Conflict({ message: `can't approve ${id}: ${can.reason}` });
       if (head !== e.item.head_oid) return yield* new Stale({ message: `can't approve ${id}: it has new commits since you opened it` });
-      const write = Effect.gen({ self: this }, function* () {
-        const { url } = yield* this.writer!.approve(e.item.node_id, head, body).pipe(
-          Effect.mapError(upstream("GitHub didn't take the approval: ")),
-        );
-        this.store.logWrite(id, "approve", this.now().toISOString());
-        this.log(`approved ${id} on GitHub${url ? ` (${url})` : ""}`);
-        // A merge that's now yours keeps it on the desk, for Hand off for merge; Done still puts it away.
-        const approved: Item["reviews"][number] = {
-          author: this.me(),
-          author_bot: false,
-          state: "approved",
-          at: this.now().toISOString(),
-          commit: head,
-        };
-        const stays = mergeOwed({ ...e.item, reviews: [...e.item.reviews, approved] }, this.me());
-        if (!stays) yield* this.doneAfterWrite(id);
-        this.refreshAfter(id);
-        return { url, stays };
+      return yield* this.write({
+        id,
+        none: `can't approve ${id}: approving isn't available in this desk`,
+        locks: this.approving,
+        busy: `already approving ${id}`,
+        send: (w) => w.approve(e.item.node_id, head, body),
+        refused: "GitHub didn't take the approval: ",
+        kind: "approve",
+        said: ({ url }) => `approved ${id} on GitHub${url ? ` (${url})` : ""}`,
+        after: ({ url }) =>
+          Effect.gen({ self: this }, function* () {
+            // A merge that's now yours keeps it on the desk, for Hand off for merge; Done still puts it away.
+            const approved: Item["reviews"][number] = {
+              author: this.me(),
+              author_bot: false,
+              state: "approved",
+              at: this.now().toISOString(),
+              commit: head,
+            };
+            const stays = mergeOwed({ ...e.item, reviews: [...e.item.reviews, approved] }, this.me());
+            if (!stays) yield* this.doneAfterWrite(id);
+            this.refreshAfter(id);
+            return { url, stays };
+          }),
       });
-      return yield* this.locked(this.approving, id, `already approving ${id}`, write);
     });
   }
 
@@ -3178,6 +3183,35 @@ export class Desk {
         );
       }),
     );
+  }
+
+  // One of the desk's GitHub writes, once its own checks pass: the writer (`none` when this desk has none), one at a time
+  // per `key` (`busy` otherwise), GitHub's refusal in Upstream after `refused`, and the write logged as `kind` and `said`.
+  // `after` is the write's own bookkeeping; `always` (a re-read) follows whatever GitHub said.
+  private write<A, B, E>(o: {
+    id: string;
+    none: string;
+    locks: Set<string>;
+    key?: string;
+    busy: string;
+    send: (w: GitHubWriter) => Effect.Effect<A, GitHubWriteError>;
+    refused: string;
+    kind: string;
+    said: (a: A) => string;
+    after: (a: A, w: GitHubWriter) => Effect.Effect<B, E>;
+    always?: Effect.Effect<void>;
+  }): Effect.Effect<B, E | Conflict | Busy | Upstream> {
+    return Effect.suspend((): Effect.Effect<B, E | Conflict | Busy | Upstream> => {
+      const w = this.writer;
+      if (!w) return Effect.fail(new Conflict({ message: o.none }));
+      const write = Effect.gen({ self: this }, function* () {
+        const a = yield* o.send(w).pipe(Effect.mapError(upstream(o.refused)));
+        this.store.logWrite(o.id, o.kind, this.now().toISOString());
+        this.log(o.said(a));
+        return yield* o.after(a, w);
+      });
+      return this.locked(o.locks, o.key ?? o.id, o.busy, o.always ? Effect.ensuring(write, o.always) : write);
+    });
   }
 
   // The PR first (the search index lags), then the full pass, in one runner fiber so the desk stopping interrupts both.
@@ -3235,8 +3269,7 @@ export class Desk {
       const body = opts.body?.trim() ?? "";
       if (action === "request_changes" && !body) return yield* new BadRequest({ message: "say what needs to change" });
       if (body.length > MAX_REPLY) return yield* new BadRequest({ message: `keep it under ${MAX_REPLY} characters` });
-      const w = this.writer!;
-      const send = (): Effect.Effect<{ url: string }, GitHubWriteError> => {
+      const send = (w: GitHubWriter): Effect.Effect<{ url: string }, GitHubWriteError> => {
         const none = { url: "" };
         if (action === "close") return Effect.as(it.kind === "issue" ? w.closeIssue(it.node_id) : w.close(it.node_id), none);
         if (action === "draft") return Effect.as(w.draft(it.node_id), none);
@@ -3247,27 +3280,35 @@ export class Desk {
         if (action === "unrequest") return Effect.as(w.unrequest(it.repo, it.number, this.me()), none);
         return w.requestChanges(it.node_id, it.head_oid, body);
       };
-      const write = Effect.gen({ self: this }, function* () {
-        const { url } = yield* send().pipe(Effect.mapError(upstream(`couldn't ${verb} on GitHub: `)));
-        this.store.logWrite(id, action, this.now().toISOString());
-        this.log(`${done} on GitHub${url ? ` (${url})` : ""}`);
-        // Closed, merged or changes asked for: yours is done. Reopened: it's back on the desk. A draft is still yours to finish,
-        // as is one marked ready with nobody asked to review it.
-        if (action === "reopen") {
-          // The done its close put on it goes, and what it was before (snoozed, muted) comes back with it.
-          const ev = this.store.lastActionFor(id);
-          if (ev?.action === "done") yield* this.undo(ev.seq);
-          else if (this.store.state(id).done_at) yield* this.act(id, "restore");
-        } else if (action !== "draft" && !(action === "ready" && this.unaskedOnceReady(it))) yield* this.doneAfterWrite(id);
-        this.changed();
-        // Awaited, so the window and its u see it closed (actions() reads the snapshot this replaces); the runner's, so a stop cuts it.
-        const refresh = this.runner.fork("refresh", this.gh.refresh(id), id);
-        if (refresh) yield* Fiber.await(refresh);
-        // A refresh that failed or was skipped (rate limit) leaves the old state, which would offer the same write again.
-        if (action !== "request_changes") this.wrote.set(id, it.updated_at);
-        return { url };
+      const after = ({ url }: { url: string }) =>
+        Effect.gen({ self: this }, function* () {
+          // Closed, merged or changes asked for: yours is done. Reopened: it's back on the desk. A draft is still yours to finish,
+          // as is one marked ready with nobody asked to review it.
+          if (action === "reopen") {
+            // The done its close put on it goes, and what it was before (snoozed, muted) comes back with it.
+            const ev = this.store.lastActionFor(id);
+            if (ev?.action === "done") yield* this.undo(ev.seq);
+            else if (this.store.state(id).done_at) yield* this.act(id, "restore");
+          } else if (action !== "draft" && !(action === "ready" && this.unaskedOnceReady(it))) yield* this.doneAfterWrite(id);
+          this.changed();
+          // Awaited, so the window and its u see it closed (actions() reads the snapshot this replaces); the runner's, so a stop cuts it.
+          const refresh = this.runner.fork("refresh", this.gh.refresh(id), id);
+          if (refresh) yield* Fiber.await(refresh);
+          // A refresh that failed or was skipped (rate limit) leaves the old state, which would offer the same write again.
+          if (action !== "request_changes") this.wrote.set(id, it.updated_at);
+          return { url };
+        });
+      return yield* this.write({
+        id,
+        none: `can't ${verb} now`,
+        locks: this.approving,
+        busy: `already writing to ${id} on GitHub`,
+        send,
+        refused: `couldn't ${verb} on GitHub: `,
+        kind: action,
+        said: ({ url }) => `${done} on GitHub${url ? ` (${url})` : ""}`,
+        after,
       });
-      return yield* this.locked(this.approving, id, `already writing to ${id} on GitHub`, write);
     });
   }
 
@@ -4112,18 +4153,19 @@ export class Desk {
       if (!e.analysis.signals.me.author) return yield* new Conflict({ message: `${id} isn't your PR` });
       if (e.item.state !== "open" || e.item.draft) return yield* new Conflict({ message: `${id} isn't open and ready for review` });
       if (!ask.users.length && !ask.teams.length) return yield* new BadRequest({ message: "pick someone to ask" });
-      const writer = this.writer;
-      if (!writer) return yield* new Conflict({ message: "asking for reviews isn't available in this desk" });
-      const write = Effect.gen({ self: this }, function* () {
-        yield* writer
-          .requestReviews(e.item.node_id, ask.users, ask.teams)
-          .pipe(Effect.mapError(upstream("GitHub didn't ask for the reviews: ")));
-        this.store.logWrite(id, "request_reviews", this.now().toISOString());
-        const n = ask.users.length + ask.teams.length;
-        this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
-        if (!keep) yield* this.doneAfterWrite(id);
-      }).pipe(Effect.ensuring(this.refreshed(id)));
-      return yield* this.locked(this.approving, id, `already asking on ${id}`, write);
+      const n = ask.users.length + ask.teams.length;
+      return yield* this.write({
+        id,
+        none: "asking for reviews isn't available in this desk",
+        locks: this.approving,
+        busy: `already asking on ${id}`,
+        send: (w) => w.requestReviews(e.item.node_id, ask.users, ask.teams),
+        refused: "GitHub didn't ask for the reviews: ",
+        kind: "request_reviews",
+        said: () => `asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`,
+        after: () => (keep ? Effect.void : this.doneAfterWrite(id)),
+        always: this.refreshed(id),
+      });
     });
   }
 
@@ -4143,16 +4185,20 @@ export class Desk {
       const reviewed = rerequestable(it).find((l) => l.toLowerCase() === who);
       if (act === "remove" && !asked) return yield* new Conflict({ message: `${login} isn't asked to review ${id}` });
       if (act === "rerequest" && (!reviewed || it.draft)) return yield* new Conflict({ message: `${login} can't be asked again on ${id}` });
-      const writer = this.writer;
-      if (!writer) return yield* new Conflict({ message: "changing reviewers isn't available in this desk" });
       const name = asked?.reviewer ?? reviewed ?? login;
-      const write = Effect.gen({ self: this }, function* () {
-        const sent = act === "remove" ? writer.unrequest(it.repo, it.number, name) : writer.rerequest(it.node_id, [name]);
-        yield* sent.pipe(Effect.mapError(upstream(act === "remove" ? "GitHub didn't remove the reviewer: " : "GitHub didn't ask again: ")));
-        this.store.logWrite(id, act === "remove" ? "unrequest" : "rerequest", this.now().toISOString());
-        this.log(act === "remove" ? `removed ${name} as a reviewer of ${id} on GitHub` : `asked ${name} again to review ${id} on GitHub`);
-      }).pipe(Effect.ensuring(this.refreshed(id)));
-      return yield* this.locked(this.approving, id, `already changing reviewers on ${id}`, write);
+      const remove = act === "remove";
+      return yield* this.write({
+        id,
+        none: "changing reviewers isn't available in this desk",
+        locks: this.approving,
+        busy: `already changing reviewers on ${id}`,
+        send: (w) => (remove ? w.unrequest(it.repo, it.number, name) : w.rerequest(it.node_id, [name])),
+        refused: remove ? "GitHub didn't remove the reviewer: " : "GitHub didn't ask again: ",
+        kind: remove ? "unrequest" : "rerequest",
+        said: () => (remove ? `removed ${name} as a reviewer of ${id} on GitHub` : `asked ${name} again to review ${id} on GitHub`),
+        after: () => Effect.void,
+        always: this.refreshed(id),
+      });
     });
   }
 
@@ -4709,27 +4755,33 @@ export class Desk {
       if (e.item.state !== "open") return yield* new Conflict({ message: `can't reply on ${id}: it's ${e.item.state}` });
       if (!text) return yield* new BadRequest({ message: "the reply is empty" });
       if (text.length > MAX_REPLY) return yield* new BadRequest({ message: `keep a reply under ${MAX_REPLY} characters` });
-      const writer = this.writer;
-      if (!writer) return yield* new Conflict({ message: "replying isn't available in this desk" });
+      if (!this.writer) return yield* new Conflict({ message: "replying isn't available in this desk" });
       const list = yield* this.convos.list(id).pipe(Effect.mapError(upstream("couldn't read the PR's conversations: ")));
       const c = list.find((x) => x.id === convoId);
       if (!c) return yield* new NotFound({ message: `no conversation "${convoId}" on ${id}` });
-      const write = Effect.gen({ self: this }, function* () {
-        const { url } = yield* (c.kind === "thread" ? writer.reply(c.id, text) : writer.comment(e.item.node_id, text)).pipe(
-          Effect.mapError(upstream("GitHub didn't take the reply: ")),
-        );
-        this.store.logWrite(id, c.kind === "thread" ? "reply" : "comment", this.now().toISOString());
-        this.log(`replied on ${id} to ${c.comments.at(-1)?.author ?? ""}${url ? ` (${url})` : ""}`);
-        // Answering was all it asked of you, and nobody else waits on you there: it's done.
-        const last = !list.some((x) => x.waiting_on_you && x.id !== convoId);
-        const only = this.replyOnly(e) && !this.snapshot().unasked.has(id); // with nobody asked, Add reviewers still waits
-        yield* this.convos.drop(id);
-        if (only && last) yield* this.doneAfterWrite(id);
-        this.changed();
-        this.refreshAfter(id);
-        return { url };
+      const after = ({ url }: { url: string }) =>
+        Effect.gen({ self: this }, function* () {
+          // Answering was all it asked of you, and nobody else waits on you there: it's done.
+          const last = !list.some((x) => x.waiting_on_you && x.id !== convoId);
+          const only = this.replyOnly(e) && !this.snapshot().unasked.has(id); // with nobody asked, Add reviewers still waits
+          yield* this.convos.drop(id);
+          if (only && last) yield* this.doneAfterWrite(id);
+          this.changed();
+          this.refreshAfter(id);
+          return { url };
+        });
+      return yield* this.write({
+        id,
+        none: "replying isn't available in this desk",
+        locks: this.sending,
+        key: convoId,
+        busy: "already sending that reply",
+        send: (w) => (c.kind === "thread" ? w.reply(c.id, text) : w.comment(e.item.node_id, text)),
+        refused: "GitHub didn't take the reply: ",
+        kind: c.kind === "thread" ? "reply" : "comment",
+        said: ({ url }) => `replied on ${id} to ${c.comments.at(-1)?.author ?? ""}${url ? ` (${url})` : ""}`,
+        after,
       });
-      return yield* this.locked(this.sending, convoId, "already sending that reply", write);
     });
   }
 
@@ -4745,18 +4797,23 @@ export class Desk {
       if (e.item.state !== "open") return yield* new Conflict({ message: `can't comment on ${id}: it's ${e.item.state}` });
       if (!text) return yield* new BadRequest({ message: "the comment is empty" });
       if (text.length > MAX_REPLY) return yield* new BadRequest({ message: `keep a comment under ${MAX_REPLY} characters` });
-      const writer = this.writer;
-      if (!writer) return yield* new Conflict({ message: "commenting isn't available in this desk" });
-      const write = Effect.gen({ self: this }, function* () {
-        const { url } = yield* writer.comment(e.item.node_id, text).pipe(Effect.mapError(upstream("GitHub didn't take the comment: ")));
-        this.store.logWrite(id, "comment", this.now().toISOString());
-        this.log(`commented on ${id}${url ? ` (${url})` : ""}`);
-        yield* this.convos.drop(id);
-        yield* this.doneAfterWrite(id);
-        this.refreshAfter(id);
-        return { url };
+      return yield* this.write({
+        id,
+        none: "commenting isn't available in this desk",
+        locks: this.sending,
+        busy: "already sending a comment there",
+        send: (w) => w.comment(e.item.node_id, text),
+        refused: "GitHub didn't take the comment: ",
+        kind: "comment",
+        said: ({ url }) => `commented on ${id}${url ? ` (${url})` : ""}`,
+        after: ({ url }) =>
+          Effect.gen({ self: this }, function* () {
+            yield* this.convos.drop(id);
+            yield* this.doneAfterWrite(id);
+            this.refreshAfter(id);
+            return { url };
+          }),
       });
-      return yield* this.locked(this.sending, id, "already sending a comment there", write);
     });
   }
 
@@ -4771,8 +4828,6 @@ export class Desk {
       if (e.item.state !== "open") return yield* new Conflict({ message: `can't comment on ${id}: it's ${e.item.state}` });
       if (!text) return yield* new BadRequest({ message: "the comment is empty" });
       if (text.length > MAX_REPLY) return yield* new BadRequest({ message: `keep a comment under ${MAX_REPLY} characters` });
-      const writer = this.writer;
-      if (!writer) return yield* new Conflict({ message: "commenting isn't available in this desk" });
       const side = (s: "new" | "old") => (s === "old" ? "LEFT" : "RIGHT");
       const thread: InlineThread = {
         path: at.path,
@@ -4782,18 +4837,24 @@ export class Desk {
           !(at.start.line === at.line && at.start.side === at.side) && { startLine: at.start.line, startSide: side(at.start.side) }),
         body: text,
       };
-      const write = Effect.gen({ self: this }, function* () {
-        const { url } = yield* writer
-          .inlineComment(e.item.node_id, head, thread)
-          .pipe(Effect.mapError(upstream("GitHub didn't take the comment: ")));
-        this.store.logWrite(id, "inline_comment", this.now().toISOString());
-        this.log(`commented on ${id} at ${at.path}:${at.line}${url ? ` (${url})` : ""}`);
-        yield* this.convos.drop(id);
-        this.changed();
-        this.refreshAfter(id);
-        return { url };
+      return yield* this.write({
+        id,
+        none: "commenting isn't available in this desk",
+        locks: this.sending,
+        key: `${id} ${at.path}:${at.line}`,
+        busy: "already sending a comment there",
+        send: (w) => w.inlineComment(e.item.node_id, head, thread),
+        refused: "GitHub didn't take the comment: ",
+        kind: "inline_comment",
+        said: ({ url }) => `commented on ${id} at ${at.path}:${at.line}${url ? ` (${url})` : ""}`,
+        after: ({ url }) =>
+          Effect.gen({ self: this }, function* () {
+            yield* this.convos.drop(id);
+            this.changed();
+            this.refreshAfter(id);
+            return { url };
+          }),
       });
-      return yield* this.locked(this.sending, `${id} ${at.path}:${at.line}`, "already sending a comment there", write);
     });
   }
 
@@ -4807,32 +4868,40 @@ export class Desk {
       const id = e.item.id;
       if (!e.analysis.signals.me.author) return yield* new Conflict({ message: `${id} isn't your PR` });
       if (e.item.state !== "open" || !e.item.draft) return yield* new Conflict({ message: `${id} isn't an open draft` });
-      const writer = this.writer;
-      if (!writer) return yield* new Conflict({ message: "marking ready isn't available in this desk" });
-      const write = Effect.gen({ self: this }, function* () {
-        yield* writer.ready(e.item.node_id).pipe(Effect.mapError(upstream("GitHub didn't mark it ready: ")));
-        this.store.logWrite(id, "ready", this.now().toISOString());
-        this.log(`marked ${id} ready for review on GitHub`);
-        const users = ask?.users ?? [];
-        const teams = ask?.teams ?? [];
-        const n = users.length + teams.length;
-        if (n > 0) {
-          yield* writer
-            .requestReviews(e.item.node_id, users, teams)
-            .pipe(
+      const after = (_: void, writer: GitHubWriter) =>
+        Effect.gen({ self: this }, function* () {
+          const users = ask?.users ?? [];
+          const teams = ask?.teams ?? [];
+          const n = users.length + teams.length;
+          if (n > 0) {
+            yield* writer.requestReviews(e.item.node_id, users, teams).pipe(
               Effect.mapError(
                 (err) =>
-                  new ReviewersNotAsked({ message: `Marked it ready, but GitHub didn't ask for the reviews: ${err.message}`, cause: err }),
+                  new ReviewersNotAsked({
+                    message: `Marked it ready, but GitHub didn't ask for the reviews: ${err.message}`,
+                    cause: err,
+                  }),
               ),
             );
-          this.store.logWrite(id, "request_reviews", this.now().toISOString());
-          this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
-        }
-        const done = n > 0 || !this.unaskedOnceReady(e.item);
-        if (done) yield* this.doneAfterWrite(id);
-        return { done };
-      }).pipe(Effect.ensuring(this.refreshed(id)));
-      return yield* this.locked(this.approving, id, `already marking ${id} ready`, write);
+            this.store.logWrite(id, "request_reviews", this.now().toISOString());
+            this.log(`asked ${n} reviewer${n === 1 ? "" : "s"} on ${id} on GitHub`);
+          }
+          const done = n > 0 || !this.unaskedOnceReady(e.item);
+          if (done) yield* this.doneAfterWrite(id);
+          return { done };
+        });
+      return yield* this.write({
+        id,
+        none: "marking ready isn't available in this desk",
+        locks: this.approving,
+        busy: `already marking ${id} ready`,
+        send: (w) => w.ready(e.item.node_id),
+        refused: "GitHub didn't mark it ready: ",
+        kind: "ready",
+        said: () => `marked ${id} ready for review on GitHub`,
+        after,
+        always: this.refreshed(id),
+      });
     });
   }
 
