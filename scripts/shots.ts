@@ -4475,23 +4475,24 @@ const SHOTS: Shot[] = [
   { name: "settings-queue", go: at("#/settings/queue") },
   { name: "settings-usage", go: at("#/settings/usage") },
   {
-    // Sessions' own part, a plugin's under GitHub in the sidebar: its switch and the model's read, Stalled after behind
-    // More, and no Automations heading, as it comes with none.
+    // Sessions' own part, a plugin's under GitHub in the sidebar: its switch and the model's read, Stalled after under
+    // More Sessions settings (always open), and no Automations heading, as it comes with none.
     name: "settings-sessions",
     go: async (page) => {
       await at("#/settings/sessions")(page);
-      const part = await page.evaluate<{ rows: string[]; heads: number; side: string[] }>(`(() => {
+      const part = await page.evaluate<{ rows: string[]; heads: string[] }>(`(() => {
         const s = document.querySelector("#s-sessions");
         return {
           rows: [...s.querySelectorAll(".setting:not([hidden]) .s-label")].map((el) => el.textContent.trim()),
-          heads: s.querySelectorAll(".group-head").length,
-          side: [...document.querySelectorAll(".side-nav .side-name")].map((el) => el.textContent.trim()).slice(-2),
+          heads: [...s.querySelectorAll(".group-head")].map((el) => el.textContent.trim()),
         };
       })()`);
-      if (part.rows.join(" · ") !== "Show sessions that need you · Ask your agent whether a question waits on you")
+      if (part.rows.join(" · ") !== "Show sessions that need you · Ask your agent whether a question waits on you · Stalled after")
         failures.push(`settings-sessions: its rows read ${JSON.stringify(part.rows)}`);
-      if (part.heads) failures.push("settings-sessions: it has an Automations heading with nothing under it");
-      if (part.side.join(" · ") !== "GitHub · Sessions") failures.push(`settings-sessions: the sidebar ends ${JSON.stringify(part.side)}`);
+      if (part.heads.join(" · ") !== "More Sessions settings")
+        failures.push(`settings-sessions: its headings read ${JSON.stringify(part.heads)}`);
+      const says = await settingsSays(page);
+      if (says !== onPart("Sessions")) failures.push(`settings-sessions: the head and the sidebar read ${JSON.stringify(says)}`);
     },
   },
   {
