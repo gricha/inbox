@@ -3,7 +3,7 @@
 // The wire).
 
 import { Data, Effect } from "effect";
-import type { ErrorBody } from "./errors.ts";
+import { refusalOf, type ErrorBody } from "./errors.ts";
 import { codeOf, field, isKeyOf } from "./narrow.ts";
 import {
   UNTIL,
@@ -110,24 +110,15 @@ export class DeskApiError extends Data.TaggedError("DeskApiError")<{
 
 export type ClientError = DeskDown | DeskNoAnswer | DeskApiError;
 
-const BY_STATUS: Partial<Record<number, ErrorBody["tag"]>> = {
-  400: "BadRequest",
-  401: "Unauthorized",
-  403: "Forbidden",
-  404: "NotFound",
-  409: "Conflict",
-  429: "TooManyRequests",
-  502: "Upstream",
-  503: "Unavailable",
-};
-
 function refusal(status: number, data: unknown): DeskApiError {
-  const b = (typeof data === "object" && data !== null ? data : {}) as Partial<ErrorBody>;
-  const said = b.error ?? "";
-  const candidates = b.candidates ?? [];
-  const tag = b.tag ?? (status === 409 && candidates.length ? "AmbiguousRef" : (BY_STATUS[status] ?? "Internal"));
-  const reason = status === 503 ? (b.reason ?? (said.includes("config") ? "config" : "starting")) : undefined;
-  return new DeskApiError({ status, said, tag, candidates, ...(reason && { reason }) });
+  const r = refusalOf(status, data);
+  return new DeskApiError({
+    status,
+    said: r.error ?? "",
+    tag: r.tag,
+    candidates: r.candidates ?? [],
+    ...(r.reason && { reason: r.reason }),
+  });
 }
 
 // DESK_URL: a desk on another machine, at its tailnet address (DESK_TOKEN is its device token); else this machine's.

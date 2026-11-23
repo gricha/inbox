@@ -2,7 +2,7 @@
 // from the desk's error answer ({ error, tag, candidates?, reason? }, docs/effect.md → The wire). Components run them
 // through runUi and answer for each failure themselves: a toast, a line on the page, the down banner.
 import { Cause, Data, Effect, Exit } from "effect";
-import type { ErrorBody } from "../../src/errors.ts";
+import { refusalOf, type ErrorBody } from "../../src/errors.ts";
 import type {
   BrandIcon,
   ItemRule,
@@ -47,7 +47,6 @@ import type {
   UpdateView,
   UsageView,
 } from "../../src/types.ts";
-import { field, isKeyOf, oneOf, str, strings } from "../../src/narrow.ts";
 import { report } from "./sentry.ts";
 
 // ---------------------------------------------------------------- what an API call fails with
@@ -113,56 +112,18 @@ export class LayoutFailed extends Data.TaggedError("LayoutFailed")<{ readonly ca
 
 // ---------------------------------------------------------------- calls
 
-// An older desk sends no tag: its status says it.
-const BY_STATUS: Partial<Record<number, ErrorBody["tag"]>> = {
-  400: "BadRequest",
-  401: "Unauthorized",
-  403: "Forbidden",
-  404: "NotFound",
-  409: "Conflict",
-  429: "TooManyRequests",
-  502: "Upstream",
-  503: "Unavailable",
-};
 // Saving over a base that changed is the only 409 these answer, whatever tag the desk sends.
 const STALE = new Set(["PUT /api/config", "PUT /api/config/builtin"]);
 
-// Every tag the wire can carry, so an answer's tag is checked, not trusted.
-const TAGS = {
-  BadRequest: true,
-  Unauthorized: true,
-  Forbidden: true,
-  NotFound: true,
-  TooManyRequests: true,
-  AmbiguousRef: true,
-  Conflict: true,
-  Stale: true,
-  Busy: true,
-  Upstream: true,
-  ReviewersNotAsked: true,
-  Unavailable: true,
-  Internal: true,
-} satisfies Record<ErrorBody["tag"], true>;
-
 // body: the refusal's JSON, or null when it didn't parse.
 function refusal(status: number, body: unknown, statusText: string, stale: boolean): ApiError {
-  const message = str(field(body, "error")) ?? (statusText || String(status));
-  const candidates = strings(field(body, "candidates"));
-  const sent = field(body, "tag");
-  const tag =
-    typeof sent === "string" && isKeyOf(TAGS, sent)
-      ? sent
-      : status === 409 && candidates?.length
-        ? "AmbiguousRef"
-        : (BY_STATUS[status] ?? "Internal");
+  const { tag, error, candidates, reason } = refusalOf(status, body);
+  const message = error ?? (statusText || String(status));
   const more = candidates ? { candidates } : {};
   if (status === 409 && stale) return new DeskConflict({ message, kind: "Stale", ...more });
   if (tag === "AmbiguousRef" || tag === "Stale" || tag === "Busy" || tag === "Conflict")
     return new DeskConflict({ message, kind: tag, ...more });
-  if (tag === "Unavailable")
-    return (oneOf(["starting", "config"], field(body, "reason")) ?? (message.includes("config") ? "config" : "starting")) === "config"
-      ? new DeskConfigBroken({ message })
-      : new DeskStarting({ message });
+  if (tag === "Unavailable") return reason === "config" ? new DeskConfigBroken({ message }) : new DeskStarting({ message });
   if (tag === "ReviewersNotAsked") return new DeskReviewersNotAsked({ message });
   return new DeskRequestFailed({ message, status, kind: tag });
 }

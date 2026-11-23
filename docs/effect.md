@@ -207,8 +207,8 @@ Each boundary runs an Effect and answers for whatever fails.
 
 ### The wire
 
-An error answers `{ error, tag, candidates?, reason? }`. Every reader (the client, the CLI, MCP, the UI) decodes
-`tag ?? BY_STATUS[status]` (409 with candidates is `AmbiguousRef`; unknown is `Internal`), and a 503's
+An error answers `{ error, tag, candidates?, reason? }`. Every reader (the client, the CLI, MCP, the UI) decodes it
+with `refusalOf()` in `src/errors.ts`: a known `tag ?? BY_STATUS[status]` (409 with candidates is `AmbiguousRef`; unknown is `Internal`), and a 503's
 `reason ?? (error includes "config" ? "config" : "starting")`, so an older desk without tags still reads right. In the
 UI, a 409 from PUT `/api/config` is `Stale` whatever its tag, and a reply that isn't JSON means the desk
 is unreachable.

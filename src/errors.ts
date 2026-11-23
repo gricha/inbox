@@ -3,7 +3,7 @@
 // inside Effect code, or Effect.die) and never gets a class here. docs/effect.md has the rules. Tags are unique across
 // families (GitHub's 403 is GitHubHttpError with its status, or GitHubRateLimited for a read's rate limit; never Forbidden).
 import { Data } from "effect";
-import { codeOf } from "./narrow.ts";
+import { codeOf, field, isKeyOf, oneOf, str, strings } from "./narrow.ts";
 
 // What was thrown, in its words: an Error's message, else the value as text.
 export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -134,7 +134,7 @@ export const isDeskHttpError = (u: unknown): u is DeskHttpError => HTTP_CLASSES.
 
 // The JSON an HTTP error answers with. error and candidates are what every client read before tags; tag (and reason for
 // a 503) let the UI and the CLI tell refusals apart without matching words. "Internal" is a 500: a failure or a bug the
-// desk didn't expect. Readers decode `tag ?? fromStatus(status)`: older desks send no tag.
+// desk didn't expect. Readers decode it with refusalOf(): older desks send no tag.
 export type ErrorBody = {
   error: string;
   tag: DeskHttpError["_tag"] | "Internal";
@@ -146,6 +146,54 @@ export function errorBody(e: DeskHttpError): ErrorBody {
   if (e._tag === "AmbiguousRef") return { error: e.message, tag: e._tag, candidates: [...e.candidates] };
   if (e._tag === "Unavailable") return { error: e.message, tag: e._tag, reason: e.reason };
   return { error: e.message, tag: e._tag };
+}
+
+// An older desk sends no tag: its status says it.
+const BY_STATUS: Partial<Record<number, ErrorBody["tag"]>> = {
+  400: "BadRequest",
+  401: "Unauthorized",
+  403: "Forbidden",
+  404: "NotFound",
+  409: "Conflict",
+  429: "TooManyRequests",
+  502: "Upstream",
+  503: "Unavailable",
+};
+
+// Every tag the wire can carry, so an answer's tag is checked, not trusted.
+const ERROR_TAGS = {
+  BadRequest: true,
+  Unauthorized: true,
+  Forbidden: true,
+  NotFound: true,
+  TooManyRequests: true,
+  AmbiguousRef: true,
+  Conflict: true,
+  Stale: true,
+  Busy: true,
+  Upstream: true,
+  ReviewersNotAsked: true,
+  Unavailable: true,
+  Internal: true,
+} satisfies Record<ErrorBody["tag"], true>;
+
+// A refusal as the CLI and the window read it. body is its JSON, or null when it didn't parse; an older desk's 503 has no
+// reason, so its words say it.
+export function refusalOf(status: number, body: unknown): Partial<ErrorBody> & Pick<ErrorBody, "tag"> {
+  const error = str(field(body, "error"));
+  const candidates = strings(field(body, "candidates"));
+  const sent = field(body, "tag");
+  const tag =
+    typeof sent === "string" && isKeyOf(ERROR_TAGS, sent)
+      ? sent
+      : status === 409 && candidates?.length
+        ? "AmbiguousRef"
+        : (BY_STATUS[status] ?? "Internal");
+  const reason =
+    tag === "Unavailable"
+      ? (oneOf(["starting", "config"], field(body, "reason")) ?? (error?.includes("config") ? "config" : "starting"))
+      : undefined;
+  return { tag, ...(error !== undefined && { error }), ...(candidates && { candidates }), ...(reason && { reason }) };
 }
 
 // ---------------------------------------------------------------- the desk's own server
