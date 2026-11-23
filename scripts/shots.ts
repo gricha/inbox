@@ -4932,7 +4932,7 @@ const SHOTS: Shot[] = [
       const said = () =>
         page.evaluate<boolean>(`[...document.querySelectorAll(".err-row, .foot-err")].some((el) => {
           const r = el.getBoundingClientRect();
-          return r.height > 0 && r.top >= 0 && r.bottom <= innerHeight && el.textContent.includes('"soon" is not a bucket');
+          return r.height > 0 && r.top >= 0 && r.bottom <= innerHeight && el.textContent.includes("must be one of now, today");
         })`);
       await page.getByRole("button", { name: "Preview changes" }).click();
       await page.locator(".err-row").first().waitFor();
