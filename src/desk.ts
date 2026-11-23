@@ -193,7 +193,9 @@ import {
   arrayOf,
   AskSchema,
   BlockedSchema,
+  type Blocked,
   IssueFailSchema,
+  type IssueFail,
   IssueReviewSchema,
   KeptInquirySchema,
   MergingSchema,
@@ -2973,7 +2975,7 @@ export class Desk {
   }
 
   // Its last failed try: on which version of the issue, why, and when.
-  issueFailure(id: string): { updated_at: string; error: string; at: string } | null {
+  issueFailure(id: string): IssueFail | null {
     return this.store.read(`issue_fail:${id}`, IssueFailSchema);
   }
 
@@ -4108,7 +4110,7 @@ export class Desk {
     const listed = new Set<string>();
     for (const b of snap.boards.values()) for (const id of b.result.placements.keys()) listed.add(id);
     const now = this.now().toISOString();
-    const next: Record<string, { since: string; by: string }> = {};
+    const next: Record<string, Blocked[string]> = {};
     const events: NewEvent[] = [];
     for (const e of snap.entries.values()) {
       const it = e.item;

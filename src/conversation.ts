@@ -6,7 +6,7 @@ import { Cache, Cause, Duration, Effect, Exit, Result, Schema, type Fiber } from
 import type { Core, Desk } from "./desk.ts";
 import { messageOf, type GitHubReadError } from "./errors.ts";
 import type { PrContext } from "./github/index.ts";
-import { decode, field, str } from "./narrow.ts";
+import { decode, field, schemaOf, str } from "./narrow.ts";
 import type { Conversation, Item, ReviewState, ReviewView, Take } from "./types.ts";
 import { report } from "./sentry.ts";
 import { pushedAt, threadWaitsOnYou, waitsOnYou } from "./stage.ts";
@@ -22,9 +22,8 @@ const CONTEXTS = 200; // PRs whose conversation is kept, the least recently aske
 type Said = PrContext["comments"][number];
 type Convo = Omit<Conversation, "take">;
 type Takes = Record<string, Take>; // by conversation id, kept per PR as take:<pr id>
-const TAKES = Schema.Record(
-  Schema.String,
-  Schema.Struct({ gist: Schema.String, take: Schema.String, comment_id: Schema.String, at: Schema.String }),
+const TAKES = schemaOf<Takes>()(
+  Schema.Record(Schema.String, Schema.Struct({ gist: Schema.String, take: Schema.String, comment_id: Schema.String, at: Schema.String })),
 );
 // What's kept for a PR: none when nothing is, or what's there isn't takes.
 const keptTakes = (v: unknown): Takes => Result.getOrElse(decode(TAKES, v), () => ({}));

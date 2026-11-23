@@ -15,7 +15,7 @@ import {
   type GitHubReadError,
 } from "../errors.ts";
 import type { GitHub, SearchHit } from "../github/index.ts";
-import { decode, isRecord, str } from "../narrow.ts";
+import { decode, isRecord, schemaOf, str } from "../narrow.ts";
 import type { CompiledBoard } from "../rules.ts";
 import { buildStacks, probeKey, toFetch, type Probe } from "../stacks.ts";
 import type { BuiltInAutomation, BuiltInCriterion, BuiltInRules, ConnectorStatus, Context, Item } from "../types.ts";
@@ -52,26 +52,30 @@ interface Feed {
   interval: number; // seconds, from X-Poll-Interval
   seen: Record<string, { at: string; reason: string }>; // thread id → the update already handled
 }
-const FEED = Schema.Struct({
-  since: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  last_modified: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  interval: Schema.optionalKey(Schema.Number),
-  seen: Schema.optionalKey(Schema.Record(Schema.String, Schema.Struct({ at: Schema.String, reason: Schema.String }))),
-});
+const FEED = schemaOf<Partial<Feed>>()(
+  Schema.Struct({
+    since: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    last_modified: Schema.optionalKey(Schema.NullOr(Schema.String)),
+    interval: Schema.optionalKey(Schema.Number),
+    seen: Schema.optionalKey(Schema.Record(Schema.String, Schema.Struct({ at: Schema.String, reason: Schema.String }))),
+  }),
+);
 const COUNTS = Schema.Record(Schema.String, Schema.Number);
 const STRINGS = Schema.mutable(Schema.Array(Schema.String));
-const CONTEXT = Schema.Struct({
-  me: Schema.String,
-  name: Schema.optionalKey(Schema.String),
-  teams: STRINGS,
-  affinity: COUNTS,
-  repo_prs: COUNTS,
-  orgs: COUNTS,
-  recent: Schema.optionalKey(STRINGS),
-  refreshed_at: Schema.String,
-  areas: Schema.optionalKey(Schema.Record(Schema.String, COUNTS)),
-  areas_at: Schema.optionalKey(Schema.String),
-});
+const CONTEXT = schemaOf<Context>()(
+  Schema.Struct({
+    me: Schema.String,
+    name: Schema.optionalKey(Schema.String),
+    teams: STRINGS,
+    affinity: COUNTS,
+    repo_prs: COUNTS,
+    orgs: COUNTS,
+    recent: Schema.optionalKey(STRINGS),
+    refreshed_at: Schema.String,
+    areas: Schema.optionalKey(Schema.Record(Schema.String, COUNTS)),
+    areas_at: Schema.optionalKey(Schema.String),
+  }),
+);
 
 const hitOf = (
   id: string,

@@ -5,6 +5,7 @@ import { NoteButtonSchema } from "./automation-body.ts";
 import { schemaOf } from "./narrow.ts";
 import {
   BUCKETS,
+  INBOX_SECTIONS,
   type AiReview,
   type Ask,
   type Bucket,
@@ -49,7 +50,7 @@ const opt = Schema.optionalKey;
 const lineSide = Schema.Literals(["new", "old"]);
 export const PlaceSchema = schemaOf<Place>()(
   Schema.Struct({
-    section: Schema.Literals(["urgent", "standard", "fyi"]),
+    section: Schema.Literals(INBOX_SECTIONS),
     rank: Schema.Number,
     after: opt(Schema.String),
     before: opt(Schema.String),
@@ -85,6 +86,7 @@ export const MergingSchema = schemaOf<Merging>()(
   }),
 );
 export const BlockedSchema = Schema.Record(Schema.String, Schema.Struct({ since: Schema.String, by: Schema.String }));
+export type Blocked = typeof BlockedSchema.Type;
 const ReviewNoteSchema = Schema.Struct({ path: Schema.String, line: Schema.Number, side: lineSide, body: Schema.String });
 const DiagramGraphSchema = Schema.Union([
   Schema.Struct({
@@ -221,6 +223,7 @@ export const IssueReviewSchema = schemaOf<IssueReview>()(
   }),
 );
 export const IssueFailSchema = Schema.Struct({ updated_at: Schema.String, error: Schema.String, at: Schema.String });
+export type IssueFail = typeof IssueFailSchema.Type;
 const ReviewFileSchema = schemaOf<ReviewFile>()(
   Schema.Struct({
     path: Schema.String,
@@ -317,7 +320,7 @@ export const NoteSchema = schemaOf<Omit<Note, "waiting" | "facts">>()(
     text: Schema.String,
     remind_at: Schema.NullOr(Schema.String),
     reminded_at: Schema.NullOr(Schema.String),
-    section: opt(Schema.Literals(["urgent", "standard", "fyi"])),
+    section: opt(Schema.Literals(INBOX_SECTIONS)),
     from: opt(Schema.Struct({ id: Schema.String, name: Schema.String })),
     body: opt(Schema.String),
     url: opt(Schema.String),

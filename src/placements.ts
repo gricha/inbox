@@ -3,32 +3,36 @@
 // from the queue as the desk computes it (Desk.queue()), so it says what you'd have seen, and only when something moved.
 import { Result, Schema } from "effect";
 import type { Core, Desk, Snapshot } from "./desk.ts";
-import { decode } from "./narrow.ts";
-import { BUCKETS, type Card, type Placed, type PlacedEntry, type QueueView, type Where } from "./types.ts";
+import { decode, schemaOf } from "./narrow.ts";
+import { BUCKETS, INBOX_SECTIONS, WHERES, type Card, type Placed, type PlacedEntry, type QueueView, type Where } from "./types.ts";
 
 type Host = Core & Pick<Desk, "urgency" | "card" | "placementOf">;
 
 const Bucketed = Schema.Literals(BUCKETS);
-const PlacedSchema = Schema.Struct({
-  where: Schema.Literals(["urgent", "standard", "fyi", "blocked", "hidden", "cleared", "resolved", "gone"]),
-  score: Schema.optionalKey(Schema.Number),
-  reason: Schema.String,
-  rule: Schema.optionalKey(
-    Schema.Struct({
-      board: Schema.String,
-      path: Schema.optionalKey(Schema.String),
-      id: Schema.optionalKey(Schema.String),
-      why: Schema.String,
-      when: Schema.String,
-      bucket: Schema.Union([Bucketed, Schema.Literal("judge")]),
-    }),
-  ),
-  judge: Schema.optionalKey(Schema.Struct({ bucket: Schema.NullOr(Bucketed), why: Schema.String, by: Schema.optionalKey(Schema.String) })),
-  criteria: Schema.optionalKey(Schema.Array(Schema.String)),
-  moved: Schema.optionalKey(Schema.Literals(["urgent", "standard", "fyi"])),
-  status: Schema.optionalKey(Schema.Literals(["done", "snoozed", "muted"])),
-  resolved: Schema.optionalKey(Schema.String),
-});
+const PlacedSchema = schemaOf<Placed>()(
+  Schema.Struct({
+    where: Schema.Literals(WHERES),
+    score: Schema.optionalKey(Schema.Number),
+    reason: Schema.String,
+    rule: Schema.optionalKey(
+      Schema.Struct({
+        board: Schema.String,
+        path: Schema.optionalKey(Schema.String),
+        id: Schema.optionalKey(Schema.String),
+        why: Schema.String,
+        when: Schema.String,
+        bucket: Schema.Union([Bucketed, Schema.Literal("judge")]),
+      }),
+    ),
+    judge: Schema.optionalKey(
+      Schema.Struct({ bucket: Schema.NullOr(Bucketed), why: Schema.String, by: Schema.optionalKey(Schema.String) }),
+    ),
+    criteria: Schema.optionalKey(Schema.mutable(Schema.Array(Schema.String))),
+    moved: Schema.optionalKey(Schema.Literals(INBOX_SECTIONS)),
+    status: Schema.optionalKey(Schema.Literals(["done", "snoozed", "muted"])),
+    resolved: Schema.optionalKey(Schema.String),
+  }),
+);
 const EntrySchema = Schema.Struct({ placed: PlacedSchema, changed: Schema.Array(Schema.String) });
 
 // What counts as a change worth an entry: a score that moved a whole point or more, the rest as they are.

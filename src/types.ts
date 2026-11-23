@@ -2,8 +2,8 @@
 import { isKeyOf } from "./narrow.ts";
 import { arrange, type Ranked } from "./order.ts";
 
-export type Bucket = "now" | "today" | "blocked" | "later" | "fyi" | "hide";
-export const BUCKETS: Bucket[] = ["now", "today", "blocked", "later", "fyi", "hide"];
+export const BUCKETS = ["now", "today", "blocked", "later", "fyi", "hide"] as const;
+export type Bucket = (typeof BUCKETS)[number];
 export const RANK: Record<Bucket, number> = { now: 0, today: 1, blocked: 2, later: 3, fyi: 4, hide: 5 };
 
 export type Ci = "green" | "red" | "pending" | "none";
@@ -541,8 +541,8 @@ export const ACTIONS: readonly Action[] = [
 ];
 // The More menu's GitHub writes, only from the desk's window: close (your PR, or an issue you opened or are assigned), draft and
 // merge your open PR, reopen your closed one, request changes on someone else's (in its review, with what you wrote).
-export type GitHubAction = "close" | "draft" | "ready" | "merge" | "reopen" | "request_changes" | "rerequest" | "unrequest";
-export const GITHUB_ACTIONS: GitHubAction[] = ["close", "draft", "ready", "merge", "reopen", "request_changes", "rerequest", "unrequest"];
+export const GITHUB_ACTIONS = ["close", "draft", "ready", "merge", "reopen", "request_changes", "rerequest", "unrequest"] as const;
+export type GitHubAction = (typeof GITHUB_ACTIONS)[number];
 // snooze `until`: "1h" | "2d" | "tomorrow" (09:00) | "monday" (09:00) | "YYYY-MM-DD" (09:00) | ISO time | "activity" | an Until
 // What a snooze can wait on instead of a time: the item stays in the Archive until it happens.
 export type Until = "ci" | "push" | "approved" | "ready" | "conflict";
@@ -899,8 +899,8 @@ export interface FirstPass {
 
 // The Inbox's sections: Urgent (an urgent criterion said yes, a hand-back, or a score at queue.urgent_at or above), FYI
 // (what the rules or an automation sorted to fyi, or a score at queue.fyi_at or below) and Standard, the rest.
-export type InboxSection = "urgent" | "standard" | "fyi";
-export const INBOX_SECTIONS: readonly InboxSection[] = ["urgent", "standard", "fyi"];
+export const INBOX_SECTIONS = ["urgent", "standard", "fyi"] as const;
+export type InboxSection = (typeof INBOX_SECTIONS)[number];
 
 // One changed file, from GitHub's pulls/{n}/files.
 export interface ReviewFile {
@@ -1061,16 +1061,22 @@ export interface ReviewRest {
 
 // Where an item stood on your desk: an Inbox section, Blocked, hidden by the rules, off it (done, snoozed or muted), resolved,
 // or gone from every search.
-export type Where = InboxSection | "blocked" | "hidden" | "cleared" | "resolved" | "gone";
+export const WHERES = [...INBOX_SECTIONS, "blocked", "hidden", "cleared", "resolved", "gone"] as const;
+export type Where = (typeof WHERES)[number];
 
 // What an item's log keeps each time where it stands changes, and why it stood there (src/placements.ts).
+interface PlacedRule extends PlacingRule {
+  when: string;
+  bucket: RuleBucket;
+}
+
 export interface Placed {
   where: Where;
   score?: number; // on the Inbox: 0 to 10
   reason: string; // its row's why then
-  rule?: PlacingRule & { when: string; bucket: RuleBucket }; // the rule that placed it
+  rule?: PlacedRule; // the rule that placed it
   judge?: { bucket: Bucket | null; why: string; by?: string }; // Claude's answer, or an automation's sort (by)
-  criteria?: readonly string[]; // the urgency criteria that said yes
+  criteria?: string[]; // the urgency criteria that said yes
   moved?: InboxSection; // you moved it there
   status?: Exclude<Status, "active">;
   resolved?: string;
