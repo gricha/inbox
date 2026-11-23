@@ -1589,7 +1589,7 @@ Settings → MCP servers lists, checks, adds and removes your agent's own (`GET`
 
 **Rules on notes.** `rules` (with `type`, up to 10) are asked of each note that fits, in order, and the first that says yes decides; with none that does, it goes where the run said (Urgent when `urgent`).
 
-- `{ when, do }`: an expression in the rules' language over `item.<field>` (`compile()` with the type's fields: an unknown one is a 400 with "did you mean"), with no model. A field a note left out can't be read, so it doesn't pass.
+- `{ when, do }`: an expression in the rules' language over `item.<field>` (`compile()` with the type's fields: an unknown one is a 400 with "did you mean"), with no model. A field a note left out is absent: a check that needs its value (`item.points >= 3`, `"me" in item.mentions`) fails to read and doesn't pass, while one that asks what it isn't (`item.due != "2026-11-27"`, `!item.paid`) passes.
 - `{ ask, do }` (up to 1,000 characters): a yes or no in your words, answered by one call on [the light model](#the-light-model) about all the run's notes still undecided at that rule (with `when` too, only those it passes), each a JSON line fenced as untrusted. When unsure, no. A light model that can't answer fails the run, and nothing of it is raised, so the next run reads them again.
 - `do` is `drop` (never raised: its key is kept, and the record says `dropped` with `rule`, the rule's `when` or `ask`) or `urgent`, `standard`, `fyi`, its section. A rule never acts outside the desk.
 - A type changed under its rules is checked again with them: a `when` naming a field it no longer has refuses the save.

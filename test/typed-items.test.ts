@@ -69,6 +69,10 @@ test("a declared type is an Effect Schema, the JSON Schema a run fills, and the 
   const rule = compile(`item.kind == "statement" && item.sender in ["Visa", "Amex"]`, fields);
   assert.ok(Result.isSuccess(rule));
   assert.deepEqual(rule.success.eval({ item: { kind: "statement", sender: "Amex" } }), Result.succeed(true));
+  // A field left out is absent: what needs its value doesn't pass; what asks what it isn't does.
+  const left = { kind: "bill", sender: "Visa" };
+  assert.ok(Result.isFailure(compile(`item.amount >= 10`, fields).pipe(Result.flatMap((r) => r.eval({ item: left })))));
+  assert.deepEqual(compile(`item.due != "2026-11-27"`, fields).pipe(Result.flatMap((r) => r.eval({ item: left }))), Result.succeed(true));
   const typo = compile(`item.knd == "statement"`, fields);
   assert.ok(Result.isFailure(typo));
   assert.match(typo.failure.message, /unknown field "item.knd"; did you mean "item.kind"\?/);
