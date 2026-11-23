@@ -4363,6 +4363,41 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // A model picked in the chat shows at once; a change made elsewhere afterwards (Settings → Agent) shows there too.
+    name: "ask-options-follow",
+    sizes: ["wide"],
+    go: async (page) => {
+      await at("#/")(page);
+      await page.locator(".side-ask").click();
+      await page.locator(".chat-input").waitFor();
+      const model = page.locator(".chat-opt").nth(1);
+      await model.click();
+      const put = page.waitForResponse((r) => r.url().endsWith("/api/settings") && r.request().method() === "PUT", { timeout: 5000 });
+      // The chat's read after the save: the desk has Opus.
+      const read = page.waitForResponse((r) => r.url().endsWith("/api/asks"), { timeout: 5000 });
+      await page.locator(".chat-pop .pop-item", { hasText: "Opus" }).click();
+      await put;
+      await read;
+      if ((await model.textContent()) !== "Opus")
+        failures.push(`ask-options-follow: after picking Opus the chat reads ${await model.textContent()}`);
+      await page.evaluate(
+        `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ set: { "agent.coordinator_model": "sonnet" } }) })`,
+      );
+      await page
+        .locator(".chat-opt", { hasText: "Sonnet" })
+        .waitFor({ timeout: 5000 })
+        .catch(async () => {
+          failures.push(`ask-options-follow: after Settings set Sonnet the chat still reads ${await model.textContent()}`);
+        });
+    },
+    after: async (page) => {
+      await page.evaluate(
+        `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ reset: ["agent.coordinator_model"] }) })`,
+      );
+      await closeChat(page);
+    },
+  },
+  {
     // A fresh chat: examples under the box, one click puts it in; the head's New chat is a plus and an arrow that lists the agents.
     name: "ask-new",
     sizes: ["wide", "mac", "mid"],

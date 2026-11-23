@@ -2,7 +2,7 @@ import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { placeNotes, type Card, type Inquiry, type Note, type QueueView, type Standing } from "../../src/types.ts";
-import { settleNoteEdits, settleReviewerAsks, withDrops, withNoteEdits, withReviewerAsks } from "../src/pending.ts";
+import { settle, settleNoteEdits, settleReviewerAsks, withDrops, withNoteEdits, withReviewerAsks } from "../src/pending.ts";
 
 const NOW = "2026-11-17T12:00:00.000Z";
 const note = (id: string, extra: Partial<Note> = {}): Note => ({
@@ -89,4 +89,29 @@ test("a drop shows at once: the row where you let it go, in its section, among i
   assert.equal(withDrops(v, [{ id: "ask:q2", section: "fyi" }]), v, "a question stays in Urgent");
   const moved = withDrops(v, [{ id: "note:n2", section: "fyi", after: "note:n3" }]).notes;
   assert.deepEqual([ids(moved.open), ids(moved.fyi)], [["n1"], ["n3", "n2"]]);
+});
+
+test("settle drops the writes a read has and keeps the rest", () => {
+  const shown = new Map([
+    ["a", true],
+    ["b", false],
+  ]);
+  const read = new Map([
+    ["a", true],
+    ["b", true],
+  ]);
+  assert.deepEqual([...settle(shown, (k, v) => read.get(k) === v)], [["b", false]]);
+});
+
+test("settle returns the same map when the read has none of the writes", () => {
+  const shown = new Map([["a", 1]]);
+  assert.equal(
+    settle(shown, () => false),
+    shown,
+  );
+  const none = new Map<string, number>();
+  assert.equal(
+    settle(none, () => true),
+    none,
+  );
 });

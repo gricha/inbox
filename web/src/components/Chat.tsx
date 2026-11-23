@@ -4,6 +4,7 @@ import { Splitter, type Width } from "./Splitter.tsx";
 import type { AgentOptions, AskLines, AsksView, CoordinatorView, Inquiry, SetupAgent } from "../../../src/types.ts";
 import { api, runUi } from "../api.ts";
 import { useKeyed, useKeyedLayout } from "../keyed.ts";
+import { useShown } from "../pending.ts";
 import { cls, copyText, shortId, sinceText } from "../format.ts";
 import { linesLabel } from "../view.ts";
 import { Prose } from "./Prose.tsx";
@@ -875,28 +876,29 @@ function Pick({
   );
 }
 
+type Field = "bypass" | "model" | "effort";
+
 // How your agent runs, by the box: the same settings as Settings → Agent, each saved as you pick it.
 function Options({ options, known }: { options: AgentOptions; known: AsksView["models"] }) {
-  const [mine, setMine] = useState<Partial<AgentOptions>>({}); // picked, until the desk says the same
+  // Each pick, as the part of the options it sets, until the desk's read says the same.
+  const mine = useShown<Field, Partial<AgentOptions>>(options, (field, part) => part[field] === options[field]);
   const [error, setError] = useState<string | null>(null);
-  const now = { ...options, ...mine };
+  const now = { ...options };
+  for (const part of mine.shown.values()) Object.assign(now, part);
   const kind = AGENT[options.agent];
-  const drop = (field: "bypass" | "model" | "effort") => {
-    setMine((m) => Object.fromEntries(Object.entries(m).filter(([k]) => k !== field)));
-  };
-  const save = (key: string, field: "bypass" | "model" | "effort", value: string | boolean) => {
-    setMine((m) => ({ ...m, [field]: value }));
+  const save = (key: string, field: Field, value: string | boolean) => {
+    mine.show(field, typeof value === "boolean" ? { bypass: value } : field === "model" ? { model: value } : { effort: value });
     setError(null);
     runUi(
       api.saveSettings({ set: { [key]: value } }).pipe(
         Effect.match({
           onSuccess: (r) => {
             if (r.ok) return;
-            drop(field);
+            mine.drop(field);
             setError(r.errors[0]?.message ?? "Not saved");
           },
           onFailure: (e) => {
-            drop(field);
+            mine.drop(field);
             setError(e.message);
           },
         }),

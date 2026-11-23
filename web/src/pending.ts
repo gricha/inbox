@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import {
   askRef,
   isNoteRef,
@@ -13,6 +14,37 @@ import {
   type QueueView,
   type Standing,
 } from "../../src/types.ts";
+import { useKeyed } from "./keyed.ts";
+
+// Your writes by key, drawn until a desk read has them.
+export type Shown<K, V> = ReadonlyMap<K, V>;
+
+// The writes a read doesn't have yet; the same map when it has none of them, so nothing re-renders.
+export function settle<K, V>(shown: Shown<K, V>, has: (key: K, value: V) => boolean): Shown<K, V> {
+  const left = [...shown].filter(([k, v]) => !has(k, v));
+  return left.length === shown.size ? shown : new Map(left);
+}
+
+// A write shown at once, then read back: `show` draws it, each new `read` (null: none yet) drops what it `has`, and a
+// refusal `drop`s it.
+export function useShown<K, V>(read: unknown, has: (key: K, value: V) => boolean) {
+  const [shown, setShown] = useState<Shown<K, V>>(new Map());
+  useKeyed(read, () => {
+    setShown((s) => settle(s, has));
+  });
+  const show = useCallback((key: K, value: V) => {
+    setShown((s) => new Map(s).set(key, value));
+  }, []);
+  const drop = useCallback((key: K) => {
+    setShown((s) => {
+      if (!s.has(key)) return s;
+      const next = new Map(s);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+  return { shown, show, drop };
+}
 
 // Note writes the desk's view doesn't show yet, by id: the note as you left it, null once done; a new one under a temporary id.
 export type NoteEdits = Readonly<Record<string, Note | null>>;
