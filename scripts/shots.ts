@@ -6462,6 +6462,22 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
+    // A move from a row's menu shows before the desk (here never) answers, as a drag does.
+    name: "row-menu-move-shows",
+    sizes: ["wide"],
+    go: async (page) => {
+      await page.route("**/api/act", stall);
+      await at("#/")(page);
+      const row = page.locator('.g-standard .line[data-id*="#"]').first();
+      const id = await row.getAttribute("data-id");
+      await rowMenuPick(page, `.g-standard .line[data-id="${id}"]`, "Move to Urgent");
+      await page.waitForTimeout(200);
+      if (!(await page.locator(`.g-urgent .line[data-id="${id}"]`).count()))
+        failures.push(`row-menu-move-shows: ${id} isn't in Urgent before the desk answers`);
+    },
+    after: drop,
+  },
+  {
     // Right-click an agent's question: what its page offers, Answer, Copy link and Dismiss, and Move down (the first has
     // none above it to move up past). Then each: Copy link copies its
     // inbox:// link (the clipboard stubbed); Dismiss takes its row off the list at once (held, so the mock keeps the

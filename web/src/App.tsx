@@ -896,10 +896,14 @@ export function App() {
   function act(c: Card, action: Action, until?: string): Effect.Effect<void> {
     // A resolved item stays under Resolved whatever you do to it.
     const leaves = LEAVES.has(action) && c.status === "active" && !c.resolved;
+    // A move to another section is drawn there at once, where the desk puts it, as a drop is.
+    const to = action === "urgent" || action === "standard" || action === "fyi" ? { id: c.id, section: action } : null;
     return Effect.gen(function* () {
       if (leaves) hide(c);
+      if (to) setDrops((x) => [...x.filter((y) => y.id !== c.id), to]);
       const started = Date.now();
       const res = yield* api.act(c.id, action, until);
+      if (to) yield* load();
       undoSeq.current = res.undo_seq ? [res.undo_seq] : []; // before the animation, so a quick Undo undoes this action
       undoWrite.current = null;
       if (leaves) {
@@ -913,6 +917,7 @@ export function App() {
       Effect.ensuring(
         Effect.sync(() => {
           if (leaves) unhide(c.id);
+          if (to) setDrops((x) => x.filter((y) => y !== to));
           refresh(0);
         }),
       ),
