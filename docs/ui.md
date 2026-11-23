@@ -658,8 +658,9 @@ The Sessions plugin's part ([api.md → Sessions](api.md#sessions)):
 A desk that was never set up shows one page in the window's place, without the sidebar, until you pick your agent ([api.md → The first run](api.md#the-first-run)). Its top is the drag handle.
 
 - **Set up Inbox**, with the mark.
-- **GitHub**: "Signed in as @you", or why not ("You're not signed in to GitHub.", "The GitHub CLI isn't installed.", "Couldn't reach GitHub: …") with the command to run and **Retry**.
-- **Your agent**: one line on what it does, then Claude Code, Codex and OpenCode, each "Installed and logged in." with a green **Use Claude Code**, or "Not logged in." / "Not installed." with the command to run and **Retry**. While GitHub isn't connected the agents say only where they stand; GitHub's Retry asks about everything.
+- What's missing is a step to take, never an error: no red, no "not installed". Each says what it's for in a line, then the command to run with **Copy** beside it, and **Check again**. The page checks again by itself every 10 seconds and when the window comes back, so installing in a terminal is enough.
+- **GitHub**: "Signed in as @you", or the step left: "Install the GitHub CLI" (`brew install gh && gh auth login` on a Mac; elsewhere a link to cli.github.com and `gh auth login`), "Sign in to GitHub", "Sign in to GitHub again", or "Connect to GitHub" when it can't be reached (what the desk saw is the line's tooltip).
+- **Your agent**: one line on what it does, then Claude Code, Codex and OpenCode, each "Installed and signed in." with a green **Use Claude Code**, or "Install Claude Code to use it here." / "Sign in to Codex to use it here." with the command. While GitHub isn't connected the agents say only where they stand; GitHub's Check again asks about everything.
 - **Use …** is one press: "Connecting…", then the Inbox with the first sync running. What fails (the CLI refusing the MCP server, or missing) is red under that agent; a name something else of yours keeps never does, as Connect picks another, and the button stays to try again.
 - It never shows again. Settings → Agent changes the agent; `inbox setup` does the same from a terminal.
 

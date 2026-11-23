@@ -699,11 +699,15 @@ const besideOpen = async (page: Page, name: string, sel: string) => {
 let skTop = -1; // where queue-loading's placeholders started
 const LONG = "Stream partial results to the client while the hash join stage spills its build side to disk under memory pressure";
 // The first-run page, as a fresh desk shows it: a mock-only switch (web/mock/server.ts), then a reload, since the window
-// asks about it only until it's done. `github: false` is GitHub signed out.
+// asks about it only until it's done. github: signed in (true), signed out (false), without gh, or offline; agents "none"
+// is a machine with none of them installed.
+type FirstRun = { github?: boolean | "missing" | "offline"; agents?: "some" | "none" };
 const firstRun =
-  (github = true) =>
+  ({ github = true, agents = "some" }: FirstRun = {}) =>
   async (page: Page) => {
-    await page.evaluate(`fetch("/api/mock/setup", { method: "POST", body: JSON.stringify({ needed: true, github: ${github} }) })`);
+    await page.evaluate(
+      `fetch("/api/mock/setup", { method: "POST", body: JSON.stringify(${JSON.stringify({ needed: true, github, agents })}) })`,
+    );
     await page.reload();
     await page.locator(".setup").waitFor({ timeout: 15_000 });
   };
@@ -712,61 +716,81 @@ const setupDone = async (page: Page) => {
   await page.reload();
   await page.locator(READY).first().waitFor({ timeout: 15_000 });
 };
-// What the first-run page says: its rows' labels and help, and its buttons.
+// What the first-run page says: its rows' labels and help, its commands, its buttons, and anything red.
 const setupSays = (page: Page) =>
-  page.evaluate<{ side: boolean; title: string; rows: string[]; buttons: string[]; go: string[] }>(`(() => ({
+  page.evaluate<{ side: boolean; title: string; rows: string[]; runs: string[]; buttons: string[]; go: string[]; red: number }>(`(() => ({
     side: !!document.querySelector(".side"),
     title: document.querySelector(".setup-title")?.textContent ?? "",
     rows: [...document.querySelectorAll(".setup .setting")].map((r) => r.querySelector(".s-label").textContent + " | " + (r.querySelector(".s-help")?.textContent ?? "")),
+    runs: [...document.querySelectorAll(".setup .setup-run code")].map((c) => c.textContent),
     buttons: [...document.querySelectorAll(".setup button")].map((b) => b.textContent),
     go: [...document.querySelectorAll(".setup .act.primary.go")].map((b) => b.textContent),
+    red: document.querySelectorAll(".setup .t-bad").length,
   }))()`);
+// What a missing tool says is a step to take: none of the words a screenshot check (AppImage's catalog) reads as an error.
+const ALARM = /error|fail|not installed|not found|could not|cannot|unable/i;
+const RUN = " Run this in a terminal:";
+const GITHUB_ROW = {
+  in: "Signed in as @me | ",
+  out: `Sign in to GitHub | Inbox reads your reviews, PRs and issues on your own login.${RUN}`,
+  missing:
+    process.platform === "darwin"
+      ? `Install the GitHub CLI | Inbox reads your reviews, PRs and issues through it.${RUN}`
+      : "Install the GitHub CLI | Inbox reads your reviews, PRs and issues through it. Get it from cli.github.com, then run this in a terminal:",
+  offline: "Connect to GitHub | Inbox can't reach GitHub from here. Check your connection.",
+};
+const GH_RUN = {
+  in: [],
+  out: ["gh auth login"],
+  missing: [process.platform === "darwin" ? "brew install gh && gh auth login" : "gh auth login"],
+  offline: [],
+};
+const CLAUDE_RUN = "curl -fsSL https://claude.ai/install.sh | bash && claude auth login";
+const OPENCODE_RUN = "curl -fsSL https://opencode.ai/install | bash && opencode auth login";
 // pick: Use Claude Code pressed first, as the installer does when Claude Code runs it.
-const setupShot = (name: string, github: boolean, viewport?: { width: number; height: number }, pick = false): Shot => ({
+const setupShot = (name: string, run: FirstRun, viewport?: { width: number; height: number }, pick = false): Shot => ({
   name,
   writes: true,
   ...(viewport && { sizes: ["wide"] }),
   go: async (page) => {
     if (viewport) await page.setViewportSize(viewport);
-    await firstRun(github)(page);
+    await firstRun(run)(page);
     if (pick) {
       await page.getByRole("button", { name: "Use Claude Code" }).click();
       await page.getByText("Your agent:").waitFor({ timeout: 15_000 });
     }
     const s = await setupSays(page);
-    const want = pick
-      ? {
-          rows: [
-            "You're not signed in to GitHub. | Run gh auth login in a terminal, then Retry.",
-            "Claude Code | Your agent: Inbox's MCP tools and skill are installed in it.",
-            "Codex | Not logged in. Run codex login in a terminal, then Retry.",
-            "OpenCode | Not installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login in a terminal, then Retry.",
-          ],
-          buttons: ["Retry", "Retry", "Retry"],
-        }
-      : github
-        ? {
-            rows: [
-              "Signed in as @me | ",
-              "Claude Code | Installed and logged in.",
-              "Codex | Not logged in. Run codex login in a terminal, then Retry.",
-              "OpenCode | Not installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login in a terminal, then Retry.",
-            ],
-            buttons: ["Use Claude Code", "Retry", "Retry"],
-          }
-        : {
-            rows: [
-              "You're not signed in to GitHub. | Run gh auth login in a terminal, then Retry.",
-              "Claude Code | Installed and logged in.",
-              "Codex | Not logged in. Run codex login in a terminal, then Retry.",
-              "OpenCode | Not installed. Run curl -fsSL https://opencode.ai/install | bash && opencode auth login in a terminal, then Retry.",
-            ],
-            buttons: ["Retry", "Use Claude Code", "Retry", "Retry"],
-          };
-    const got = { rows: s.rows, buttons: s.buttons };
+    const gh = run.github === undefined || run.github === true ? "in" : run.github === false ? "out" : run.github;
+    const none = run.agents === "none";
+    const claude = pick
+      ? "Claude Code | Your agent: Inbox's MCP tools and skill are installed in it."
+      : none
+        ? `Claude Code | Install Claude Code to use it here.${RUN}`
+        : "Claude Code | Installed and signed in.";
+    const want = {
+      rows: [
+        GITHUB_ROW[gh],
+        claude,
+        none ? `Codex | Install Codex to use it here.${RUN}` : `Codex | Sign in to Codex to use it here.${RUN}`,
+        `OpenCode | Install OpenCode to use it here.${RUN}`,
+      ],
+      runs: [...GH_RUN[gh], ...(none ? [CLAUDE_RUN, "npm install -g @openai/codex && codex login"] : ["codex login"]), OPENCODE_RUN],
+      buttons: [
+        ...(gh === "in" ? [] : GH_RUN[gh].length ? ["Copy", "Check again"] : ["Check again"]),
+        ...(pick ? [] : none ? ["Copy", "Check again"] : ["Use Claude Code"]),
+        "Copy",
+        "Check again",
+        "Copy",
+        "Check again",
+      ],
+    };
+    const got = { rows: s.rows, runs: s.runs, buttons: s.buttons };
     if (s.side || s.title !== "Set up Inbox" || JSON.stringify(got) !== JSON.stringify(want))
       failures.push(`${name}: the page reads ${JSON.stringify(s)}`);
-    if (s.go.length !== (pick ? 0 : 1)) failures.push(`${name}: its green buttons are ${JSON.stringify(s.go)}`);
+    if (s.go.length !== (pick || none ? 0 : 1)) failures.push(`${name}: its green buttons are ${JSON.stringify(s.go)}`);
+    if (s.red) failures.push(`${name}: ${s.red} red lines on a first run`);
+    const alarm = s.rows.find((r) => ALARM.test(r));
+    if (alarm) failures.push(`${name}: reads as an error: ${JSON.stringify(alarm)}`);
   },
   after: async (page) => {
     if (viewport) {
@@ -819,10 +843,15 @@ const firstPassShot = (name: string, pass: FirstPass, viewport?: { width: number
 const SYNCING: FirstPass = { step: "sync", done: 4, total: 12, found: 63, line: "Getting your PRs from GitHub… 63 found so far" };
 const SORTING: FirstPass = { step: "sort", done: 40, total: 120, found: 120, line: "Sorting 120 PRs… 40 done" };
 const SHOTS: Shot[] = [
-  setupShot("setup", true),
-  setupShot("setup-github", false),
-  setupShot("setup-picked", false, undefined, true),
-  setupShot("setup-narrow", true, { width: 390, height: 760 }),
+  setupShot("setup", {}),
+  setupShot("setup-github", { github: false }),
+  setupShot("setup-picked", { github: false }, undefined, true),
+  setupShot("setup-narrow", {}, { width: 390, height: 760 }),
+  // A machine without the tools, as AppImage's catalog tests it: each missing one is a step, never an error.
+  setupShot("setup-no-claude", { agents: "none" }),
+  setupShot("setup-no-gh", { github: "missing" }),
+  setupShot("setup-no-tools", { github: "missing", agents: "none" }),
+  setupShot("setup-offline", { github: "offline", agents: "none" }),
   {
     // Picking your agent: one press, then the Inbox.
     name: "setup-done",

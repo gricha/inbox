@@ -602,10 +602,11 @@ const setup = Effect.fnUntraced(function* (x: Ctx) {
     return yield* new UsageError({ message: `unknown agent: ${pick} (try: inbox setup claude, codex or opencode)` });
   const s = driver ? yield* api.chooseAgent(driver.id) : yield* api.checkSetup();
   const g = s.github;
-  x.out(g.login ? `${x.c.green("✓")} GitHub: signed in as @${g.login}` : `GitHub: ${g.error}${g.fix ? ` Run: ${g.fix}` : ""}`);
+  const left = `GitHub: ${g.step}. ${g.why}${g.detail ? ` (${g.detail})` : ""}${g.url ? ` Get it from ${g.url}.` : ""}${g.fix ? ` Run: ${g.fix}` : ""}`;
+  x.out(g.login ? `${x.c.green("✓")} GitHub: signed in as @${g.login}` : left);
   if (driver) {
     x.out(`${x.c.green("✓")} ${driver.label} is your agent: Inbox's MCP tools and skill are installed in it`);
-    if (s.needed) x.out(`Inbox opens once GitHub is connected: run ${g.fix ?? "inbox setup"}, then press Retry in the app`);
+    if (s.needed) x.out(`Inbox opens once GitHub is connected: run ${g.fix ?? "inbox setup"}, then press Check again in the app`);
     return 0;
   }
   for (const a of s.agents) {

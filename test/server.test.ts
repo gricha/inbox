@@ -160,15 +160,15 @@ test("startServer rejects with what stopped the desk, in its words, its port in 
   assert.equal(stopped.mock.callCount(), 1, "the desk it made is let go");
   stopped.mock.restore();
   taken.close();
-  // No gh and no token on a first run: the desk starts without a config, and its first-run page says what to run.
+  // No gh and no token on a first run: the desk starts without a config, and its first-run page says the step to take.
   process.env.PATH = home;
   delete process.env.GITHUB_TOKEN;
   const free = await unusedPort();
   const srv = await startServer({ port: free, home, log: () => {} });
   try {
-    const first = (await (await fetch(`${srv.url}/api/setup`)).json()) as { needed: boolean; github: { error: string } };
+    const first = (await (await fetch(`${srv.url}/api/setup`)).json()) as { needed: boolean; github: { step: string } };
     assert.equal(first.needed, true);
-    assert.match(first.github.error, /^The GitHub CLI isn't installed/);
+    assert.equal(first.github.step, "Install the GitHub CLI");
     assert.equal(fs.existsSync(path.join(home, "config.toml")), false);
   } finally {
     await srv.close();

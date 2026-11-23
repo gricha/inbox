@@ -1,4 +1,4 @@
-// The first-run page's words (GET /api/setup): who GitHub says you are or what to run, and each agent's state.
+// The first-run page's words (GET /api/setup): who GitHub says you are or the step left, and each agent's state.
 import type { DriverId } from "./agents.ts";
 import type { GitHubReadError, Upstream } from "./errors.ts";
 import type { SetupAgent, SetupView } from "./types.ts";
@@ -29,13 +29,31 @@ export function agentView(id: DriverId, name: string, installed: boolean, logged
   return { id, name, installed, logged_in: installed && loggedIn, fix, url: PAGE[id] };
 }
 
+// What's left before Inbox can read GitHub, said as a step to take rather than an error: a first run on a machine without gh,
+// signed out or offline is where everyone starts. detail is what the desk saw, for a tooltip.
 export function githubView(login: string, error: GitHubReadError | Upstream | null, platform = process.platform): SetupView["github"] {
-  if (!error) return { login: login || null, error: null, fix: null };
-  if (error._tag !== "GitHubAuthError") return { login: null, error: `Couldn't reach GitHub: ${error.message}`, fix: null };
+  const view = { login: null, why: null, fix: null, url: null, detail: null };
+  if (!error) return { ...view, login: login || null, step: null };
+  if (error._tag !== "GitHubAuthError")
+    return { ...view, step: "Connect to GitHub", why: "Inbox can't reach GitHub from here. Check your connection.", detail: error.message };
+  const why = "Inbox reads your reviews, PRs and issues through it.";
   if (error.reason === "gh_missing")
     return platform === "darwin"
-      ? { login: null, error: "The GitHub CLI isn't installed.", fix: "brew install gh && gh auth login" }
-      : { login: null, error: "The GitHub CLI isn't installed: get it from cli.github.com.", fix: "gh auth login" };
-  const why = error.reason === "rejected" ? "GitHub refused your login." : "You're not signed in to GitHub.";
-  return { login: null, error: why, fix: "gh auth login" };
+      ? { ...view, step: "Install the GitHub CLI", why, fix: "brew install gh && gh auth login" }
+      : { ...view, step: "Install the GitHub CLI", why, fix: "gh auth login", url: "https://cli.github.com" };
+  if (error.reason === "rejected")
+    return {
+      ...view,
+      step: "Sign in to GitHub again",
+      why: "GitHub no longer takes the saved login.",
+      fix: "gh auth login",
+      detail: error.message,
+    };
+  return {
+    ...view,
+    step: "Sign in to GitHub",
+    why: "Inbox reads your reviews, PRs and issues on your own login.",
+    fix: "gh auth login",
+    detail: error.message,
+  };
 }

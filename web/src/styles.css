@@ -9255,6 +9255,30 @@ pre,
   line-height: 1.4;
 }
 
+/* A command to run, on a quiet wash with its Copy button. */
+.setup-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 6px;
+  background: var(--wash);
+}
+
+.setup-run code {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  font: 12.5px var(--mono);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.setup-run .act {
+  flex: none;
+}
+
 @media (width <= 640px) {
   .setup {
     padding-inline: 12px;

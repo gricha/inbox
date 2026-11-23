@@ -3,7 +3,8 @@
 // rules, changing buckets, caps or defaults in the config editor really moves cards.
 // MOCK_AI_PAUSED=1 starts with Claude Code logged out (AI reviews and the judge paused);
 // POST /api/mock/ai-paused { paused } flips it, and POST /api/mock/agents-busy { busy } sets the judge to work.
-// POST /api/mock/setup { needed, github } shows the first-run page (GitHub signed out when github is false).
+// POST /api/mock/setup { needed, github, agents } shows the first-run page: github false is signed out, "missing" without gh,
+// "offline" unreachable; agents "none" has none of them installed.
 // POST /api/mock/clock winds the mock's clock back to when it started (GET says when): the shots start each shot there.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Effect, Result, Schema } from "effect";
@@ -34,7 +35,7 @@ import { CHUNK_FIELDS, FIELDS, plainWhy, waitable, weekdayHours } from "../../sr
 import { mergeLine, peopleOf, stage, standings } from "../../src/stage.ts";
 import { CLAUDE_MODELS, type AgentModels } from "../../src/models.ts";
 import { agentDefs, agentName, checkSetting, DEFAULTS, masked, SECTIONS, settingDef } from "../../src/settings.ts";
-import { GitHubAuthError, type ErrorBody } from "../../src/errors.ts";
+import { GitHubAuthError, Upstream, type ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
 import type {
   Action,
@@ -4456,18 +4457,30 @@ function putSettings(set: Record<string, unknown>, reset: string[]): { ok: boole
 
 const linked = new Set(["claude-code mcp"]);
 
-// The first-run page: Claude Code ready, Codex logged out, OpenCode not installed.
-const firstRun: { needed: boolean; github: boolean; picked: SetupView["picked"] } = { needed: false, github: true, picked: null };
+// The first-run page: Claude Code ready, Codex logged out, OpenCode not installed (or none of them, a machine without any).
+type FirstRunGitHub = "in" | "out" | "missing" | "offline";
+const firstRun: { needed: boolean; github: FirstRunGitHub; agents: "some" | "none"; picked: SetupView["picked"] } = {
+  needed: false,
+  github: "in",
+  agents: "some",
+  picked: null,
+};
+const GITHUB_AS: Record<FirstRunGitHub, GitHubAuthError | Upstream | null> = {
+  in: null,
+  out: new GitHubAuthError({ reason: "no_token", message: "no GitHub token: run `gh auth login`" }),
+  missing: new GitHubAuthError({ reason: "gh_missing", message: "GitHub CLI (gh) not found" }),
+  offline: new Upstream({ message: "GitHub request failed: fetch failed" }),
+};
 function setupView(): SetupView {
-  const signedOut = new GitHubAuthError({ reason: "no_token", message: "no GitHub token: run `gh auth login`" });
+  const some = firstRun.agents === "some";
   return {
     needed: firstRun.needed,
-    github: githubView(ME, firstRun.github ? null : signedOut),
+    github: githubView(ME, GITHUB_AS[firstRun.github]),
     agent: setting("agent.harness"),
     picked: firstRun.picked,
     agents: [
-      agentView("claude-code", "Claude Code", true, true),
-      agentView("codex", "Codex", true, false),
+      agentView("claude-code", "Claude Code", some, some),
+      agentView("codex", "Codex", some, false),
       agentView("opencode", "OpenCode", false, false),
     ],
   };
@@ -5088,13 +5101,14 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     const a = setupView().agents.find((x) => x.id === agent);
     if (!a || a.fix) throw new HttpError(409, `${agent} isn't ready`, { tag: "Conflict" });
     putSettings({ "agent.harness": agent }, []);
-    Object.assign(firstRun, { picked: a.id, needed: !firstRun.github });
+    Object.assign(firstRun, { picked: a.id, needed: firstRun.github !== "in" });
     bump();
     return setupView();
   }
   if (route === "POST /api/mock/setup") {
     const body = await readBody(req);
-    Object.assign(firstRun, { needed: body.needed !== false, github: body.github !== false, picked: null });
+    const gh: FirstRunGitHub = body.github === false ? "out" : body.github === "missing" || body.github === "offline" ? body.github : "in";
+    Object.assign(firstRun, { needed: body.needed !== false, github: gh, agents: body.agents === "none" ? "none" : "some", picked: null });
     return setupView();
   }
   if (route === "GET /api/remote") return remoteView();

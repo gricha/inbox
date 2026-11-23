@@ -72,13 +72,13 @@ async function fresh(ready: Partial<Record<DriverId, "installed" | "ready">> = {
   return { desk, gh, dir, signIn: () => (gh.viewer = viewer), app: createApp(desk, 47823) };
 }
 
-test("a first run without GitHub starts anyway: no config, the page says what to run, and Retry writes the config", async () => {
+test("a first run without GitHub starts anyway: no config, the page says what to run, and Check again writes the config", async () => {
   const t = await fresh({}, true);
   try {
     assert.equal(existsSync(join(t.dir, "config.toml")), false);
     const s = await run(t.desk.setupView());
     assert.equal(s.needed, true);
-    assert.deepEqual(s.github, { login: null, error: "You're not signed in to GitHub.", fix: "gh auth login" });
+    assert.deepEqual([s.github.login, s.github.step, s.github.fix], [null, "Sign in to GitHub", "gh auth login"]);
     const queue = await t.app.request("http://127.0.0.1:47823/api/queue");
     assert.equal(queue.status, 503);
     assert.match(((await queue.json()) as { error: string }).error, /^GitHub isn't connected yet .*: run inbox setup$/);
@@ -87,7 +87,7 @@ test("a first run without GitHub starts anyway: no config, the page says what to
       github: unknown;
       needed: boolean;
     };
-    assert.deepEqual(after.github, { login: "me", error: null, fix: null });
+    assert.deepEqual(after.github, { login: "me", step: null, why: null, fix: null, url: null, detail: null });
     assert.equal(after.needed, true, "still waits on your agent");
     assert.ok(existsSync(join(t.dir, "config.toml")));
     assert.ok(t.desk.loaded);
@@ -180,21 +180,40 @@ test("a desk from before the first-run page never shows it", async () => {
   }
 });
 
+// A first run is where everyone starts: no gh, signed out or offline reads as a step to take, never as an error.
 test("the page's words for GitHub and each agent", () => {
   const auth = (reason: "gh_missing" | "no_token" | "rejected") => new GitHubAuthError({ reason, message: "x" });
-  assert.deepEqual(githubView("dana", null), { login: "dana", error: null, fix: null });
+  const done = { login: null, step: null, why: null, fix: null, url: null, detail: null };
+  assert.deepEqual(githubView("dana", null), { ...done, login: "dana" });
   assert.deepEqual(githubView("", auth("gh_missing"), "darwin"), {
-    login: null,
-    error: "The GitHub CLI isn't installed.",
+    ...done,
+    step: "Install the GitHub CLI",
+    why: "Inbox reads your reviews, PRs and issues through it.",
     fix: "brew install gh && gh auth login",
   });
-  assert.equal(githubView("", auth("gh_missing"), "linux").fix, "gh auth login");
-  assert.equal(githubView("", auth("rejected")).error, "GitHub refused your login.");
-  assert.deepEqual(githubView("", new Upstream({ message: "ENOTFOUND api.github.com" })), {
-    login: null,
-    error: "Couldn't reach GitHub: ENOTFOUND api.github.com",
-    fix: null,
+  assert.deepEqual(githubView("", auth("gh_missing"), "linux"), {
+    ...done,
+    step: "Install the GitHub CLI",
+    why: "Inbox reads your reviews, PRs and issues through it.",
+    fix: "gh auth login",
+    url: "https://cli.github.com",
   });
+  assert.equal(githubView("", auth("no_token")).step, "Sign in to GitHub");
+  assert.equal(githubView("", auth("rejected")).step, "Sign in to GitHub again");
+  assert.deepEqual(githubView("", new Upstream({ message: "GitHub request failed: fetch failed" })), {
+    ...done,
+    step: "Connect to GitHub",
+    why: "Inbox can't reach GitHub from here. Check your connection.",
+    detail: "GitHub request failed: fetch failed",
+  });
+  // What the window shows (all but the tooltip's detail) has none of the words a screenshot check reads as an error.
+  for (const v of [auth("gh_missing"), auth("no_token"), auth("rejected"), new Upstream({ message: "fetch failed" })]) {
+    const shown = Object.entries(githubView("", v, "linux"))
+      .filter(([k]) => k !== "detail")
+      .map(([, w]) => w ?? "")
+      .join(" ");
+    assert.doesNotMatch(shown, /error|fail|not installed|not found|could not|cannot|unable/i);
+  }
   assert.equal(
     agentView("claude-code", "Claude Code", false, false, "linux").fix,
     "curl -fsSL https://claude.ai/install.sh | bash && claude auth login",

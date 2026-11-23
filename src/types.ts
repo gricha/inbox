@@ -386,8 +386,8 @@ export interface RemoteView {
 // GET /api/setup: a desk never set up shows the first-run page while `needed`, until you pick your agent.
 export interface SetupView {
   needed: boolean;
-  // login: who GitHub says you are; else why it can't be read and what to run (null: nothing to run, just Retry)
-  github: { login: string | null; error: string | null; fix: string | null };
+  // login: who GitHub says you are; else the step left (step, a line on it, what to run, where to get gh) and what the desk saw
+  github: { login: string | null; step: string | null; why: string | null; fix: string | null; url: string | null; detail: string | null };
   agent: string; // agent.harness
   picked: SetupAgent["id"] | null; // the agent picked here, connected already; the page waits on GitHub alone
   agents: SetupAgent[];

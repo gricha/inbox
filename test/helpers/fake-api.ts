@@ -427,7 +427,7 @@ const reply = (status: number, data: unknown): Reply => ({ status, data });
 function setupView(needed: boolean, agent: string): SetupView {
   return {
     needed,
-    github: { login: "you", error: null, fix: null },
+    github: { login: "you", step: null, why: null, fix: null, url: null, detail: null },
     agent,
     picked: needed ? null : (agent as SetupView["picked"]),
     agents: [
