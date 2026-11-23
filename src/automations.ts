@@ -462,7 +462,17 @@ interface Said {
   do: unknown;
   until?: string;
 }
+// One item of a run's answer, read leniently: null without a ref or a why, so one bad item never fails the run; `fallback`
+// is its do when it gave none.
+function saidOf(raw: unknown, fallback?: Verb): Said | null {
+  const ref = str(field(raw, "ref"))?.trim();
+  const why = str(field(raw, "why"));
+  if (ref === undefined || why === undefined || !why.trim()) return null;
+  const until = str(field(raw, "until"))?.trim();
+  return { ref, why, do: field(raw, "do") ?? fallback, ...(until && { until }) };
+}
 // What each verb means as one of the decision model's options; a snooze has no "until" there, so it's the default's.
+
 const OPTION: Record<Verb, string> = {
   ...DOES,
   add: "put it on my desk, in Today: it needs me now",
@@ -1042,15 +1052,7 @@ export class Automations {
         askSchema(canOf(a)),
       );
       const list = field(answer, "items");
-      const said: Said[] = [];
-      for (const raw of Array.isArray(list) ? list : []) {
-        const ref = str(field(raw, "ref"));
-        const why = str(field(raw, "why"));
-        if (ref === undefined || why === undefined || !why.trim()) continue;
-        const u = str(field(raw, "until"))?.trim();
-        said.push({ ref: ref.trim(), why, do: field(raw, "do"), ...(u && { until: u }) });
-      }
-      return said;
+      return (Array.isArray(list) ? list : []).flatMap((raw) => saidOf(raw) ?? []);
     });
   }
 
@@ -1198,13 +1200,9 @@ export class Automations {
       const items = field(said, "items");
       const found: unknown[] = Array.isArray(items) ? items : [];
       for (const raw of found.slice(0, ITEMS_MAX)) {
-        const ref = str(field(raw, "ref"));
-        const why = str(field(raw, "why"));
-        if (ref === undefined || why === undefined || !why.trim()) continue;
-        const u = str(field(raw, "until"))?.trim();
+        const x = saidOf(raw, "add");
         // One that only adds was never asked what to do: what it lists is added, as before.
-        const what = addsOnly(canOf(a)) ? "add" : (field(raw, "do") ?? "add");
-        run.items.push(yield* this.apply(a, { ref, why, do: what, ...(u && { until: u }) }));
+        if (x) run.items.push(yield* this.apply(a, addsOnly(canOf(a)) ? { ...x, do: "add" } : x));
       }
       if (found.length > ITEMS_MAX) run.summary += ` (It listed ${found.length}; the desk took the first ${ITEMS_MAX}.)`;
       if (a.mcp) {
