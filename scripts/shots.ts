@@ -3667,6 +3667,17 @@ const SHOTS: Shot[] = [
       );
       if (!said.some((x) => x.startsWith("Dropped by a rule") && x.includes('item.kind == "statement"')))
         failures.push(`settings-automations-typed: its run reads ${JSON.stringify(said)}`);
+      // A problem outcome is red, as problems are elsewhere; the rest stay pencil.
+      const red = await page.evaluate<Record<string, boolean>>(`(() => {
+        const probe = document.createElement("span");
+        probe.style.color = "var(--red)";
+        document.body.append(probe);
+        const red = getComputedStyle(probe).color;
+        probe.remove();
+        return Object.fromEntries([...document.querySelectorAll(".s-view:not([hidden]) .au-outcome")].map((o) => [o.textContent, getComputedStyle(o).color === red]));
+      })()`);
+      if (JSON.stringify(red) !== JSON.stringify({ Added: false, "Dropped by a rule": false, "Held: doesn't fit its type": true }))
+        failures.push(`settings-automations-typed: its outcomes, red or not: ${JSON.stringify(red)}`);
     },
     after: at("#/"),
   },

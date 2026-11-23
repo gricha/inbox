@@ -5947,7 +5947,7 @@ button.s-edit:hover:not(:disabled) {
   }
 }
 
-.au-outcome {
+.au-outcome:not(.t-bad) {
   color: var(--pencil);
 }
 
