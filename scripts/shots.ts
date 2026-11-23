@@ -2278,8 +2278,14 @@ const SHOTS: Shot[] = [
         failures.push("review-ai-skim: folded, the rest of the summary doesn't show its first lines, inert");
       if ((await ai.locator(".rv-gist code").count()) < 2) failures.push("review-ai-skim: the first sentence's code names aren't code");
       if ((await ai.allInnerTexts()).join("").includes("`")) failures.push("review-ai-skim: a backtick shows");
-      const h = await page.evaluate<number>(`document.querySelector(".rv-ai")?.getBoundingClientRect().height ?? 0`);
-      if (h > 120) failures.push(`review-ai-skim: the folded AI review is ${Math.round(h)}px tall`);
+      // Folded, it's the goal, then about five of the rest's lines and Show more: never the whole summary.
+      const m = await page.evaluate<{ h: number; gist: number; line: number }>(`(() => {
+        const h = (s) => document.querySelector(s)?.getBoundingClientRect().height ?? 0;
+        const body = document.querySelector(".rv-ai .rv-fold-body");
+        return { h: h(".rv-ai"), gist: h(".rv-ai .rv-gist"), line: body ? parseFloat(getComputedStyle(body).lineHeight) : 0 };
+      })()`);
+      if (!m.line || m.h - m.gist > 6 * m.line)
+        failures.push(`review-ai-skim: folded, the AI review is ${Math.round(m.h - m.gist)}px beyond its goal`);
     },
   },
   {
