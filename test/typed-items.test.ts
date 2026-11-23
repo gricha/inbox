@@ -16,6 +16,7 @@ import { setup } from "./helpers/desk.ts";
 import { unixOnly } from "./helpers/platform.ts";
 import { run as runFx, runSync } from "./helpers/run.ts";
 import { until } from "./helpers/wait.ts";
+import { fakeAgent } from "./helpers/fake-agent.ts";
 
 const EMAIL = `type Email = {
   kind: "statement" | "bill" | "personal" | "security" | "booking" | "order";
@@ -151,42 +152,30 @@ test("what the desk doesn't read is refused, saying what and where", () => {
 
 // A fake claude: each call's args and prompt kept; call n answers answer.<n> if there is one, else answer.
 function fakeClaude(c: TestContext) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-fake-typed-"));
-  const bin = path.join(dir, "claude");
-  fs.writeFileSync(
-    bin,
-    `#!/bin/sh
-d="$(dirname "$0")"
-n=$(($(cat "$d/count" 2>/dev/null || echo 0) + 1)); echo $n > "$d/count"
+  const f = fakeAgent(
+    c,
+    "claude",
+    `n=$(($(cat "$d/count" 2>/dev/null || echo 0) + 1)); echo $n > "$d/count"
 printf '%s\\n' "$@" > "$d/args.$n"; cat > "$d/stdin.$n"
 while [ -f "$d/wait.$n" ]; do sleep 0.05; done
-if [ -f "$d/answer.$n" ]; then cat "$d/answer.$n"; else cat "$d/answer"; fi
-`,
+if [ -f "$d/answer.$n" ]; then cat "$d/answer.$n"; else cat "$d/answer"; fi`,
   );
-  fs.chmodSync(bin, 0o755);
-  const was = process.env.DESK_CLAUDE;
-  process.env.DESK_CLAUDE = bin;
-  c.after(() => {
-    process.env.DESK_CLAUDE = was;
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-  const read = (f: string) => fs.readFileSync(path.join(dir, f), "utf8");
   const envelope = (out: object) => JSON.stringify({ type: "result", is_error: false, session_id: "sess-1", structured_output: out });
   return {
     // The answer to call n; without n, to every call that has none of its own.
     answer: (out: object, n?: number) => {
-      fs.writeFileSync(path.join(dir, n === undefined ? "answer" : `answer.${n}`), envelope(out));
+      f.write(n === undefined ? "answer" : `answer.${n}`, envelope(out));
     },
     // Call n waits until the returned release is called.
     hold: (n: number) => {
-      fs.writeFileSync(path.join(dir, `wait.${n}`), "");
+      f.write(`wait.${n}`, "");
       return () => {
-        fs.rmSync(path.join(dir, `wait.${n}`));
+        fs.rmSync(f.at(`wait.${n}`));
       };
     },
-    calls: () => (fs.existsSync(path.join(dir, "count")) ? Number(read("count")) : 0),
-    args: (n: number) => read(`args.${n}`).split("\n"),
-    stdin: (n: number) => read(`stdin.${n}`),
+    calls: () => Number(f.read("count") || 0),
+    args: (n: number) => f.read(`args.${n}`).split("\n"),
+    stdin: (n: number) => f.read(`stdin.${n}`),
   };
 }
 
