@@ -35,6 +35,17 @@ test("unchecked casts live only in src/narrow.ts and the known reads of the desk
   assert.deepEqual(per, KNOWN);
 });
 
+// The linter lets a Record<string, unknown> body through `as { … }`, so a route's body is checked field by field instead.
+test("no route casts its request body", () => {
+  const casts = code.flatMap((f) =>
+    fs
+      .readFileSync(path.join(root, f), "utf8")
+      .split("\n")
+      .flatMap((l, i) => (/\b(?:json|bodyOf)\(c\)\)?\s*as\b|\.req\.json<(?!unknown>)/.test(l) ? [`${f}:${i + 1}`] : [])),
+  );
+  assert.deepEqual(casts, []);
+});
+
 test("no effect skips its dependencies", () => {
   assert.deepEqual(disabling(/exhaustive-effect-dependencies|exhaustive-deps/), []);
 });
