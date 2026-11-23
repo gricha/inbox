@@ -186,6 +186,10 @@ const fromDesk = (c: Context) =>
     !!c.req.header("origin") &&
     (!REMOTE.has(c.req.raw) || VIA.get(c.req.raw) === "cookie"));
 
+// What only the owner's hands do: anyone else is refused in `message`'s words.
+const hands = (c: Context, message: string): Effect.Effect<void, Forbidden> =>
+  fromDesk(c) ? Effect.void : Effect.fail(new Forbidden({ message }));
+
 // Why a request isn't from the desk's own page: an Origin that isn't `own`, or another site reading the API. A no-cors GET
 // (an <img> on another site or another localhost port) has no Origin; browsers still say where it came from.
 const crossSite = (c: Context, own: (origin: string) => boolean): string | null => {
@@ -513,7 +517,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       c,
       Effect.gen(function* () {
         yield* up;
-        if (!fromDesk(c)) return yield* new Forbidden({ message: refused });
+        yield* hands(c, refused);
         return yield* then(yield* bodyOf(c));
       }),
       { log },
@@ -637,7 +641,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.post("/api/ask", (c) => {
     const ask = Effect.gen(function* () {
       yield* up;
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "ask your agent from the desk's window" });
+      yield* hands(c, "ask your agent from the desk's window");
       const b = yield* bodyOf(c);
       if (typeof b.text !== "string") return yield* new BadRequest({ message: "need { text }" });
       let lines: AskLines | undefined;
@@ -665,7 +669,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       yield* up;
       const b = yield* bodyOf(c);
       const trust = b.trust === true;
-      if (trust && !fromDesk(c)) return yield* new Forbidden({ message: "analyze a flagged issue anyway from the desk's window" });
+      if (trust) yield* hands(c, "analyze a flagged issue anyway from the desk's window");
       return yield* desk.analyzeIssue(c.req.param("id"), trust);
     });
     return respond(c, go, { log });
@@ -674,7 +678,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.post("/api/issue/:id/fix", (c) => {
     const go = Effect.gen(function* () {
       yield* up;
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "make a PR with a fix from the desk's window" });
+      yield* hands(c, "make a PR with a fix from the desk's window");
       return { ok: true, ask: yield* desk.fixIssue(c.req.param("id")) };
     });
     return respond(c, go, { log });
@@ -686,7 +690,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     app.post(`/api/issue/:id/${route}`, (c) => {
       const go = Effect.gen(function* () {
         yield* up;
-        if (!fromDesk(c)) return yield* new Forbidden({ message: `${route} an author from the desk's window` });
+        yield* hands(c, `${route} an author from the desk's window`);
         return yield* desk.blockAuthor(c.req.param("id"), on);
       });
       return respond(c, go, { log });
@@ -695,7 +699,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   // New chat, with your agent or another one: from the desk's own window or your paired phone only, as it changes your agent.
   app.post("/api/asks/new", (c) => {
     const fresh = Effect.gen(function* () {
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "start a new chat from the desk's window" });
+      yield* hands(c, "start a new chat from the desk's window");
       const b = yield* bodyOf(c);
       return yield* desk.newChat(typeof b.agent === "string" ? b.agent : undefined, `http://localhost:${port}/mcp`);
     });
@@ -772,7 +776,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       c,
       Effect.gen(function* () {
         yield* up;
-        if (!fromDesk(c)) return yield* new Forbidden({ message: "a note's buttons work only in the desk's window" });
+        yield* hands(c, "a note's buttons work only in the desk's window");
         const { button } = yield* bodyOf(c);
         if (typeof button !== "number" || !Number.isInteger(button))
           return yield* new BadRequest({ message: "need { button: its index }" });
@@ -847,7 +851,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   // Your answer, from the desk's own window or your paired phone only: an agent can't answer its own question.
   app.post("/api/inquiries/:id/answer", (c) => {
     const answer = Effect.gen(function* () {
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "answer it in the desk's window" });
+      yield* hands(c, "answer it in the desk's window");
       const b = yield* bodyOf(c);
       if (b.dismiss === true) return { ok: true, inquiry: yield* desk.answerInquiry(c.req.param("id"), "", true) };
       if (typeof b.text !== "string") return yield* new BadRequest({ message: "need { text } or { dismiss: true }" });
@@ -859,7 +863,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.get("/api/sessions/:id", (c) => respond(c, desk.session(c.req.param("id")), { log, read: true }));
   app.post("/api/sessions/:id/kick", (c) => {
     const kick = Effect.gen(function* () {
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "kick a session in the desk's window" });
+      yield* hands(c, "kick a session in the desk's window");
       return { ok: true, ...(yield* desk.kickSession(c.req.param("id"))) };
     });
     return respond(c, kick, { log });
@@ -929,7 +933,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.put("/api/automations/:id/on", (c) => {
     const turn = Effect.gen(function* () {
       yield* up;
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "only the owner switches it, in the desk's window: Settings" });
+      yield* hands(c, "only the owner switches it, in the desk's window: Settings");
       const { on } = yield* bodyOf(c);
       if (typeof on !== "boolean") return yield* new BadRequest({ message: "need { on: true or false }" });
       return { ok: true, automation: yield* desk.automations.switch(c.req.param("id"), on) };
@@ -938,7 +942,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   });
   app.delete("/api/automations/:id", (c) => {
     const remove = Effect.gen(function* () {
-      if (!fromDesk(c)) return yield* new Forbidden({ message: "delete it in the desk's window: Settings → Automations" });
+      yield* hands(c, "delete it in the desk's window: Settings → Automations");
       yield* desk.automations.remove(c.req.param("id"));
       return { ok: true };
     });
@@ -989,8 +993,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.put("/api/criteria/:id/on", (c) => {
     const turn = Effect.gen(function* () {
       yield* up;
-      if (!fromDesk(c))
-        return yield* new Forbidden({ message: "only the owner switches it, in the desk's window: Settings → Automations → Urgency" });
+      yield* hands(c, "only the owner switches it, in the desk's window: Settings → Automations → Urgency");
       const { on } = yield* bodyOf(c);
       if (typeof on !== "boolean") return yield* new BadRequest({ message: "need { on: true or false }" });
       return { ok: true, criterion: yield* desk.urgency.switch(c.req.param("id"), on) };
@@ -1064,8 +1067,8 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       const set = yield* opt(b, "set", (v) => (isRecord(v) ? v : undefined), "an object");
       const reset = yield* opt(b, "reset", stringsOf, "a list of keys");
       // A key (a secret setting) is set or cleared in the desk's window only, as approve is: no agent, CLI or curl reaches it.
-      if ([...Object.keys(set ?? {}), ...(reset ?? [])].some(isSecret) && !fromDesk(c))
-        return yield* new Forbidden({ message: "set or clear a key in the desk's window: Settings → Agent" });
+      if ([...Object.keys(set ?? {}), ...(reset ?? [])].some(isSecret))
+        yield* hands(c, "set or clear a key in the desk's window: Settings → Agent");
       return yield* desk.putSettings({ set, reset });
     });
     return respond(c, put, { log });
@@ -1082,15 +1085,12 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   );
   app.post("/api/mcp/check", (c) => respond(c, desk.checkMcp(mcpUrl), { log }));
   // Your agent's config is yours: only the window adds or removes a server.
-  const yours = (c: Parameters<typeof fromDesk>[0]) =>
-    fromDesk(c)
-      ? Effect.void
-      : Effect.fail(new Forbidden({ message: "add or remove a server in the desk's window: Settings → MCP servers" }));
+  const yours = "add or remove a server in the desk's window: Settings → MCP servers";
   app.post("/api/mcp", (c) =>
     respond(
       c,
       Effect.gen(function* () {
-        yield* yours(c);
+        yield* hands(c, yours);
         const b = yield* bodyOf(c);
         const argv = b.command;
         if (
@@ -1108,7 +1108,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   app.delete("/api/mcp/:name", (c) =>
     respond(
       c,
-      Effect.flatMap(yours(c), () => desk.removeMcp(mcpUrl, c.req.param("name"))),
+      Effect.flatMap(hands(c, yours), () => desk.removeMcp(mcpUrl, c.req.param("name"))),
       { log },
     ),
   );
@@ -1242,7 +1242,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     respond(
       c,
       Effect.gen(function* () {
-        if (!fromDesk(c)) return yield* new Forbidden({ message: "revoke it in the desk's window: Settings → Network → Tailscale" });
+        yield* hands(c, "revoke it in the desk's window: Settings → Network → Tailscale");
         yield* remote.revoke(c.req.param("id"));
         log(`revoked paired device ${c.req.param("id")}`);
         return { ok: true };
