@@ -3,13 +3,15 @@
 import { randomBytes } from "node:crypto";
 import { as } from "./usage.ts";
 import { Cache, Cause, Duration, Effect, Exit, Result, Schema, type Fiber } from "effect";
-import type { Desk } from "./desk.ts";
+import type { Core, Desk } from "./desk.ts";
 import { messageOf, type GitHubReadError } from "./errors.ts";
 import type { PrContext } from "./github/index.ts";
 import { decode, field, str } from "./narrow.ts";
 import type { Conversation, Item, ReviewState, ReviewView, Take } from "./types.ts";
 import { report } from "./sentry.ts";
 import { pushedAt, threadWaitsOnYou, waitsOnYou } from "./stage.ts";
+
+type Host = Core & Pick<Desk, "light" | "gh">;
 
 const BATCH = 10; // conversations per call
 const BODY = 1500; // characters of each comment
@@ -179,7 +181,7 @@ export function talked(it: Item, me: string): boolean {
 
 // Fetches a PR's conversation (again once a sync sees it updated) and has Claude read what waits on you, one PR at a time.
 export class Conversations {
-  desk: Desk;
+  desk: Host;
   // By `<id> <node id> <updated_at>`, so a sync that sees the PR updated asks again; a failed fetch isn't kept, so it's
   // tried again next time, and callers asking at once share one.
   contexts: Cache.Cache<string, PrContext, GitHubReadError>;
@@ -188,7 +190,7 @@ export class Conversations {
   call: Fiber.Fiber<void> | null = null; // the read in flight, which stop() interrupts
   errors = new Map<string, { message: string; at: number }>();
 
-  constructor(desk: Desk) {
+  constructor(desk: Host) {
     this.desk = desk;
     this.contexts = Effect.runSync(
       Cache.makeWith((key: string) => this.desk.gh.api.prContext(key.split(" ")[1]!), {
