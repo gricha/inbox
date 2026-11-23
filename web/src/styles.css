@@ -6729,8 +6729,11 @@ a.rv-part-row:hover {
   white-space: nowrap;
 }
 
+/* A long state ("changes requested · asked again") wraps, so the name beside it keeps its room. */
 .rv-part-state {
-  flex: none;
+  flex: 0 1 auto;
+  max-width: 60%;
+  text-align: right;
 }
 
 /* A reviewer's one icon on your PR, after their state: remove (asked, not reviewed yet) or ask again (reviewed). */

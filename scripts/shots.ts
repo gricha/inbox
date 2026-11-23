@@ -2793,6 +2793,11 @@ const SHOTS: Shot[] = [
       const sam = (await rows()).find((r) => r.startsWith("sam: "));
       await part.locator(".rv-rev-tool[title='Ask sam to review again']").click();
       await after("asking sam again", (rs) => !!sam && rs.includes(`${sam} · asked again`));
+      // A long state leaves the name beside it its room.
+      const cut = await page.evaluate<string[]>(
+        `[...document.querySelectorAll("[data-part=reviewers] .rv-part-name")].filter((el) => el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent.trim())`,
+      );
+      if (cut.length) failures.push(`review-reviewers-show: the reviewers' names cut short: ${cut.join(", ")}`);
       await part.locator(".rv-part-more", { hasText: "Add reviewers" }).click();
       await part.locator(".rv-reviewers-input").fill("dana");
       await page.waitForTimeout(400);
