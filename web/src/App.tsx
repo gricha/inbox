@@ -30,7 +30,7 @@ import { holdKeys, keysHeld } from "./drafts.ts";
 import { adoptTheme, desktop, loadOmarchy, OmarchyAnswer, omarchyIs } from "./theme.ts";
 import { getStored, setStored } from "./storage.ts";
 import { useKeyed, useKeyedLayout } from "./keyed.ts";
-import { dropKey, settleNoteEdits, withDrops, withNoteEdits, type Drop, type NoteEdits } from "./pending.ts";
+import { hasNoteEdit, useShown, withDrops, withNoteEdits, type Drop } from "./pending.ts";
 import {
   attachCommand,
   beside,
@@ -44,11 +44,9 @@ import {
   parseRoute,
   pickRange,
   pickToggle,
-  removeCard,
   routeHash,
   PAGE_GROUPS,
   settingsBack,
-  settleSteps,
   stepOf,
   toggled,
   type Acted,
@@ -57,7 +55,9 @@ import {
   type GroupKey,
   matches,
   type Route,
+  waitingSteps,
   whereIs,
+  withoutRows,
 } from "./view.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
@@ -175,7 +175,11 @@ export function App() {
   const [route, setRoute] = useState<Route>(() => parseRoute(location.hash));
   const [overview, setOverview] = useState<Overview | null>(null);
   const [setup, setSetup] = useState<SetupView | null>(null); // the first-run page, while the desk says it's needed
-  const [view, setView] = useState<QueueView | null>(null);
+  const [desk, setView] = useState<QueueView | null>(null); // the queue as the desk last said it
+  const deskSeq = useRef(0); // the load `desk` came from
+  // Rows you finished, off the lists until a load started after the write is read: one already in flight can't draw them again.
+  const gone = useShown<string, number>(desk, (_, at) => deskSeq.current > at);
+  const view = useMemo(() => desk && (gone.shown.size ? withoutRows(desk, gone.shown) : desk), [desk, gone.shown]);
   const [down, setDown] = useState<Down | null>(null);
   const [epoch, setEpoch] = useState(0); // bumped to reopen the event stream
   const [now, setNow] = useState(() => Date.now());
@@ -184,8 +188,9 @@ export function App() {
   const [details, setDetails] = useState<Record<string, ItemDetail | string>>({});
   const [noting, setNoting] = useState<Note | "new" | null>(null); // the note tray: a new note, or one you opened
   const [chainsOpen, setChainsOpen] = useState(chainsAtStart);
-  const [unwaited, setUnwaited] = useState<ReadonlySet<string>>(new Set()); // Stop waiting, until the desk's view has it
-  const [noteEdits, setNoteEdits] = useState<NoteEdits>({});
+  // Stop waiting, until the desk's view has the step off every chain, where it goes.
+  const unwaited = useShown<string, true>(desk, (id) => !!desk && !waitingSteps(desk).has(id));
+  const noteEdits = useShown<string, Note | null>(desk, (id, n) => !!desk && hasNoteEdit(desk.notes, id, n));
   const [drops, setDrops] = useState<readonly Drop[]>([]); // rows you placed, drawn there until the desk's view is read back
   const newNotes = useRef(0);
   const noteClose = useRef<(() => void) | null>(null); // the open tray's way out, for Esc
@@ -228,7 +233,8 @@ export function App() {
   const [picks, setPicked] = useState<string[]>([]); // rows picked by shift- or ⌘-click on a list page
   const stay = useRef<string | null>(null); // a row selected by a right-click: the page doesn't scroll to it under its menu
   const [leaving, setLeaving] = useState<Set<string>>(new Set());
-  const [answered, setAnswered] = useState<Set<string>>(new Set()); // agents' questions you answered, gone at once
+  // Agents' questions you answered, gone at once, until the desk's view has them gone.
+  const answered = useShown<string, true>(desk, (id) => !!desk && !desk.inquiries.some((q) => q.id === id));
   // What you did on an item from this page, until you leave it: a review shows it in place of the button you pressed.
   const [acted, setActed] = useState<Record<string, Acted | undefined>>({});
   const actedRef = useRef(acted);
@@ -354,6 +360,7 @@ export function App() {
               // The dev proxy keeps a dead upstream's event stream open, so reopen it once the API answers again.
               if (downRef.current) setEpoch((x) => x + 1);
               setDown(null);
+              deskSeq.current = n;
               setView(v);
               if (exp && d) setDetails((m) => ({ ...m, [exp]: d }));
             },
@@ -637,7 +644,7 @@ export function App() {
     const f = filter.trim().toLowerCase();
     if (listPage !== "queue") return []; // on a question's page, the queue's cursor stays on it
     return (placed?.inquiries ?? []).filter(
-      (q) => !answered.has(q.id) && (!f || q.question.toLowerCase().includes(f) || q.from.toLowerCase().includes(f)),
+      (q) => !answered.shown.has(q.id) && (!f || q.question.toLowerCase().includes(f) || q.from.toLowerCase().includes(f)),
     );
   }, [placed, answered, filter, listPage]);
   // Then the sessions that need you, which the filter reads too.
@@ -652,14 +659,9 @@ export function App() {
   const queueView = useMemo(
     () =>
       placed &&
-      (Object.keys(noteEdits).length ? { ...placed, notes: withNoteEdits(placed.notes, noteEdits, new Date(now).toISOString()) } : placed),
-    [placed, noteEdits, now],
+      (noteEdits.shown.size ? { ...placed, notes: withNoteEdits(placed.notes, noteEdits.shown, new Date(now).toISOString()) } : placed),
+    [placed, noteEdits.shown, now],
   );
-  useEffect(() => {
-    if (view) setNoteEdits((e) => settleNoteEdits(view.notes, e));
-    // A step you stopped waiting that's off every chain in the desk's view: the view has it where it goes.
-    if (view) setUnwaited((u) => (u.size ? settleSteps(view, u) : u));
-  }, [view]);
   // Your notes, wherever their rows are (the Inbox, or the Archive while a reminder waits): each has a right-click menu.
   const notes = useMemo(
     () =>
@@ -908,7 +910,7 @@ export function App() {
       undoWrite.current = null;
       if (leaves) {
         yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
-        setView((v) => v && removeCard(v, c.id));
+        gone.show(c.id, loadSeq.current);
       }
       const verb = action === "snooze" ? `Snoozed ${snoozeOptions(c).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
       flash(`${verb}: ${shortRef(c)}`, false, true);
@@ -983,7 +985,7 @@ export function App() {
       undoSeq.current = ok.flatMap((r) => (r.seq ? [r.seq] : []));
       undoWrite.current = null;
       yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
-      setView((v) => v && ok.reduce((w, r) => (leaves.includes(r.c) ? removeCard(w, r.c.id) : w), v));
+      for (const r of ok) if (leaves.includes(r.c)) gone.show(r.c.id, loadSeq.current);
       const first = cs[0];
       const verb =
         action === "snooze" && first ? `Snoozed ${snoozeOptions(first).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
@@ -1016,8 +1018,7 @@ export function App() {
             undoSeq.current = res.undo_seq ? [res.undo_seq] : [];
             undoWrite.current = null;
             // Off the list before it's unhidden, so it doesn't flash back until the refresh lands.
-            const status = action === "done" ? "done" : action === "snooze" ? "snoozed" : "muted";
-            setView((v) => v && { ...v, sessions: v.sessions.map((x) => (x.id === s.id ? { ...x, status } : x)) });
+            gone.show(s.id, loadSeq.current);
             const snoozed = SNOOZE.find((o) => o.until === until)?.toast.replace(/ \(or .*\)$/, "") ?? until;
             flash(`${action === "snooze" ? `Snoozed ${snoozed}` : VERB[action]}: ${s.name}`, false, true);
           }),
@@ -1088,16 +1089,17 @@ export function App() {
         reminded_at: n && remind_at === n.remind_at ? n.reminded_at : null,
         ...(where && { section: where }),
       };
-      setNoteEdits((e) => ({ ...e, [key]: drawn }));
+      noteEdits.show(key, drawn);
       return api.saveNote(n?.id ?? null, { text, remind, ...(put && { section: put }) }).pipe(
         Effect.match({
           onSuccess: ({ note }) => {
-            setNoteEdits((e) => ({ ...dropKey(e, key), [note.id]: note }));
+            noteEdits.drop(key);
+            noteEdits.show(note.id, note);
             flash(note.remind_at ? `I'll remind you ${when(note.remind_at)}` : n ? "Note changed" : "Noted: it's on your Inbox");
             return true;
           },
           onFailure: (e) => {
-            setNoteEdits((x) => dropKey(x, key));
+            noteEdits.drop(key);
             flash(e.message, true);
             return false;
           },
@@ -1107,7 +1109,7 @@ export function App() {
     });
   }
   function doneNote(n: Note) {
-    setNoteEdits((e) => ({ ...e, [n.id]: null }));
+    noteEdits.show(n.id, null);
     runUi(
       api.doneNote(n.id).pipe(
         Effect.match({
@@ -1115,7 +1117,7 @@ export function App() {
             flash("Note done");
           },
           onFailure: (e) => {
-            setNoteEdits((x) => dropKey(x, n.id));
+            noteEdits.drop(n.id);
             flash(e.message, true);
           },
         }),
@@ -1125,7 +1127,7 @@ export function App() {
   }
   // An automation's note's Ask button: it leaves at once, handed to your agent; put back if the desk refuses.
   function pressNote(n: Note, button: number) {
-    setNoteEdits((e) => ({ ...e, [n.id]: null }));
+    noteEdits.show(n.id, null);
     runUi(
       api.askNote(n.id, button).pipe(
         Effect.match({
@@ -1133,7 +1135,7 @@ export function App() {
             flash("Asked your agent");
           },
           onFailure: (e) => {
-            setNoteEdits((x) => dropKey(x, n.id));
+            noteEdits.drop(n.id);
             flash(e.message, true);
           },
         }),
@@ -1157,11 +1159,11 @@ export function App() {
         go({ name: "review", id: s.id });
       }
     },
-    gone: unwaited,
+    gone: unwaited.shown,
   };
   // Stop waiting: off its chain at once, onto your desk where its own placement puts it once the desk answers.
   function stopWaiting(s: WaitingStep) {
-    setUnwaited((u) => new Set([...u, s.id]));
+    unwaited.show(s.id, true);
     runUi(
       api.after(s.id, []).pipe(
         Effect.match({
@@ -1169,7 +1171,7 @@ export function App() {
             flash(`Stopped waiting: ${s.ref || s.title}`);
           },
           onFailure: (e) => {
-            setUnwaited((u) => new Set([...u].filter((x) => x !== s.id)));
+            unwaited.drop(s.id);
             flash(e.message, true);
           },
         }),
@@ -1195,7 +1197,7 @@ export function App() {
     return Effect.suspend(() => {
       const id = inquiryOf(q.id);
       if (selected === id) setSelected(null);
-      setAnswered((s) => new Set(s).add(q.id));
+      answered.show(q.id, true);
       return api.answerInquiry(q.id, dismiss ? { dismiss: true } : { text }).pipe(
         Effect.match({
           onSuccess: () => {
@@ -1210,11 +1212,7 @@ export function App() {
             return true;
           },
           onFailure: (e) => {
-            setAnswered((s) => {
-              const next = new Set(s);
-              next.delete(q.id);
-              return next;
-            });
+            answered.drop(q.id);
             setSelected(id);
             flash(e.message, true);
             return false;
@@ -1259,7 +1257,7 @@ export function App() {
           onSuccess: (r) => {
             // Still on your desk (ready with nobody asked to review it): it went nowhere, and its next step shows in place.
             mark(r.stays || !shown ? before : { ...did, sending: false });
-            if (!r.stays) setView((v) => v && removeCard(v, c.id));
+            if (!r.stays) gone.show(c.id, loadSeq.current);
             flash(r.text, r.error, r.undo);
             return true;
           },
@@ -1918,7 +1916,7 @@ export function App() {
     ...(LIST_PAGES.has(route.name) && { pick: picker(selected, true) }),
   };
   const configErrors = overview?.config_errors.length ?? 0;
-  const inbox = view ? inboxCount(view, leaving, answered) : null;
+  const inbox = view ? inboxCount(view, leaving, answered.shown) : null;
   const offline = down?._tag === "DeskUnreachable";
   const broken = down?._tag === "DeskConfigBroken" ? down : null;
   // What's wrong with the system, from what the desk reports: the bubbles at the window's edge.
@@ -2274,7 +2272,7 @@ export function App() {
           key={asking.item ?? ""} // a new spot keeps your draft; the line above the box follows it
           about={asking}
           review={route.name === "review"}
-          questions={(view?.inquiries ?? []).filter((q) => isCoordinator(q.from) && q.item_id === asking.item && !answered.has(q.id))}
+          questions={(view?.inquiries ?? []).filter((q) => isCoordinator(q.from) && q.item_id === asking.item && !answered.shown.has(q.id))}
           loads={loads}
           now={now}
           onWiden={widen}

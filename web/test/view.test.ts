@@ -65,7 +65,7 @@ import {
   PAGE_GROUPS,
   parseRoute,
   quietTimes,
-  removeCard,
+  withoutRows,
   resolvedHead,
   resumeCommand,
   attachCommand,
@@ -102,7 +102,7 @@ import {
   pickRange,
   pickToggle,
 } from "../src/view.ts";
-import { afterText, chainLabel, settleSteps, stepGuides, stepOf, toggled } from "../src/view.ts";
+import { afterText, chainLabel, stepGuides, stepOf, toggled, waitingSteps } from "../src/view.ts";
 import { remindTime } from "../src/view.ts";
 import type { WaitingStep } from "../../src/types.ts";
 import { isTestPath, onLines, sections, tagTip, traditional, walk } from "../../src/sections.ts";
@@ -571,7 +571,7 @@ test("Blocked is one group from sections.blocked, open, in the desk's order; act
     ],
   );
   assert.deepEqual(
-    removeCard(q, "acme/billing#1").sections.blocked.map((c) => c.id),
+    withoutRows(q, new Set(["acme/billing#1"])).sections.blocked.map((c) => c.id),
     ["acme/billing#2"],
     "done on it takes it off, as on Later: it comes back when what it waits on merges",
   );
@@ -1019,13 +1019,13 @@ test("threads show on the lines they're on; outdated ones, other files' and PR c
   );
 });
 
-test("removeCard drops an item from every active group but keeps cleared and resolved", () => {
-  const v = removeCard(removeCard(queue(), "acme/api#1"), "acme/api#4");
+test("withoutRows drops an item from every active group but keeps cleared and resolved", () => {
+  const v = withoutRows(queue(), new Set(["acme/api#1", "acme/api#4"]));
   assert.equal(v.sections.now.length, 0);
   assert.equal(v.inbox.urgent.length, 0);
   assert.equal(v.hidden.length, 0);
   assert.equal(v.cleared.length, 1);
-  assert.equal(removeCard(queue(), "acme/api#6").resolved.length, 1);
+  assert.equal(withoutRows(queue(), new Set(["acme/api#6"])).resolved.length, 1);
 });
 
 test("events read as plain words", () => {
@@ -1381,9 +1381,8 @@ test("a step you stopped waiting stays off its chain until the desk's view drops
       hidden: [],
       notes,
     }) as unknown as QueueView;
-  const gone = new Set(["acme/api#2"]);
-  assert.equal(settleSteps(view([s]), gone), gone, "still on its chain: the same set");
-  assert.deepEqual([...settleSteps(view([]), gone)], []);
+  assert.deepEqual([...waitingSteps(view([s]))], ["acme/api#2"]);
+  assert.deepEqual([...waitingSteps(view([]))], []);
 });
 
 test("asking your agent to change an automation or a criterion names it, its tool, and what to do with a built-in", () => {

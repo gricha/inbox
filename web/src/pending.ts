@@ -47,7 +47,7 @@ export function useShown<K, V>(read: unknown, has: (key: K, value: V) => boolean
 }
 
 // Note writes the desk's view doesn't show yet, by id: the note as you left it, null once done; a new one under a temporary id.
-export type NoteEdits = Readonly<Record<string, Note | null>>;
+export type NoteEdits = Shown<string, Note | null>;
 
 const notesOf = (v: NotesView) => [...v.due, ...v.urgent, ...v.open, ...v.fyi, ...v.later];
 const isNote = (n: Note | null): n is Note => n !== null;
@@ -57,20 +57,15 @@ export const dropKey = <T>(r: Readonly<Record<string, T>>, key: string): Record<
 
 // The desk's notes with yours on them, placed as the desk places them.
 export function withNoteEdits(v: NotesView, edits: NoteEdits, now: string): NotesView {
-  const ids = new Set(Object.keys(edits));
-  if (!ids.size) return v;
-  return placeNotes([...notesOf(v).filter((n) => !ids.has(n.id)), ...Object.values(edits).filter(isNote)], now);
+  if (!edits.size) return v;
+  return placeNotes([...notesOf(v).filter((n) => !edits.has(n.id)), ...[...edits.values()].filter(isNote)], now);
 }
 
-// Your edits the desk's view now has drop off: a done note gone, a saved one as it was saved.
-export function settleNoteEdits(v: NotesView, edits: NoteEdits): NoteEdits {
-  const desk = new Map(notesOf(v).map((n) => [n.id, n]));
-  const left = Object.entries(edits).filter(([id, n]) => {
-    const d = desk.get(id);
-    if (n === null) return !!d;
-    return !d || d.text !== n.text || d.remind_at !== n.remind_at || d.section !== n.section;
-  });
-  return left.length === Object.keys(edits).length ? edits : Object.fromEntries(left);
+// The desk's view has your edit: a done note gone, a saved one as it was saved.
+export function hasNoteEdit(v: NotesView, id: string, n: Note | null): boolean {
+  const d = notesOf(v).find((x) => x.id === id);
+  if (n === null) return !d;
+  return !!d && d.text === n.text && d.remind_at === n.remind_at && d.section === n.section;
 }
 
 // Your reviewer changes a review's read doesn't show yet, by who as its list names them (a login, or @team), lower case.

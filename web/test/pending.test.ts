@@ -2,7 +2,7 @@ import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { placeNotes, type Card, type Inquiry, type Note, type QueueView, type Standing } from "../../src/types.ts";
-import { settle, settleNoteEdits, settleReviewerAsks, withDrops, withNoteEdits, withReviewerAsks } from "../src/pending.ts";
+import { hasNoteEdit, settle, settleReviewerAsks, withDrops, withNoteEdits, withReviewerAsks } from "../src/pending.ts";
 
 const NOW = "2026-11-17T12:00:00.000Z";
 const note = (id: string, extra: Partial<Note> = {}): Note => ({
@@ -19,29 +19,36 @@ test("a note write shows at once, placed as the desk places it", () => {
   const desk = placeNotes([note("a"), note("b", { section: "urgent" })], NOW);
   const shown = withNoteEdits(
     desk,
-    {
-      a: null, // done
-      b: note("b", { section: "fyi" }), // moved
-      "new-1": note("new-1", { at: NOW, text: "fresh" }), // written, not answered yet
-    },
+    new Map([
+      ["a", null], // done
+      ["b", note("b", { section: "fyi" })], // moved
+      ["new-1", note("new-1", { at: NOW, text: "fresh" })], // written, not answered yet
+    ]),
     NOW,
   );
   assert.deepEqual(ids(shown.urgent), []);
   assert.deepEqual(ids(shown.fyi), ["b"]);
   assert.deepEqual(ids(shown.open), ["new-1"]);
   // A reminder to come takes it off the Inbox to the Archive's Reminders.
-  const later = withNoteEdits(desk, { b: note("b", { remind_at: "2026-11-18T09:00:00.000Z" }) }, NOW);
+  const later = withNoteEdits(desk, new Map([["b", note("b", { remind_at: "2026-11-18T09:00:00.000Z" })]]), NOW);
   assert.deepEqual(ids(later.later), ["b"]);
   assert.deepEqual(ids(later.urgent), []);
-  assert.equal(withNoteEdits(desk, {}, NOW), desk);
+  assert.equal(withNoteEdits(desk, new Map(), NOW), desk);
 });
 
 test("a note edit drops once the desk's view has it", () => {
-  const edits = { a: null, b: note("b", { section: "fyi" }), "new-1": note("new-1") };
+  const edits = new Map([
+    ["a", null],
+    ["b", note("b", { section: "fyi" })],
+    ["new-1", note("new-1")],
+  ]);
   const before = placeNotes([note("a"), note("b")], NOW);
-  assert.equal(settleNoteEdits(before, edits), edits);
+  assert.equal(
+    settle(edits, (id, n) => hasNoteEdit(before, id, n)),
+    edits,
+  );
   const after = placeNotes([note("b", { section: "fyi" })], NOW);
-  assert.deepEqual(Object.keys(settleNoteEdits(after, edits)), ["new-1"]);
+  assert.deepEqual([...settle(edits, (id, n) => hasNoteEdit(after, id, n)).keys()], ["new-1"]);
 });
 
 test("a reviewer change shows at once and drops once the review's requests have it", () => {

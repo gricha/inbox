@@ -1,6 +1,6 @@
 import type { WaitingStep } from "../../../src/types.ts";
 import { age, cls } from "../format.ts";
-import { afterText, chainLabel, stepGuides, WAIT, type Guide } from "../view.ts";
+import { afterText, chainLabel, stepGuides, WAIT, type Guide, type Ids } from "../view.ts";
 import { Avatar } from "./Avatar.tsx";
 import { ChainIcon, KindIcon, RowFacts } from "./RowIcons.tsx";
 import { parseItemId } from "../../../src/links.ts";
@@ -10,7 +10,7 @@ export interface ChainCtx {
   open: ReadonlySet<string>;
   toggle: (head: string) => void;
   step: (s: WaitingStep) => void; // opens it, as its row would
-  gone: ReadonlySet<string>; // steps you just stopped waiting: off their chain until the desk says where they are
+  gone: Ids; // steps you just stopped waiting: off their chain until the desk says where they are
 }
 
 const TREE_STEP = 20; // as CardRow's

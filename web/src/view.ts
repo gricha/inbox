@@ -41,6 +41,11 @@ export type Route =
   | { name: "inflight" }
   | { name: "archive" }
   | { name: "settings"; section: string };
+// Ids to leave out: a Set, or the keys of a Map.
+export interface Ids {
+  has(id: string): boolean;
+}
+
 // What a write that finished your part did, and where the item went: the Archive, or Merging.
 export interface Acted {
   what: string;
@@ -213,7 +218,7 @@ export function beside(o: {
 
 // What the Inbox counts: everything on it, an agent's question and a session that needs you included (each waits on you
 // too); a row on its way off (you acted on it) or a question you answered no longer counts.
-export const inboxCount = (v: QueueView, leaving: ReadonlySet<string> = new Set(), answered: ReadonlySet<string> = new Set()) =>
+export const inboxCount = (v: QueueView, leaving: Ids = new Set(), answered: Ids = new Set()) =>
   [...v.inbox.urgent, ...v.inbox.standard].filter((c) => !leaving.has(c.id)).length +
   v.inquiries.filter((q) => !answered.has(q.id)).length +
   v.sessions.filter((s) => s.status === "active" && !leaving.has(s.id)).length;
@@ -575,15 +580,11 @@ export function stepOf(id: string, heads: readonly { waiting?: WaitingStep[] | u
   return heads.flatMap((h) => h.waiting ?? []).find((s) => `${WAIT}${s.id}` === id);
 }
 
-// Steps you stopped waiting that a chain in the view still has; the same set when that's all of them.
-export function settleSteps(view: QueueView, gone: ReadonlySet<string>): ReadonlySet<string> {
+// The steps a chain in the view still waits on, by id.
+export function waitingSteps(view: QueueView): ReadonlySet<string> {
   const n = view.notes;
   const heads = [...Object.values(view.sections).flat(), ...view.resolved, ...view.cleared, ...view.hidden];
-  const still = new Set(
-    [...heads, ...n.due, ...n.urgent, ...n.open, ...n.fyi, ...n.later].flatMap((h) => h.waiting ?? []).map((s) => s.id),
-  );
-  const kept = [...gone].filter((id) => still.has(id));
-  return kept.length === gone.size ? gone : new Set(kept);
+  return new Set([...heads, ...n.due, ...n.urgent, ...n.open, ...n.fyi, ...n.later].flatMap((h) => h.waiting ?? []).map((s) => s.id));
 }
 
 // This device's open chains: a head's id in the set or out of it.
@@ -654,14 +655,16 @@ export const navigable = (groups: Group[], leaving: Set<string>) =>
 // The rows on screen.
 export const stops = (groups: Group[], leaving: Set<string>): string[] => navigable(groups, leaving).map((c) => c.id);
 
-export function removeCard(v: QueueView, id: string): QueueView {
-  const drop = (cs: Card[]) => cs.filter((c) => c.id !== id);
+// The view without the rows you finished: items off every active group (cleared and resolved keep theirs), and sessions.
+export function withoutRows(v: QueueView, gone: Ids): QueueView {
+  const drop = <T extends { id: string }>(cs: T[]) => cs.filter((c) => !gone.has(c.id));
   const s = v.sections;
   return {
     ...v,
     sections: { now: drop(s.now), today: drop(s.today), blocked: drop(s.blocked), later: drop(s.later), fyi: drop(s.fyi) },
     inbox: { urgent: drop(v.inbox.urgent), standard: drop(v.inbox.standard), fyi: drop(v.inbox.fyi) },
     hidden: drop(v.hidden),
+    sessions: drop(v.sessions),
   };
 }
 
