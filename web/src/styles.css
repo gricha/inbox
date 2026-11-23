@@ -639,18 +639,6 @@ p {
   flex: 1;
 }
 
-.t-bad {
-  color: var(--red);
-}
-
-.t-warn {
-  color: var(--amber);
-}
-
-.t-good {
-  color: var(--green);
-}
-
 /* Shell -------------------------------------------------------------------- */
 
 /* The sidebar is the only global chrome; each page has its own head. */
@@ -1907,14 +1895,6 @@ html::-webkit-scrollbar-corner,
   color: var(--green);
 }
 
-.rf.t-warn {
-  color: var(--amber);
-}
-
-.rf.t-bad {
-  color: var(--red);
-}
-
 /* A PR's size: four bars, as many filled as it's big. */
 .bars rect {
   fill: currentcolor;
@@ -1989,14 +1969,6 @@ html::-webkit-scrollbar-corner,
 
 .sig-i.t-ok {
   color: var(--green);
-}
-
-.sig-i.t-warn {
-  color: var(--amber);
-}
-
-.sig-i.t-bad {
-  color: var(--red);
 }
 
 /* A quick review's bolt leads the facts, outside their columns. */
@@ -5380,11 +5352,7 @@ a.c-cta {
   text-wrap: pretty;
 }
 
-/* A status's help: red for what's yours to fix (GitHub's error, a failed connect), ink for an agent's failure or pause. */
-.s-help.t-bad {
-  color: var(--red);
-}
-
+/* A status's help: red (.t-bad) for what's yours to fix (GitHub's error, a failed connect), ink for an agent's failure or pause. */
 .s-help.s-ink {
   color: var(--ink);
 }
@@ -5988,7 +5956,7 @@ button.s-edit:hover:not(:disabled) {
   }
 }
 
-.au-outcome:not(.t-bad) {
+.au-outcome {
   color: var(--pencil);
 }
 
@@ -6734,10 +6702,6 @@ fieldset.au-field > legend {
   color: var(--green);
 }
 
-.rv-mark.t-bad {
-  color: var(--red);
-}
-
 /* "16 more": in line with the members' numbers, over the line. */
 .rv-stack .rv-more {
   position: relative;
@@ -6775,6 +6739,7 @@ a.rv-part-row:hover {
   flex: 0 1 auto;
   max-width: 60%;
   text-align: right;
+  color: var(--pencil);
 }
 
 /* A reviewer's one icon on your PR, after their state: remove (asked, not reviewed yet) or ask again (reviewed). */
@@ -6804,10 +6769,6 @@ a.rv-part-row:hover {
   height: 13px;
 }
 
-.rv-part-state:not(.t-bad, .t-warn) {
-  color: var(--pencil);
-}
-
 /* Under a part's name, a step quieter than it: regular weight, no larger. */
 .rv-part-line {
   margin: 0 0 4px;
@@ -6815,9 +6776,6 @@ a.rv-part-row:hover {
   font-size: var(--text-sm);
   font-weight: 450;
   line-height: 1.35;
-}
-
-.rv-part-line:not(.t-bad, .t-warn) {
   color: var(--ink);
 }
 
@@ -9322,4 +9280,17 @@ pre,
   display: grid;
   gap: 12px;
   padding: 12px 16px;
+}
+
+/* Tones last, so they beat any one class's colour; calming one takes a rule with more classes. */
+.t-bad {
+  color: var(--red);
+}
+
+.t-warn {
+  color: var(--amber);
+}
+
+.t-good {
+  color: var(--green);
 }
