@@ -8,7 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Effect, Result, Schema } from "effect";
-import type { Desk } from "./desk.ts";
+import type { Core, Desk } from "./desk.ts";
 import { parse } from "smol-toml";
 import { claudeJson } from "./agents.ts";
 import { kill, OWN_GROUP, track } from "./children.ts";
@@ -66,6 +66,8 @@ import {
 import { report } from "./sentry.ts";
 import { transcriptUsage } from "./usage.ts";
 import { reviewOptional } from "./stage.ts";
+
+type Host = Core & Pick<Desk, "jobs" | "answerRead" | "mcpUrl" | "asks" | "agent">;
 
 const FRESH = 15_000; // how often Merging may look for its claude.ai link until it has one
 const TURN = 60 * 60_000; // a wake on Codex or OpenCode is one turn the desk waits on; past this it's stopped
@@ -395,7 +397,7 @@ const NO_RUNS: Runs = { model: "", effort: "" };
 const SAID = 12_000; // the most of what it's said that the chat is sent
 
 export class Coordinator {
-  desk: Desk;
+  desk: Host;
   batch = 60_000; // what lands within this goes in one message
   every = 5 * 60_000; // how often the desk checks it's still running: one `claude agents`, no turn
   asked = false; // Wake it or Start it now in Merging
@@ -418,7 +420,7 @@ export class Coordinator {
 
   seat: Seat;
 
-  constructor(desk: Desk, seat: Seat = MERGING) {
+  constructor(desk: Host, seat: Seat = MERGING) {
     this.desk = desk;
     this.seat = seat;
   }
