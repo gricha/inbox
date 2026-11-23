@@ -630,7 +630,9 @@ test(
     const m = machine(c);
     const t = await deskOn(c, m);
     const l = lines(S.bg, m.work);
-    const resets = Date.now() + 90 * MIN;
+    // One clock for the desk and the expected text, so a run that crosses midnight can't name two days.
+    const now = t.desk.now().getTime();
+    const resets = now + 90 * MIN;
     const row = { id: "bg01", cwd: m.work, kind: "background", startedAt: 1, sessionId: S.bg, name: "Migrate", state: "working" };
     m.agents([row, { pid: process.pid, cwd: m.work, kind: "interactive", sessionId: S.cli, name: "term", status: "busy" }]);
     m.transcript(S.bg, [l.prompt("go"), l.apiError("rate_limit", 429, Math.floor(resets / 1000))]);
@@ -639,10 +641,10 @@ test(
     await t.poll();
     const id = `session:${S.bg}`;
     const card = await run(t.desk.session(id));
-    assert.deepEqual([card.reason, card.actions], [`rate limited until ${untilText(resets, Date.now())}`, ["kick"]]);
+    assert.deepEqual([card.reason, card.actions], [`rate limited until ${untilText(resets, now)}`, ["kick"]]);
     assert.equal(
       (await failure(t.desk.kickSession(id))).message,
-      `Migrate is rate limited until ${untilText(resets, Date.now())}; kick it after that`,
+      `Migrate is rate limited until ${untilText(resets, now)}; kick it after that`,
     );
     const term = await run(t.desk.session(`session:${S.cli}`));
     assert.deepEqual([term.reason, term.actions], ["no progress", []]);
