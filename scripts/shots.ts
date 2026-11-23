@@ -6587,7 +6587,37 @@ const SHOTS: Shot[] = [
       if (JSON.stringify(back) !== JSON.stringify(["Move to Standard"]))
         failures.push(`row-menu-move: an Urgent row offers ${JSON.stringify(back)}`);
       await page.locator(".ctx-item", { hasText: "Move to Standard" }).click();
-      await page.waitForTimeout(300);
+      // The picture is the row back in Standard, its toast risen. Nothing scrolls a moved row, and where the right-clicks
+      // left the page varies, so centre the row, then wait for the scroll to rest.
+      const moved = page.locator(`.g-standard .line[data-id="${id}"]`);
+      await moved
+        .evaluate((el) => {
+          el.scrollIntoView({ block: "center" });
+        })
+        .catch(() => {
+          failures.push(`row-menu-move: ${id} isn't in Standard after Move to Standard`);
+        });
+      await page
+        .waitForFunction(
+          `(() => {
+            const row = document.querySelector('.g-standard .line[data-id=${JSON.stringify(id)}]');
+            const r = row?.getBoundingClientRect();
+            const head = document.querySelector(".page-head")?.getBoundingClientRect().bottom ?? 0;
+            const toast = [...document.querySelectorAll(".toast")].find((t) => t.textContent.startsWith("Moved to Standard"));
+            const moving = [row, toast].some((el) => el?.getAnimations({ subtree: true }).some((a) => a.playState === "running" && a.effect?.getTiming().iterations !== Infinity));
+            const at = r && toast && !moving && r.top >= head && r.bottom <= innerHeight ? scrollY + ":" + r.top : null;
+            const still = at !== null && at === window.__rowMenuMoveAt;
+            window.__rowMenuMoveAt = at;
+            return still;
+          })()`,
+          null,
+          { polling: 100, timeout: 5000 },
+        )
+        .catch(() => {
+          failures.push(`row-menu-move: ${id} isn't in view in Standard after Move to Standard`);
+        });
+      // Two frames more, so the tiles the scroll uncovered are drawn at full quality.
+      await page.evaluate(`new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`);
     },
     after: fresh,
   },
