@@ -3,7 +3,6 @@
 // decision model's through OpenRouter), and an agent is your own Claude Code, read only. What comes of it, the desk acts on, by the verbs you allow it (add, when you allow nothing else: on your desk
 // with its why). An agent may write or change one, and it's on unless it says off, as yours is.
 import { randomBytes } from "node:crypto";
-import fs from "node:fs";
 import { as, meter } from "./usage.ts";
 import path from "node:path";
 import { Effect, Result, Schema, type Fiber } from "effect";
@@ -28,8 +27,9 @@ import {
   deskMcp,
   makeAgentDir,
   opencodeRun,
+  mcpAllow,
   runCommand,
-  toolPart,
+  withMcpConfig,
 } from "./review.ts";
 import {
   ACTIVITY_KINDS,
@@ -191,9 +191,9 @@ const CODEX_TOOLS =
   "- On this run you have the desk's read tools (inbox_list, inbox_item, inbox_overview, inbox_events, inbox_brief, inbox_merging) and nothing else: no shell, no gh, no web.";
 const CODEX_TOOLS_MCP = (mcp: readonly string[]) =>
   `- On this run you have the desk's read tools and the MCP servers ${mcp.join(", ")}, and nothing else: no shell, no gh, no web.`;
-// A Claude Code run's MCP: its --mcp-config file, none when your login's connectors must load; the desk's server's name.
+// A Claude Code run's MCP: the servers of its --mcp-config, none when your login's connectors must load; the desk's server's name.
 interface Scoped {
-  file: string | null;
+  servers: Record<string, unknown> | null;
   desk: string | null;
 }
 // A run reads, never asks, and is refused the rest: these and whatever your own settings allow (your MCP servers' tools you
@@ -1122,33 +1122,32 @@ export class Automations {
       if (agent !== "claude-code") return yield* this.byCodex(a, run, last, passed, batch, agent);
       const handed = passed?.slice(0, ITEMS_MAX) ?? null;
       const dir = yield* this.dir();
-      const scoped = a.mcp ? yield* this.claudeMcp(a.mcp, dir) : null;
-      const spawnAs = yield* claudeSpawn(claudeCommand(), [
-        "-p",
-        "--output-format",
-        "json",
-        "--permission-mode",
-        "dontAsk",
-        "--allowedTools",
-        [...allow(scoped?.desk ?? this.serverName()), ...(a.mcp ?? []).map((n) => `mcp__${toolPart(n)}`)].join(","),
-        "--disallowedTools",
-        secretsDeny(this.desk.home),
-        ...(scoped?.file ? ["--strict-mcp-config", "--mcp-config", scoped.file] : []),
-        "--json-schema",
-        JSON.stringify(schemaFor(a)),
-      ]);
-      const out = yield* runCommand(spawnAs, {
-        input: prompt(a, run.at, last, handed && this.fence(handed, batch?.happened)),
-        cwd: dir,
-        timeout: TIMEOUT,
-        stdoutOnError: true,
-        missing: claudeMissing(claudeCommand()),
-      }).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            if (scoped?.file) fs.rmSync(scoped.file, { force: true });
-          }),
-        ),
+      const scoped = a.mcp ? yield* this.claudeMcp(a.mcp) : null;
+      const input = prompt(a, run.at, last, handed && this.fence(handed, batch?.happened));
+      const out = yield* withMcpConfig(dir, scoped?.servers ?? null, (file) =>
+        Effect.gen({ self: this }, function* () {
+          const spawnAs = yield* claudeSpawn(claudeCommand(), [
+            "-p",
+            "--output-format",
+            "json",
+            "--permission-mode",
+            "dontAsk",
+            "--allowedTools",
+            [...allow(scoped?.desk ?? this.serverName()), ...mcpAllow(a.mcp ?? [])].join(","),
+            "--disallowedTools",
+            secretsDeny(this.desk.home),
+            ...(file ? ["--strict-mcp-config", "--mcp-config", file] : []),
+            "--json-schema",
+            JSON.stringify(schemaFor(a)),
+          ]);
+          return yield* runCommand(spawnAs, {
+            input,
+            cwd: dir,
+            timeout: TIMEOUT,
+            stdoutOnError: true,
+            missing: claudeMissing(claudeCommand()),
+          });
+        }),
       );
       if (!this.all().some((x) => x.id === a.id)) return "gone" as const; // deleted while it ran
       run.session = sessionOf(out);
@@ -1599,23 +1598,20 @@ export class Automations {
   // config, in a file of its own (their headers may hold tokens), so none other of yours loads. A claude.ai connector
   // ("claude.ai Gmail") comes only with your login, never in such a file: with one named, every server of yours loads and
   // only the named ones' tools are allowed.
-  claudeMcp(names: readonly string[], dir: string): Effect.Effect<Scoped, McpServerMissing> {
+  claudeMcp(names: readonly string[]): Effect.Effect<Scoped, McpServerMissing> {
     return Effect.suspend((): Effect.Effect<Scoped, McpServerMissing> => {
       const servers = claudeServers();
       const connectors = names.filter((n) => n.startsWith("claude.ai "));
       const gone = names.filter((n) => !connectors.includes(n) && !Object.hasOwn(servers, n));
       if (gone.length) return Effect.fail(new McpServerMissing({ names: gone, agent: "Claude Code" }));
-      if (connectors.length) return Effect.succeed({ file: null, desk: this.serverName() });
+      if (connectors.length) return Effect.succeed({ servers: null, desk: this.serverName() });
       const desk = this.serverName() ?? "inbox";
       const entry: unknown = this.serverName() ? servers[desk] : this.desk.mcpUrl && { type: "http", url: this.desk.mcpUrl };
       const picked: [string, unknown][] = [
         ...(entry ? [[desk, entry] as [string, unknown]] : []),
         ...names.map((n): [string, unknown] => [n, servers[n]]),
       ];
-      const mcpServers = Object.fromEntries(picked);
-      const file = path.join(dir, `.mcp-${randomBytes(6).toString("hex")}.json`);
-      fs.writeFileSync(file, JSON.stringify({ mcpServers }), { mode: 0o600 });
-      return Effect.succeed({ file, desk });
+      return Effect.succeed({ servers: Object.fromEntries(picked), desk });
     });
   }
 

@@ -691,7 +691,31 @@ export interface YourMcp {
 }
 
 // A server's name as Claude Code puts it in its tools' names (mcp__<it>__<tool>).
-export const toolPart = (name: string) => name.replaceAll(/[^A-Za-z0-9_-]/g, "_");
+const toolPart = (name: string) => name.replaceAll(/[^A-Za-z0-9_-]/g, "_");
+// Every tool of each of these servers, as --allowedTools names them.
+export const mcpAllow = (names: readonly string[]) => names.map((n) => `mcp__${toolPart(n)}`);
+
+// Claude Code's --mcp-config for `run`: `servers` in a file of their own in `dir` (their headers may hold tokens, so
+// only you read it), removed however the run ends; null, and no file, without servers.
+export const withMcpConfig = <A, E, R>(
+  dir: string,
+  servers: Record<string, unknown> | null,
+  run: (file: string | null) => Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R> =>
+  servers
+    ? Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const file = path.join(dir, `inbox-mcp-${randomBytes(6).toString("hex")}.json`);
+          fs.writeFileSync(file, JSON.stringify({ mcpServers: servers }), { mode: 0o600 });
+          return file;
+        }),
+        run,
+        (file) =>
+          Effect.sync(() => {
+            fs.rmSync(file, { force: true });
+          }),
+      )
+    : run(null);
 
 // The desk's own entry in a Codex or OpenCode list: its name, or a loopback address at its port.
 const deskOwn = (s: { name: string; url: string | null }, desk: string | null) => {
@@ -728,39 +752,34 @@ export const askClaude = Effect.fn("askClaude")(function* (
   opts: { command?: string } & AskOpts,
 ): Effect.fn.Return<ClaudeAnswer, CommandError | ClaudeError> {
   const command = opts.command ?? claudeCommand();
-  // Yours in a file of their own (their headers may hold tokens), outside the checkout, so a PR's .mcp.json never loads.
-  const yours = Object.keys(opts.mcp?.claude ?? {});
-  const file = yours.length ? path.join(os.tmpdir(), `inbox-mcp-${randomBytes(6).toString("hex")}.json`) : null;
-  const allowed = [...(opts.read ? [GITHUB_READS] : []), ...yours.map((n) => `mcp__${toolPart(n)}`)];
-  const args = [
-    "-p",
-    "--output-format",
-    "json",
-    "--tools",
-    opts.read ? "Read,Grep,Glob,Bash" : "",
-    ...(allowed.length ? ["--allowedTools", allowed.join(","), ...FENCED] : []),
-    "--strict-mcp-config",
-    ...(file ? ["--mcp-config", file] : []),
-    "--no-session-persistence",
-    "--json-schema",
-    JSON.stringify(opts.schema ?? SCHEMA),
-    ...(opts.model ? ["--model", opts.model] : []),
-    ...(opts.effort ? ["--effort", opts.effort] : []),
-  ];
-  if (file) fs.writeFileSync(file, JSON.stringify({ mcpServers: opts.mcp?.claude }), { mode: 0o600 });
-  const spawnAs = yield* claudeSpawn(command, args);
-  const out = yield* runCommand(spawnAs, {
-    input: prompt,
-    cwd: opts.dir,
-    timeout: TIMEOUT,
-    stdoutOnError: true,
-    missing: claudeMissing(command),
-  }).pipe(
-    Effect.ensuring(
-      Effect.sync(() => {
-        if (file) fs.rmSync(file, { force: true });
-      }),
-    ),
+  const yours = opts.mcp?.claude && Object.keys(opts.mcp.claude).length ? opts.mcp.claude : null;
+  const allowed = [...(opts.read ? [GITHUB_READS] : []), ...mcpAllow(Object.keys(yours ?? {}))];
+  // Outside the checkout, so a PR's .mcp.json never loads.
+  const out = yield* withMcpConfig(os.tmpdir(), yours, (file) =>
+    Effect.gen(function* () {
+      const spawnAs = yield* claudeSpawn(command, [
+        "-p",
+        "--output-format",
+        "json",
+        "--tools",
+        opts.read ? "Read,Grep,Glob,Bash" : "",
+        ...(allowed.length ? ["--allowedTools", allowed.join(","), ...FENCED] : []),
+        "--strict-mcp-config",
+        ...(file ? ["--mcp-config", file] : []),
+        "--no-session-persistence",
+        "--json-schema",
+        JSON.stringify(opts.schema ?? SCHEMA),
+        ...(opts.model ? ["--model", opts.model] : []),
+        ...(opts.effort ? ["--effort", opts.effort] : []),
+      ]);
+      return yield* runCommand(spawnAs, {
+        input: prompt,
+        cwd: opts.dir,
+        timeout: TIMEOUT,
+        stdoutOnError: true,
+        missing: claudeMissing(command),
+      });
+    }),
   );
   return yield* metered(claudeEnvelope(out));
 });
