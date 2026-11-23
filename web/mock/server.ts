@@ -107,6 +107,7 @@ import type {
   Job,
   Work,
   RemoteView,
+  NoteButton,
 } from "../../src/types.ts";
 import {
   ACTIVITY_KINDS,
@@ -114,6 +115,7 @@ import {
   COORDINATOR_NAME,
   GITHUB_ACTIONS,
   INBOX_SECTIONS,
+  ITEM_DOES,
   RANK,
   SECRET_SET,
   UNTIL,
@@ -178,6 +180,12 @@ function untilOf(when: string | null): Until | null {
 }
 const isSettingValue = (v: unknown): v is SettingValue =>
   typeof v === "number" || typeof v === "boolean" || typeof v === "string" || strings(v) !== undefined;
+// A note button from a PUT body, or null.
+function buttonOf(v: unknown): NoteButton | null {
+  if (!isRecord(v) || typeof v.label !== "string") return null;
+  if (v.do === "open") return { label: v.label, do: "open" };
+  return v.do === "ask" && typeof v.prompt === "string" ? { label: v.label, do: "ask", prompt: v.prompt } : null;
+}
 // An automation's rule from a PUT body: { rule } when it names a verb, else nothing.
 function ruleOf(v: unknown): { rule: RuleAction } | false {
   const verb = oneOf(VERBS, isRecord(v) ? v.do : undefined);
@@ -2880,6 +2888,11 @@ const AUTOMATIONS: Automation[] = [
     schedule: "weekdays hourly",
     prompt: "Read my unread mail since the last run and raise what needs me: a bill to pay, something to sign, a person waiting on me.",
     mcp: ["claude.ai Gmail"],
+    buttons: [
+      { label: "Open in Gmail", do: "open" },
+      { label: "Draft a reply", do: "ask", prompt: "Draft a reply to this email in my Gmail drafts; don't send it." },
+    ],
+    icon: "brand:gmail",
     type: GMAIL_TYPE,
     rules: [{ when: 'item.kind == "statement"', do: "drop" }],
     on: true,
@@ -4732,6 +4745,14 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     if (plugin) throw new HttpError(400, `"${plugin.name}" comes with GitHub: only its switch is yours, in its part of Settings`);
     if (req.method === "PUT") {
       const b = await readBody(req);
+      // A typed one's type and rules, refused as the desk words it.
+      const type = typeof b.type === "string" ? b.type.trim() : "";
+      const rules = Array.isArray(b.rules) ? b.rules.filter(isRecord) : [];
+      const checked = typeCheck(type, rules);
+      if (checked.error) throw new HttpError(400, `type: ${checked.error.message}`);
+      const bad = checked.rules.findIndex((r) => r !== null);
+      if (bad >= 0) throw new HttpError(400, `rules: ${bad + 1}: ${checked.rules[bad]}`);
+      const servers = strings(b.mcp) ?? [];
       const a: Automation = {
         id,
         name: String(b.name),
@@ -4742,6 +4763,19 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
         ...((b.decide === "rule" || b.decide === "ask") && { decide: b.decide }),
         ...(b.decide === "rule" && ruleOf(b.rule)),
         ...(Array.isArray(b.can) && b.can.join() !== "add" && { can: b.can.flatMap((v) => oneOf(VERBS, v) ?? []) }),
+        ...(servers.length > 0 && { mcp: servers }),
+        ...(Array.isArray(b.buttons) && b.buttons.length > 0 && { buttons: b.buttons.flatMap((x) => buttonOf(x) ?? []) }),
+        ...(typeof b.icon === "string" && b.icon && { icon: b.icon }),
+        ...(type && { type }),
+        ...(rules.length > 0 && {
+          rules: rules.flatMap((r) => {
+            const does = oneOf(ITEM_DOES, r.do);
+            if (!does) return [];
+            const w = typeof r.when === "string" ? r.when.trim() : "";
+            const ask = typeof r.ask === "string" ? r.ask.trim() : "";
+            return [{ ...(w && { when: w }), ...(ask && { ask }), do: does }];
+          }),
+        }),
         on: b.on !== false,
         by: "you",
         updated_at: new Date().toISOString(),

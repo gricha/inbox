@@ -256,6 +256,7 @@ After you answer, the question leaves the main page and is owed to whoever asked
 | PUT    | `/api/automations/:id/on`  | `{ on }` → `{ ok, automation }`: switches a plugin's (`github.<id>`). Own page only; 404 for one of yours (its switch is its PUT)                                                                     | ✓            |
 | DELETE | `/api/automations/:id`     | Own page only; 400 for a plugin's                                                                                                                                                                     | ✓            |
 | POST   | `/api/automations/:id/run` | `{ ok, running }`: runs it now, in the background. 409 for one that's off unless from the own page                                                                                                    | ✓ (when off) |
+| POST   | `/api/automations/check`   | `{ type?, rules? }` → `TypeCheck`: a typed automation's type and rules checked as a save would, each where it is; nothing is saved ([Typed notes](#typed-notes))                                      |              |
 | GET    | `/api/criteria`            | `CriteriaView`: each criterion with `yes` (the Inbox items it says yes to), and `waiting`, `held`, `scored` ([Urgency](#urgency))                                                                     |              |
 | GET    | `/api/usage?days=`         | `UsageView`: what model calls would have cost at API prices, by `work` and `model`, over the last `days` (all of them without) ([Usage](#usage))                                                      |              |
 | PUT    | `/api/criteria/:id`        | `{ name, when?, ask?, urgent?, on? }` → `{ ok, criterion }`: saves yours, whole. An agent's is on (`on` is the window's to set)                                                                       |              |
@@ -743,6 +744,10 @@ interface Automation {
   rule?: { do: Verb; until?: string; why: string }; // decide rule's fixed action
   can?: Verb[]; // absent: add only
   mcp?: string[]; // an agent's: your agent's MCP servers its runs get, by name; absent: none named
+  buttons?: NoteButton[]; // with mcp: its notes' buttons
+  icon?: string; // with mcp: its notes' icon
+  type?: string; // with mcp: TypeScript for its notes' fields (Typed notes)
+  rules?: { when?: string; ask?: string; do: "drop" | "urgent" | "standard" | "fyi" }[]; // with type: in order, the first yes decides
   on: boolean;
   by: "you" | "an agent"; // who last changed it
   updated_at: string;
@@ -763,6 +768,8 @@ type AutomationBody = {
   mcp?: string[]; // decide agent only
   buttons?: NoteButton[]; // with mcp
   icon?: string; // with mcp: its notes' icon: a Lucide name ("receipt") or "brand:<Simple Icons slug>" ("brand:gmail")
+  type?: string; // with mcp
+  rules?: { when?: string; ask?: string; do: "drop" | "urgent" | "standard" | "fyi" }[]; // with type
   on?: boolean;
 };
 
@@ -794,6 +801,24 @@ interface AutomationView extends Automation {
   running: boolean;
   waiting: { why: string; until: string } | null; // an ask whose model can't answer now
   runs: (AutomationRun & { did: string; didnt: string })[]; // the last 10, newest first
+  held: HeldNoteView[]; // its notes whose fields don't fit its type, off your desk, oldest first
+}
+
+interface HeldNoteView {
+  id: string;
+  at: string;
+  text: string; // untrusted, as the run gave it
+  fields: unknown; // untrusted, as the run gave them
+  error: string; // how they don't fit, in Effect's words
+  rec: string | null; // the open recommendation's inquiry id; null while your agent is still to recommend
+}
+
+// POST /api/automations/check { type?, rules? }: what a save would say of them, nothing saved.
+interface TypeCheck {
+  name: string | null; // the type's, once it reads
+  error: { message: string; line: number | null; column: number | null } | null; // the parser's words, and where (1-based)
+  fields: { path: string; type: string; optional: boolean }[]; // what its rules' item. can name: "item.kind", '"bill" | "statement"'
+  rules: (string | null)[]; // each rule's refusal, as a save words it after "rules: <n>: "; null where it holds
 }
 ```
 
@@ -1585,6 +1610,7 @@ Settings → MCP servers lists, checks, adds and removes your agent's own (`GET`
 
 - **What it reads.** One `type Name = { … }` or `interface Name { … }` (optionally `export`), whose fields are `string`, `number` (`Schema.Finite`), `boolean`, string literals and unions of these, optional fields (`a?: T`), `readonly`, nested object literals and arrays (`T[]`, `Array<T>`); comments are skipped. Anything else is a 400 naming it and where, with what it does read: `type: line 1, column 20: "Date" (use string, an ISO date) isn't supported; a type here is …`. So are `null`, a number literal, a generic, `extends`, an index signature, a tuple, a function, `&`, another type's name, a second declaration, and a field named other than letters, digits and `_`. TypeScript 7 has no JS API, so this is a small parser of its own; its refusals are its subset, not TypeScript's.
 - **What it becomes.** An Effect `Schema.Struct`, and from it, by `Schema.toJsonSchemaDocument()` (`onExcessProperty: "error"`), the JSON Schema of each note's `fields` in the run's answer, which then requires `fields`. The run's prompt carries the type and says to fill the fields from the item itself, never guessing. Its fields' paths (`item.kind`, nested `item.ship.carrier`; a list of objects isn't one) are what its rules read.
+- **Checked as you write.** `POST /api/automations/check` reads a type and its rules as `PUT` would and saves nothing: the type's refusal in the parser's words with its line and column (`readType()`), each rule's refusal as the save words it (`typeCheck()`), and the fields its rules can name with their types as written. Settings' editor asks it a moment after each change, so the window never parses a type itself.
 - **The check.** Each note's `fields` is decoded with the Schema (`fit()`, every error, Effect's words). One that fits goes through its rules, and a note it raises keeps them as decoded (`Note.fields`, untrusted like the rest of it; `inbox_ask` gives them inside the note's fence). `Desk.notesView()` reads them by the automation's type as it is now (`factsOf()`; with the automation gone, by each value) into `Note.facts`, never stored, for the opened note: `{ label, text | number | date }` in the type's order, a field's name in words (`due` → Due, `sender_name` → Sender name), an enum's value humanized, a boolean Yes or No, a list of scalars joined, a nested object's fields as `Ship carrier`, an ISO date or time as `date` and a number as `number` for the window to write in its locale; a field left out, a null or a list of objects has none, and there are 12 at most; one that doesn't is **held**: kv `automation_held` keeps it by automation (`{ id, key, run, note, error, said, rec }`), it isn't on your desk and its key isn't kept as raised, and its run's record says `unfit` with the error. A later run that reads the same key the same way holds nothing more; one that reads it so it fits raises it, and the held one goes with its recommendation.
 
 **Rules on notes.** `rules` (with `type`, up to 10) are asked of each note that fits, in order, and the first that says yes decides; with none that does, it goes where the run said (Urgent when `urgent`).
@@ -1602,7 +1628,7 @@ What it recommends is an `Inquiry` with `fix` (`Recommendation`: `automation`, `
 - **Disagree** (or a dismissal): the recommendation and the held note go, and its key is kept as raised: it doesn't come back.
 - **Anything else you write** (Approve with comment): it goes back to your agent with the recommendation it answers, for a revised one, in the background; the old one leaves at once. One that fails is logged and notified, and the next run asks again.
 
-A refusal (the automation gone, a fix that no longer fits) leaves both as they were. Deleting the automation forgets what it held, and its questions; so does saving it without a type, since nothing is left for them to fit: its next run reads them again.
+A refusal (the automation gone, a fix that no longer fits) leaves both as they were. Deleting the automation forgets what it held, and its questions; so does saving it without a type, since nothing is left for them to fit: its next run reads them again. `GET /api/automations` lists what each holds (`held`): its text, fields and error, and `rec`, the open recommendation about it.
 
 #### What it may do
 

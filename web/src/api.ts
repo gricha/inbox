@@ -5,6 +5,8 @@ import { Cause, Data, Effect, Exit } from "effect";
 import type { ErrorBody } from "../../src/errors.ts";
 import type {
   BrandIcon,
+  ItemRule,
+  TypeCheck,
   InboxSection,
   Action,
   AgentStatus,
@@ -264,6 +266,7 @@ export const api = {
     call<{ ok: true; automation: Automation }>("PUT", `/api/automations/${encodeURIComponent(id)}/on`, { on }),
   deleteAutomation: (id: string) => call<{ ok: true }>("DELETE", `/api/automations/${encodeURIComponent(id)}`),
   runAutomation: (id: string) => call<{ ok: true; running: string }>("POST", `/api/automations/${encodeURIComponent(id)}/run`),
+  checkType: (type: string, rules: ItemRule[]) => call<TypeCheck>("POST", "/api/automations/check", { type, rules }),
   // A note to yourself, new or changed; remind: "" for none, else a time ("1h", "tomorrow", an ISO time).
   saveNote: (id: string | null, b: { text: string; remind: string; section?: InboxSection }) =>
     call<{ ok: true; note: Note }>("POST", id ? `/api/notes/${encodeURIComponent(id)}` : "/api/notes", b),

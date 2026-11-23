@@ -557,6 +557,7 @@ Each row:
 - While its model can't answer: a red line saying it's waiting, why, when it asks again, and that nothing was spent.
 - **Run now** (not for a rule, or a question on events without a check), **Edit**, **Turn off**/**Turn on**.
 - Its runs: when and how ("on schedule", "run now", "on an event"), what it did ("put 2 on your desk, sorted 3 to FYI, snoozed 1"), the agent's summary, each item with what came of it (Added, Sorted to FYI, Hidden, Snoozed until CI passes, Marked done, Muted, Already on your desk, You'd dealt with it, Nobody needs it now, Held where it is, Dropped by a rule with the rule; Not allowed, Couldn't add and Held: doesn't fit its type in red) and why.
+- **Held** (when it holds any), before its runs: "Notes whose fields don't fit its type. They aren't on your desk." Each: its text, when, how it doesn't fit (the desk's check, in the code font) and its fields as the run gave them, with **Claude's recommendation** linking to that question, or "Claude is still to recommend". Its text and fields are what the run read: text only.
 - **Copy resume command** copies `cd <home>/automations && claude --resume <id>` (`codex resume` or `opencode --session` for those agents).
 - Deleting one goes back to Automations. A link to one that isn't there says so.
 
@@ -568,9 +569,12 @@ Each row:
 - **How it decides**: A rule, Ask a model, or An agent with tools.
 - For a rule, **Then**: Add to your desk, Sort to Today, Sort to Later, Sort to FYI, Hide, Snooze (with "until": tomorrow, an hour, 3 hours, Monday, new activity, CI passes, new commits, approved, ready for review, conflict fixed), Mark done, Mute; and the why the item shows.
 - For the others, **Instruction** and **It may** (the same eight, at least one).
+- An agent's **MCP servers**: names, comma-separated.
+- With MCP servers (or a type already), **Its notes are**: the type, in the code font, growing with it. The desk checks it a moment after you stop typing (`POST /api/automations/check`; the window never parses it): a refusal is marked in red under the very characters it names and said under the box in the parser's words ("line 2, column 7: "Date" (use string, an ISO date) isn't supported; …"); a click on it selects that spot. Under it, what its rules can read: each field (`item.kind`) and its type as written, "may be left out" when optional (the last type that read, while you fix one).
+- **Its rules**, in order: what a yes does (Drop it, Urgent, Standard, FYI), **when** (the rules' language over `item.<field>`) and **and Claude says yes to** (a question in your words); under each, the desk's refusal ("when: unknown field "item.knd"; did you mean "item.kind"?", in red once the rule says something), then **Move up**, **Move down** and **Remove**. **Add a rule**, up to 10. Each needs a when, an ask or both before Save.
 - **Save** (⌘S; off until it's a valid automation), **Cancel** (Esc), and in a view **Delete** (no confirmation; stops a run in progress).
 - A new one's id is its name's, made unique with -2, -3…
-- Its type and rules aren't in the editor: an agent writes them (**Change with your agent**), and a save keeps them as they are.
+- A save sends the whole automation, its buttons and icon too, which the editor doesn't change: the view shows what you saved at once (its line says "Saving…" while a changed schedule or events wait for the desk's words), then reads it back; a refusal opens the editor again with your words and says why.
 
 #### Urgency
 

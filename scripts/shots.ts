@@ -3667,6 +3667,206 @@ const SHOTS: Shot[] = [
     after: at("#/"),
   },
   {
+    // What it held, before its runs: each note's text, how it doesn't fit (red, as its run's line says it) and its fields,
+    // with a link to the recommendation that waits on you, or that Claude is still to give one.
+    name: "settings-automations-held",
+    go: async (page) => {
+      await at("#/settings/automations/gmail")(page);
+      await page.locator(".s-view .au-held").first().waitFor();
+      const notes = await page.evaluate<{ text: string; link: string | null; to: string; red: boolean; fields: string }[]>(
+        `[...document.querySelectorAll(".s-view:not([hidden]) .au-held")].map((h) => ({
+          text: h.querySelector(".au-held-text").textContent,
+          link: h.querySelector("a.au-resume")?.getAttribute("href") ?? null,
+          to: h.querySelector(".au-resume").textContent,
+          red: getComputedStyle(h.querySelector(".au-held-error")).color === getComputedStyle(document.querySelector(".t-bad")).color,
+          fields: h.querySelector(".au-held-fields").textContent,
+        }))`,
+      );
+      const want = [
+        {
+          text: "Your receipt from Blue Bottle Coffee",
+          link: "#/inquiry/q5e1a11d",
+          to: "Claude’s recommendation",
+          red: true,
+          fields: '{"kind":"receipt","sender":"Blue Bottle Coffee","amount":6.5}',
+        },
+        {
+          text: "City of Oakland: parking ticket, pay by Dec 5",
+          link: null,
+          to: "Claude is still to recommend",
+          red: true,
+          fields: '{"kind":"bill","sender":"City of Oakland","amount":"$64.00","due":"2026-12-05"}',
+        },
+      ];
+      if (JSON.stringify(notes) !== JSON.stringify(want)) failures.push(`settings-automations-held: it reads ${JSON.stringify(notes)}`);
+      const order = await page.evaluate<string[]>(
+        `[...document.querySelectorAll(".s-view:not([hidden]) .group-head")].map((h) => h.textContent)`,
+      );
+      if (order.join() !== "Held,Runs") failures.push(`settings-automations-held: its heads read ${JSON.stringify(order)}`);
+      await page.evaluate(`document.querySelector(".s-view:not([hidden]) .au-held").scrollIntoView({ block: "center" })`);
+      await page.waitForTimeout(200);
+    },
+    after: at("#/"),
+  },
+  {
+    // A typed automation's editor: its type in the code font with the fields its rules can read under it, and its rules in
+    // order, each with what a yes does, its when and its ask. A when naming a field the type hasn't is the desk's "did you
+    // mean", under that rule, a moment after typing; nothing is saved.
+    name: "settings-automations-type-edit",
+    go: async (page) => {
+      await at("#/settings/automations/gmail")(page);
+      await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).click();
+      const form = page.locator(".s-view:not([hidden]) .au-editor");
+      await form.locator(".au-fields").waitFor();
+      const read = () =>
+        page.evaluate<{ labels: string[]; type: string; fields: string[]; rules: string[][]; error: string | null }>(`(() => {
+          const f = document.querySelector(".s-view:not([hidden]) .au-editor");
+          return {
+            labels: [...f.querySelectorAll(".s-label")].map((l) => l.textContent),
+            type: f.querySelector(".au-type-src").value,
+            fields: [...f.querySelectorAll(".au-fields > div")].map((d) => d.textContent),
+            rules: [...f.querySelectorAll(".au-rule")].map((r) =>
+              [...r.querySelectorAll("select, input")].map((x) => (x.tagName === "SELECT" ? x.selectedOptions[0].textContent : x.value)),
+            ),
+            error: f.querySelector(".au-rule .s-help")?.textContent ?? null,
+          };
+        })()`);
+      const opened = await read();
+      const want = {
+        labels: ["Name", "Runs", "Only when", "How it decides", "Instruction", "It may", "MCP servers", "Its notes are", "Its rules"],
+        fields: [
+          'item.kind"statement" | "bill" | "personal" | "security" | "booking" | "order"',
+          "item.senderstring",
+          "item.amountnumber, may be left out",
+          "item.duestring, may be left out",
+        ],
+        rules: [["Drop it", 'item.kind == "statement"', ""]],
+        error: null,
+      };
+      const { type, ...got } = opened;
+      if (JSON.stringify(got) !== JSON.stringify(want) || !type.startsWith("type Email = {"))
+        failures.push(`settings-automations-type-edit: the editor opens as ${JSON.stringify(opened)}`);
+      await form.getByRole("button", { name: "Add a rule" }).click();
+      await form.getByLabel("What rule 2 does").selectOption({ label: "Urgent" });
+      await form.getByLabel("Rule 2: when").fill('item.knd == "security"');
+      await form.locator(".au-rule .s-help.t-bad").waitFor();
+      const typo = (await read()).error;
+      if (typo !== 'when: unknown field "item.knd"; did you mean "item.kind"?')
+        failures.push(`settings-automations-type-edit: a typo reads ${JSON.stringify(typo)}`);
+      await page.evaluate(
+        `document.querySelector(".s-view:not([hidden]) .au-type-src").scrollIntoView({ block: "start" }); scrollBy(0, -60)`,
+      );
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.locator(".s-view:not([hidden]) .au-editor").getByRole("button", { name: "Cancel" }).click();
+      await at("#/")(page);
+    },
+  },
+  {
+    // A type the desk doesn't read: the very characters it names marked in red where they are, and its words under the box,
+    // the parser's own; a click on them selects that spot.
+    name: "settings-automations-type-error",
+    go: async (page) => {
+      await at("#/settings/automations/gmail")(page);
+      await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).click();
+      const form = page.locator(".s-view:not([hidden]) .au-editor");
+      await form.locator(".au-type-src").fill('type Email = {\n  kind: "bill" | "statement";\n  sender: string;\n  sent: Date;\n}');
+      await form.locator(".au-type-mark").waitFor();
+      const seen = await page.evaluate<{ mark: string; said: string; top: number; line: number }>(`(() => {
+        const f = document.querySelector(".s-view:not([hidden]) .au-editor");
+        const mark = f.querySelector(".au-type-mark");
+        const box = f.querySelector(".au-type-src");
+        return {
+          mark: mark.textContent,
+          said: f.querySelector(".au-type-error").textContent,
+          top: Math.round(mark.getBoundingClientRect().top - box.getBoundingClientRect().top),
+          line: parseFloat(getComputedStyle(box).lineHeight),
+        };
+      })()`);
+      if (seen.mark !== "Date" || !seen.said.startsWith(`line 4, column 9: "Date" (use string, an ISO date) isn't supported`))
+        failures.push(`settings-automations-type-error: it reads ${JSON.stringify(seen)}`);
+      // On its line, the fourth, under the box's top padding.
+      if (Math.abs(seen.top - (11 + 3 * seen.line)) > 4) failures.push(`settings-automations-type-error: the mark is ${seen.top}px down`);
+      await form.locator(".au-type-go").click();
+      const picked = await page.evaluate<string>(
+        `(() => { const t = document.querySelector(".s-view:not([hidden]) .au-type-src"); return t.value.slice(t.selectionStart, t.selectionEnd); })()`,
+      );
+      if (picked !== "Date") failures.push(`settings-automations-type-error: a click on it selects ${JSON.stringify(picked)}`);
+      await page.evaluate(
+        `document.querySelector(".s-view:not([hidden]) .au-type-src").scrollIntoView({ block: "start" }); scrollBy(0, -60)`,
+      );
+      await page.waitForTimeout(200);
+    },
+    after: async (page) => {
+      await page.locator(".s-view:not([hidden]) .au-editor").getByRole("button", { name: "Cancel" }).click();
+      await at("#/")(page);
+    },
+  },
+  {
+    // A save of a typed one shows at once: the editor closes and the view says the new rules in their new order before the
+    // desk answers; what goes is the whole automation, its buttons, icon and servers as they were. Then it reads back.
+    name: "settings-automations-type-save",
+    writes: true,
+    sizes: ["wide"],
+    go: async (page) => {
+      const was = await page.evaluate<string>(
+        `fetch("/api/automations").then((r) => r.json()).then((v) => JSON.stringify(v.find((a) => a.id === "gmail")))`,
+      );
+      let sent: Record<string, unknown> = {};
+      let answer = () => {};
+      const answered = new Promise<void>((r) => {
+        answer = r;
+      });
+      await page.route("**/api/automations/gmail", async (route) => {
+        if (route.request().method() !== "PUT") return route.fallback();
+        sent = route.request().postDataJSON() as Record<string, unknown>;
+        await answered;
+        await route.continue();
+      });
+      await at("#/settings/automations/gmail")(page);
+      await page.locator(".s-view .au-view").getByRole("button", { name: "Edit" }).click();
+      const form = page.locator(".s-view:not([hidden]) .au-editor");
+      await form.getByRole("button", { name: "Add a rule" }).click();
+      await form.getByLabel("What rule 2 does").selectOption({ label: "FYI" });
+      await form.getByLabel("Rule 2: ask").fill("Is it a newsletter or a promotion?");
+      await form.getByLabel("Move rule 2 up").click();
+      await form.getByRole("button", { name: "Save" }).click();
+      await page.locator(".s-view:not([hidden]) .au-facts").waitFor({ timeout: 2_000 });
+      const shown = (await automationFacts(page)).facts.filter((f) => f.startsWith("Rules") || f.startsWith("Then"));
+      const want = ["Rules: FYI if Claude says yes to “Is it a newsletter or a promotion?”", 'Then: Drop it when item.kind == "statement"'];
+      if (JSON.stringify(shown) !== JSON.stringify(want))
+        failures.push(`settings-automations-type-save: before the desk answers, the view reads ${JSON.stringify(shown)}`);
+      const old = JSON.parse(was) as Record<string, unknown>;
+      const changed = ["mcp", "buttons", "icon", "type", "schedule", "prompt", "on"].filter(
+        (k) => JSON.stringify(sent[k]) !== JSON.stringify(old[k]),
+      );
+      const rules = [{ ask: "Is it a newsletter or a promotion?", do: "fyi" }, ...(old.rules as object[])];
+      const sorted = (v: unknown) =>
+        JSON.stringify(v, (_, x: unknown) =>
+          isRecord(x) ? Object.fromEntries(Object.entries(x).toSorted(([a], [b]) => a.localeCompare(b))) : x,
+        );
+      if (changed.length || sorted(sent.rules) !== sorted(rules))
+        failures.push(`settings-automations-type-save: the PUT dropped or changed ${changed.join(", ")}: ${JSON.stringify(sent)}`);
+      answer();
+      await page.waitForFunction(
+        `fetch("/api/automations").then((r) => r.json()).then((v) => v.find((a) => a.id === "gmail").rules.length === 2)`,
+      );
+      const back = await page.evaluate<Record<string, unknown>>(
+        `fetch("/api/automations").then((r) => r.json()).then((v) => v.find((a) => a.id === "gmail"))`,
+      );
+      if (JSON.stringify([back.buttons, back.icon, back.mcp]) !== JSON.stringify([old.buttons, old.icon, old.mcp]))
+        failures.push(`settings-automations-type-save: read back, the desk has ${JSON.stringify(back)}`);
+      await unroute(page);
+      await page.evaluate(
+        `((a) => fetch("/api/automations/gmail", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(a) }))(${was})`,
+      );
+      await page.reload();
+      await page.locator(".s-view:not([hidden]) .au-facts").waitFor();
+    },
+    after: at("#/"),
+  },
+  {
     // Merged and closed ones under Merged, below the fold at every size.
     name: "inflight-landed",
     go: async (page) => {
@@ -5199,6 +5399,10 @@ const SHOTS: Shot[] = [
       await form.getByLabel("New commits are pushed").check();
       await form.getByRole("button", { name: "Save" }).click();
       await page.locator(".s-view .au-facts").waitFor();
+      // At once it says it's saving what starts it, whose words only the desk has; then the read back has them.
+      await page.waitForFunction(
+        `![...document.querySelectorAll(".s-view:not([hidden]) .s-view-line")].some((l) => l.textContent.startsWith("Saving"))`,
+      );
       const saved = await page.evaluate<Record<string, unknown>>(
         `fetch("/api/automations").then((r) => r.json()).then((v) => v.find((a) => a.id === "my-red-ci"))`,
       );

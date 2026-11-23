@@ -16,6 +16,7 @@ import {
   type AutomationRun,
   type AutomationView as Auto,
   type ItemRule,
+  type NoteButton,
   type RuleAction,
   type Verb,
   type Way,
@@ -26,6 +27,7 @@ import { useKeyed } from "../keyed.ts";
 import { ago, cls, copyText, issueUrl, MOD, when, aiName } from "../format.ts";
 import { changeAsk, resumeCommand, routeHash } from "../view.ts";
 import { SkLines } from "./Skeleton.tsx";
+import { HeldNotes, ITEM_DOES_WORDS, RulesField, TypeField, useTypeCheck } from "./TypedNotes.tsx";
 
 type Run = Auto["runs"][number];
 const RAN: Record<Run["trigger"], string> = { schedule: "on schedule", now: "run now", event: "on an event" };
@@ -41,8 +43,10 @@ interface Draft {
   rule?: RuleAction; // with decide rule
   can: Verb[];
   mcp: string; // an agent's MCP servers, as typed: names, comma-separated
-  // An agent writes these (inbox_automations); the editor keeps them as they are.
-  type?: string;
+  // An agent writes these (inbox_automations); the editor sends them back as they are.
+  buttons?: NoteButton[];
+  icon?: string;
+  type?: string; // its notes' type and rules, which the editor writes too
   rules?: ItemRule[];
   on: boolean;
 }
@@ -74,14 +78,6 @@ const UNTILS: [string, string][] = [
 ];
 const untilWords = (u: string | undefined) => UNTILS.find(([k]) => k === (u ?? "tomorrow"))?.[1] ?? u ?? "";
 
-// What a rule on its notes does with a yes.
-const ITEM_DOES_WORDS: Record<ItemRule["do"], string> = {
-  drop: "Drop it",
-  urgent: "Urgent",
-  standard: "Standard",
-  fyi: "FYI",
-};
-
 // How it decides, the three ways cheapest first, as the editor offers them.
 const WAY: Record<Way, { name: string; help: string }> = {
   rule: { name: "A rule", help: "No model: every item that passes the check gets the one action below." },
@@ -103,7 +99,12 @@ function bodyOf(d: Draft): AutomationBody {
     ...(d.when.trim() && { when: d.when.trim() }),
     decide: d.decide,
     ...(rule ? { rule, can: [rule.do] } : { prompt: d.prompt, can: d.can }),
-    ...(d.decide === "agent" && serversOf(d.mcp).length > 0 && { mcp: serversOf(d.mcp), type: d.type, rules: d.rules }),
+    ...(d.decide === "agent" && serversOf(d.mcp).length > 0 && { mcp: serversOf(d.mcp) }),
+    // Never dropped: without mcp the desk refuses them, out loud.
+    ...(d.buttons && { buttons: d.buttons }),
+    ...(d.icon && { icon: d.icon }),
+    ...(d.type && { type: d.type }),
+    ...(d.rules && { rules: d.rules }),
     on: d.on,
   };
 }
@@ -139,6 +140,7 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
   const [flipped, setFlipped] = useState<Record<string, boolean>>({});
   const [starting, setStarting] = useState<string[]>([]);
   const [gone, setGone] = useState<string[]>([]);
+  const [saving, setSaving] = useState<Record<string, Draft>>({});
   // A new one being written: the tab's last row opens it, and its editor sits under the tab's sheet.
   const [writing, setWriting] = useState<Draft | null>(null);
   // An edit open in an automation's view, by its id: kept across a trip to another automation's view, or anywhere, and back.
@@ -263,6 +265,7 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
   }
 
   // A new one's id is its name's, made free with -2, -3… so it never lands on one you have. Its id once it's saved, else null.
+  // An edit shows as saved at once, until the list read again has it or the desk refuses it.
   function save(d: Draft, done?: string): Effect.Effect<string | null> {
     const base = d.id ?? slug(d.name);
     if (!base) {
@@ -271,7 +274,18 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     }
     let id = base;
     for (let n = 2; !d.id && list?.some((a) => a.id === id); n++) id = `${base.slice(0, 36)}-${n}`;
-    return put(id, bodyOf(d), done ?? (d.id ? `Saved ${d.name}` : `Added ${d.name}`)).pipe(Effect.map((ok) => (ok ? id : null)));
+    const edit = d.id;
+    return Effect.suspend(() => {
+      if (edit) setSaving((s) => ({ ...s, [edit]: d }));
+      return put(id, bodyOf(d), done ?? (d.id ? `Saved ${d.name}` : `Added ${d.name}`));
+    }).pipe(
+      Effect.map((ok) => (ok ? id : null)),
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (edit) setSaving((s) => Object.fromEntries(Object.entries(s).filter(([k]) => k !== edit)));
+        }),
+      ),
+    );
   }
 
   // A plugin's, as one of yours to change: its definition, off until you turn it on; its view opens.
@@ -288,7 +302,13 @@ export function useAutomations(active: boolean, refresh: number, flash: (text: s
     list &&
     list
       .filter((a) => !gone.includes(a.id))
-      .map((a) => Object.assign({}, a, { on: flipped[a.id] ?? a.on, running: a.running || starting.includes(a.id) }));
+      .map((a) => {
+        const d = saving[a.id];
+        return Object.assign({}, d ? shownAs(a, d) : a, {
+          on: flipped[a.id] ?? d?.on ?? a.on,
+          running: a.running || starting.includes(a.id),
+        });
+      });
   return { list: shown, error, busy, writing, setWriting, edits, keep, turn, runNow, remove, save, copy };
 }
 
@@ -303,10 +323,37 @@ const editing = (a: Auto): Draft => ({
   ...(a.rule && { rule: a.rule }),
   can: a.can ?? ["add"],
   mcp: (a.mcp ?? []).join(", "),
+  ...(a.buttons && { buttons: a.buttons }),
+  ...(a.icon && { icon: a.icon }),
   ...(a.type && { type: a.type }),
   ...(a.rules && { rules: a.rules }),
   on: a.on,
 });
+// An automation as an edit being saved makes it: drawn so until the desk's copy has it.
+function shownAs(a: Auto, d: Draft): Auto {
+  const { events: _e, when: _w, decide: _d, rule: _r, can: _c, mcp: _m, buttons: _b, icon: _i, type: _t, rules: _ru, ...kept } = a;
+  const b = bodyOf(d);
+  const starts = (x: { schedule?: string | undefined; events?: readonly string[] | undefined }) =>
+    JSON.stringify([x.schedule ?? "", x.events ?? []]);
+  return {
+    ...kept,
+    // Only the desk words a schedule: a new one's words come with the read back.
+    ...(starts(b) !== starts(a) && { trigger: "Saving\u2026" }),
+    name: b.name,
+    schedule: b.schedule ?? "",
+    prompt: b.prompt ?? "",
+    ...(b.events?.length ? { events: b.events } : {}),
+    ...(b.when ? { when: b.when } : {}),
+    ...(d.decide !== "agent" && { decide: d.decide }),
+    ...(d.decide === "rule" && d.rule ? { rule: d.rule } : {}),
+    ...(b.can && b.can.join() !== "add" ? { can: b.can } : {}),
+    ...(b.mcp ? { mcp: b.mcp } : {}),
+    ...(b.buttons ? { buttons: b.buttons } : {}),
+    ...(b.icon ? { icon: b.icon } : {}),
+    ...(b.type ? { type: b.type } : {}),
+    ...(b.rules?.length ? { rules: b.rules } : {}),
+  };
+}
 
 // A part's automation rows on its sheet: each its name (its view), when it runs (a plugin's: what it does) and its last run,
 // Run now while it's on and its switch. `plugin`: that plugin's, which you don't write; else yours, ending in New automation.
@@ -539,11 +586,12 @@ export function AutomationView({
             busy={au.busy}
             onChange={setDraft}
             onSave={(d) => {
+              setDraft(null);
               runUi(
                 au.save(d).pipe(
                   Effect.tap((ok) =>
                     Effect.sync(() => {
-                      if (ok) setDraft(null);
+                      if (!ok) setDraft(d); // refused: back in its editor, your words kept
                     }),
                   ),
                 ),
@@ -641,6 +689,7 @@ export function AutomationView({
           </>
         )}
       </div>
+      <HeldNotes a={a} />
       <h2 className="group-head au-runs-head">Runs</h2>
       {a.runs.length ? <Runs a={a} resume={resume} /> : <p className="s-view-line">It hasn&rsquo;t run yet.</p>}
     </>
@@ -791,7 +840,11 @@ function Editor({
   const says = d.decide === "rule" ? !!rule.why.trim() : !!d.prompt.trim() && d.can.length > 0;
   // A rule or a question is about items: its events', or on a schedule the ones its check passes.
   const needsCheck = d.decide !== "agent" && !onEvents && !d.when.trim();
-  const ready = !!d.name.trim() && starts && says && !needsCheck;
+  // A typed one's: its type and its rules, which the desk checks as you write them.
+  const typed = (d.decide === "agent" && d.mcp.split(",").some((n) => n.trim())) || !!d.type || !!d.rules?.length;
+  const check = useTypeCheck(typed ? (d.type ?? "") : null, d.rules ?? []);
+  const ruled = (d.rules ?? []).every((r) => !!r.when?.trim() || !!r.ask?.trim());
+  const ready = !!d.name.trim() && starts && says && !needsCheck && ruled;
   // ⌘S or ⌘↵ saves from any field, Esc leaves it as it was.
   const keys = (e: KeyboardEvent) => {
     if (e.key === "Escape") onCancel();
@@ -1043,6 +1096,28 @@ function Editor({
               </span>
             </label>
           )}
+        </>
+      )}
+      {typed && (
+        <>
+          <TypeField
+            value={d.type ?? ""}
+            check={check}
+            keys={keys}
+            onChange={(v) => {
+              const { type: _, ...rest } = d;
+              setD(v ? { ...rest, type: v } : rest);
+            }}
+          />
+          <RulesField
+            rules={d.rules ?? []}
+            check={check}
+            keys={keys}
+            onChange={(r) => {
+              const { rules: _, ...rest } = d;
+              setD(r.length ? { ...rest, rules: r } : rest);
+            }}
+          />
         </>
       )}
       <div className="actions">

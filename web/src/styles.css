@@ -5898,7 +5898,8 @@ button.s-edit:hover:not(:disabled) {
   border-left: 2px solid var(--rule-strong);
 }
 
-.au-run {
+.au-run,
+.au-held {
   display: grid;
   gap: 6px;
   padding: 12px 16px;
@@ -6062,6 +6063,158 @@ fieldset.au-field > legend {
 
 .au-delete {
   margin-left: auto;
+}
+
+/* A typed automation's type: code that grows with what's in it, over a copy of itself in which the desk's refusal is marked
+   where it is, so the mark sits under the very characters the parser names. */
+.au-type-box {
+  position: relative;
+  border-radius: 12px;
+  background: var(--sheet);
+}
+
+.au-type-box > .editor.au-type-src,
+.au-type-back {
+  padding: 10px 12px;
+  font: 12.5px/1.6 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.au-type-box > .editor.au-type-src {
+  position: relative;
+  height: auto;
+  min-height: 132px;
+  field-sizing: content;
+  background: transparent;
+  resize: none;
+}
+
+.au-type-back {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border: 1px solid transparent;
+  color: transparent;
+  pointer-events: none;
+}
+
+.au-type-mark {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+  text-decoration: underline wavy var(--red);
+  text-decoration-skip-ink: none;
+  text-underline-offset: 4px;
+}
+
+.au-type-error {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.au-type-go {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.au-type-go:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* What its rules can read: each field and its type, the types starting in one column. */
+.au-fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 14px;
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+}
+
+.au-fields > div {
+  display: contents;
+}
+
+.au-fields dt,
+.au-fields dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+
+.au-fields code {
+  font: 12px var(--mono);
+}
+
+/* Its rules, in order, each a few lines between rules, with its own refusal and its order's links under it. */
+.au-rules {
+  display: grid;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.au-rule {
+  display: grid;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.au-rule:first-child {
+  padding-top: 0;
+}
+
+.au-rule .au-line > .s-unit {
+  flex: none;
+}
+
+.au-rule-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+
+.au-rule-foot .link-btn:disabled {
+  color: var(--pencil);
+  text-decoration: none;
+  cursor: default;
+}
+
+/* A held note on its automation's page: its text, how it doesn't fit and its fields, as the run gave them. */
+.au-held-text {
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+
+.au-held-at {
+  margin: 0;
+  color: var(--pencil);
+  font-size: var(--text-sm);
+}
+
+.au-held-error {
+  margin: 0;
+  font: 12px/1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.au-held-fields {
+  color: var(--pencil);
+  font: 12px/1.5 var(--mono);
+  overflow-wrap: anywhere;
 }
 
 .side-col {
