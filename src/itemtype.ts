@@ -2,6 +2,7 @@
 // Schema the desk decodes each note with, the JSON Schema a run fills them by, and the item.<field> paths its rules read.
 // TypeScript 7 has no JS API, so this reads a small subset itself and refuses the rest, saying what it doesn't support.
 import { Result, Schema } from "effect";
+import { isRecord } from "./narrow.ts";
 import type { ItemField, NoteFact, TypeRefusal } from "./types.ts";
 
 const SUBSET =
@@ -250,8 +251,24 @@ export function readType(source: string): Result.Result<ItemType, TypeRefusal> {
 export const itemType = (source: string): Result.Result<ItemType, string> => Result.mapError(readType(source), (r) => r.message);
 
 // A note's fields checked against its type: them, decoded; or every way they don't fit, as Effect words it.
-export function fit(t: ItemType, fields: unknown): Result.Result<unknown, string> {
-  return Schema.decodeUnknownResult(t.schema, { errors: "all" })(fields).pipe(Result.mapError((e) => e.message));
+export function fit(t: ItemType, fields: unknown): Result.Result<Record<string, unknown>, string> {
+  return Schema.decodeUnknownResult(t.schema, { errors: "all" })(fields).pipe(
+    Result.mapError((e) => e.message),
+    // A type is an object literal (parse() refuses the rest), so what it decodes is a record.
+    Result.flatMap((v) => (isRecord(v) ? Result.succeed(v) : Result.fail(`${t.name} isn't an object`))),
+  );
+}
+
+// A saved automation's type, read once per source: null without one, or with one this desk no longer reads.
+const read = new Map<string, ItemType | null>();
+export function typeOf(a: { type?: string | undefined }): ItemType | null {
+  if (!a.type) return null;
+  const was = read.get(a.type);
+  if (was !== undefined) return was;
+  if (read.size >= 100) read.clear();
+  const t = Result.getOrNull(itemType(a.type));
+  read.set(a.type, t);
+  return t;
 }
 
 const FACTS_MAX = 12;

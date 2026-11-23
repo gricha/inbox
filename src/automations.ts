@@ -12,9 +12,9 @@ import { DENY as COORDINATOR_DENY, denyDir, wakeFor } from "./coordinator.ts";
 import type { Core, Desk, Entry } from "./desk.ts";
 import { decide, type Question } from "./decisions.ts";
 import { compile } from "./expr.ts";
-import { fit, itemType, readType, type ItemType } from "./itemtype.ts";
+import { fit, itemType, readType, typeOf, type ItemType } from "./itemtype.ts";
 import { describe, sortKey, textHash } from "./judge.ts";
-import { decodeEach, decodeValues, field, isRecord, jsonOf, schemaOf, str } from "./narrow.ts";
+import { decodeEach, decodeValues, field, jsonOf, schemaOf, str } from "./narrow.ts";
 import { BadRequest, ClaudeBadOutput, McpServerMissing, messageOf, NotFound, type FsError } from "./errors.ts";
 import {
   agentDown,
@@ -171,6 +171,8 @@ const HeldSchema = schemaOf<HeldNote>()(
 );
 // A note of a run's answer, read: what the desk keeps of it.
 type Raw = HeldNote["note"] & { key: string };
+// A note past its type's check: its fields as the type decoded them; null for an untyped automation's, which keeps none.
+type Fitted = Omit<Raw, "fields"> & { fields: Record<string, unknown> | null };
 const ITEMS_MAX = 20; // a run that lists more is told so, and the rest are dropped; a run is handed no more either
 const TIMEOUT = 20 * 60_000;
 const TICK = 60_000;
@@ -353,7 +355,7 @@ const NOTES = {
 function schemaFor(a: Pick<Automation, "can" | "mcp" | "type" | "icon">): object {
   const base = itemsSchema(canOf(a));
   if (!a.mcp) return base;
-  const t = a.type ? typeOf(a.type) : null;
+  const t = savedType(a);
   const { icon: _, ...picked } = NOTES.items.properties; // its own icon wins, so a run isn't asked for one
   const properties = {
     ...(a.icon ? picked : NOTES.items.properties),
@@ -363,11 +365,11 @@ function schemaFor(a: Pick<Automation, "can" | "mcp" | "type" | "icon">): object
   return { ...base, properties: { ...base.properties, notes } };
 }
 
-// A saved automation's type: set() parsed it, so one that doesn't parse now is a bug.
-function typeOf(source: string): ItemType {
-  const t = itemType(source);
-  if (Result.isFailure(t)) throw new Error(`a saved type doesn't parse: ${t.failure}`);
-  return t.success;
+// A saved automation's type, null without one: set() parsed it, so one that doesn't parse now is a bug.
+function savedType(a: Pick<Automation, "type">): ItemType | null {
+  const t = typeOf(a);
+  if (a.type && !t) throw new Error(`a saved type doesn't parse: ${a.type.slice(0, 200)}`);
+  return t;
 }
 function itemsSchema(can: readonly Verb[]): typeof SCHEMA {
   if (addsOnly(can)) return SCHEMA;
@@ -1277,16 +1279,16 @@ export class Automations {
   // doesn't fit is held off your desk for Claude's recommendation; then its rules, and what they leave goes on your desk.
   notes(a: Automation, run: AutomationRun, raws: readonly unknown[]) {
     return Effect.gen({ self: this }, function* () {
-      const t = a.type ? typeOf(a.type) : null;
+      const t = savedType(a);
       const seen = new Set(this.noted(a.id));
       const out: AutomationItem[] = [];
-      const fits: (Raw & { fields: unknown })[] = [];
+      const fits: Fitted[] = [];
       for (const raw of raws) {
         const n = rawNote(raw);
         if (!n || seen.has(n.key)) continue;
         seen.add(n.key);
         const was = this.heldOf(a.id).find((h) => h.key === n.key);
-        const fitted = t ? fit(t, n.fields) : Result.succeed(n.fields);
+        const fitted = t ? fit(t, n.fields) : Result.succeed(null);
         if (Result.isFailure(fitted)) {
           if (!was) this.holdNote(a, run, n, fitted.failure);
           out.push({ item_id: n.key.slice(0, 100), why: n.text.slice(0, 300), outcome: "unfit", error: fitted.failure });
@@ -1303,7 +1305,7 @@ export class Automations {
 
   // A checked note on your desk, in the section its rule says (else Urgent when the run said so); or dropped by its rule.
   // Either way its key is kept, so it's raised once.
-  raise(a: Automation, n: Raw, by: Decided | undefined): AutomationItem {
+  raise(a: Automation, n: Fitted, by: Decided | undefined): AutomationItem {
     this.markNoted(a.id, n.key);
     if (by?.do === "drop") return { item_id: n.key.slice(0, 100), why: n.text.slice(0, 300), outcome: "dropped", rule: by.rule };
     // Open is the one button a note with a link needs, unless the automation says which.
@@ -1318,7 +1320,7 @@ export class Automations {
         ...(section && { section }),
         buttons: buttons.filter((b) => b.do !== "open" || n.url),
         ...(n.icon && !a.icon && { icon: n.icon }),
-        ...(a.type && isRecord(n.fields) && { fields: n.fields }), // what its type checked, never an untyped run's
+        ...(n.fields && { fields: n.fields }),
       },
     );
     return { item_id: `note:${note.id}`, why: n.text.slice(0, 300), outcome: "added" };
@@ -1335,7 +1337,7 @@ export class Automations {
 
   // Its rules, in order, over the notes that fit its type: a when over item.<field> with no model, then an ask, one light
   // model call over the notes still undecided that its when lets through. The first rule that says yes decides.
-  byItemRules(a: Automation, t: ItemType, notes: readonly (Raw & { fields: unknown })[]) {
+  byItemRules(a: Automation, t: ItemType, notes: readonly Fitted[]) {
     return Effect.gen({ self: this }, function* () {
       const decided = new Map<string, Decided>();
       for (const r of a.rules ?? []) {
@@ -1357,7 +1359,7 @@ export class Automations {
   }
 
   // A rule's ask: one call on the light model, about each note at once, yes or no; when unsure, no.
-  askRule(a: Automation, ask: string, notes: readonly (Raw & { fields: unknown })[]) {
+  askRule(a: Automation, ask: string, notes: readonly Fitted[]) {
     return Effect.gen({ self: this }, function* () {
       const tag = randomBytes(6).toString("hex");
       const lines = notes.map((n) => JSON.stringify({ key: n.key, text: n.text, fields: n.fields, ...(n.body && { body: n.body }) }));
@@ -1457,7 +1459,8 @@ export class Automations {
   private ask(a: Automation, h: HeldNote) {
     return Effect.gen({ self: this }, function* () {
       const desk = this.desk;
-      const t = typeOf(a.type ?? "");
+      const t = savedType(a);
+      if (!t) return null; // its type went, and its held notes with it
       const { answer } = yield* askAgent(recommendPrompt(a, h, desk.me() || "the owner"), {
         dir: yield* makeAgentDir(desk.home),
         agent: desk.agent(),
@@ -1477,11 +1480,9 @@ export class Automations {
         error: h.error,
       };
       if (does === "fix") {
-        const fields = field(answer, "fields");
-        const fitted = fit(t, fields);
-        if (Result.isFailure(fitted) || !isRecord(fields))
-          return yield* bad(`doesn't fit ${t.name} either: ${Result.isFailure(fitted) ? fitted.failure : "no fields"}`);
-        fix.fields = fields;
+        const fitted = fit(t, field(answer, "fields"));
+        if (Result.isFailure(fitted)) return yield* bad(`doesn't fit ${t.name} either: ${fitted.failure}`);
+        fix.fields = fitted.success;
       }
       if (does === "type") {
         const type = str(field(answer, "type"))?.trim() ?? "";
@@ -1543,9 +1544,11 @@ export class Automations {
         return "dropped";
       }
       if (fix.do === "fix") {
-        const fitted = fit(typeOf(a.type ?? ""), fix.fields);
+        const t = savedType(a);
+        if (!t) return yield* new BadRequest({ message: "its fix is for a type it doesn't have now" });
+        const fitted = fit(t, fix.fields);
         if (Result.isFailure(fitted)) return yield* new BadRequest({ message: `its fix doesn't fit the type now: ${fitted.failure}` });
-        yield* this.release(a, [{ h, fields: fitted.success }]);
+        yield* this.release(a, t, [{ h, fields: fitted.success }]);
         return "released";
       }
       // A change to the automation itself: saved as an agent's, which you approved, on or off as it was.
@@ -1555,29 +1558,28 @@ export class Automations {
         this.forgetHeld(a.id, h.id); // not raised: its next run reads it again, by the new instruction
         return "saved";
       }
-      const t = typeOf(saved.type ?? "");
+      const t = savedType(saved);
       const freed = this.heldOf(a.id).flatMap((x) => {
-        const fitted = fit(t, x.note.fields);
-        return Result.isSuccess(fitted) ? [{ h: x, fields: fitted.success }] : [];
+        const fitted = t ? fit(t, x.note.fields) : null;
+        return fitted && Result.isSuccess(fitted) ? [{ h: x, fields: fitted.success }] : [];
       });
-      yield* this.release(saved, freed);
+      if (t) yield* this.release(saved, t, freed);
       return "saved";
     });
   }
 
   // Held notes that fit now go through its rules, and on your desk or dropped as they say; their run's record says so.
-  release(a: Automation, freed: readonly { h: HeldNote; fields: unknown }[]) {
+  release(a: Automation, t: ItemType, freed: readonly { h: HeldNote; fields: Record<string, unknown> }[]) {
     return Effect.gen({ self: this }, function* () {
-      const notes = freed.map(({ h, fields }) => ({ ...h.note, key: h.key, fields }));
-      const decided = yield* this.byItemRules(a, typeOf(a.type ?? ""), notes);
-      for (const { h } of freed) {
+      const notes = freed.map(({ h, fields }) => ({ h, n: { ...h.note, key: h.key, fields } }));
+      const decided = yield* this.byItemRules(
+        a,
+        t,
+        notes.map((x) => x.n),
+      );
+      for (const { h, n } of notes) {
         this.forgetHeld(a.id, h.id);
-        const did = this.raise(
-          a,
-          notes.find((n) => n.key === h.key)!,
-          decided.get(h.key),
-        );
-        this.amend(h.run, h.key, did);
+        this.amend(h.run, h.key, this.raise(a, n, decided.get(h.key)));
       }
     });
   }

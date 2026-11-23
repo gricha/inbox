@@ -219,7 +219,8 @@ import {
   type YourMcp,
 } from "./review.ts";
 import * as agents from "./agents.ts";
-import { factsOf, itemType } from "./itemtype.ts";
+import { factsOf, typeOf } from "./itemtype.ts";
+
 import { Judge, JudgeAnswerSchema, judgeKey, sortKey, textHash } from "./judge.ts";
 import { readOwnSkill, REVIEW_SKILL_VERSION, type OwnSkill } from "./connectors/github-review.ts";
 import { fixAskText, readOwnIssueSkill, type FetchIssueError, type IssueRun, type IssueText, type OwnIssueSkill } from "./issue.ts";
@@ -4560,7 +4561,7 @@ export class Desk {
     );
     const own = this.automations.own();
     const icons = new Map(own.map((a) => [a.id, a.icon]));
-    const types = new Map(own.flatMap((a) => (a.type ? [[a.id, Result.getOrNull(itemType(a.type))] as const] : [])));
+    const types = new Map(own.map((a) => [a.id, typeOf(a)]));
     const withSteps = (ns: Note[]) =>
       ns.map((n) => {
         const waiting = snap.steps.get(`${NOTE}${n.id}`);
