@@ -1260,8 +1260,9 @@ const SHOTS: Shot[] = [
       await page.reload();
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
       const link = page.locator("a.side-update");
-      if ((await link.textContent()) !== "Download 0.2.0" || !(await link.getAttribute("href"))?.includes("/releases/tag/v0.2.0"))
-        failures.push(`sidebar-download: the line reads ${JSON.stringify(await link.textContent())}`);
+      const text = await link.locator(".side-long").textContent();
+      if (text !== "Download 0.2.0" || !(await link.getAttribute("href"))?.includes("/releases/tag/v0.2.0"))
+        failures.push(`sidebar-download: the line reads ${JSON.stringify(text)}`);
     },
     after: unsettle,
   },

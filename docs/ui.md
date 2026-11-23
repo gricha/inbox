@@ -746,7 +746,7 @@ The `+` box and a thread's Reply box each have a quiet **Ask your agent** after 
 When a newer Inbox is released, a line appears at the top of the sidebar's footer, above Ask your agent (`Sidebar.tsx`):
 
 - Where the app can install it itself (macOS, an AppImage on Linux, the installed Windows app), it downloads it unasked: a quiet **Downloading x.y.z…** with a spinner, nothing to press ("Updating…" in the compact sidebar). Then **Restart to update** in the accent ("Restart" compact): a click restarts into it ("Restarting…" meanwhile). The download is kept, so the app quit and opened again offers the restart without downloading again.
-- **Download x.y.z** elsewhere (archives, a Mac app it can't write over): a link to the release page. If a download or restart failed, it's this link and its tooltip says why; the next check tries again.
+- **Download x.y.z** elsewhere (archives, a Mac app it can't write over): a link to the release page ("Download" in the compact sidebar). If a download or restart failed, it's this link and its tooltip says why; the next check tries again.
 
 The desk checks the latest GitHub Release every 6 hours, only in the packaged app (`src/updates.ts`; the install is `electron-updater` in `electron/main.ts`, and the app's own swap in `electron/mac-update.ts` on macOS). Releases: [README → Release](../README.md#release).
 
