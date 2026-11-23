@@ -416,6 +416,27 @@ interface Flight {
 const SILO = "waits on your reply to dana, then a review from sam, kai and 6 more"; // what api#1294 waits on
 const EXPORT = "waits on a review from sam, @backend and 1 more"; // what web#2306 waits on
 
+// The website's demo (site/, MOCK_DEMO): a short list, so its Inbox shows what sorting leaves you with.
+const DEMO = process.env.MOCK_DEMO
+  ? new Set([
+      "acme/api#4127",
+      "acme/worker#875",
+      "me/notes-app#12",
+      "oss/tinyhttp#212",
+      "acme/web#2303",
+      "acme/ml-pipeline#311",
+      "acme/api#4071",
+      "acme/worker#870",
+      "oss/tinyhttp#209",
+      "acme/web#2295",
+      "acme/api#4122",
+      "acme/worker#871",
+      "acme/web#2288",
+      "acme/infra#540",
+    ])
+  : null;
+const inDemo = (id: string) => !DEMO || DEMO.has(id);
+
 const SEEDS: Seed[] = [
   {
     repo: "acme/api",
@@ -1623,7 +1644,9 @@ const recOf = (s: Seed): Rec => {
       .slice(0, 50);
   return rec;
 };
-const recs: Rec[] = SEEDS.map(recOf);
+const recs: Rec[] = SEEDS.map(recOf).filter((r) => inDemo(r.id));
+// The demo's Inbox: three things need you now; the rest can wait.
+if (DEMO) for (const r of recs) if (["oss/tinyhttp#212", "me/notes-app#12", "acme/web#2303"].includes(r.id)) r.state.section = "standard";
 
 // ---------------------------------------------------------------------------
 // Signals, items, placements
@@ -2535,101 +2558,105 @@ const coordinator: CoordinatorView = {
 // Agent sessions' questions for you: one with options, one without. Answering one takes it off the main page. Then two
 // you answered: one its session never came back for, one it picked up two minutes later.
 // Two of your sessions that need you: the desktop app's, waiting on a permission, and a background one stopped by a rate limit.
-const SESSIONS: SessionCard[] = [
-  {
-    id: "session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
-    session_id: "5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
-    kind: "desktop",
-    name: "Fix the flaky upload test",
-    cwd: "/Users/you/code/api",
-    branch: "fix/upload-flake",
-    state: "blocked",
-    reason: "needs permission: Bash",
-    since: iso(0.3),
-    excerpt: "Bash: Run the upload tests 20 times with retries off",
-    resets_at: null,
-    alive: true,
-    actions: ["open"],
-    open_url: "claude://claude.ai/epitaxy/local_5f1c2a90",
-    attach: null,
-    status: "active",
-    snooze_until: null,
-  },
-  {
-    id: "session:a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
-    session_id: "a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
-    kind: "background",
-    name: "Migrate the job store to SQLite",
-    cwd: "/Users/you/code/worker",
-    branch: "store-sqlite",
-    state: "stalled",
-    reason: `rate limited until ${new Date(T0 + HOUR).toTimeString().slice(0, 5)}`,
-    since: iso(1.6),
-    excerpt: "API Error: Rate limit reached for your five-hour window",
-    resets_at: new Date(T0 + HOUR).toISOString(),
-    alive: false,
-    actions: ["kick"],
-    open_url: null,
-    attach: null,
-    status: "active",
-    snooze_until: null,
-  },
-];
+const SESSIONS: SessionCard[] = DEMO
+  ? []
+  : [
+      {
+        id: "session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
+        session_id: "5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
+        kind: "desktop",
+        name: "Fix the flaky upload test",
+        cwd: "/Users/you/code/api",
+        branch: "fix/upload-flake",
+        state: "blocked",
+        reason: "needs permission: Bash",
+        since: iso(0.3),
+        excerpt: "Bash: Run the upload tests 20 times with retries off",
+        resets_at: null,
+        alive: true,
+        actions: ["open"],
+        open_url: "claude://claude.ai/epitaxy/local_5f1c2a90",
+        attach: null,
+        status: "active",
+        snooze_until: null,
+      },
+      {
+        id: "session:a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
+        session_id: "a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
+        kind: "background",
+        name: "Migrate the job store to SQLite",
+        cwd: "/Users/you/code/worker",
+        branch: "store-sqlite",
+        state: "stalled",
+        reason: `rate limited until ${new Date(T0 + HOUR).toTimeString().slice(0, 5)}`,
+        since: iso(1.6),
+        excerpt: "API Error: Rate limit reached for your five-hour window",
+        resets_at: new Date(T0 + HOUR).toISOString(),
+        alive: false,
+        actions: ["kick"],
+        open_url: null,
+        attach: null,
+        status: "active",
+        snooze_until: null,
+      },
+    ];
 const sessionTriage = new Map<string, SessionCard["status"]>();
 const sessionCards = () => SESSIONS.map((x) => ({ ...x, status: sessionTriage.get(x.id) ?? "active" }));
 const activeSessions = () => sessionCards().filter((x) => x.status === "active");
 
 // Notes to yourself: one reminder that came due, one without a time, one for tomorrow.
-const NOTES: Note[] = [
-  {
-    id: "n1",
-    at: iso(26),
-    text: "Ask Priya whether the planner change needs a migration note",
-    remind_at: iso(0.2),
-    reminded_at: iso(0.2),
-  },
-  { id: "n2", at: iso(3), text: "Write up the tombstone compaction idea for the sync design doc", remind_at: null, reminded_at: null },
-  {
-    id: "n3",
-    at: iso(1),
-    text: "Check the p95 dashboard after the search deploy",
-    remind_at: new Date(now() + 18 * HOUR).toISOString(),
-    reminded_at: null,
-  },
-  // An automation's, from what its run read: its body is untrusted markdown, its link a mail thread.
-  {
-    id: "n4",
-    at: iso(0.5),
-    text: "Dana Okafor: the venue needs the deposit confirmed by tomorrow",
-    remind_at: null,
-    reminded_at: null,
-    section: "fyi",
-    from: { id: "personal-gmail", name: "Important personal email" },
-    body: "Dana asks you to confirm the **$1,200 deposit** for the Oct 18 venue by **tomorrow, 5pm**, or the hold lapses.\n\n- Reply to confirm, or call her at the number in the thread\n- The invoice is attached: https://example.com/invoice.pdf",
-    url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0a7d1",
-    buttons: [
-      { label: "Open in Gmail", do: "open" },
-      { label: "Draft a reply", do: "ask", prompt: "Draft a reply to this email in my Gmail drafts; don't send it." },
-    ],
-    icon: "brand:gmail",
-  },
-  // The same automation's, with the Lucide icon its run picked for a bill.
-  {
-    id: "n5",
-    at: iso(0.75),
-    text: "Northwind Card: November statement is ready — $412.80 due Dec 12",
-    remind_at: null,
-    reminded_at: null,
-    section: "fyi",
-    from: { id: "personal-gmail", name: "Important personal email" },
-    body: "Your statement closed Nov 20. **$412.80** is due **Dec 12**; autopay is off.",
-    url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0b9e4",
-    buttons: [{ label: "Open in Gmail", do: "open" }],
-    icon: "receipt",
-  },
-  // A typed automation's over a source that isn't mail: its fields shown as facts when it's opened.
-  trackerNote(),
-];
+const NOTES: Note[] = DEMO
+  ? []
+  : [
+      {
+        id: "n1",
+        at: iso(26),
+        text: "Ask Priya whether the planner change needs a migration note",
+        remind_at: iso(0.2),
+        reminded_at: iso(0.2),
+      },
+      { id: "n2", at: iso(3), text: "Write up the tombstone compaction idea for the sync design doc", remind_at: null, reminded_at: null },
+      {
+        id: "n3",
+        at: iso(1),
+        text: "Check the p95 dashboard after the search deploy",
+        remind_at: new Date(now() + 18 * HOUR).toISOString(),
+        reminded_at: null,
+      },
+      // An automation's, from what its run read: its body is untrusted markdown, its link a mail thread.
+      {
+        id: "n4",
+        at: iso(0.5),
+        text: "Dana Okafor: the venue needs the deposit confirmed by tomorrow",
+        remind_at: null,
+        reminded_at: null,
+        section: "fyi",
+        from: { id: "personal-gmail", name: "Important personal email" },
+        body: "Dana asks you to confirm the **$1,200 deposit** for the Oct 18 venue by **tomorrow, 5pm**, or the hold lapses.\n\n- Reply to confirm, or call her at the number in the thread\n- The invoice is attached: https://example.com/invoice.pdf",
+        url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0a7d1",
+        buttons: [
+          { label: "Open in Gmail", do: "open" },
+          { label: "Draft a reply", do: "ask", prompt: "Draft a reply to this email in my Gmail drafts; don't send it." },
+        ],
+        icon: "brand:gmail",
+      },
+      // The same automation's, with the Lucide icon its run picked for a bill.
+      {
+        id: "n5",
+        at: iso(0.75),
+        text: "Northwind Card: November statement is ready — $412.80 due Dec 12",
+        remind_at: null,
+        reminded_at: null,
+        section: "fyi",
+        from: { id: "personal-gmail", name: "Important personal email" },
+        body: "Your statement closed Nov 20. **$412.80** is due **Dec 12**; autopay is off.",
+        url: "https://mail.google.com/mail/?authuser=me@example.com#all/18c2f0b9e4",
+        buttons: [{ label: "Open in Gmail", do: "open" }],
+        icon: "receipt",
+      },
+      // A typed automation's over a source that isn't mail: its fields shown as facts when it's opened.
+      trackerNote(),
+    ];
 function trackerNote(): Note {
   const fields = {
     kind: "review_request",
@@ -2706,7 +2733,7 @@ const GMAIL_TYPE = `type Email = {
   due?: string;
 }`;
 
-const INQUIRIES: Inquiry[] = [
+const ALL_INQUIRIES: Inquiry[] = [
   {
     id: "q1c0ffee",
     at: iso(0.4),
@@ -2817,6 +2844,7 @@ const INQUIRIES: Inquiry[] = [
     },
   },
 ];
+const INQUIRIES = ALL_INQUIRIES.filter((q) => !DEMO || q.id === "q1c0ffee");
 function answerInquiry(id: string, b: Record<string, unknown>): Inquiry {
   const q = INQUIRIES.find((x) => x.id === id);
   if (!q) throw new HttpError(404, `no inquiry "${id}"`);
@@ -3102,7 +3130,7 @@ function automationsView(): AutomationView[] {
 
 // Your asks to the coordinator: two answered (a list, then paragraphs, a list and a code block) and one it's still on. A new
 // one gets a canned answer a few seconds later.
-const ASKS: Ask[] = [
+const ALL_ASKS: Ask[] = [
   {
     id: "c4e9a7d1",
     at: iso(26),
@@ -3137,6 +3165,7 @@ const ASKS: Ask[] = [
     answer: null,
   },
 ];
+const ASKS = ALL_ASKS.filter((a) => !DEMO || (a.item_id !== null && DEMO.has(a.item_id)));
 let askN = 0;
 function addAsk(b: Record<string, unknown>): Ask {
   if (!setting("agent.coordinator")) throw new HttpError(409, "your agent is off: Settings → Agent");
@@ -5020,29 +5049,42 @@ export async function handle(req: MockRequest, res: MockResponse) {
 }
 
 // What you snoozed this morning, so Later → Cleared has something in it.
-for (const id of ["acme/infra#540", "acme/api#4101", "acme/web#2288", "acme/ml-pipeline#311"]) act(resolve(id), "snooze", "tomorrow");
+for (const id of ["acme/infra#540", "acme/api#4101", "acme/web#2288", "acme/ml-pipeline#311"].filter(inDemo))
+  act(resolve(id), "snooze", "tomorrow");
 
-// Two reviews being written, for longer than a test run or a round of shots: one a first try 40 seconds in, one its second
-// try four minutes in, after the first ran out of time.
-const LATE = "no answer in 5 minutes, so it was stopped";
-setJob("ai_review", RUNNING, { state: "queued", attempts: 1, error: LATE });
-if (!aiPaused)
-  for (const id of [STALE, RUNNING])
-    void generate(
-      recs.find((r) => r.id === id)!,
-      60 * 60_000,
-    ).catch(() => {});
-setJob("ai_review", STALE, { started_at: iso(40 / 3600) });
-setJob("ai_review", RUNNING, { started_at: iso(4 / 60) });
-// One that ran out of time three times, its last an hour ago; and the ask your agent is on.
-aiErrors.set(FAILED, LATE);
-setJob("ai_review", FAILED, { state: "failed", attempts: 3, queued_at: iso(1.6), started_at: iso(1.1), finished_at: iso(1), error: LATE });
+// The demo has none of these: its reviews are done and nothing failed.
+if (!DEMO) {
+  // Two reviews being written, for longer than a test run or a round of shots: one a first try 40 seconds in, one its second
+  // try four minutes in, after the first ran out of time.
+  const LATE = "no answer in 5 minutes, so it was stopped";
+  setJob("ai_review", RUNNING, { state: "queued", attempts: 1, error: LATE });
+  if (!aiPaused)
+    for (const id of [STALE, RUNNING])
+      void generate(
+        recs.find((r) => r.id === id)!,
+        60 * 60_000,
+      ).catch(() => {});
+  setJob("ai_review", STALE, { started_at: iso(40 / 3600) });
+  setJob("ai_review", RUNNING, { started_at: iso(4 / 60) });
+  // One that ran out of time three times, its last an hour ago; and the ask your agent is on.
+  aiErrors.set(FAILED, LATE);
+  setJob("ai_review", FAILED, {
+    state: "failed",
+    attempts: 3,
+    queued_at: iso(1.6),
+    started_at: iso(1.1),
+    finished_at: iso(1),
+    error: LATE,
+  });
+}
 for (const a of ASKS.filter((x) => !x.answer))
   setJob("ask", a.id, { item: a.item_id, state: "running", attempts: 1, queued_at: a.at, started_at: a.at });
-// And your answer its session never read: the desk told you after half an hour.
-setJob("answer", "q3ab5e17", {
-  state: "failed",
-  queued_at: iso(40 / 60),
-  finished_at: iso(10 / 60),
-  error: "that session has probably ended",
-});
+if (!DEMO) {
+  // And your answer its session never read: the desk told you after half an hour.
+  setJob("answer", "q3ab5e17", {
+    state: "failed",
+    queued_at: iso(40 / 60),
+    finished_at: iso(10 / 60),
+    error: "that session has probably ended",
+  });
+}

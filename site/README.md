@@ -12,17 +12,20 @@ npm run site:build   # site/dist: static files for Cloudflare
 
 ## The page
 
-Top to bottom, and nothing else: header (tile, Inbox; GitHub, Install) · headline "One list of what needs you on GitHub." and
-one lead paragraph · a line of hints over the demo, each taking the demo to a place (the action stays the visitor's), and
-Start over · the demo in an iframe, 1px edge, 12px corners, no fake window chrome, sized to the viewport · Install, one
-command (`/install` redirects to the repo's `install.sh`) · three facts (writes only on your click; your agent, your login;
-hands off what it can) · a one-line footer.
+The landing page is the demo: the live app fills the first screen, on desktop and on a phone.
 
-- **Look.** The app's own Light and Dark tokens and system fonts; the site differs only in scale. No webfont, no analytics, no
-  animation beyond Copy → Copied.
-- **Phones** (under 720px) get **Open the demo**, which opens `/demo/` full screen in the app's phone layout.
+- **The stage.** The first screen is petrol, the brand tile's colour. Behind it drifts the raw pile of GitHub notifications
+  (review requested, CI failed, dependabot opened…); in front, the live app shows the same work as one sorted list. That
+  contrast is the page's one bold idea; everything else stays quiet.
+- **The rail** beside the app: the headline "Your GitHub pile, sorted." (Instrument Sans, the app's own face, 700 at 75%
+  width), one paragraph, four things to try (each takes the demo to a place; the action stays the visitor's), and Start
+  the demo over. Under 1000px the rail's text sits above the app and the things to try below it.
+- **Below the stage**, on warm white: Install (one command; `/install` redirects to the repo's `install.sh`), three facts
+  (writes only when you click; runs on your agent; hands off what it can), and a footer.
+- **Palette:** petrol `#1e3436` and `#365d60`, warm white `#f7f6f2`, ink `#172322`, lichen `#9db8b0` for quiet text on
+  petrol, the app's lilac `#c4a7f5` for links and focus. JetBrains Mono only for the pile and the command.
 - **Left out on purpose:** features grid, screenshots, themes showcase, video, testimonials, pricing, newsletter, cookie
-  banner, docs site (the README is the docs).
+  banner, analytics, docs site (the README is the docs).
 
 ## Cloudflare
 

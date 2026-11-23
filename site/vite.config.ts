@@ -26,6 +26,8 @@ export default defineConfig({
   root: import.meta.dirname,
   publicDir: "public",
   plugins: [react()],
+  // The mock reads its switches from process.env; the demo page sets them (demo/index.html), so keep Vite from inlining {}.
+  define: { "process.env": "globalThis.process.env" },
   resolve: { alias: Object.entries(NODE).map(([m, f]) => ({ find: m.startsWith("@") ? m : `node:${m}`, replacement: node(f) })) },
   build: {
     outDir: "dist",

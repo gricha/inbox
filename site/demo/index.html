@@ -46,7 +46,7 @@
   <body>
     <div id="root"></div>
     <script>
-      window.process = { env: { MOCK_NO_POLL: "" }, platform: "darwin", argv: [], cwd: () => "/" };
+      window.process = { env: { MOCK_DEMO: "1", MOCK_NO_POLL: "1" }, platform: "darwin", argv: [], cwd: () => "/" };
     </script>
     <script type="module" src="./main.ts"></script>
   </body>
