@@ -168,7 +168,7 @@ test("an automation over a tracker's MCP server: cards with icon, body and butto
     ],
   ]);
   assert.deepEqual(q.notes.open.map(line), [
-    ["priya in #design: Review the onboarding copy before Friday", "git-pull-request", true, "https://tracker.example/m/m2", both],
+    ["priya in #design: Review the onboarding copy before Friday", "message-circle", true, "https://tracker.example/m/m2", both],
   ]);
   assert.deepEqual(q.notes.fyi.map(line), [
     ["standup-bot in #eng: Daily digest: 4 threads mention you", "message-circle", false, "https://tracker.example/m/m4", both],

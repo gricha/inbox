@@ -2180,17 +2180,23 @@ test("a note's icon is a Lucide name or brand:<Simple Icons slug>; one neither p
         .map((n) => [n.text, n.icon]),
     );
   assert.equal(shown()["Dana: lunch Friday?"], undefined, "an automation without an icon: a note's");
-  runSync(t.desk.automations.set("mail", { ...mail, icon: "brand:gmail" }, true));
-  assert.deepEqual(shown(), {
-    "Airline: your flight moved": "plane",
-    "GitHub: a new sign-in": "brand:github",
-    "Dana: lunch Friday?": "brand:gmail",
-    "Shop: <script>": "brand:gmail",
-    "Brand off the pack": "brand:gmail",
-  });
+  assert.equal(shown()["Airline: your flight moved"], "plane", "the run's pick, with none of its automation's");
+  // An automation's own icon wins over every run's pick, those raised before it was set too: its cards all look alike.
+  const gmail = runSync(t.desk.automations.set("mail", { ...mail, icon: "brand:gmail" }, true));
+  assert.deepEqual(new Set(Object.values(shown())), new Set(["brand:gmail"]));
   runSync(t.desk.automations.set("mail", { ...mail, icon: "mail" }, true));
-  assert.equal(shown()["Dana: lunch Friday?"], "mail", "its automation's icon as it is now");
+  assert.equal(shown()["Airline: your flight moved"], "mail", "its automation's icon as it is now");
   assert.equal(t.desk.notes()[2]!.icon, undefined, "nothing is written to the note");
+  // With one set, a run isn't asked for an icon, and one it gives anyway isn't kept.
+  runSync(t.desk.automations.set("mail", { ...mail, icon: "brand:gmail" }, true));
+  fake.answer("One.", [], { notes: [{ key: "t6", text: "Netlify: deploy failed", icon: "brand:netlify" }] });
+  await t.desk.automations.run(gmail, "now").p;
+  assert.equal(t.desk.notes().at(-1)!.icon, undefined);
+  const asked = JSON.parse(fake.args(2)[fake.args(2).indexOf("--json-schema") + 1]!) as {
+    properties: { notes: { items: { properties: object } } };
+  };
+  assert.ok(!("icon" in asked.properties.notes.items.properties), "no icon in its schema");
+  assert.doesNotMatch(fake.stdin(2), /the icon that fits what it is/);
 
   const schema = JSON.parse(fake.args(1)[fake.args(1).indexOf("--json-schema") + 1]!) as {
     properties: { notes: { items: { properties: { icon: { enum?: string[]; description: string } } } } };

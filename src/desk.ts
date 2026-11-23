@@ -4423,8 +4423,8 @@ export class Desk {
     return decodeEach(NoteSchema, this.store.get("notes"));
   }
 
-  // A note waiting in an "after" chain is on no list; one at a chain's head carries it. A note whose run picked no icon
-  // shows its automation's as it is now, so one set later reaches the notes it raised before; a typed note's facts are read
+  // A note waiting in an "after" chain is on no list; one at a chain's head carries it. A note shows its automation's icon
+  // as it is now, over its run's pick, so one set later reaches the notes it raised before; a typed note's facts are read
   // by its automation's type as it is now too.
   notesView(snap: Snapshot): NotesView {
     const v = placeNotes(
@@ -4437,7 +4437,7 @@ export class Desk {
     const withSteps = (ns: Note[]) =>
       ns.map((n) => {
         const waiting = snap.steps.get(`${NOTE}${n.id}`);
-        const icon = n.icon ?? (n.from && icons.get(n.from.id));
+        const icon = (n.from && icons.get(n.from.id)) ?? n.icon;
         const facts = n.fields ? factsOf((n.from && types.get(n.from.id)) ?? null, n.fields) : [];
         return { ...n, ...(icon && { icon }), ...(facts.length > 0 && { facts }), ...(waiting && { waiting }) };
       });

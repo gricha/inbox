@@ -321,7 +321,7 @@ const NOTES = {
       urgent: { type: "boolean", description: "It can't wait for today" },
       icon: {
         type: "string",
-        description: `Optional: the icon its row shows, the one that fits what it is. ${ICON_FORMAT}; left out: the automation's`,
+        description: `Optional: the icon its row shows, the one that fits what it is. ${ICON_FORMAT}`,
       },
     },
     required: ["key", "text"],
@@ -330,21 +330,16 @@ const NOTES = {
 
 // An automation that only adds answers as before; one that may do more says what to do with each item; one with MCP
 // servers may raise notes too, each with its fields when it has a type.
-function schemaFor(a: Pick<Automation, "can" | "mcp" | "type">): object {
+function schemaFor(a: Pick<Automation, "can" | "mcp" | "type" | "icon">): object {
   const base = itemsSchema(canOf(a));
   if (!a.mcp) return base;
   const t = a.type ? typeOf(a.type) : null;
-  const note = NOTES.items;
-  const notes = t
-    ? {
-        ...NOTES,
-        items: {
-          ...note,
-          properties: { ...note.properties, fields: { ...t.json, description: `This item as a ${t.name}, by its type` } },
-          required: [...note.required, "fields"],
-        },
-      }
-    : NOTES;
+  const { icon: _, ...picked } = NOTES.items.properties; // its own icon wins, so a run isn't asked for one
+  const properties = {
+    ...(a.icon ? picked : NOTES.items.properties),
+    ...(t && { fields: { ...t.json, description: `This item as a ${t.name}, by its type` } }),
+  };
+  const notes = { ...NOTES, items: { ...NOTES.items, properties, required: [...NOTES.items.required, ...(t ? ["fields"] : [])] } };
   return { ...base, properties: { ...base.properties, notes } };
 }
 
@@ -1287,7 +1282,7 @@ export class Automations {
         ...(n.url && { url: n.url }),
         ...(section && { section }),
         buttons: buttons.filter((b) => b.do !== "open" || n.url),
-        ...(n.icon && { icon: n.icon }),
+        ...(n.icon && !a.icon && { icon: n.icon }),
         ...(a.type && isRecord(n.fields) && { fields: n.fields }), // what its type checked, never an untyped run's
       },
     );
@@ -1673,7 +1668,7 @@ function rawNote(raw: unknown): Raw | null {
   if (!key || !text) return null;
   const body = str(field(raw, "body"))?.trim().slice(0, 4_000);
   const url = httpsUrl(field(raw, "url"));
-  // Only the run's own pick: one without shows its automation's icon as it is then (Desk.notesView).
+  // Only the run's own pick; its automation's, when it has one, is shown over it (Desk.notesView).
   const icon = iconName(field(raw, "icon"));
   return {
     key,
@@ -1978,7 +1973,7 @@ function prompt(
     ...answerLines(canOf(a)),
     ...(a.mcp
       ? [
-          `- What needs me that isn't a PR or issue (an email, say) goes in notes: its key (its id there, so the desk raises it once), one line of text on who or what it is and what it needs from me, a short markdown body with what I'd want before opening it, its https url (the message in its web app, so Open goes straight there), the icon that fits what it is (a Lucide name like "receipt" or "plane", or ${BRAND}<slug> for a brand's logo, ${BRAND}gmail), and urgent when it can't wait for today. Only what needs me; none is a good run.`,
+          `- What needs me that isn't a PR or issue (an email, say) goes in notes: its key (its id there, so the desk raises it once), one line of text on who or what it is and what it needs from me, a short markdown body with what I'd want before opening it, its https url (the message in its web app, so Open goes straight there), ${a.icon ? "" : `the icon that fits what it is (a Lucide name like "receipt" or "plane", or ${BRAND}<slug> for a brand's logo, ${BRAND}gmail), `}and urgent when it can't wait for today. Only what needs me; none is a good run.`,
         ]
       : []),
     ...(a.mcp && a.type
