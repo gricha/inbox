@@ -1,10 +1,6 @@
 // The page around the demo: the pile behind it, things to try that take the demo somewhere, Start over, and Copy.
 const frame = document.querySelector<HTMLIFrameElement>("#demo");
 
-// ?palette=cobalt and the like, to compare palettes until one is picked.
-const palette = new URLSearchParams(location.search).get("palette");
-if (palette) document.documentElement.dataset.palette = palette;
-
 // What GitHub sends you in a week, unsorted: the stage's backdrop, repeated so its drift loops.
 const PILE = [
   "priya requested your review on acme/api#4127 Stream partial results from the query planner",

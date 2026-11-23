@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-palette="violet">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -9,28 +9,15 @@
       content="A desktop app for your GitHub reviews, mentions and PRs: one short list of what needs you, sorted by your rules and your own agent."
     />
     <link rel="icon" href="../assets/brand/tile.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#1d1733" />
     <link rel="stylesheet" href="./site.css" />
   </head>
   <body>
-    <svg width="0" height="0" aria-hidden="true" style="position: absolute">
-      <symbol id="tile" viewBox="0 0 64 64">
-        <rect width="64" height="64" rx="13.5" fill="var(--tile)" />
-        <g fill="var(--glyph)">
-          <path d="M22 19.6H42C43.6 19.6 44.9 20.9 44.9 22.5S43.6 25.4 42 25.4H22C20.4 25.4 19.1 24.1 19.1 22.5S20.4 19.6 22 19.6Z" />
-          <path
-            d="M11.5 25.4H13.9C15.4 25.4 16.5 26.1 17.2 27.5L20 32.8C20.7 34.2 21.9 35 23.5 35H40.5C42.1 35 43.3 34.2 44 32.8L46.8 27.5C47.5 26.1 48.6 25.4 50.1 25.4H52.5C54.4 25.4 56 27 56 28.9V37.4C56 41.3 52.8 44.5 48.9 44.5H15.1C11.2 44.5 8 41.3 8 37.4V28.9C8 27 9.6 25.4 11.5 25.4Z"
-          />
-        </g>
-      </symbol>
-    </svg>
-
     <div class="stage">
       <div class="pile" aria-hidden="true"></div>
 
       <header class="top">
-        <a class="brand" href="/"
-          ><svg width="28" height="28" aria-hidden="true"><use href="#tile" /></svg>Inbox</a
-        >
+        <a class="brand" href="/"><img src="../assets/brand/tile.svg" alt="" width="28" height="28" />Inbox</a>
         <nav>
           <a href="https://github.com/gricha/inbox">Source</a>
           <a href="#install">Install</a>

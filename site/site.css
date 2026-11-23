@@ -1,5 +1,5 @@
 /* useinbox.dev: the live app is the hero, on a stage of one strong colour with GitHub's raw pile behind it. Instrument Sans,
-   the app's own face, set condensed for the one big line. A palette is a token set on <html data-palette>. */
+   the app's own face, set condensed for the one big line. */
 @font-face {
   font-family: "Instrument Sans";
   src: url("../web/src/fonts/instrument-sans-latin-standard-normal.woff2") format("woff2");
@@ -19,18 +19,14 @@
   --sans: "Instrument Sans", system-ui, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, menlo, monospace;
   --top: 64px;
-}
 
-/* Violet: the app's own accent, deepened into the stage. */
-:root[data-palette="violet"] {
+  /* Violet: the logo's, deepened into the stage; the app's own accent lives in it. */
   --stage: #1d1733;
   --on-stage: #f6f3fc;
   --stage-muted: #b9afd0;
   --stage-line: rgb(246 243 252 / 14%);
   --stage-link: #c9b0f7;
   --pile: #b9afd0;
-  --tile: #6a3dbd;
-  --glyph: #f6f3fc;
   --paper: #f8f7fb;
   --ink: #1d1733;
   --muted: #5f5873;
@@ -38,44 +34,6 @@
   --cmd: #1d1733;
   --on-cmd: #f6f3fc;
   --cmd-link: #c9b0f7;
-}
-
-/* Cobalt: a saturated poster blue, white type. */
-:root[data-palette="cobalt"] {
-  --stage: #1f3bd0;
-  --on-stage: #fff;
-  --stage-muted: #c9d1fa;
-  --stage-line: rgb(255 255 255 / 22%);
-  --stage-link: #ffe27a;
-  --pile: #dfe4ff;
-  --tile: #1f3bd0;
-  --glyph: #fff;
-  --paper: #f7f8fc;
-  --ink: #101633;
-  --muted: #535a78;
-  --line: #e1e4ef;
-  --cmd: #101633;
-  --on-cmd: #fff;
-  --cmd-link: #ffe27a;
-}
-
-/* Marigold: a light stage, ink type, a warm yellow tile. */
-:root[data-palette="marigold"] {
-  --stage: #e9ebf0;
-  --on-stage: #14161b;
-  --stage-muted: #5a5f6e;
-  --stage-line: rgb(20 22 27 / 12%);
-  --stage-link: #14161b;
-  --pile: #5a5f6e;
-  --tile: #f2a922;
-  --glyph: #14161b;
-  --paper: #fff;
-  --ink: #14161b;
-  --muted: #5a5f6e;
-  --line: #e6e7eb;
-  --cmd: #14161b;
-  --on-cmd: #fff;
-  --cmd-link: #f2a922;
 }
 
 * {
@@ -307,6 +265,15 @@ figcaption {
   color-scheme: light dark;
 }
 
+/* The app in Dark is nearly the stage's colour: a brighter edge keeps it a window. */
+@media (prefers-color-scheme: dark) {
+  .window {
+    box-shadow:
+      0 0 0 1px rgb(246 243 252 / 24%),
+      0 24px 60px -24px rgb(0 0 0 / 70%);
+  }
+}
+
 .window iframe {
   display: block;
   width: 100%;
@@ -474,7 +441,7 @@ footer a {
   }
 
   .pile {
-    mask-image: linear-gradient(to bottom, #000 0, transparent 200px);
+    mask-image: linear-gradient(to bottom, #000 0, transparent 110px);
     opacity: 0.12;
   }
 
