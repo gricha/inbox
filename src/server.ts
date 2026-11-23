@@ -1397,6 +1397,8 @@ function overTailnet(app: Hono, remote: Remote, desk: Desk, wanted: () => boolea
   const settled = lock.withPermits(1)(settle);
   return {
     check: () => {
+      // Turned off, a failed start may try again: now, as a settle that waits on the lock may only see it back on.
+      if (!wanted()) failed = false;
       if (!closed && (!!server !== wanted() || remote.wanted !== wanted())) desk.runner.fork("tailscale serve", settled);
     },
     stop: Effect.suspend(() => {
@@ -1444,6 +1446,7 @@ function onLan(app: Hono, desk: Desk, port: number) {
   const settled = lock.withPermits(1)(settle);
   return {
     check: () => {
+      if (!wanted()) failed = false; // turned off, a failed start may try again
       if (!closed && !!server !== wanted()) desk.runner.fork("local network", settled);
     },
     stop: Effect.suspend(() => {

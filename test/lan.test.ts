@@ -5,9 +5,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { Desk } from "../src/desk.ts";
-import { createApp, lanFetch } from "../src/server.ts";
+import net from "node:net";
+import { createApp, lanFetch, startServer } from "../src/server.ts";
+import { unusedPort } from "./helpers/fake-api.ts";
 import { FakeGitHub, makeItem, NOW } from "./helpers/items.ts";
+import { unixOnly } from "./helpers/platform.ts";
 import { run } from "./helpers/run.ts";
+import { until } from "./helpers/wait.ts";
 
 delete process.env.DESK_UI_ORIGIN;
 delete process.env.DESK_DEV;
@@ -75,4 +79,42 @@ test("from the local network: refused while it's off or has no token, and a Host
   c.after(on.cleanup);
   const spoofed = await Promise.resolve(lanFetch(on.app)(new Request("http://localhost:47823/api/queue")));
   assert.equal(spoofed.status, 401);
+});
+
+test("a local network listener that couldn't start tries again when it's turned off and on", async (c) => {
+  if (unixOnly(c)) return;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-lan-"));
+  fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ "policy.judge": false, "lan.on": true }));
+  fs.writeFileSync(path.join(home, "secrets.json"), JSON.stringify({ "lan.token": TOKEN }));
+  const port = await unusedPort();
+  const blocker = net.createServer();
+  await new Promise<void>((r) => {
+    blocker.listen(port + 1, "0.0.0.0", r);
+  });
+  const saved = { PATH: process.env.PATH, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+  process.env.PATH = home; // no gh: syncs fail at once
+  delete process.env.GITHUB_TOKEN;
+  const logs: string[] = [];
+  const srv = await startServer({
+    port,
+    home,
+    log: (m) => {
+      logs.push(m);
+    },
+  });
+  c.after(async () => {
+    await srv.close();
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  await until(() => logs.some((l) => l.startsWith("can't serve on the local network")), "the port in use");
+  await new Promise((r) => {
+    blocker.close(r);
+  });
+  await run(srv.desk.putSettings({ set: { "lan.on": false } }));
+  await run(srv.desk.putSettings({ set: { "lan.on": true } }));
+  await until(() => logs.some((l) => l.startsWith("serving read only on the local network")), "serving once the port is free");
 });
