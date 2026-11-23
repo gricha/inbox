@@ -4918,26 +4918,25 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Another skill of yours holds skills/inbox: the row says what holds it before Connect is pressed, and nothing to run.
-    name: "settings-agent-taken",
+    // Something else of yours keeps the name inbox: before Connect is pressed, the row says what the desk goes in as instead.
+    name: "settings-agent-renamed",
     go: async (page) => {
+      const note = "Connects as inbox-47998: your other desk keeps inbox";
       await page.route("**/api/agents", async (route) => {
         const res = await route.fetch();
         const a: unknown = await res.json();
-        const skill = field(a, "skill");
-        if (isRecord(a) && isRecord(skill)) {
-          const taken = `${String(skill.path)} is another skill named inbox, not the desk's: move it, then connect again`;
-          Object.assign(a, { skill: { ...skill, state: "taken" }, taken, needs: "taken", connect: [] });
-        }
+        const mcp = field(a, "mcp");
+        if (isRecord(a) && isRecord(mcp))
+          Object.assign(a, { mcp: { ...mcp, connected: false, name: "inbox-47998" }, needs: "connect", note });
         await route.fulfill({ response: res, json: a });
       });
       await at("#/")(page);
       await at("#/settings/agent")(page);
       const rows = await statusRows(page, "agent");
-      if (rows.join("|") !== "Claude Code has another skill or server named inbox")
-        failures.push(`settings-agent-taken: Claude's status rows read ${JSON.stringify(rows)}`);
-      const help = await page.locator("#s-agent .s-status .s-help").first().textContent();
-      if (!help?.includes("is another skill named inbox")) failures.push(`settings-agent-taken: its help reads ${JSON.stringify(help)}`);
+      if (rows.join("|") !== "Claude Code isn't connected to the desk")
+        failures.push(`settings-agent-renamed: Claude's status rows read ${JSON.stringify(rows)}`);
+      const help = await page.locator("#s-agent .s-status .s-help").first().textContent({ timeout: 5000 });
+      if (help !== `${note}.`) failures.push(`settings-agent-renamed: its help reads ${JSON.stringify(help)}`);
     },
     after: async (page) => {
       await unroute(page);
