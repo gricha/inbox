@@ -5,7 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { as } from "./usage.ts";
 import { Effect, Schema, type Fiber } from "effect";
 import { areaFiles, areasFor, touched } from "./areas.ts";
-import type { Core, Desk } from "./desk.ts";
+import type { Core, Desk, Entry } from "./desk.ts";
 import { field, oneOf, schemaOf, str } from "./narrow.ts";
 import { notLoggedIn } from "./review.ts";
 import { agentName } from "./settings.ts";
@@ -113,6 +113,9 @@ export const sortKey = (item: Item, activityAt: string, pinned?: string, blocker
   const { paths: _paths, ...unpathed } = item;
   return judgeKey(unpathed, activityAt, null, pinned, blocker);
 };
+// The item as a sort holds for it, less the pin; "" for one the desk no longer holds.
+export const itemKey = (e: Entry | undefined) =>
+  e ? sortKey(e.item, e.analysis.activity_at, undefined, e.analysis.signals.pr.blocker) : "";
 
 // oxlint-disable-next-line no-control-regex -- stripping control characters is the point
 const oneLine = (s: string) => s.replaceAll(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ").trim();

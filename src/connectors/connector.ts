@@ -1,7 +1,8 @@
 // A connector turns one source (GitHub today) into item snapshots and events. The desk runs every connector it has.
-import type { Effect } from "effect";
+import { Schema, type Effect } from "effect";
 import type { LoadedConfig } from "../config.ts";
 import type { GitHubReadError, NotFound, Upstream } from "../errors.ts";
+import { decodeValues } from "../narrow.ts";
 import type { CompiledBoard } from "../rules.ts";
 import type { ActivityEvent, BuiltInAutomation, BuiltInCriterion, BuiltInRules, ConnectorStatus, Item } from "../types.ts";
 
@@ -41,4 +42,34 @@ export interface Connector {
   fetchOne(id: string): Effect.Effect<string, Upstream | NotFound>; // reads the item `id` names and stores it; answers the id it's stored under
   // scope: its space's; loaded: the config being computed (a preview's, or the desk's), whose signals GitHub's {close_authors} reads.
   boardIds(board: CompiledBoard, scope: string, loaded: LoadedConfig): Members;
+}
+
+// An automation's or criterion's id: lowercase letters, digits and -, up to 40.
+export const SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+// kv `key`: a plugin's definitions you switched, by "<plugin>.<id>": on or off, and when.
+type Kept = { get(key: string): unknown; set(key: string, value: unknown): void };
+const SwitchSchema = Schema.Struct({ on: Schema.Boolean, at: Schema.String });
+
+// What the plugins come with (`of` each connector), as the code defines each now, on or off as you switched it (else as it
+// comes): "<plugin>.<id>", yours to switch only.
+export function pluginDefs<D extends { id: string; help: string; on: boolean }>(
+  store: Kept,
+  key: string,
+  connectors: readonly Connector[],
+  of: (c: Connector) => readonly D[],
+) {
+  const switched = decodeValues(SwitchSchema, store.get(key));
+  return connectors.flatMap((c) =>
+    of(c).map(({ id: own, help, on, ...def }) => {
+      const id = `${c.id}.${own}`;
+      const s = switched[id];
+      return Object.assign({ id }, def, { on: s?.on ?? on, by: "you" as const, updated_at: s?.at ?? "", plugin: c.id, help });
+    }),
+  );
+}
+
+// You switched a plugin's definition on or off, at `at`.
+export function switchPlugin(store: Kept, key: string, id: string, on: boolean, at: string): void {
+  store.set(key, { ...decodeValues(SwitchSchema, store.get(key)), [id]: { on, at } });
 }
