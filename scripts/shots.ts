@@ -6617,6 +6617,9 @@ try {
   const browser = await chromium.launch({ channel: "chrome" });
   for (const theme of ["light", "dark"] as const) {
     for (const size of SIZES) {
+      const these = shots.filter((shot) => (shot.sizes ? shot.sizes.includes(size.name) : !size.asked));
+      // A full run takes about an hour and says nothing until it ends: this line tells slow from stuck.
+      if (these.length) console.log(`${theme}-${size.name}: ${these.length} shots, from ${new Date().toLocaleTimeString()}`);
       const page = await browser.newPage({
         viewport: { width: size.width, height: size.height },
         colorScheme: theme,
@@ -6657,8 +6660,7 @@ try {
       });
       await page.goto(`${url}/#/`);
       await page.locator(READY).first().waitFor({ timeout: 15_000 });
-      for (const shot of shots) {
-        if (shot.sizes ? !shot.sizes.includes(size.name) : size.asked) continue;
+      for (const shot of these) {
         await page.keyboard.press("Escape");
         await shot.go(page);
         await page.mouse.move(0, 0); // no hover state left over from a click
