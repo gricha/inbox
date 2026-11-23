@@ -90,7 +90,18 @@ import {
   wholeFor,
 } from "../src/view.ts";
 import { hashOf } from "../../src/links.ts";
-import { bulkMenu, filterOf, filterPeople, filterRest, githubRef, parseFilter, logLine, pickRange, pickToggle } from "../src/view.ts";
+import {
+  bulkMenu,
+  filterOf,
+  filterPeople,
+  filterRest,
+  fyiShown,
+  githubRef,
+  parseFilter,
+  logLine,
+  pickRange,
+  pickToggle,
+} from "../src/view.ts";
 import { afterText, chainLabel, settleSteps, stepGuides, stepOf, toggled } from "../src/view.ts";
 import { remindTime } from "../src/view.ts";
 import type { WaitingStep } from "../../src/types.ts";
@@ -1615,4 +1626,12 @@ test("a note's fact reads as plain text, a number and a date in this computer's 
     if (was === undefined) delete process.env.TZ;
     else process.env.TZ = was;
   }
+});
+
+test("FYI folds after its first five rows, its notes counted among them", () => {
+  const rows = ["note:a", "note:b", "note:c", "pr1", "pr2", "pr3", "pr4", "pr5", "pr6"];
+  assert.equal(fyiShown(rows, null), 5);
+  assert.equal(fyiShown(rows.slice(0, 6), null), null); // a fold of one row is no fold
+  assert.equal(fyiShown(rows, "pr2"), 5);
+  assert.equal(fyiShown(rows, "pr3"), null); // the selected row is further down
 });

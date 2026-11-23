@@ -6287,8 +6287,8 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
-    // FYI shows its first five rows and Show N more; a click shows the rest. The mock's FYI has six, one short of a fold,
-    // so three more ride in on the queue.
+    // FYI shows its first five rows, its notes first, and Show N more; a click shows the rest. Three more PRs ride in on the
+    // queue beside the mock's three notes and six PRs.
     name: "fyi-more",
     go: async (page) => {
       await at("#/")(page);

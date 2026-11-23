@@ -427,6 +427,15 @@ export function filterPeople(cards: Card[], me: string): { login: string; author
   return [...seen].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0])).map(([login, s]) => ({ login, author: s.author }));
 }
 
+const FYI_SHOWN = 5; // FYI's first rows; the rest wait behind Show more until you leave the page
+
+// How many of FYI's rows (`ids`, its notes then its cards) show before Show more, or null for all: none waits for a fold of
+// one, nor while the selected row is further down.
+export function fyiShown(ids: readonly string[], selected: string | null): number | null {
+  if (ids.length <= FYI_SHOWN + 1 || (selected !== null && ids.indexOf(selected) >= FYI_SHOWN)) return null;
+  return FYI_SHOWN;
+}
+
 // The Inbox's sections, Blocked and the Archive's own group open with their page; the rest open when asked (a click on their heading).
 export const DEFAULT_OPEN: Record<GroupKey, boolean> = {
   urgent: true,

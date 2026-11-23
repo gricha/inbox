@@ -1,14 +1,12 @@
 import { useState } from "react";
 import type { Card, Inquiry, Note, Overview, QueueView, SessionCard } from "../../../src/types.ts";
 import { cls } from "../format.ts";
-import { PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
+import { fyiShown, PAGE_GROUPS, treeGuides, type Group, type GroupKey } from "../view.ts";
 import { CardRow, type RowCtx } from "./CardRow.tsx";
 import { InquiryRow, type InquiryCtx } from "./Inquiry.tsx";
-import { NoteRow, type NoteCtx } from "./Note.tsx";
+import { noteOf, NoteRow, type NoteCtx } from "./Note.tsx";
 import { SessionRow, type SessionCtx } from "./Session.tsx";
 import { SkRows } from "./Skeleton.tsx";
-
-const FYI_SHOWN = 5; // FYI's first rows; the rest wait behind Show more until you leave the page
 
 // The main page: what's on your Inbox, in its sections, each in the desk's order: Urgent (agents' questions and the sessions
 // that need you first, since one waits on each), Standard and FYI. Each row says why it's there, quietly.
@@ -89,14 +87,13 @@ export function Queue({
       {first && <p className={cls("queue-first", any && "above")}>{first}</p>}
       {any ? (
         parts.map(({ g, lead }) => {
-          // FYI shows its first rows, unless you're filtering, asked for all, or the selected row is further down.
-          const cut =
-            g.key === "fyi" &&
-            !allFyi &&
-            !filter.trim() &&
-            g.cards.length > FYI_SHOWN + 1 &&
-            !g.cards.slice(FYI_SHOWN).some((c) => c.id === ctx.selected);
-          const cards = cut ? g.cards.slice(0, FYI_SHOWN) : g.cards;
+          // FYI shows its first rows, its notes among them, unless you're filtering or asked for all.
+          const fold =
+            g.key === "fyi" && !allFyi && !filter.trim()
+              ? fyiShown([...fyi.map((n) => noteOf(n.id)), ...g.cards.map((c) => c.id)], ctx.selected)
+              : null;
+          const notes = fold === null ? fyi : fyi.slice(0, fold);
+          const cards = fold === null ? g.cards : g.cards.slice(0, Math.max(0, fold - fyi.length));
           return (
             <section key={g.key} className={`group g-${g.key}`} aria-labelledby={`h-${g.key}`}>
               <h2 id={`h-${g.key}`} className="group-head">
@@ -120,13 +117,13 @@ export function Queue({
                   {g.key === "urgent" && ses && shown.map((s) => <SessionRow key={s.id} s={s} ctx={ses} />)}
                   {g.key === "urgent" && [...due, ...urgent].map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
                   {g.key === "standard" && open.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
-                  {g.key === "fyi" && fyi.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
+                  {g.key === "fyi" && notes.map((n) => <NoteRow key={n.id} n={n} ctx={note} />)}
                   {cards.map((c) => (
                     <CardRow key={c.id} card={c} variant="active" ctx={ctx} />
                   ))}
                 </div>
               )}
-              {g.open && cut && (
+              {g.open && fold !== null && (
                 <p className="group-more">
                   <button
                     type="button"
@@ -135,7 +132,7 @@ export function Queue({
                       setAllFyi(true);
                     }}
                   >
-                    Show {g.cards.length - FYI_SHOWN} more
+                    Show {fyi.length + g.cards.length - fold} more
                   </button>
                 </p>
               )}
