@@ -223,7 +223,7 @@ test("config preview reports moves and errors; save applies", async () => {
 
   const { data: bad } = await call<PreviewResult>("POST", "/api/config/preview", { text: edited.replace("pr.approvals", "pr.aprovals") });
   assert.equal(bad.errors[0]?.path, "boards[0].rules[7].when");
-  assert.match(bad.errors[0]?.message ?? "", /did you mean pr\.approvals/);
+  assert.match(bad.errors[0]?.message ?? "", /did you mean "pr\.approvals"/);
 
   const { data: saved } = await call<{ ok: boolean }>("PUT", "/api/config", { text: edited });
   assert.equal(saved.ok, true);

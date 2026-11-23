@@ -22,7 +22,7 @@ import { GITHUB_CRITERIA } from "../../src/connectors/github-criteria.ts";
 import { WORK } from "../../src/usage.ts";
 import { fallbackScore, sectionOf } from "../../src/urgency.ts";
 import { checksView } from "../../src/checks.ts";
-import { catchAllOf, resolveRules, spaceOf } from "../../src/config.ts";
+import { catchAllOf, parseConfig, resolveRules, spaceOf } from "../../src/config.ts";
 import { GITHUB_RULES } from "../../src/connectors/github-rules.ts";
 import { compile, renderTemplate } from "../../src/expr.ts";
 import { CLAUDE_PAUSED, hunksOf, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
@@ -159,7 +159,6 @@ function closedDays(): Record<string, number> {
 }
 
 const hoursSince = (at: string) => Math.round((now() - Date.parse(at)) / HOUR);
-const BUCKET_LIST = new Set<Bucket>(["now", "today", "blocked", "later", "fyi", "hide"]);
 // Every action /api/act takes, so a body's is checked.
 const ACTIONS = {
   done: true,
@@ -4049,7 +4048,7 @@ function sync() {
 if (!process.env.MOCK_NO_POLL) setInterval(sync, { ...DEFAULTS, ...overrides }["github.poll_seconds"] * 1000);
 
 // ---------------------------------------------------------------------------
-// Config text: generated from `config`, parsed back with a small line-based TOML reader.
+// Config text: generated from `config`, parsed back by the desk's parseConfig.
 
 const tomlStr = (s: string) => (s.includes('"') && !s.includes("'") ? `'${s}'` : JSON.stringify(s));
 const tomlArr = (xs: string[]) => `[${xs.map(tomlStr).join(", ")}]`;
@@ -4096,228 +4095,10 @@ function toToml(c: Config): string {
 
 let configText = toToml(config);
 
-function stripComment(line: string): string {
-  let q = "";
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (q) {
-      if (ch === "\\" && q === '"') i++;
-      else if (ch === q) q = "";
-    } else if (ch === '"' || ch === "'") q = ch;
-    else if (ch === "#") return line.slice(0, i);
-  }
-  return line;
-}
-
-function depth(s: string): number {
-  let d = 0,
-    q = "";
-  for (const ch of s) {
-    if (q) {
-      if (ch === q) q = "";
-      continue;
-    }
-    if (ch === '"' || ch === "'") q = ch;
-    else if (ch === "[" || ch === "{") d++;
-    else if (ch === "]" || ch === "}") d--;
-  }
-  return d;
-}
-
-function splitTop(s: string, sep: string): string[] {
-  const parts: string[] = [];
-  let level = 0,
-    q = "",
-    cur = "";
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (q) {
-      if (ch === "\\" && q === '"') cur += ch + s[++i];
-      else cur += ch;
-      if (ch === q) q = "";
-      continue;
-    }
-    if (ch === '"' || ch === "'") q = ch;
-    if (ch === "[" || ch === "{") level++;
-    if (ch === "]" || ch === "}") level--;
-    if (ch === sep && level === 0) {
-      parts.push(cur.trim());
-      cur = "";
-    } else cur += ch;
-  }
-  if (cur.trim()) parts.push(cur.trim());
-  return parts;
-}
-
-function value(v: string): unknown {
-  v = v.trim();
-  if (v.startsWith('"')) return JSON.parse(v);
-  if (v.startsWith("'")) {
-    if (!v.endsWith("'") || v.length < 2) throw new Error("unterminated string");
-    return v.slice(1, -1);
-  }
-  if (v === "true" || v === "false") return v === "true";
-  if (v.startsWith("[")) {
-    if (!v.endsWith("]")) throw new Error("unterminated array");
-    return splitTop(v.slice(1, -1), ",").map(value);
-  }
-  if (v.startsWith("{")) {
-    if (!v.endsWith("}")) throw new Error("unterminated inline table");
-    return Object.fromEntries(
-      splitTop(v.slice(1, -1), ",").map((kv) => {
-        const [k = "", ...rest] = kv.split("=");
-        return [k.trim(), value(rest.join("="))];
-      }),
-    );
-  }
-  if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
-  throw new Error(`can't read value ${v}`);
-}
-
+// Read as the desk reads it, so the editor shows the desk's own errors.
 function parseToml(text: string): { cfg: Config; errors: ConfigError[] } {
-  const errors: ConfigError[] = [];
-  const cfg: Config = { ...structuredClone(config), spaces: [], boards: [] };
-  const lines = text.split("\n");
-  let cur: object = cfg; // the table the next key = value lines go in
-  let path = "";
-  for (let i = 0; i < lines.length; i++) {
-    const line = stripComment(lines[i] ?? "").trim();
-    if (!line) continue;
-    const head = line.match(/^\[\[?\s*([\w.]+)\s*\]\]?$/);
-    if (head) {
-      const t = head[1] ?? "";
-      const arr = line.startsWith("[[");
-      if (arr && t === "spaces") {
-        const space = { id: "", name: "", scope: "" };
-        cfg.spaces.push(space);
-        cur = space;
-        path = `spaces[${cfg.spaces.length - 1}]`;
-      } else if (arr && t === "boards") {
-        const board: BoardConfig = {
-          id: "",
-          space: "",
-          name: "",
-          queries: [],
-          rules: [],
-          default: "later",
-          default_why: "",
-          sort: "waiting",
-        };
-        cfg.boards.push(board);
-        cur = board;
-        path = `boards[${cfg.boards.length - 1}]`;
-      } else if (arr && t === "boards.rules" && cfg.boards.length) {
-        const b = cfg.boards.at(-1)!;
-        const rule: Rule = { when: "", bucket: "later" };
-        b.rules.push(rule);
-        cur = rule;
-        path = `boards[${cfg.boards.length - 1}].rules[${b.rules.length - 1}]`;
-      } else errors.push({ path: path || t, message: `unknown table ${line}` });
-      continue;
-    }
-    const kv = line.match(/^([A-Za-z_]\w*)\s*=\s*(.*)$/);
-    if (!kv) {
-      errors.push({ path: `line ${i + 1}`, message: `can't parse: ${line}` });
-      continue;
-    }
-    const key = kv[1] ?? "";
-    let raw = kv[2] ?? "";
-    if (raw.startsWith('"""')) {
-      const body: string[] = [raw.slice(3)];
-      while (!body.at(-1)!.includes('"""') && i + 1 < lines.length) body.push(lines[++i] ?? "");
-      raw = JSON.stringify(
-        body
-          .join("\n")
-          .replace(/"""\s*$/, "")
-          .replace(/^\n/, "")
-          .replace(/\n$/, ""),
-      );
-    } else if (raw.startsWith("[")) {
-      while (depth(raw) > 0 && i + 1 < lines.length) raw += " " + stripComment(lines[++i] ?? "").trim();
-    }
-    try {
-      // Any key on any table: validate() checks what was read.
-      Reflect.set(cur, key, value(raw));
-    } catch (e) {
-      errors.push({ path: path ? `${path}.${key}` : key, message: messageOf(e) });
-    }
-  }
-  return { cfg, errors: errors.concat(validate(cfg)) };
-}
-
-function validate(c: Config): ConfigError[] {
-  const errors: ConfigError[] = [];
-  const spaces = new Set(c.spaces.map((s) => s.id));
-  const ids = new Set<string>();
-  const bucket = (p: string, v: unknown) => {
-    if (!oneOf([...BUCKET_LIST], v))
-      errors.push({ path: p, message: `"${String(v)}" is not a bucket (now, today, blocked, later, fyi, hide)` });
-  };
-  const expr = (p: string, v: string) => {
-    const err = checkExpr(v);
-    if (err) errors.push({ path: p, message: err });
-  };
-  c.boards.forEach((b, i) => {
-    const p = `boards[${i}]`;
-    if (!b.id) errors.push({ path: `${p}.id`, message: "board needs an id" });
-    else if (ids.has(b.id)) errors.push({ path: `${p}.id`, message: `duplicate board id ${b.id}` });
-    ids.add(b.id);
-    if (!spaces.has(b.space)) errors.push({ path: `${p}.space`, message: `unknown space "${b.space}"` });
-    if (!b.queries.length) errors.push({ path: `${p}.queries`, message: "board needs at least one query" });
-    if (!["waiting", "updated", "newest"].includes(b.sort))
-      errors.push({ path: `${p}.sort`, message: "sort is waiting, updated or newest" });
-    bucket(`${p}.default`, b.default);
-    if (b.filter) expr(`${p}.filter`, b.filter);
-    if (b.priority) expr(`${p}.priority`, b.priority);
-    if (b.builtin !== undefined && !GITHUB_RULES[b.builtin])
-      errors.push({ path: `${p}.builtin`, message: `must be one of ${Object.keys(GITHUB_RULES).join(", ")}` });
-    b.rules.forEach((r, j) => {
-      if (!r.when) errors.push({ path: `${p}.rules[${j}].when`, message: "rule needs a when" });
-      else expr(`${p}.rules[${j}].when`, r.when);
-      if (r.bucket !== "judge") bucket(`${p}.rules[${j}].bucket`, r.bucket);
-      else if (r.final)
-        errors.push({ path: `${p}.rules[${j}].final`, message: "a final rule places the item itself; give it a bucket, not judge" });
-    });
-  });
-  return errors;
-}
-
-const FUNCS = new Set(["len", "lower", "contains", "startswith", "any", "true", "false", "and", "or", "not", "in", "matches"]);
-
-function checkExpr(src: string): string | null {
-  let level = 0,
-    q = "";
-  for (const ch of src) {
-    if (q) {
-      if (ch === q) q = "";
-      continue;
-    }
-    if (ch === '"' || ch === "'") q = ch;
-    else if (ch === "(" || ch === "[") level++;
-    else if (ch === ")" || ch === "]") level--;
-    if (level < 0) return "unbalanced parentheses";
-  }
-  if (q) return "unterminated string";
-  if (level) return "unbalanced parentheses";
-  const bare = src.replaceAll(/"[^"]*"|'[^']*'/g, '""');
-  for (const [name] of bare.matchAll(/[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*/g)) {
-    if (FUNCS.has(name) || FIELD_SET.has(name)) continue;
-    const near = FIELDS.map((f) => f.path)
-      .sort((x, y) => edits(x, name) - edits(y, name))
-      .find((f) => edits(f, name) <= 3);
-    return `unknown field ${name}${near ? ` (did you mean ${near}?)` : ""}`;
-  }
-  return null;
-}
-
-function edits(a: string, b: string): number {
-  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
-  for (let i = 1; i <= a.length; i++) {
-    const row = [i];
-    for (let j = 1; j <= b.length; j++) row[j] = Math.min(prev[j]! + 1, row[j - 1]! + 1, prev[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
-    prev = row;
-  }
-  return prev[b.length]!;
+  const { loaded, errors } = parseConfig(text, { ...DEFAULTS, ...overrides });
+  return { cfg: loaded?.config ?? config, errors };
 }
 
 function preview(text: string): PreviewResult {
@@ -4349,8 +4130,6 @@ function preview(text: string): PreviewResult {
     config = saved;
   }
 }
-
-const FIELD_SET = new Set(FIELDS.map((f) => f.path));
 
 // ---------------------------------------------------------------------------
 // Settings
