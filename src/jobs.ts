@@ -3,9 +3,15 @@
 // desk tracks in memory (Desk.generating, the coordinator's asks) writes through it, so "Claude is reviewing it" is true
 // exactly while its job runs, and a loop on the desk's runner sees each one through.
 import { Effect } from "effect";
-import type { Desk } from "./desk.ts";
+import type { Core, Desk } from "./desk.ts";
 import { CommandTimeout } from "./errors.ts";
 import { JOB_ATTEMPTS as ATTEMPTS, type Ask, type Job } from "./types.ts";
+
+type Host = Core &
+  Pick<
+    Desk,
+    "yourAgent" | "resendAsk" | "pumpAi" | "inquiries" | "generating" | "autoAiOn" | "asks" | "answerUnread" | "aiStop" | "aiGone"
+  >;
 
 const MINUTE = 60_000;
 const BACKOFF = [2 * MINUTE, 10 * MINUTE]; // after a review's first and second failed try
@@ -19,13 +25,13 @@ export const askOf = (line: string): string | undefined => /^My ask (\w+)/.exec(
 export const answerOf = (line: string): string | undefined => /^My answer to your question (\w+)/.exec(line)?.[1];
 
 export class Jobs {
-  private desk: Desk;
+  private desk: Host;
   private rows: Map<string, Job>; // the store's, by kind and key, in the order they were first kept
   timer: NodeJS.Timeout | null = null;
 
   // A review the desk was in when it stopped never finishes: it's queued again, and that try doesn't count. An ask stays
   // as it was: your agent has it, and a desk restart leaves it running.
-  constructor(desk: Desk) {
+  constructor(desk: Host) {
     this.desk = desk;
     this.rows = new Map(desk.store.jobs().map((j) => [`${j.kind} ${j.key}`, j]));
     for (const j of this.list())
