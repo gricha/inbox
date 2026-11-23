@@ -984,6 +984,35 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // A typed automation's note over a source that isn't mail, opened: its fields as plain facts under its title, in its
+    // type's order, named in words, the enum a word, the date written as a day; untrusted text, so no link in them.
+    name: "queue-note-facts",
+    go: async (page) => {
+      await at("#/")(page);
+      const row = page.locator(".line.memo", { hasText: "review the onboarding copy" });
+      await row.waitFor({ timeout: 3000 });
+      await row.locator(".row-main").click();
+      const card = page.locator(".note-card");
+      await card.waitFor({ timeout: 3000 });
+      const facts = await card
+        .locator(".nc-fact")
+        .evaluateAll((els) => els.map((e) => `${e.querySelector("dt")?.textContent}: ${e.querySelector("dd")?.textContent}`));
+      const want = ["Kind: Review request", "Author: mina", "Channel: design", "Mentions: me, design-team"];
+      if (facts.slice(0, 4).join("|") !== want.join("|") || !/^Due: \w{3}, \w{3} \d+$/.test(facts[4] ?? "") || facts[5] !== "Points: 3")
+        failures.push(`queue-note-facts: its facts read ${JSON.stringify(facts)}`);
+      if (await card.locator(".nc-facts a").count()) failures.push("queue-note-facts: a fact is a link");
+      const [head, list, prose] = await Promise.all([".nc-head", ".nc-facts", ".prose"].map((sel) => card.locator(sel).boundingBox()));
+      if (!head || !list || !prose || list.y < head.y + head.height || prose.y < list.y + list.height)
+        failures.push("queue-note-facts: the facts aren't between its title and its body");
+      if (list && list.height > 60) failures.push(`queue-note-facts: its facts take ${Math.round(list.height)}px, not a compact block`);
+      await page.waitForTimeout(400); // it has slid down
+    },
+    after: async (page) => {
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(400);
+    },
+  },
+  {
     // A note's Done, Move to and Save show on the Inbox at once, before the desk answers (it never does here).
     name: "queue-notes-show",
     go: async (page) => {

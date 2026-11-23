@@ -298,7 +298,7 @@ export const NoteButtonSchema = Schema.Struct({
   do: Schema.Literals(["open", "ask"]),
   prompt: opt(Schema.String),
 });
-export const NoteSchema = schemaOf<Omit<Note, "waiting">>()(
+export const NoteSchema = schemaOf<Omit<Note, "waiting" | "facts">>()(
   Schema.Struct({
     id: Schema.String,
     at: Schema.String,

@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { Effect, Result } from "effect";
 import { compile } from "../src/expr.ts";
-import { fit, itemType } from "../src/itemtype.ts";
+import { factsOf, fit, itemType } from "../src/itemtype.ts";
 import { AGREE, DISAGREE, type Recommendation } from "../src/types.ts";
 import { setup } from "./helpers/desk.ts";
 import { unixOnly } from "./helpers/platform.ts";
@@ -72,6 +72,47 @@ test("a declared type is an Effect Schema, the JSON Schema a run fills, and the 
   const typo = compile(`item.knd == "statement"`, fields);
   assert.ok(Result.isFailure(typo));
   assert.match(typo.failure.message, /unknown field "item.knd"; did you mean "item.kind"\?/);
+});
+
+test("a note's facts are its fields as its type reads them: named in words, enums as words, numbers and dates as such", () => {
+  const t = itemType(`type Order = {
+    kind: "review_request" | "bill";
+    sender: string;
+    amount?: number;
+    due?: string;
+    paid?: boolean;
+    tags: Array<"gift" | "refund_due">;
+    ship: { carrier: string; eta?: string };
+    lines: { name: string }[];
+    note?: string;
+  }`);
+  assert.ok(Result.isSuccess(t));
+  const fields = {
+    kind: "review_request",
+    sender: "<b>PG&E</b> https://pge.example",
+    amount: 61.5,
+    due: "2026-11-27",
+    paid: false,
+    tags: ["gift", "refund_due"],
+    ship: { carrier: "UPS", eta: "2026-11-29T17:00:00Z" },
+    lines: [{ name: "x" }],
+  };
+  assert.deepEqual(factsOf(t.success, fields), [
+    { label: "Kind", text: "Review request" },
+    { label: "Sender", text: "<b>PG&E</b> https://pge.example" }, // plain text: the window draws it as such
+    { label: "Amount", number: 61.5 },
+    { label: "Due", date: "2026-11-27" },
+    { label: "Paid", text: "No" },
+    { label: "Tags", text: "Gift, Refund due" },
+    { label: "Ship carrier", text: "UPS" },
+    { label: "Ship eta", date: "2026-11-29T17:00:00Z" },
+  ]);
+  // With no type (its automation gone), by what each value is; a camelCase name in words too.
+  assert.deepEqual(factsOf(null, { dueDate: "2026-11-27T10:00:00Z", points: 3, status: "in_review", gone: null }), [
+    { label: "Due date", date: "2026-11-27T10:00:00Z" },
+    { label: "Points", number: 3 },
+    { label: "Status", text: "in_review" },
+  ]);
 });
 
 test("what the desk doesn't read is refused, saying what and where", () => {

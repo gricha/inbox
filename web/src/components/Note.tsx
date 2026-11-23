@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { blocks } from "../../../src/prose.ts";
 import type { InboxSection, Note, NoteButton } from "../../../src/types.ts";
 import { runUi } from "../api.ts";
-import { age, cls, when } from "../format.ts";
+import { age, cls, factText, when } from "../format.ts";
 import { useKeyedLayout } from "../keyed.ts";
 import { remindTime, TIMES } from "../view.ts";
 import { ChainButton, stepsOf, WaitingRows, type ChainCtx } from "./Chain.tsx";
@@ -588,8 +588,8 @@ export function NoteBar({
   );
 }
 
-// A note an automation raised, opened: its line, where it came from, its body as prose (an agent wrote it from what it
-// read: no HTML, no images, its links as text), and its buttons. Nothing in it is yours to change, so it's read, not edited.
+// A note an automation raised, opened: its line, where it came from, a typed note's fields as plain facts, its body as prose
+// (an agent wrote it from what it read: no HTML, no images, its links as text), and its buttons. Nothing in it is yours to change, so it's read, not edited.
 export function NoteCard({
   note,
   now,
@@ -648,6 +648,16 @@ export function NoteCard({
             From your automation {note.from?.name} · {age(note.at, now)} ago
           </div>
         </div>
+        {note.facts && note.facts.length > 0 && (
+          <dl className="nc-facts" aria-label="What it read">
+            {note.facts.map((f) => (
+              <div key={f.label} className="nc-fact">
+                <dt>{f.label}</dt>
+                <dd>{factText(f)}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
         {bs.length > 0 && <ProseBlocks bs={bs} links={false} />}
         <div className="note-when">
           <span className="note-acts">

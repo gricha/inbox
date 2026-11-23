@@ -2,6 +2,7 @@
 // Schema the desk decodes each note with, the JSON Schema a run fills them by, and the item.<field> paths its rules read.
 // TypeScript 7 has no JS API, so this reads a small subset itself and refuses the rest, saying what it doesn't support.
 import { Result, Schema } from "effect";
+import type { NoteFact } from "./types.ts";
 
 const SUBSET =
   'a type here is an object literal ({ a: string }) of string, number, boolean, string literals ("a" | "b"), unions of those, optional fields (a?: T), nested object literals and arrays (T[])';
@@ -21,6 +22,7 @@ export interface ItemType {
   schema: Schema.Codec<unknown, unknown>;
   json: object; // the JSON Schema a run's notes fill their `fields` by
   fields: ReadonlySet<string>; // what a rule may name: item.kind, item.sender, item.amount
+  shape: Shape; // what the note's facts are read by
 }
 
 type Tok = { k: "id" | "str" | "num" | "p"; v: string; at: number };
@@ -213,7 +215,7 @@ export function itemType(source: string): Result.Result<ItemType, string> {
       const { name, shape } = parse(source);
       const schema = schemaOf(shape);
       const json = Schema.toJsonSchemaDocument(schema, { onExcessProperty: "error" }).schema;
-      return { name, schema, json, fields: new Set(paths(shape, "item")) };
+      return { name, schema, json, fields: new Set(paths(shape, "item")), shape };
     },
     catch: (e) => {
       if (e instanceof Refused) return e.message;
@@ -225,4 +227,59 @@ export function itemType(source: string): Result.Result<ItemType, string> {
 // A note's fields checked against its type: them, decoded; or every way they don't fit, as Effect words it.
 export function fit(t: ItemType, fields: unknown): Result.Result<unknown, string> {
   return Schema.decodeUnknownResult(t.schema, { errors: "all" })(fields).pipe(Result.mapError((e) => e.message));
+}
+
+const FACTS_MAX = 12;
+const VALUE_MAX = 200;
+// An ISO date or time, as a run is told to write one: 2026-11-27, or with its time.
+const ISO = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+// A field's name in words: due → Due, sender_name and senderName → Sender name.
+const humanize = (key: string): string => {
+  const words = key
+    .replaceAll(/([a-z\d])([A-Z])/g, "$1 $2")
+    .replaceAll(/[_-]+/g, " ")
+    .trim()
+    .toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+const line = (s: string) => {
+  const one = s.replaceAll(/\s+/g, " ").trim();
+  return one.length > VALUE_MAX ? `${one.slice(0, VALUE_MAX - 1)}…` : one;
+};
+const literal = (s: Shape | undefined): boolean => s?.t === "lit" || (s?.t === "union" && s.of.every(literal));
+
+// One value as text: an enum's word humanized, a number as written, a string as it is on one line.
+function textOf(v: unknown, s: Shape | undefined): string | null {
+  if (typeof v === "string") return line(literal(s) ? humanize(v) : v) || null;
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  return null;
+}
+
+function factOf(label: string, v: unknown, s: Shape | undefined): NoteFact[] {
+  if (v === undefined || v === null) return [];
+  if (Array.isArray(v)) {
+    const of = s?.t === "array" ? s.of : undefined;
+    const said = v.map((x) => textOf(x, of));
+    return said.length && said.every((x) => x !== null) ? [{ label, text: line(said.join(", ")) }] : [];
+  }
+  if (typeof v === "object") {
+    const at = s?.t === "object" ? s : undefined;
+    return Object.entries(v).flatMap(([k, x]) =>
+      factOf(`${label} ${humanize(k).toLowerCase()}`, x, at?.fields.find((f) => f.key === k)?.of),
+    );
+  }
+  if (typeof v === "number" && Number.isFinite(v)) return [{ label, number: v }];
+  if (typeof v === "string" && !literal(s) && ISO.test(v.trim()) && !Number.isNaN(Date.parse(v))) return [{ label, date: v.trim() }];
+  const text = textOf(v, s);
+  return text === null ? [] : [{ label, text }];
+}
+
+// A note's fields as facts: in its type's order, by what each field is; without a type (its automation is gone), by what
+// each value is. A field left out has no fact.
+export function factsOf(t: ItemType | null, fields: Record<string, unknown>): NoteFact[] {
+  const shape = t?.shape.t === "object" ? t.shape : null;
+  const keys = shape ? shape.fields.map((f) => f.key) : Object.keys(fields);
+  return keys.flatMap((k) => factOf(humanize(k), fields[k], shape?.fields.find((f) => f.key === k)?.of)).slice(0, FACTS_MAX);
 }

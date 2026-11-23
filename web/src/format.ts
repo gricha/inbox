@@ -1,5 +1,14 @@
 import { Effect } from "effect";
-import { isCoordinator, UNTIL, type ActivityEvent, type AgentName, type Bucket, type Card, type Handoff } from "../../src/types.ts";
+import {
+  isCoordinator,
+  UNTIL,
+  type ActivityEvent,
+  type AgentName,
+  type Bucket,
+  type Card,
+  type Handoff,
+  type NoteFact,
+} from "../../src/types.ts";
 import { ClipboardUnavailable } from "./api.ts";
 
 export const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
@@ -65,6 +74,19 @@ export function when(at: string): string {
   if (d.toDateString() === new Date().toDateString()) return time;
   if (Math.abs(days) < 6) return `${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
   return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+}
+
+// A typed note's fact as its opened note says it: a number and a date in this computer's locale, the year only when it isn't
+// this one. A date alone is that day here, not midnight UTC, which reads as the day before west of it.
+export function factText(f: NoteFact, now = new Date()): string {
+  if ("number" in f) return f.number.toLocaleString();
+  if (!("date" in f)) return f.text;
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(f.date);
+  const d = day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])) : new Date(f.date);
+  const year = d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" as const };
+  return day
+    ? d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", ...year })
+    : d.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", ...year });
 }
 
 // Who sorts and reviews (Settings → Agent), as Overview.ai_agent names it: set on every load, read while drawing.

@@ -217,6 +217,7 @@ import {
   type YourMcp,
 } from "./review.ts";
 import * as agents from "./agents.ts";
+import { factsOf, itemType } from "./itemtype.ts";
 import { Judge, JudgeAnswerSchema, judgeKey, sortKey, textHash } from "./judge.ts";
 import { readOwnSkill, REVIEW_SKILL_VERSION, type OwnSkill } from "./connectors/github-review.ts";
 import { fixAskText, readOwnIssueSkill, type FetchIssueError, type IssueRun, type IssueText, type OwnIssueSkill } from "./issue.ts";
@@ -4423,18 +4424,22 @@ export class Desk {
   }
 
   // A note waiting in an "after" chain is on no list; one at a chain's head carries it. A note whose run picked no icon
-  // shows its automation's as it is now, so one set later reaches the notes it raised before.
+  // shows its automation's as it is now, so one set later reaches the notes it raised before; a typed note's facts are read
+  // by its automation's type as it is now too.
   notesView(snap: Snapshot): NotesView {
     const v = placeNotes(
       this.notes().filter((n) => !snap.chains.head.has(`${NOTE}${n.id}`)),
       this.now().toISOString(),
     );
-    const icons = new Map(this.automations.own().map((a) => [a.id, a.icon]));
+    const own = this.automations.own();
+    const icons = new Map(own.map((a) => [a.id, a.icon]));
+    const types = new Map(own.flatMap((a) => (a.type ? [[a.id, Result.getOrNull(itemType(a.type))] as const] : [])));
     const withSteps = (ns: Note[]) =>
       ns.map((n) => {
         const waiting = snap.steps.get(`${NOTE}${n.id}`);
         const icon = n.icon ?? (n.from && icons.get(n.from.id));
-        return { ...n, ...(icon && { icon }), ...(waiting && { waiting }) };
+        const facts = n.fields ? factsOf((n.from && types.get(n.from.id)) ?? null, n.fields) : [];
+        return { ...n, ...(icon && { icon }), ...(facts.length > 0 && { facts }), ...(waiting && { waiting }) };
       });
     return {
       due: withSteps(v.due),

@@ -14,6 +14,7 @@ import { agentView, githubView } from "../../src/setup.ts";
 import { didntText, didText, eventsWords, nextAt, parseSchedule, scheduleWords } from "../../src/automations.ts";
 import { GITHUB_AUTOMATIONS } from "../../src/connectors/github-automations.ts";
 import { brandIcon } from "../../src/icons.ts";
+import { factsOf as noteFacts, itemType } from "../../src/itemtype.ts";
 import { GITHUB_CRITERIA } from "../../src/connectors/github-criteria.ts";
 import { WORK } from "../../src/usage.ts";
 import { fallbackScore, sectionOf } from "../../src/urgency.ts";
@@ -2601,7 +2602,40 @@ const NOTES: Note[] = [
     buttons: [{ label: "Open in Gmail", do: "open" }],
     icon: "receipt",
   },
+  // A typed automation's over a source that isn't mail: its fields shown as facts when it's opened.
+  trackerNote(),
 ];
+function trackerNote(): Note {
+  const fields = {
+    kind: "review_request",
+    author: "mina",
+    channel: "design",
+    mentions: ["me", "design-team"],
+    due: new Date(T0 + 5 * 24 * HOUR).toISOString().slice(0, 10),
+    points: 3,
+  };
+  const t = itemType(
+    `type Message = { kind: "question" | "review_request" | "incident" | "announcement"; author: string; channel: string; mentions: string[]; due?: string; points?: number }`,
+  );
+  return {
+    id: "n6",
+    at: iso(2),
+    text: "Mina in #design: review the onboarding copy before Friday",
+    remind_at: null,
+    reminded_at: null,
+    section: "fyi",
+    from: { id: "tracker", name: "Tracker mentions" },
+    body: "Three screens, about **200 words**. She wants a yes on the tone before it goes to translation.",
+    url: "https://tracker.example/m/m2",
+    buttons: [
+      { label: "Open in tracker", do: "open" },
+      { label: "Draft a reply", do: "ask", prompt: "Draft a reply to this message; don't send it." },
+    ],
+    icon: "git-pull-request",
+    fields,
+    facts: noteFacts(Result.isSuccess(t) ? t.success : null, fields),
+  };
+}
 const notesView = (): NotesView => {
   const now = new Date().toISOString();
   const soonest = (a: Note, b: Note) => a.remind_at!.localeCompare(b.remind_at!);

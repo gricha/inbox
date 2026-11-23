@@ -182,6 +182,20 @@ test("an automation over a tracker's MCP server: cards with icon, body and butto
     due: "2026-11-27",
     points: 3,
   });
+  // The opened note shows them by its type: named in words, the enum a word, the date and the number for the window to write.
+  assert.deepEqual(q.notes.open[0]!.facts, [
+    { label: "Kind", text: "Review request" },
+    { label: "Author", text: "priya" },
+    { label: "Channel", text: "design" },
+    { label: "Mentions", text: "me" },
+    { label: "Due", date: "2026-11-27" },
+    { label: "Points", number: 3 },
+  ]);
+  assert.deepEqual(
+    q.notes.urgent[0]!.facts?.map((f) => f.label),
+    ["Kind", "Author", "Channel", "Mentions"],
+    "optional ones left out",
+  );
 
   // The held three aren't on the desk; their recommendations are questions on it.
   const recs = q.inquiries.filter((x) => x.fix);

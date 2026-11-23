@@ -1436,8 +1436,13 @@ export interface Note {
   buttons?: NoteButton[]; // the automation's, as it was when it raised this; the first is the row's
   icon?: string; // its row's, an icon pack's name ("receipt", "brand:gmail"): the run's pick; on a view, else its automation's
   fields?: Record<string, unknown>; // a typed automation's: the note's fields as its type decoded them, untrusted text
+  facts?: NoteFact[]; // on a view: its fields as its automation's type reads them, for the opened note; never stored
   waiting?: WaitingStep[]; // on QueueView.notes: the head of an "after" chain, as on a Card; never stored
 }
+
+// One of a typed note's fields as the opened note shows it: its name in words, and its value as plain text, a number or a
+// date (an ISO date or time) for the window to write in its own locale.
+export type NoteFact = { label: string } & ({ text: string } | { number: number } | { date: string });
 
 // QueueView.notes, placed by the desk: due reminders lead Urgent, notes without one lead the section you put them in, the
 // rest wait in the Archive.

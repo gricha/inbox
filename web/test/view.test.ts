@@ -18,6 +18,7 @@ import type {
 import {
   age,
   ago,
+  factText,
   clearedText,
   eventText,
   fromName,
@@ -1597,4 +1598,20 @@ test("a picked day's reminder starts at 9:00, or the first half hour still ahead
   assert.equal(remindTime("2026-11-22", "2026-11-22", "07:15"), "09:00", "early today: still 9:00");
   assert.equal(remindTime("2026-11-22", "2026-11-22", "14:10"), "14:30", "later today: the next half hour");
   assert.equal(remindTime("2026-11-22", "2026-11-22", "23:40"), "23:30", "nothing left today");
+});
+
+test("a note's fact reads as plain text, a number and a date in this computer's locale, a day as that day here", () => {
+  const was = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";
+  try {
+    const now = new Date(2026, 10, 22);
+    assert.equal(factText({ label: "Due", date: "2026-11-27" }, now), "Fri, Nov 27");
+    assert.equal(factText({ label: "Due", date: "2027-01-04" }, now), "Mon, Jan 4, 2027");
+    assert.equal(factText({ label: "Starts", date: "2026-11-29T17:00:00Z" }, now), "Sun, Nov 29, 9:00 AM");
+    assert.equal(factText({ label: "Amount", number: 1234.5 }, now), "1,234.5");
+    assert.equal(factText({ label: "Sender", text: "<b>PG&E</b>" }, now), "<b>PG&E</b>");
+  } finally {
+    if (was === undefined) delete process.env.TZ;
+    else process.env.TZ = was;
+  }
 });
