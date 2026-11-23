@@ -2,6 +2,7 @@
 import "../../test/helpers/no-agent.ts";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import { once } from "node:events";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -27,22 +28,32 @@ import { CLAUDE_PAUSED, lineAt, parseReview } from "../../src/review.ts";
 
 const ORDER = ["failing", "cancelled", "running", "passing", "skipped"];
 
-const child = spawn(
-  process.execPath,
-  ["--disable-warning=ExperimentalWarning", fileURLToPath(new URL("../mock/server.ts", import.meta.url))],
-  {
-    env: { ...process.env, MOCK_PORT: "0" },
-    stdio: ["ignore", "pipe", "inherit"],
-  },
-);
+// A mock of its own, on a free port: its first line says where.
+async function startMock(): Promise<{ base: string; stop: () => void }> {
+  const child = spawn(
+    process.execPath,
+    ["--disable-warning=ExperimentalWarning", fileURLToPath(new URL("../mock/server.ts", import.meta.url))],
+    {
+      env: { ...process.env, MOCK_PORT: "0" },
+      stdio: ["ignore", "pipe", "inherit"],
+    },
+  );
+  const [line] = (await once(child.stdout, "data")) as [Buffer];
+  return {
+    base: line.toString().match(/http:\/\/[\d.:]+/)![0],
+    stop: () => {
+      child.kill();
+    },
+  };
+}
 let base = "";
+let stop = () => {};
 
 before(async () => {
-  const [line] = (await once(child.stdout, "data")) as [Buffer];
-  base = line.toString().match(/http:\/\/[\d.:]+/)![0];
+  ({ base, stop } = await startMock());
 });
 after(() => {
-  child.kill();
+  stop();
 });
 
 // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- T is the caller's claim about the reply shape, like call<T> in web/src/api.ts
@@ -689,4 +700,53 @@ test("one reviewer of your PR removed or asked again, as the review's sidebar do
   assert.ok((await who()).includes("dana"));
   assert.equal((await one("dana", "remove")).status, 200);
   assert.equal((await one("dana", "remove", encodeURIComponent("acme/api#4127"))).status, 409, "not yours");
+});
+
+// Every call<…>("METHOD", "/api/…") in web/src/api.ts, its ${…} filled in: a ternary of two words takes the first.
+const windowCalls = (): { method: string; path: string }[] =>
+  [
+    ...fs.readFileSync(new URL("../src/api.ts", import.meta.url), "utf8").matchAll(/call<[\s\S]*?>\("(GET|POST|PUT|DELETE)", ([^\n]*)/g),
+  ].flatMap(([, method, rest]) =>
+    [
+      ...rest!
+        .replaceAll(/\$\{[^}?]*\?\s*"([^"]*)"\s*:\s*"[^"]*"\}/g, "$1")
+        .replaceAll(/\$\{[^}]*\}/g, "x")
+        .matchAll(/["`](\/api\/[^"`]*)["`]/g),
+    ].map(([, path]) => ({ method: method!, path: path! })),
+  );
+
+// The routes src/server.ts serves, as METHOD and a pattern: :id is one segment, :id{re} its own pattern, ${…} one segment.
+const deskRoutes = (): { method: string; re: RegExp }[] =>
+  [
+    ...fs.readFileSync(new URL("../../src/server.ts", import.meta.url), "utf8").matchAll(/app\.(get|post|put|delete)\(["`](\/[^"`]*)["`]/g),
+  ].map(([, method, route]) => ({
+    method: method!.toUpperCase(),
+    re: new RegExp(
+      `^${route!
+        .replaceAll(/:\w+\{(.+?)\}(?=\/|$)/g, "($1)")
+        .replaceAll(/:\w+/g, "[^/]+")
+        .replaceAll(/\$\{\w+\}/g, "[^/]+")}$`,
+    ),
+  }));
+
+test("the mock answers every route the window calls, and the desk serves each one", async (c) => {
+  const calls = windowCalls();
+  assert.ok(calls.length > 70, `read ${calls.length} calls from api.ts`);
+  const routes = deskRoutes();
+  const unserved = calls.filter((x) => !routes.some((r) => r.method === x.method && r.re.test(x.path.split("?")[0]!)));
+  assert.deepEqual(unserved, [], "routes the window calls that src/server.ts has no handler for");
+  // Its own mock: these calls change what it holds.
+  const mock = await startMock();
+  c.after(mock.stop);
+  const missing: string[] = [];
+  for (const { method, path } of calls) {
+    const res = await fetch(mock.base + path, {
+      method,
+      ...(method === "GET" ? {} : { body: "{}" }),
+      headers: { "content-type": "application/json" },
+    });
+    const body: unknown = await res.json().catch(() => null);
+    if (res.status === 404 && JSON.stringify(body).includes('"error":"not found"')) missing.push(`${method} ${path}`);
+  }
+  assert.deepEqual(missing, []);
 });

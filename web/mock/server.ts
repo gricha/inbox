@@ -70,6 +70,7 @@ import type {
   GitHubStatus,
   InflightRow,
   AgentOptions,
+  AsksView,
   CoordinatorView,
   InflightView,
   Check,
@@ -3064,13 +3065,15 @@ const RUNS: AutomationRun[] = [
   },
 ];
 // Settings → MCP servers: the desk's own, a remote one an automation names, a local one; a check adds states and a connector.
+const MCP_SERVERS: McpView["servers"] = [
+  { name: "inbox", kind: "http", target: "http://localhost:47823/mcp", headers: false, desk: true, used_by: [] },
+  { name: "linear", kind: "http", target: "https://mcp.linear.app/mcp", headers: false, desk: false, used_by: ["Linear check"] },
+  { name: "xcodebuildmcp", kind: "stdio", target: "npx -y xcodebuildmcp@latest mcp", headers: false, desk: false, used_by: [] },
+];
+
 function mcpView(checked: boolean): McpView {
   const ok = { state: "connected" as const, detail: "Connected" };
-  const servers: McpView["servers"] = [
-    { name: "inbox", kind: "http", target: "http://localhost:47823/mcp", headers: false, desk: true, used_by: [] },
-    { name: "linear", kind: "http", target: "https://mcp.linear.app/mcp", headers: false, desk: false, used_by: ["Linear check"] },
-    { name: "xcodebuildmcp", kind: "stdio", target: "npx -y xcodebuildmcp@latest mcp", headers: false, desk: false, used_by: [] },
-  ];
+  const servers = MCP_SERVERS.map((x) => ({ ...x }));
   if (!checked) return { agent: "Claude Code", config: "~/.claude.json", servers, checked };
   return {
     agent: "Claude Code",
@@ -4573,6 +4576,17 @@ async function readBody(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 const textOf = (body: Record<string, unknown>) => (typeof body.text === "string" ? body.text : "");
 
+function asksView(): AsksView {
+  const harness = setting("agent.harness");
+  const options: AgentOptions = {
+    agent: harness === "codex" || harness === "opencode" ? harness : "claude-code",
+    bypass: setting("agent.coordinator_bypass"),
+    model: setting("agent.coordinator_model"),
+    effort: harness === "opencode" ? "" : setting("agent.coordinator_effort"),
+  };
+  return { on: setting("agent.coordinator"), asks: ASKS, coordinator, options };
+}
+
 // The JSON body for a route; an HttpError becomes an error reply.
 async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   const route = `${req.method} ${url.pathname}`;
@@ -4814,15 +4828,19 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (route === "GET /api/inflight") return inflight();
   if (route === "POST /api/coordinator/wake") return { ok: true };
-  if (route === "GET /api/asks") {
-    const harness = setting("agent.harness");
-    const options: AgentOptions = {
-      agent: harness === "codex" || harness === "opencode" ? harness : "claude-code",
-      bypass: setting("agent.coordinator_bypass"),
-      model: setting("agent.coordinator_model"),
-      effort: harness === "opencode" ? "" : setting("agent.coordinator_effort"),
-    };
-    return { on: setting("agent.coordinator"), asks: ASKS, coordinator, options };
+  if (route === "GET /api/asks") return asksView();
+  // New chat, as Desk.newChat: another agent becomes yours, and the asks it hadn't answered are let go.
+  if (route === "POST /api/asks/new") {
+    if (!setting("agent.coordinator")) throw new HttpError(409, "your agent is off: Settings → Agent");
+    const agent = (await readBody(req)).agent;
+    if (typeof agent === "string" && agent !== asksView().options.agent) {
+      const saved = putSettings({ "agent.harness": agent }, []);
+      if (!saved.ok) throw new HttpError(400, saved.errors.map((e) => e.message).join("; "));
+    }
+    const kept = ASKS.filter((a) => a.answer);
+    ASKS.splice(0, ASKS.length, ...kept);
+    bump();
+    return asksView();
   }
   if (route === "GET /api/automations") return automationsView();
   if (route === "POST /api/automations/check") {
@@ -5026,6 +5044,8 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
     return { ok: true };
   }
   if (route === "POST /api/look") return { ok: true };
+  // The mock is no packaged app (its overview has no update), so there's nothing newer to restart into.
+  if (route === "POST /api/update") throw new HttpError(409, "Inbox is up to date");
   if (route === "GET /api/config") {
     const hard = config.boards.flatMap((b) =>
       rulesOf(b).flatMap((r) =>
@@ -5095,6 +5115,28 @@ async function respond(req: IncomingMessage, url: URL): Promise<unknown> {
   }
   if (route === "GET /api/agents") return agentStatus();
   if (route === "GET /api/mcp" || route === "POST /api/mcp/check") return mcpView(route === "POST /api/mcp/check");
+  if (route === "POST /api/mcp") {
+    const b = await readBody(req);
+    const remote = typeof b.url === "string" ? b.url : undefined;
+    const target = remote ?? strings(b.command)?.join(" ");
+    if (typeof b.name !== "string" || !target) throw new HttpError(400, "need { name, url } or { name, command }");
+    MCP_SERVERS.push({
+      name: b.name,
+      kind: remote ? "http" : "stdio",
+      target,
+      headers: typeof b.header === "string",
+      desk: false,
+      used_by: [],
+    });
+    return mcpView(false);
+  }
+  const mcpName = /^DELETE \/api\/mcp\/([^/]+)$/.exec(route)?.[1];
+  if (mcpName) {
+    const at = MCP_SERVERS.findIndex((x) => x.name === decodeURIComponent(mcpName));
+    if (at < 0) throw new HttpError(404, `no MCP server "${decodeURIComponent(mcpName)}"`);
+    MCP_SERVERS.splice(at, 1);
+    return mcpView(false);
+  }
   if (route === "GET /api/setup" || route === "POST /api/setup/check") return setupView();
   if (route === "POST /api/setup") {
     const agent = String((await readBody(req)).agent);
