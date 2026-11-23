@@ -301,7 +301,7 @@ against the design rules, and a skeptic per finding.
 
 `npm run shots` drives Chrome against the mock and writes `.shots/` (`index.html` shows them all). The data is the same
 on every run: it syncs only when a shot asks, never on a timer, and each shot starts at the mock's start time
-(`POST /api/mock/clock`, and the page's clock with it), so an hour-long run reads the same ages throughout.
+(`POST /api/mock/clock`, and the page's clock with it), so a long run reads the same ages throughout.
 
 | Size | Window                                                                                                              | Which shots                                                              |
 | ---- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -318,12 +318,13 @@ Each runs in light and dark. Each theme has `theme-<id>`, `-review`, `-ask` and 
 
 While iterating, `npm run shots -- --only queue,beside` runs the shots whose names contain one of those words.
 
-Each theme at each size is a pass, in one page. `--jobs 4` (the default) splits the passes over four processes, the
-biggest first onto the one with the fewest shots so far; each starts its own mock and Vite, so each starts fresh as a
-single run does, and the first also draws the icons. A full run takes about 20 minutes; `--jobs 1` runs them one after
-another, as before. `--pass light-wide,dark-mid` runs only those passes and keeps what's already in `--out`. Against a
-desk at `--url` it's one process. Job n uses `SHOTS_MOCK_PORT + n` and `SHOTS_VITE_PORT + n` (47830 and 5190 by
-default), so keep two checkouts' bases at least `--jobs` apart.
+Each theme at each size is a pass, in one page, on a fresh mock: what one pass's shots leave in the mock never reaches
+the next, and every mock starts at the run's one start time. `--jobs 4` (the default) splits the passes over four
+processes, the biggest first onto the one with the fewest shots so far; each runs its own mock and Vite, and the first
+also draws the icons, so a pass shoots the same in any job. A full run takes about 17 minutes; `--jobs 1` runs the
+passes one after another (about 65). `--pass light-wide,dark-mid` runs only those passes and keeps what's already in
+`--out`. Against a desk at `--url` it's one process. Job n uses `SHOTS_MOCK_PORT + n` and `SHOTS_VITE_PORT + n` (47830
+and 5190 by default), so keep two checkouts' bases at least `--jobs` apart.
 
 ### What to look at
 

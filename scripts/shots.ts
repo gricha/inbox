@@ -114,22 +114,42 @@ async function up(url: string, ms = 30_000): Promise<void> {
   throw new Error(`${url} didn't come up`);
 }
 
-async function start(): Promise<string> {
-  const node = (args: string[], env: Record<string, string>) =>
-    kids.push(spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: "ignore" }));
-  // An AI review that never finishes during the run, so every theme and size shows it being written; no sync on a timer.
-  node(["--disable-warning=ExperimentalWarning", "web/mock/server.ts"], {
+const node = (args: string[], env: Record<string, string>) => {
+  const kid = spawn(process.execPath, args, { cwd: root, env: { ...process.env, ...env }, stdio: "ignore" });
+  kids.push(kid);
+  return kid;
+};
+// A fresh mock for each pass, all at the run's one start, so what one pass's shots leave in it never reaches the next and
+// a pass shoots the same in any job. An AI review that never finishes during the run, so every theme and size shows it
+// being written; no sync on a timer.
+let mock: ChildProcess | undefined;
+async function freshMock(): Promise<void> {
+  const old = mock;
+  if (old && old.exitCode === null && old.signalCode === null) {
+    const gone = new Promise<void>((done) => {
+      old.once("exit", () => {
+        done();
+      });
+    });
+    old.kill();
+    await gone;
+  }
+  mock = node(["--disable-warning=ExperimentalWarning", "web/mock/server.ts"], {
     MOCK_PORT: String(MOCK),
     MOCK_AI_MS: "3600000",
     MOCK_NO_POLL: "1",
-    MOCK_T0: process.env.SHOTS_T0 ?? "",
+    MOCK_T0: clock.t0 ? String(clock.t0) : (process.env.SHOTS_T0 ?? ""),
   });
+  await up(`http://127.0.0.1:${MOCK}/health`);
+}
+
+async function start(): Promise<string> {
+  await freshMock();
   // Its own deps cache per port, so the jobs' Vites never rewrite one another's.
   node(["node_modules/vite/bin/vite.js", "--config", "web/vite.config.ts", "--port", String(VITE), "--strictPort"], {
     DESK_API: `http://127.0.0.1:${MOCK}`,
     SHOTS_VITE_CACHE: path.join(root, "node_modules/.vite", `shots-${VITE}`),
   });
-  await up(`http://127.0.0.1:${MOCK}/health`);
   await up(`http://localhost:${VITE}/`);
   return `http://localhost:${VITE}`;
 }
@@ -6968,7 +6988,8 @@ async function shoot(): Promise<void> {
   const url = real ?? (await start());
   if (!real) clock.t0 = Number(field(await (await fetch(`http://127.0.0.1:${MOCK}/api/mock/clock`)).json(), "t0"));
   const browser = await chromium.launch({ channel: "chrome" });
-  for (const { name, theme, size, these } of passes) {
+  for (const [i, { name, theme, size, these }] of passes.entries()) {
+    if (!real && i) await freshMock();
     // A full run takes a while and says nothing until it ends: this line tells slow from stuck.
     console.log(`${name}: ${these.length} shots${job === undefined ? "" : ` in job ${job}`}, from ${new Date().toLocaleTimeString()}`);
     const page = await browser.newPage({
