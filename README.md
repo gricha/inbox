@@ -51,7 +51,7 @@ To build an installable app for the current OS into `release/` (a `.dmg`, an App
 npm run dist     # or dist:mac, dist:linux, dist:win
 ```
 
-The macOS build is ad-hoc signed and not notarized: the first time, right-click the app → Open (`install.sh` clears the quarantine flag, so it opens directly). The AppImage carries the static AppImage runtime (`build.toolsets.appimage` in package.json), so it needs no libfuse2 on the host.
+The macOS build is ad-hoc signed and not notarized. `install.sh` clears the quarantine flag, so its install opens directly. A dmg downloaded by hand is blocked the first time: try to open Inbox once, then press **Open Anyway** under Privacy & Security in macOS's System Settings (since macOS 15, right-click → Open no longer gets past it). The AppImage carries the static AppImage runtime (`build.toolsets.appimage` in package.json), so it needs no libfuse2 on the host.
 
 **Coming from Review Desk?** Quit Review Desk.app and delete it, or its login item keeps starting it (Inbox removes the old Linux autostart entry itself). Inbox keeps your window, theme and settings, and moves `~/.review-desk` to `~/.inbox` on first start, leaving a link at the old path.
 
