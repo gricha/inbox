@@ -3,7 +3,7 @@ import { defaultConfigText, type LoadedConfig } from "../config.ts";
 import { GITHUB_AUTOMATIONS } from "./github-automations.ts";
 import { GITHUB_CRITERIA } from "./github-criteria.ts";
 import { GITHUB_RULES } from "./github-rules.ts";
-import type { Desk } from "../desk.ts";
+import type { Core, Desk } from "../desk.ts";
 import { Cause, Effect, Result, Schema } from "effect";
 import {
   GitHubNotFetched,
@@ -25,6 +25,8 @@ import { botCheck } from "../signals.ts";
 import { onBehalf } from "../github/behalf.ts";
 import { mergeOwed } from "../stage.ts";
 import { report } from "../sentry.ts";
+
+type Host = Core & Pick<Desk, "ingest" | "synced" | "record" | "isResolved" | "attributions">;
 
 const HOUR = 3_600_000;
 const MAX_QUERY = 256; // GitHub search rejects longer queries
@@ -111,7 +113,7 @@ export class GitHubConnector implements Connector {
   automations: readonly BuiltInAutomation[] = GITHUB_AUTOMATIONS;
   criteria: readonly BuiltInCriterion[] = GITHUB_CRITERIA;
   rules: Readonly<Record<string, BuiltInRules>> = GITHUB_RULES;
-  desk: Desk;
+  desk: Host;
   api: GitHub;
   syncing = false;
   progress: { done: number; total: number; found: number } | null = null; // the running pass's searches
@@ -135,7 +137,7 @@ export class GitHubConnector implements Connector {
   feed: Feed;
   ctx: Context | null; // who you are, your teams, orgs and areas: kv `context`
 
-  constructor(desk: Desk, api: GitHub) {
+  constructor(desk: Host, api: GitHub) {
     this.desk = desk;
     this.api = api;
     // What's kept and isn't one counts as none: fetched again, or started over.
