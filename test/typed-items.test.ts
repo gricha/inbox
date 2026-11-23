@@ -554,6 +554,21 @@ test("a run while a comment's re-ask is out leaves the held note one recommendat
   );
 });
 
+test("a held note that goes while Claude is asked about it gets no recommendation", async (c) => {
+  if (unixOnly(c)) return;
+  const { fake, t, a, q } = await held(c, { do: "type", says: "Allow receipts?", why: "A receipt.", type: WIDER });
+  const release = fake.hold(3);
+  fake.answer({ do: "drop", says: "Drop receipts?", why: "You said so." }, 3);
+  await runFx(t.desk.answerInquiry(q.id, "Coffee receipts need nothing from me"));
+  await until(() => fake.calls() === 3, "the re-ask is out");
+  fake.answer(run("Read it again.", [{ ...RECEIPT, fields: { kind: "order", sender: "Blue Bottle", amount: 6.5 } }]), 4);
+  await t.desk.automations.run(a, "schedule").p;
+  assert.deepEqual(t.desk.automations.heldOf("mail"), [], "read right this time");
+  release();
+  await until(() => t.desk.automations.asking.size === 0, "the re-ask is back");
+  assert.deepEqual(t.desk.inquiries(), []);
+});
+
 test("deleting the automation forgets what it held, and its recommendation", async (c) => {
   if (unixOnly(c)) return;
   const { t } = await held(c, { do: "drop", says: "Drop it?", why: "x" });

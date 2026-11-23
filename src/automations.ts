@@ -1473,6 +1473,8 @@ export class Automations {
         if (!instruction || instruction.length > 8_000) return yield* bad("has no instruction, or one over 8000 characters");
         Object.assign(fix, { prompt: instruction, was: a.prompt });
       }
+      // Released, dropped or deleted while it was asked: nothing left to recommend about.
+      if (!this.heldOf(a.id).some((x) => x.id === h.id)) return null;
       const q = desk.recommend(a.name, says, why, fix, h.note.url);
       this.keepHeld(
         a.id,
