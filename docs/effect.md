@@ -128,9 +128,9 @@ services (`Context.Service`, `Layer`, `ManagedRuntime`), `Data.TaggedError` not 
 - **Never `Effect.cached` where a failure must be retried**: it caches failures. Use
   `Cache.makeWith(lookup, { capacity, timeToLive: (exit) => (Exit.isFailure(exit) ? Duration.zero : Duration.infinity) })`,
   with `Cache.invalidate` when the value goes stale (a 401 for the token).
-- **Shared work (`Desk.shared`)**: work several callers wait on, any of whom may leave (an AI review, `fetching`), is
-  forked through the runner and completes a `Deferred` kept in a Map; callers `Deferred.await` it. The fiber deletes the
-  entry before completing, and keeps no failure, so the next caller starts fresh.
+- **Shared work (`Shared` in `src/shared.ts`)**: work several callers wait on, any of whom may leave (an AI review,
+  `fetching`), is forked through the runner (`start`) and completes a `Deferred` kept per key; callers `Deferred.await`
+  it. The fiber deletes the entry before completing, and keeps no failure, so the next caller starts fresh.
 - **Interruption records nothing.** No `onExit`, `ensuring` or `onInterrupt` writes the store or notifies. Finalizers
   only kill children, clear timers and release locks.
 

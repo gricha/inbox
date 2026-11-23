@@ -156,6 +156,7 @@ import { meterTo, WORK } from "./usage.ts";
 import { decodeEach, field, isKeyOf, isRecord, keysOf, oneOf, str, strings } from "./narrow.ts";
 import { detached, report, webSentry } from "./sentry.ts";
 import { Runner } from "./runner.ts";
+import { Shared } from "./shared.ts";
 import { AGENTS, agentView, githubView } from "./setup.ts";
 import { RELEASES, Updates, type AppUpdater } from "./updates.ts";
 import {
@@ -514,12 +515,12 @@ export class Desk {
   snap: Snapshot | null = null;
   stopped = false;
   private noteTimer: ReturnType<typeof setInterval> | null = null;
-  generating = new Map<string, Deferred.Deferred<AiReview, AiError>>(); // the AI reviews on their way (see shared()), each a running job
-  issueRuns = new Map<string, Deferred.Deferred<IssueReview, IssueError>>(); // issues' pre-reviews on their way, one at a time
+  generating = new Shared<AiReview, AiError>(this, "ai_review"); // the AI reviews on their way, each a running job
+  issueRuns = new Shared<IssueReview, IssueError>(this, "issue_review"); // issues' pre-reviews on their way, one at a time
   aiFailures = 0; // in a row, across PRs
   aiLastFailed: string | null = null; // the PR of the latest: its retries aren't more in a row
   aiPaused: { why: string; until: number } | null = null;
-  fetching = new Map<string, Deferred.Deferred<PrText, FetchPrError>>(); // the diffs on their way
+  fetching = new Shared<PrText, FetchPrError>(this, "diff"); // the diffs on their way
   // PRs' checks one by one, by `<id> <node id> <detail_at>`: kept until a sync next refreshes the PR, so a review's list
   // is no older than its "CI passing"; a failed fetch isn't kept, and callers asking at once share one.
   checkRuns = Effect.runSync(
@@ -533,7 +534,6 @@ export class Desk {
   approving = new Set<string>(); // items with a GitHub write on its way (approve, ready, the More menu's)
   wrote = new Map<string, string>(); // a More menu write's item → its updated_at then: nothing more till a read shows the change
   sending = new Set<string>(); // conversations a reply is on its way to
-  private readonly fibers = new WeakMap<object, Fiber.Fiber<unknown, unknown>>(); // shared work's, by its Deferred
   private readonly storeClosed = Deferred.makeUnsafe<void>(); // by stop(), or the last write in flight then (closeIfIdle)
   readonly runner: Runner; // the work nobody waits on: see runner.ts
 
@@ -2604,7 +2604,7 @@ export class Desk {
     });
   }
 
-  // The changed files and description, kept per head commit; a fetch on its way is shared (see shared()).
+  // The changed files and description, kept per head commit; a fetch on its way is shared (see shared.ts).
   prText(id: string): Effect.Effect<PrText, PrTextError> {
     return Effect.suspend((): Effect.Effect<PrText, PrTextError> => {
       const review = this.review;
@@ -2623,7 +2623,7 @@ export class Desk {
           this.store.set(`pr:${id}`, { ...t, head_oid: item.head_oid });
         }),
       );
-      return Deferred.await(this.shared(this.fetching, "diff", id, fetch));
+      return Deferred.await(this.fetching.start(id, fetch));
     });
   }
 
@@ -2654,7 +2654,7 @@ export class Desk {
     const running = this.generating.get(id);
     if (running) return running;
     if (!this.stopped) this.jobs.begin("ai_review", id, { item: id, head: this.snapshot().entries.get(id)!.item.head_oid, fresh });
-    const d = this.shared(this.generating, "ai_review", id, this.runAi(id), (ok) => {
+    const d = this.generating.start(id, this.runAi(id), (ok) => {
       if (this.stopped) return;
       this.changed();
       this.notifyNew();
@@ -2662,55 +2662,6 @@ export class Desk {
     });
     this.changed();
     return d;
-  }
-
-  // Work its callers share (an AI review, a PR's diff), kept in `runs` while it's on its way. Forked through the runner: a
-  // caller leaving never stops it, and the desk stopping does, which ends its callers too. The fiber frees its slot and
-  // does `after` before they resume, unless the work was interrupted (the diff it waits on, ended by the desk stopping
-  // first): that does nothing more. One the stopped desk won't start ends them at once.
-  private shared<A, E>(
-    runs: Map<string, Deferred.Deferred<A, E>>,
-    what: string,
-    id: string,
-    work: Effect.Effect<A, E>,
-    after: (ok: boolean) => void = () => {},
-  ): Deferred.Deferred<A, E> {
-    const running = runs.get(id);
-    if (running) return running;
-    const d = Deferred.makeUnsafe<A, E>();
-    runs.set(id, d);
-    let result: Exit.Exit<A, E> | undefined; // the work's own: a bug in after() is the runner's, not its callers'
-    const run = Effect.exit(work).pipe(
-      Effect.tap((exit) =>
-        Effect.sync(() => {
-          result = exit;
-          runs.delete(id);
-          if (Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)) return;
-          after(Exit.isSuccess(exit));
-        }),
-      ),
-      Effect.onExit((ended) =>
-        Effect.sync(() => {
-          if (runs.get(id) === d) runs.delete(id);
-          Deferred.doneUnsafe(d, result ?? (Exit.isSuccess(ended) ? ended.value : Exit.failCause(ended.cause)));
-        }),
-      ),
-    );
-    const fiber = this.runner.fork(what, run, id);
-    if (fiber) this.fibers.set(d, fiber);
-    else {
-      runs.delete(id);
-      Deferred.doneUnsafe(d, Exit.interrupt());
-    }
-    return d;
-  }
-
-  // Stops shared work on its way (an AI review past its time): its callers end with `err`, and it records nothing itself.
-  private stopShared<A, E>(runs: Map<string, Deferred.Deferred<A, E>>, id: string, err: E): void {
-    const d = runs.get(id);
-    if (!d) return;
-    Deferred.doneUnsafe(d, Exit.fail(err));
-    this.fibers.get(d)?.interruptUnsafe();
   }
 
   // What fails it, a bug too, is its ai_error for this commit (reported, and logged with the login's own words), and
@@ -2929,7 +2880,7 @@ export class Desk {
   // The loop's: a review past its time is stopped and counts as a failed try; its callers get the same words.
   aiStop(id: string, err: CommandTimeout): void {
     this.aiFailed(id, err);
-    this.stopShared(this.generating, id, err);
+    this.generating.stop(id, err);
     this.changed();
   }
 
@@ -3060,7 +3011,7 @@ export class Desk {
   startIssue(id: string, trust = false): Deferred.Deferred<IssueReview, IssueError> {
     const running = this.issueRuns.get(id);
     if (running) return running;
-    const d = this.shared(this.issueRuns, "issue_review", id, this.runIssue(id, trust), (ok) => {
+    const d = this.issueRuns.start(id, this.runIssue(id, trust), (ok) => {
       if (this.stopped) return;
       this.changed();
       if (ok) this.pumpIssues();
@@ -4916,7 +4867,7 @@ export class Desk {
   // GitHub's answers to who you can ask, kept a while per PR and search: each takes it a second, and the picker asks as you
   // type. A search on its way is shared, and one a shorter search answered in full is narrowed here instead.
   private reviewerAnswers = new Map<string, { at: number; list: Reviewer[] }>();
-  private reviewerRuns = new Map<string, Deferred.Deferred<Reviewer[], Upstream>>();
+  private reviewerRuns = new Shared<Reviewer[], Upstream>(this, "reviewers");
 
   private reviewerList(it: Item, q: string): Effect.Effect<Reviewer[], Upstream> {
     return Effect.suspend(() => {
@@ -4949,7 +4900,7 @@ export class Desk {
         }),
       ),
     );
-    return this.shared(this.reviewerRuns, "reviewers", key, fetch);
+    return this.reviewerRuns.start(key, fetch);
   }
 
   // Your open PRs nobody's asked to review, drafts too: GitHub's suggestions fetched before you open the picker.
