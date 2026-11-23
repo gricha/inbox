@@ -6324,6 +6324,7 @@ const SHOTS: Shot[] = [
     after: async (page) => {
       await page.keyboard.press("Escape");
     },
+    held: true, // the pointer off Snooze closes it after 250ms (RowMenu's hover), under the screenshot on a busy machine
   },
   // A row's "Show log": one line per event, newest first: the desk's moves between what happened on GitHub.
   {
@@ -6382,6 +6383,7 @@ const SHOTS: Shot[] = [
         failures.push(`row-menu-note: Snooze 3 hours sent ${JSON.stringify(sent)}`);
       await page.keyboard.press("Escape");
     },
+    held: true, // Snooze stays open for the screenshot and `after`'s click, as in row-menu
   },
   {
     // Copy link in a row's menu: the item's inbox:// link on the clipboard (stubbed), and a quiet toast.
