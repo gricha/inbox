@@ -4029,7 +4029,8 @@ const SHOTS: Shot[] = [
     after: closeChat,
   },
   {
-    // A PR whose latest ask is unanswered, the chat closed: the sidebar's Ask says so, in what fits it; its action line doesn't.
+    // A PR whose latest ask is unanswered, the chat closed: the sidebar's Ask says so by your agent's mark, in what fits it;
+    // its action line doesn't.
     name: "ask-waiting",
     go: async (page) => {
       await review("me/notes-app#12")(page);
@@ -4037,11 +4038,11 @@ const SHOTS: Shot[] = [
       const ask = await page.evaluate<{ words: string; icon: boolean; waiting: boolean } | null>(`(() => {
         const b = document.querySelector(".side-ask");
         const shown = (el) => !!el && getComputedStyle(el).display !== "none";
-        return b && { words: [...b.querySelectorAll("span")].filter(shown).map((s) => s.textContent).join(""), icon: shown(b.querySelector(".i")), waiting: b.classList.contains("waiting") };
+        return b && { words: [...b.querySelectorAll("span")].filter(shown).map((s) => s.textContent).join(""), icon: shown(b.querySelector(".chat-mark")), waiting: b.classList.contains("waiting") };
       })()`);
       const want = width > 1000 ? "Your agent \u00b7 waiting" : "Asked";
       if (!ask || ask.words !== want || !ask.waiting || !ask.icon)
-        failures.push(`ask-waiting: at ${width}px the sidebar's ask is ${JSON.stringify(ask)}, not ${want} by its icon`);
+        failures.push(`ask-waiting: at ${width}px the sidebar's ask is ${JSON.stringify(ask)}, not ${want} by your agent's mark`);
       const actions = (await page.locator(".rv-actions").textContent()) ?? "";
       if (/Coordinator|agent/.test(actions)) failures.push(`ask-waiting: the review's actions say ${actions}`);
     },
