@@ -885,7 +885,7 @@ The only model the desk calls that isn't your agent is [the decision model](#the
 
 #### OpenCode
 
-- **Command:** `opencode run --format json --pure --agent inbox-desk --title Inbox` in `~/.inbox/agent`. The prompt goes on stdin with the answer's JSON Schema after it (`opencode run` takes no schema). The title stops OpenCode from asking a small model to name the session.
+- **Command:** `opencode run --format json --pure --agent inbox-desk --title Inbox` in `~/.inbox/agent`. The prompt goes on stdin with the answer's JSON Schema after it (`opencode run` takes no schema), made strict as Codex's (`strictSchema()`), with a null for an optional property read as left out (`fromStrict()`). The title stops OpenCode from asking a small model to name the session.
 - **Fenced** through `OPENCODE_CONFIG_CONTENT`, which OpenCode merges last over your config (one of your own is kept under it):
   - its own agent `inbox-desk`, whose permissions deny `*` and each permission by name (`read`, `edit`, `bash`, `webfetch`, `task`, `skill`, …), so they beat your global rules;
   - `mcp.<name>.enabled: false` for each MCP server `opencode debug config --pure` lists enabled (kept 5 minutes; if it can't be read, the call is refused);
@@ -1550,7 +1550,7 @@ On Codex (`Automations.byCodex()`): `codex exec --json --sandbox read-only --ski
 - the tool-less call's `--disable` flags. No shell: Codex can't allow only `gh`'s reads (an allowing rule runs a command outside the sandbox), and the read-only sandbox can read `secrets.json`;
 - `-c web_search="disabled"`, `-c approval_policy="never"`;
 - your MCP servers off but the desk's: `-c mcp_servers.inbox.url="<the desk's /mcp>"`, `enabled=true`, `enabled_tools=["inbox_list","inbox_item","inbox_overview","inbox_events","inbox_brief","inbox_merging"]` (`inbox_desk` when your `inbox` is another server). Codex connects to MCP servers itself, outside the sandbox, so the desk's localhost `/mcp` is reachable though the sandbox has no network;
-- `--output-schema <file> -o <file> -`, the prompt on stdin with a line saying it has only those tools. The schema is made strict first (`strictSchema()`: each object closed, each property required, so an optional `until` comes back empty), since OpenAI refuses others with `invalid_json_schema`.
+- `--output-schema <file> -o <file> -`, the prompt on stdin with a line saying it has only those tools. The schema is made strict first (`strictSchema()`: each object closed, each property required, an optional one nullable), since OpenAI refuses others with `invalid_json_schema`; `fromStrict()` reads a null where the schema has the property optional as left out, so an optional `until` or a typed note's `due?: string` it has no value for is absent, never a made-up one.
 
 Its session is kept (no `--ephemeral`): `session` is the thread and `agent` is `codex`, so Copy resume command is `codex resume <id>`. A login or a limit fails the run in Codex's words.
 

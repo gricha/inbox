@@ -49,6 +49,8 @@ if (fs.existsSync(at("fail"))) {
   process.exit(1);
 }
 say({ type: "thread.started", thread_id: args[1] === "resume" ? args.at(-2) : "th-" + n });
+const sc = args.indexOf("--output-schema");
+if (sc >= 0) fs.copyFileSync(args[sc + 1], at("schema." + n));
 const o = args.indexOf("-o");
 if (o >= 0 && fs.existsSync(at("answer"))) fs.copyFileSync(at("answer"), args[o + 1]);
 while (fs.existsSync(at("hold"))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
@@ -79,6 +81,7 @@ say({ type: "turn.completed" });
     servers: (list: unknown[]) => {
       file("servers", JSON.stringify(list));
     },
+    schema: (n: number): unknown => JSON.parse(fs.readFileSync(path.join(dir, `schema.${n}`), "utf8")),
     trust: (folder: string) => {
       file("codex-home/config.toml", `[projects."${fs.realpathSync(folder)}"]\ntrust_level = "trusted"\n`);
     },
@@ -230,6 +233,75 @@ test("a Codex automation with MCP servers keeps those of yours on and every othe
   );
   assert.match((await t.desk.automations.run(b, "now").p).error ?? "", /Codex has no MCP server named "claude\.ai Gmail"/);
   assert.equal(t.fake.calls().length, 1);
+});
+
+// OpenAI's strict mode makes every property required, so an optional field is nullable: null is none, never a value.
+test("a typed note on Codex: optional fields are required but nullable in its schema, and a null is a field left out", posix, async (c) => {
+  const t = await automating(c);
+  t.fake.servers([{ name: "tracker", enabled: true, transport: { type: "stdio", command: "tracker" } }]);
+  const type = `type Message = { kind: "question" | "incident"; author: string; mentions: string[]; due?: string; points?: number; ship?: { eta?: string } }`;
+  const a = runSync(
+    t.desk.automations.set(
+      "tracker",
+      {
+        name: "Tracker",
+        schedule: "weekdays 09:00",
+        prompt: "Read my mentions.",
+        mcp: ["tracker"],
+        type,
+        rules: [{ when: "item.points > 2", do: "urgent" }],
+      },
+      true,
+    ),
+  );
+  const note = { key: "m1", text: "dana: can you look?", body: null, url: null, urgent: null, icon: null };
+  t.fake.file(
+    "answer",
+    JSON.stringify({
+      summary: "One mention.",
+      items: [],
+      notes: [{ ...note, fields: { kind: "question", author: "dana", mentions: ["me"], due: null, points: null, ship: null } }],
+    }),
+  );
+  const r = await t.desk.automations.run(a, "now").p;
+  assert.equal(r.error, null);
+  assert.deepEqual(
+    r.items.map((x) => x.outcome),
+    ["added"],
+  );
+  assert.deepEqual(
+    t.desk.notes().map((n) => [n.text, n.section ?? "standard"]),
+    [["dana: can you look?", "standard"]],
+    "points left out doesn't pass its rule",
+  );
+  // notes is optional too: an array or null.
+  const notes = (t.fake.schema(1) as { properties: { notes: { anyOf: { items: { properties: { fields: object } } }[] } } }).properties.notes
+    .anyOf;
+  const fields = notes[0]!.items.properties.fields;
+  assert.deepEqual(fields, {
+    type: "object",
+    properties: {
+      kind: { type: "string", enum: ["question", "incident"] },
+      author: { type: "string" },
+      mentions: { type: "array", items: { type: "string" } },
+      due: { anyOf: [{ type: "string" }, { type: "null" }] },
+      points: { anyOf: [{ type: "number" }, { type: "null" }] },
+      ship: {
+        anyOf: [
+          {
+            type: "object",
+            properties: { eta: { anyOf: [{ type: "string" }, { type: "null" }] } },
+            required: ["eta"],
+            additionalProperties: false,
+          },
+          { type: "null" },
+        ],
+      },
+    },
+    required: ["kind", "author", "mentions", "due", "points", "ship"],
+    additionalProperties: false,
+    description: "This item as a Message, by its type",
+  });
 });
 
 test("a Codex agent run that needs a login says Codex's words; one at its limit keeps codex's", posix, async (c) => {

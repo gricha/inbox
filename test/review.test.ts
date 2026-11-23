@@ -32,6 +32,7 @@ import {
   buildPrompt,
   saidOf,
   forgetCodexServers,
+  fromStrict,
   strictSchema,
   tomlKey,
   claudeEnvelope,
@@ -423,7 +424,12 @@ test(
     assert.equal(f.read("stdin"), "PROMPT");
     assert.deepEqual(
       JSON.parse(f.read("schema")),
-      { ...schema, additionalProperties: false, required: ["summary"] },
+      {
+        ...schema,
+        properties: { summary: { anyOf: [{ type: "string" }, { type: "null" }] } },
+        additionalProperties: false,
+        required: ["summary"],
+      },
       "strict mode's shape, which the model's API is sent as it is",
     );
     assert.equal(f.read("cwd-listing").trim(), path.basename(at), "the run's directory holds only its schema");
@@ -1648,8 +1654,9 @@ test("Codex reading a checkout keeps its shell, to read with, in its read-only s
   assert.ok((await args(false)).includes("shell_tool"), "a tool-less call has none");
 });
 
-// What OpenAI's strict mode refuses (live, through Codex on OpenRouter): an open object, or a property not required.
-test("a Codex call's schema is closed and all required, as an automation's answer, with its optional until, needs to be", () => {
+// What OpenAI's strict mode refuses (live, through Codex on OpenRouter): an open object, or a property not required. An
+// optional one is nullable, and its null in the answer is read as left out.
+test("a Codex call's schema is closed and all required, with its optional until nullable and its null read as none", () => {
   const automation = {
     type: "object",
     properties: {
@@ -1686,12 +1693,20 @@ test("a Codex call's schema is closed and all required, as an automation's answe
             ref: { type: "string" },
             do: { type: "string", enum: ["add", "snooze"] },
             why: { type: "string" },
-            until: { type: "string" },
+            until: { anyOf: [{ type: "string" }, { type: "null" }] },
           },
         },
       },
     },
   });
+  assert.deepEqual(fromStrict({ summary: "ok", items: [{ ref: "a/b#1", do: "add", why: "x", until: null }] }, automation), {
+    summary: "ok",
+    items: [{ ref: "a/b#1", do: "add", why: "x" }],
+  });
+  // A null where the schema has a value is the model's mistake, left for the reader to refuse; one it allows is kept.
+  const nullable = { type: "object", properties: { at: { type: ["string", "null"] }, n: { type: "number" } }, required: ["n"] };
+  assert.deepEqual(strictSchema(nullable), { ...nullable, additionalProperties: false, required: ["at", "n"] });
+  assert.deepEqual(fromStrict({ at: null, n: null }, nullable), { at: null, n: null });
 });
 
 // ---------------------------------------------------------------- the desk

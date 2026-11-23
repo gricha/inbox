@@ -122,6 +122,12 @@ test(
     );
     f.file("answer", 'Here it is:\n{"summary":"ok"}');
     const schema = { type: "object", properties: { summary: { type: "string" } } };
+    const strict = {
+      ...schema,
+      properties: { summary: { anyOf: [{ type: "string" }, { type: "null" }] } },
+      additionalProperties: false,
+      required: ["summary"],
+    };
     assert.deepEqual(await run(askAgent("PROMPT", { agent: "opencode", dir, schema })), {
       answer: { summary: "ok" },
       model: "opencode",
@@ -133,7 +139,8 @@ test(
     assert.equal(fs.realpathSync(call!.cwd), fs.realpathSync(dir));
     assert.equal(
       call!.stdin,
-      `PROMPT\n\nAnswer with one JSON object and nothing else (no code fence) that matches this JSON Schema:\n${JSON.stringify(schema)}`,
+      `PROMPT\n\nAnswer with one JSON object and nothing else (no code fence) that matches this JSON Schema:\n${JSON.stringify(strict)}`,
+      "strict, as Codex's: an optional property is required and nullable",
     );
     assert.deepEqual(config(call!), {
       share: "disabled",
@@ -283,6 +290,37 @@ test(
       },
     });
     assert.ok(!f.calls().some((x) => x.args[0] === "session"), "kept, so opencode --session shows what it did");
+  },
+);
+
+test(
+  "a typed note on OpenCode: its schema in the prompt has optional fields nullable, and a null is a field left out",
+  posix,
+  async (c) => {
+    const f = fakeOpencode(c);
+    f.file("config", JSON.stringify({ mcp: { tracker: { type: "local", command: ["tracker"] } } }));
+    const t = await setup([], { settings: { "agent.harness": "opencode", "policy.judge": false }, desk: { mcpUrl: MCP } });
+    c.after(t.cleanup);
+    const type = `type Message = { kind: "question" | "incident"; author: string; due?: string; points?: number }`;
+    const a = runSync(
+      t.desk.automations.set(
+        "tracker",
+        { name: "Tracker", schedule: "weekdays 09:00", prompt: "Read my mentions.", mcp: ["tracker"], type },
+        true,
+      ),
+    );
+    const fields = { kind: "question", author: "dana", due: null, points: null };
+    f.file(
+      "answer",
+      JSON.stringify({ summary: "One.", items: [], notes: [{ key: "m1", text: "dana: can you look?", body: null, url: null, fields }] }),
+    );
+    const r = await t.desk.automations.run(a, "now").p;
+    assert.equal(r.error, null);
+    assert.deepEqual(
+      r.items.map((x) => x.outcome),
+      ["added"],
+    );
+    assert.match(f.runs()[0]!.stdin, /"due":\{"anyOf":\[\{"type":"string"\},\{"type":"null"\}\]\}/);
   },
 );
 

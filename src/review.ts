@@ -957,7 +957,8 @@ export const codexRun = Effect.fn("codexRun")(function* (
       ),
     );
     const last = fs.existsSync(out) ? fs.readFileSync(out, "utf8") : "";
-    return { ...(yield* codexAnswer(events, last)), session: codexThread(events) };
+    const got = yield* codexAnswer(events, last);
+    return { ...got, answer: fromStrict(got.answer, opts.schema ?? SCHEMA), session: codexThread(events) };
   });
   return yield* run.pipe(
     Effect.ensuring(
@@ -971,13 +972,46 @@ export const codexRun = Effect.fn("codexRun")(function* (
 
 // --output-schema goes to the model's API as it is, in OpenAI's strict mode, which refuses a schema with an open object
 // or an optional property (an automation's answer has both): closed and all required, a property the answer needn't
-// carry is then an empty one, which every reader of the desk's answers takes as none.
+// carry is nullable, and fromStrict() reads its null as left out.
 export function strictSchema(s: unknown): unknown {
   if (Array.isArray(s)) return s.map(strictSchema);
-  if (!s || typeof s !== "object") return s;
+  if (!isRecord(s)) return s;
   const o: Record<string, unknown> = Object.fromEntries(Object.entries(s).map(([k, v]) => [k, strictSchema(v)]));
-  if (o.type !== "object") return o;
-  return { ...o, additionalProperties: false, required: Object.keys(o.properties ?? {}) };
+  if (o.type !== "object" || !isRecord(o.properties)) return o.type === "object" ? { ...o, additionalProperties: false, required: [] } : o;
+  const required = new Set(strings(s.required) ?? []);
+  const properties = Object.fromEntries(Object.entries(o.properties).map(([k, v]) => [k, required.has(k) ? v : nullable(v)]));
+  return { ...o, properties, additionalProperties: false, required: Object.keys(properties) };
+}
+
+const anyOf = (s: unknown): unknown[] => {
+  const of = field(s, "anyOf");
+  return Array.isArray(of) ? of : [];
+};
+const allowsNull = (s: unknown): boolean =>
+  field(s, "type") === "null" || (strings(field(s, "type")) ?? []).includes("null") || anyOf(s).some(allowsNull);
+
+// A property strict mode can leave empty: its schema or null, its description kept outside.
+function nullable(s: unknown): unknown {
+  if (!isRecord(s) || allowsNull(s)) return s;
+  const { description, ...rest } = s;
+  const of = Object.keys(rest).length === 1 && anyOf(rest).length ? anyOf(rest) : [rest];
+  return { anyOf: [...of, { type: "null" }], ...(description !== undefined && { description }) };
+}
+
+// An answer to strictSchema(schema), read as schema says: a null where schema has the property optional (and not
+// nullable) is left out, as the model was told null means.
+export function fromStrict(v: unknown, schema: unknown): unknown {
+  if (Array.isArray(v)) return v.map((x) => fromStrict(x, field(schema, "items")));
+  if (!isRecord(v)) return v;
+  const props = field(schema, "properties");
+  if (!isRecord(props)) {
+    const objects = anyOf(schema).filter((x) => isRecord(field(x, "properties")));
+    return objects.length === 1 ? fromStrict(v, objects[0]) : v;
+  }
+  const required = new Set(strings(field(schema, "required")) ?? []);
+  return Object.fromEntries(
+    Object.entries(v).flatMap(([k, x]) => (x === null && !required.has(k) && !allowsNull(props[k]) ? [] : [[k, fromStrict(x, props[k])]])),
+  );
 }
 
 // The thread `codex exec --json` says it started: its first event.
@@ -1110,8 +1144,9 @@ function withYours(ours: { mcp: object; agent: object }, yours: string | undefin
   return { ...parsed, ...ours, mcp: { ...objectOr(parsed.mcp), ...ours.mcp }, agent: { ...objectOr(parsed.agent), ...ours.agent } };
 }
 
-// The schema goes in the prompt: opencode run has no option for one, and the answer is read from its last text.
-const withSchema = (prompt: string, schema: object) =>
+// The schema goes in the prompt, strict as Codex's (any model may be behind it): opencode run has no option for one, and
+// the answer is read from its last text.
+const withSchema = (prompt: string, schema: unknown) =>
   `${prompt}\n\nAnswer with one JSON object and nothing else (no code fence) that matches this JSON Schema:\n${JSON.stringify(schema)}`;
 
 // The tool-less call: every permission denied, no MCP server, and its session deleted after, as Claude Code keeps none.
@@ -1134,7 +1169,7 @@ export const opencodeRun = Effect.fn("opencodeRun")(function* (
   const config = yield* opencodeConfig(command, opts.dir, permits, desk, opts.mcp);
   const spawnAs = yield* claudeSpawn(command, opencodeRunArgs(desk ? "Inbox automation" : "Inbox", undefined, opts.model));
   const events = yield* runCommand(spawnAs, {
-    input: withSchema(prompt, opts.schema ?? SCHEMA),
+    input: withSchema(prompt, strictSchema(opts.schema ?? SCHEMA)),
     cwd: opts.dir,
     timeout: opts.timeout ?? TIMEOUT,
     stdoutOnError: true,
@@ -1148,7 +1183,7 @@ export const opencodeRun = Effect.fn("opencodeRun")(function* (
   const session = opencodeSession(events);
   const forget = !desk && session ? dropSession(command, opts.dir, session) : Effect.void;
   return yield* Effect.ensuring(
-    Effect.map(opencodeAnswer(events), (a) => ({ ...a, session })),
+    Effect.map(opencodeAnswer(events), (a) => ({ ...a, answer: fromStrict(a.answer, opts.schema ?? SCHEMA), session })),
     forget,
   );
 });
