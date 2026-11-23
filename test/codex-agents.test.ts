@@ -68,7 +68,8 @@ say({ type: "turn.completed" });
   process.env.CODEX_HOME = path.join(dir, "codex-home");
   fs.mkdirSync(process.env.CODEX_HOME);
   c.after(() => {
-    process.env.DESK_CODEX = was.codex;
+    if (was.codex === undefined) delete process.env.DESK_CODEX;
+    else process.env.DESK_CODEX = was.codex;
     if (was.home === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = was.home;
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 });

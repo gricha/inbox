@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { claudeCommand, codexCommand, opencodeCommand } from "../src/review.ts";
 
 const root = path.join(import.meta.dirname, "..");
 const tests = (dir: string): string[] =>
@@ -20,4 +21,11 @@ test("every test file imports the no-agent helper first", () => {
     return !first || path.resolve(root, path.dirname(f), first) !== guard;
   });
   assert.deepEqual(missing, []);
+});
+
+test("the helper points every agent's CLI at nothing, not one on PATH", () => {
+  assert.deepEqual(
+    [claudeCommand(), codexCommand(), opencodeCommand()],
+    ["/nonexistent/claude", "/nonexistent/codex", "/nonexistent/opencode"],
+  );
 });

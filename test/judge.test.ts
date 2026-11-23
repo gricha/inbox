@@ -1,4 +1,4 @@
-import "./helpers/no-agent.ts";
+import { NO_AGENT } from "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -818,7 +818,7 @@ test("with Codex chosen, codex sorts the desk and claude isn't asked; its login 
   const codex = fakeCodex();
   process.env.DESK_CODEX = codex.bin;
   c.after(() => {
-    delete process.env.DESK_CODEX;
+    process.env.DESK_CODEX = NO_AGENT.DESK_CODEX;
     fs.rmSync(codex.dir, { recursive: true, force: true });
   });
   const t = await setup(c, [gray(1)], { settings: { "agent.harness": "codex" } });

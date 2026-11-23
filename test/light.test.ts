@@ -46,8 +46,10 @@ say({ type: "turn.completed" });
   process.env.DESK_CLAUDE = at("claude");
   process.env.DESK_CODEX = at("codex");
   c.after(() => {
-    process.env.DESK_CLAUDE = was.claude;
-    process.env.DESK_CODEX = was.codex;
+    if (was.claude === undefined) delete process.env.DESK_CLAUDE;
+    else process.env.DESK_CLAUDE = was.claude;
+    if (was.codex === undefined) delete process.env.DESK_CODEX;
+    else process.env.DESK_CODEX = was.codex;
     fs.rmSync(dir, { recursive: true, force: true });
   });
   const claudeCalls = () =>

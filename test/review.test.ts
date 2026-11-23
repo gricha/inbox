@@ -1,4 +1,4 @@
-import "./helpers/no-agent.ts";
+import { NO_AGENT } from "./helpers/no-agent.ts";
 import { test } from "node:test";
 import { aiPending } from "../src/stage.ts";
 import assert from "node:assert/strict";
@@ -486,7 +486,7 @@ while :; do sleep 0.1; done`);
     const e = await failure(codexRun("hi", { dir, timeout: 1000 }));
     assert.deepEqual([e._tag, e.message], ["CommandTimeout", "no answer in 1 second, so it was stopped"]);
   } finally {
-    delete process.env.DESK_CODEX;
+    process.env.DESK_CODEX = NO_AGENT.DESK_CODEX;
   }
   fs.rmSync(dir, { recursive: true });
 });
@@ -538,8 +538,8 @@ test("the tool-less call is Claude Code's unless the agent is Codex", posix, asy
     assert.deepEqual((await run(askAgent("hi", { dir, agent: "claude-code" }))).answer, { summary: "from claude" });
     assert.deepEqual(await run(askAgent("hi", { dir, agent: "codex" })), { answer: { summary: "from codex" }, model: "codex", usage: [] });
   } finally {
-    delete process.env.DESK_CLAUDE;
-    delete process.env.DESK_CODEX;
+    process.env.DESK_CLAUDE = NO_AGENT.DESK_CLAUDE;
+    process.env.DESK_CODEX = NO_AGENT.DESK_CODEX;
   }
   fs.rmSync(dir, { recursive: true });
 });
@@ -1530,8 +1530,8 @@ test("with Codex chosen, the AI review and its check both run on codex, and its 
     assert.equal(f.read("calls").split("\n").filter(Boolean).length, 2, "the writer and the check");
     assert.ok(!fs.existsSync(path.join(claude.dir, "calls")), "claude never ran");
   } finally {
-    delete process.env.DESK_CODEX;
-    delete process.env.DESK_CLAUDE;
+    process.env.DESK_CODEX = NO_AGENT.DESK_CODEX;
+    process.env.DESK_CLAUDE = NO_AGENT.DESK_CLAUDE;
     fs.rmSync(f.dir, { recursive: true });
     fs.rmSync(claude.dir, { recursive: true });
     fs.rmSync(home, { recursive: true });
