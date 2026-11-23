@@ -1,7 +1,7 @@
 {
   "name": "@gricha/inbox",
   "productName": "Inbox",
-  "version": "0.2.91",
+  "version": "0.2.92",
   "description": "A local desk that sorts your GitHub review load into boards and a priority queue.",
   "license": "UNLICENSED",
   "repository": {
