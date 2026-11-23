@@ -3,7 +3,6 @@ import "./helpers/no-agent.ts";
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { createApp } from "../src/server.ts";
 import type { Card, InboxSection, Item } from "../src/types.ts";
@@ -15,37 +14,27 @@ import { run, runSync } from "./helpers/run.ts";
 import { Effect } from "effect";
 import { posix } from "./helpers/platform.ts";
 import { until } from "./helpers/wait.ts";
+import { fakeAgent } from "./helpers/fake-agent.ts";
 
 const SVC = { name: "Service accounts", ask: "Is it about service accounts?", when: "!me.author", urgent: true };
 
 // A fake claude: answers a criteria question with ask.json, a score with score.json; each call's kind goes in calls.
 function fakeClaude(c: TestContext) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-fake-urgency-"));
-  const bin = path.join(dir, "claude");
-  fs.writeFileSync(
-    bin,
-    `#!/bin/sh
-d="$(dirname "$0")"
-cat > "$d/stdin"
+  const f = fakeAgent(
+    c,
+    "claude",
+    `cat > "$d/stdin"
 if grep -q "yes-or-no questions" "$d/stdin"; then k=ask; else k=score; fi
 echo $k >> "$d/calls"; cp "$d/stdin" "$d/stdin.$k"
-printf '{"type":"result","is_error":false,"structured_output":%s}' "$(cat "$d/$k.json")"
-`,
+printf '{"type":"result","is_error":false,"structured_output":%s}' "$(cat "$d/$k.json")"`,
   );
-  fs.chmodSync(bin, 0o755);
-  const was = process.env.DESK_CLAUDE;
-  process.env.DESK_CLAUDE = bin;
-  c.after(() => {
-    process.env.DESK_CLAUDE = was;
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
   const say = (k: "ask" | "score", items: unknown[]) => {
-    fs.writeFileSync(path.join(dir, `${k}.json`), JSON.stringify({ items }));
+    f.write(`${k}.json`, JSON.stringify({ items }));
   };
   say("ask", []);
   say("score", []);
-  const calls = () => (fs.existsSync(path.join(dir, "calls")) ? fs.readFileSync(path.join(dir, "calls"), "utf8").trim().split("\n") : []);
-  const stdin = (k: "ask" | "score") => fs.readFileSync(path.join(dir, `stdin.${k}`), "utf8");
+  const calls = () => f.read("calls").trim().split("\n").filter(Boolean);
+  const stdin = (k: "ask" | "score") => f.read(`stdin.${k}`);
   return { say, calls, stdin };
 }
 
