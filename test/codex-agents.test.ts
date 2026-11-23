@@ -12,6 +12,7 @@ import { makeItem } from "./helpers/items.ts";
 import { run, runSync } from "./helpers/run.ts";
 import { posix } from "./helpers/platform.ts";
 import { until } from "./helpers/wait.ts";
+import { fakeAgent } from "./helpers/fake-agent.ts";
 
 const MCP = "http://localhost:49401/mcp";
 const ROLE =
@@ -100,26 +101,14 @@ say({ type: "turn.completed" });
 
 // A claude whose one background session, stopped, is resumed by --resume <its session> --bg.
 function fakeClaude(c: TestContext, folder: string) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-fake-claude-"));
-  const bin = path.join(dir, "claude");
   const row = JSON.stringify([{ id: "c0ffee01", sessionId: "c0ffee01-s", cwd: folder, kind: "background", name: "Inbox coordinator" }]);
-  fs.writeFileSync(
-    bin,
-    `#!/bin/sh
-printf '%s\\n' "$*" >> "$(dirname "$0")/calls"
-case "$1" in agents) echo '${row}';; --resume) echo "backgrounded · c0ffee01";; esac
-`,
+  const f = fakeAgent(
+    c,
+    "claude",
+    `printf '%s\\n' "$*" >> "$d/calls"
+case "$1" in agents) echo '${row}';; --resume) echo "backgrounded · c0ffee01";; esac`,
   );
-  fs.chmodSync(bin, 0o755);
-  const was = process.env.DESK_CLAUDE;
-  process.env.DESK_CLAUDE = bin;
-  c.after(() => {
-    process.env.DESK_CLAUDE = was;
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-  return {
-    calls: () => (fs.existsSync(path.join(dir, "calls")) ? fs.readFileSync(path.join(dir, "calls"), "utf8").trim().split("\n") : []),
-  };
+  return { calls: () => f.read("calls").trim().split("\n").filter(Boolean) };
 }
 
 // ---------------------------------------------------------------- an automation's agent run
