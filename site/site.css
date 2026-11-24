@@ -114,7 +114,7 @@ button {
   opacity: var(--pile-alpha);
   white-space: nowrap;
   mask-image:
-    radial-gradient(ellipse min(760px, 52vw) 120px at 50% 180px, transparent 55%, #000 100%),
+    radial-gradient(ellipse min(640px, 46vw) 100px at 50% 182px, transparent 55%, #000 100%),
     linear-gradient(to bottom, transparent 0, transparent 60px, #000 84px, #000 220px, transparent 330px);
   mask-composite: intersect;
   pointer-events: none;
@@ -207,12 +207,12 @@ button {
   position: relative;
   max-width: 1520px;
   margin: 0 auto;
-  padding: 64px 40px 72px;
+  padding: 72px 40px;
 }
 
 h1 {
-  margin: 0 0 64px;
-  font-size: clamp(56px, 7.4vw, 128px);
+  margin: 0 0 72px;
+  font-size: clamp(48px, 5.6vw, 92px);
   font-weight: 700;
   font-stretch: 75%;
   line-height: 1;
@@ -457,7 +457,7 @@ footer a {
 
   h1 {
     margin: 32px 0 36px;
-    font-size: clamp(46px, 12.5vw, 80px);
+    font-size: clamp(40px, 9vw, 64px);
   }
 
   .window {
