@@ -385,6 +385,12 @@ export function Review({
     });
   }
 
+  // Your draft or ready PR nobody's asked has its box on the page, asked by Ready for review or Ask reviewers.
+  function toPicker() {
+    setOver(false);
+    requestAnimationFrame(focusReviewers);
+  }
+
   // Opened to ask reviewers (its row's Add reviewers): the box has the cursor, once per PR.
   const askedFocus = useRef("");
   useEffect(() => {
@@ -1348,7 +1354,7 @@ export function Review({
                   }),
                 };
               })}
-              add={yoursOpen && !asking && !acted && !sideAdding ? addReviewers : undefined}
+              add={acted ? undefined : picking ? toPicker : yoursOpen && !sideAdding ? addReviewers : undefined}
             >
               {sideAdding && !acted && (
                 <div className="rv-side-add">
@@ -1999,7 +2005,7 @@ function SidePart({
   bad: string; // t-bad, t-warn, or "" for ink
   tone?: string; // calm(): on a sorted-away PR its problems are grey
   rows?: { name: string; login?: string; state: string; bad: string; tools?: ReactNode }[];
-  add?: (() => void) | undefined; // the reviewers' Add reviewers, on your open PR
+  add?: (() => void) | undefined; // the reviewers' Add reviewers, on your open PR or draft
 }) {
   return (
     <section className={cls("rv-part", tone)} data-part={id} aria-label={name}>

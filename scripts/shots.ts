@@ -2797,6 +2797,8 @@ const SHOTS: Shot[] = [
       if (await page.locator(".rv-reviewers-pop").count()) failures.push("review-unasked: the reviewers list opens over Ask reviewers");
       if (await page.getByRole("button", { name: "Hand off for merge" }).count())
         failures.push("review-unasked: Hand off for merge shows where a review is required");
+      if ((await page.locator(".rv-side").isVisible()) && !(await page.locator("[data-part=reviewers] .rv-part-more").count()))
+        failures.push("review-unasked: no Add reviewers in the sidebar");
     },
     after: async (page) => {
       await unroute(page);
@@ -2924,6 +2926,29 @@ const SHOTS: Shot[] = [
       await fresh(page);
     },
     writes: true,
+  },
+  // Your draft nobody's asked: the sidebar's Add reviewers too, to the page's box, whose picks Ready for review asks.
+  {
+    name: "review-add-reviewers-draft",
+    go: async (page) => {
+      await review("acme/web#2303")(page);
+      const side = page.locator(".rv-side");
+      if (!(await side.isVisible())) await page.locator(".rv-side-show").click();
+      const add = page.locator("[data-part=reviewers] .rv-part-more", { hasText: "Add reviewers" });
+      if (!(await add.count())) {
+        failures.push("review-add-reviewers-draft: no Add reviewers on your draft nobody's asked");
+        return;
+      }
+      await add.click();
+      await page.waitForTimeout(300);
+      const focused = await page.evaluate<boolean>(
+        `!!document.activeElement?.closest(".rv-main") && document.activeElement.classList.contains("rv-reviewers-input")`,
+      );
+      if (!focused) failures.push("review-add-reviewers-draft: Add reviewers doesn't put the cursor in the draft's box");
+      if (await page.locator("[data-part=reviewers] .rv-reviewers").count())
+        failures.push("review-add-reviewers-draft: a second box opened in the sidebar");
+    },
+    after: fresh,
   },
   // Removing, asking again and adding a reviewer show in the sidebar at once, before GitHub answers (it never does here).
   {
