@@ -1,3 +1,5 @@
+import { compact } from "./stars.ts";
+
 // The page around the demo: the pile behind it, things to try that take the demo somewhere, Start over, and Copy.
 const frame = document.querySelector<HTMLIFrameElement>("#demo");
 
@@ -55,13 +57,25 @@ document.querySelector("[data-reset]")?.addEventListener("click", () => {
   win.location.reload();
 });
 
-const copy = document.querySelector<HTMLButtonElement>("[data-copy]");
-copy?.addEventListener("click", () => {
-  const text = document.querySelector("#cmd")?.textContent ?? "";
-  void navigator.clipboard.writeText(text).then(() => {
-    copy.textContent = "Copied";
-    return setTimeout(() => {
-      copy.textContent = "Copy";
-    }, 1500);
+// Each Copy copies the text in its own box.
+for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy]")) {
+  button.addEventListener("click", () => {
+    const text = button.parentElement?.querySelector("code")?.textContent ?? "";
+    void navigator.clipboard.writeText(text).then(() => {
+      button.textContent = "Copied";
+      return setTimeout(() => {
+        button.textContent = "Copy";
+      }, 1500);
+    });
   });
-});
+}
+
+// The live star count, over the one the build put in; GitHub not answering leaves that one.
+async function liveStars(el: Element) {
+  const res = await fetch("https://api.github.com/repos/gricha/inbox").catch(() => null);
+  const body: unknown = res?.ok ? await res.json().catch(() => null) : null;
+  const n = body && typeof body === "object" && "stargazers_count" in body ? body.stargazers_count : null;
+  if (typeof n === "number") el.textContent = compact(n);
+}
+const count = document.querySelector("[data-stars]");
+if (count) void liveStars(count);

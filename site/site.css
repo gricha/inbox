@@ -376,6 +376,25 @@ h2 {
   background: rgb(255 255 255 / 6%);
 }
 
+.or {
+  margin: 20px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.cmd.prompt {
+  margin-top: 10px;
+}
+
+.cmd.prompt code {
+  font: 400 16px/1.5 var(--sans);
+  white-space: normal;
+}
+
+.stars:has([data-stars]:empty) {
+  display: none;
+}
+
 .install .small {
   margin-top: 6px;
   font-size: 15px;

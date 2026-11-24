@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { compact } from "./stars.ts";
 
 const node = (f: string) => fileURLToPath(new URL(`./demo/node/${f}.ts`, import.meta.url));
 const NODE: Record<string, string> = {
@@ -21,22 +22,20 @@ const NODE: Record<string, string> = {
   "@sentry/hono/node": "misc",
 };
 
-// The repo's stars for the navbar, read once per build (each deploy); none when GitHub doesn't answer.
+// The repo's stars for the navbar as of the build, so the first paint has a number; the page reads the live count after.
 async function stars(): Promise<string> {
   const res = await fetch("https://api.github.com/repos/gricha/inbox", { signal: AbortSignal.timeout(5000) }).catch(() => null);
   const body: unknown = res?.ok ? await res.json().catch(() => null) : null;
   const n = body && typeof body === "object" && "stargazers_count" in body ? body.stargazers_count : null;
-  if (typeof n !== "number") return "";
-  const shown = n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k` : String(n);
-  return `<span class="stars" title="${n} stars on GitHub"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M8 .9l2.2 4.5 4.9.7-3.6 3.5.9 4.9L8 12.2l-4.4 2.3.9-4.9L.9 6.1l4.9-.7z"/></svg>${shown}</span>`;
+  return typeof n === "number" ? compact(n) : "";
 }
-const starsHtml = await stars();
+const starsAtBuild = await stars();
 
 // useinbox.dev: the landing page and, at /demo/, the real window running against the mock desk in the page.
 export default defineConfig({
   root: import.meta.dirname,
   publicDir: "public",
-  plugins: [react(), { name: "stars", transformIndexHtml: (html) => html.replace("<!--stars-->", starsHtml) }],
+  plugins: [react(), { name: "stars", transformIndexHtml: (html) => html.replace("<!--stars-->", starsAtBuild) }],
   // The mock reads its switches from process.env; the demo page sets them (demo/index.html), so keep Vite from inlining {}.
   define: { "process.env": "globalThis.process.env" },
   resolve: { alias: Object.entries(NODE).map(([m, f]) => ({ find: m.startsWith("@") ? m : `node:${m}`, replacement: node(f) })) },
