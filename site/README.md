@@ -19,7 +19,7 @@ GitHub: code reviews are one source beside your agents' questions and stuck sess
 - **The stage.** Behind the app drifts the raw pile of what wants you (review requests, CI, an agent asking for a
   permission, mail, chat mentions); in front, the live app shows it as one short list. That contrast is the page's one bold
   idea; everything else stays quiet.
-- **The first screen** is the demo: the headline "Attention is all you've got." (Instrument Sans, the app's own face, 700
+- **The first screen** is the demo: the headline "Attention is all you've got" (Instrument Sans, the app's own face, 700
   at 75% width) centred above it, then the live app, large, with a margin on each side. Under it: the paragraph, and the
   four things to try in a 2×2 grid (each takes the demo to a place; the action stays the visitor's) with Start the demo
   over. On a phone the same, in one column.
