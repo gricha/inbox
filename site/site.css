@@ -114,8 +114,8 @@ button {
   opacity: var(--pile-alpha);
   white-space: nowrap;
   mask-image:
-    radial-gradient(ellipse min(620px, 46vw) 90px at 50% 110px, transparent 55%, #000 100%),
-    linear-gradient(to bottom, transparent 0, transparent 60px, #000 84px, #000 130px, transparent 220px);
+    radial-gradient(ellipse min(760px, 52vw) 120px at 50% 180px, transparent 55%, #000 100%),
+    linear-gradient(to bottom, transparent 0, transparent 60px, #000 84px, #000 220px, transparent 330px);
   mask-composite: intersect;
   pointer-events: none;
 }
@@ -207,12 +207,12 @@ button {
   position: relative;
   max-width: 1520px;
   margin: 0 auto;
-  padding: 28px 40px 72px;
+  padding: 64px 40px 72px;
 }
 
 h1 {
-  margin: 0 0 40px;
-  font-size: clamp(48px, 5.6vw, 92px);
+  margin: 0 0 64px;
+  font-size: clamp(56px, 7.4vw, 128px);
   font-weight: 700;
   font-stretch: 75%;
   line-height: 1;
@@ -225,10 +225,10 @@ h1 {
   margin: 0;
 }
 
-/* The demo takes the rest of the first screen: under the bar and the headline, never past the fold. */
+/* The demo is nearly a screen tall, so scrolled to it fills the window; the headline's band sits above it. */
 .window {
   overflow: hidden;
-  height: clamp(600px, calc(100svh - 232px), 940px);
+  height: clamp(600px, calc(100svh - 120px), 940px);
   border-radius: 12px;
   background: light-dark(#eeecf3, #0b0911);
   box-shadow:
@@ -456,12 +456,12 @@ footer a {
   }
 
   h1 {
-    margin: 20px 0 28px;
-    font-size: clamp(40px, 9vw, 64px);
+    margin: 32px 0 36px;
+    font-size: clamp(46px, 12.5vw, 80px);
   }
 
   .window {
-    height: clamp(440px, calc(100svh - 190px), 720px);
+    height: clamp(440px, calc(100svh - 120px), 720px);
   }
 
   .below {

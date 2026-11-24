@@ -31,12 +31,12 @@ const pile = document.querySelector(".pile");
 if (pile) {
   const rows = document.createElement("div");
   rows.className = "pile-rows";
-  for (let i = 0; i < 6; i++)
-    for (const line of PILE) {
-      const row = document.createElement("div");
-      row.textContent = line;
-      rows.append(row);
-    }
+  // Three notifications a line, each line starting further along the pile, so it fills the width on both sides.
+  for (let i = 0; i < 6 * PILE.length; i++) {
+    const row = document.createElement("div");
+    row.textContent = [0, 7, 13].map((k) => PILE[(i + k) % PILE.length]).join("      ");
+    rows.append(row);
+  }
   pile.append(rows);
 }
 
