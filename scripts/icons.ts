@@ -8,23 +8,26 @@ const dir = path.join(root, "assets");
 const paths = [...fs.readFileSync(path.join(dir, "brand", "mark.svg"), "utf8").matchAll(/<path d="([^"]+)"/g)];
 if (!paths.length) throw new Error("assets/brand/mark.svg has no <path d>");
 const mark = paths.map((m) => `<path d="${m[1]}"/>`).join("");
+// Triage: the rows are Urgent, Standard and FYI in the window's Dark red, amber and pencil, on its violet ink.
+const ROWS = ["#FFB4AB", "#EBC076", "#ACA4BD"];
+if (paths.length !== ROWS.length) throw new Error(`assets/brand/mark.svg has ${paths.length} rows, not ${ROWS.length}`);
+const rows = paths.map((m, i) => `<path d="${m[1]}" fill="${ROWS[i]}"/>`).join("");
 
-const VIOLET = "#6A3DBD";
+const INK = "#1D1733";
 const MARK_WHITE = "#F6F3FC";
 const svg = (viewBox: string, body: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${body}</svg>`;
 
-// The alert's dot sits in the corner the pill leaves clear, never on the mark.
+// The alert's dot sits in the corner the rows leave clear (bottom right, past the shortest bar), never on the mark.
 const tile = (alert: boolean) =>
   svg(
     "0 0 64 64",
-    `<rect width="64" height="64" rx="13.5" fill="${VIOLET}"/><g fill="${MARK_WHITE}">${mark}</g>` +
-      (alert ? `<circle cx="54" cy="10" r="10" fill="#E5484D"/>` : ""),
+    `<rect width="64" height="64" rx="13.5" fill="${INK}"/>${rows}` + (alert ? `<circle cx="54" cy="54" r="10" fill="#E5484D"/>` : ""),
   );
 
 // The app icon on the macOS grid (an 824 tile at 100,100, its corner), the kit's tile scaled to it: flat, no highlight.
 const icon = svg(
   "0 0 1024 1024",
-  `<rect x="100" y="100" width="824" height="824" rx="185" fill="${VIOLET}"/><g fill="${MARK_WHITE}" transform="translate(100 100) scale(12.875)">${mark}</g>`,
+  `<rect x="100" y="100" width="824" height="824" rx="185" fill="${INK}"/><g transform="translate(100 100) scale(12.875)">${rows}</g>`,
 );
 
 // A build that isn't the release says so in the Dock and menu bar (appVariant in electron/lib.ts): its own colour, and on
@@ -40,17 +43,15 @@ const variantTile = (fill: string, alert: boolean) =>
   svg(
     "0 0 64 64",
     `<rect width="64" height="64" rx="13.5" fill="${fill}"/><g fill="${MARK_WHITE}">${mark}</g>` +
-      (alert ? `<circle cx="54" cy="10" r="10" fill="#E5484D"/>` : ""),
+      (alert ? `<circle cx="54" cy="54" r="10" fill="#E5484D"/>` : ""),
   );
 
 // Maskable: full bleed, the mark at three quarters so it stays inside the platform's safe zone.
-const maskable = svg(
-  "0 0 64 64",
-  `<rect width="64" height="64" fill="${VIOLET}"/><g fill="${MARK_WHITE}" transform="translate(8 8) scale(.75)">${mark}</g>`,
-);
+const maskable = svg("0 0 64 64", `<rect width="64" height="64" fill="${INK}"/><g transform="translate(8 8) scale(.75)">${rows}</g>`);
 
-// The menu bar's template image (alpha only): the silhouette (x 8–56, y 19.6–44.5) and a margin, 22×16 pt like its neighbours.
-const template = svg("6.5 13.8 51 37.1", `<g fill="#000">${mark}</g>`);
+// The menu bar's template image (alpha only): the silhouette (x 12.2–51.6, y 13.2–50.8) and a margin, 22×16 pt like its
+// neighbours.
+const template = svg("3.3 11.2 57.2 41.6", `<g fill="#000">${mark}</g>`);
 
 const dot = svg("0 0 16 16", `<circle cx="8" cy="8" r="7" fill="#E5484D" stroke="#FFFFFF" stroke-width="1.5"/>`);
 

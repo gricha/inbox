@@ -9,7 +9,7 @@ const paths = (f: string) => [...fs.readFileSync(new URL(f, root), "utf8").match
 
 test("the window's Mark and every icon draw the paths of assets/brand/mark.svg", () => {
   const mark = paths("assets/brand/mark.svg");
-  assert.equal(mark.length, 2);
+  assert.equal(mark.length, 3);
   for (const f of [
     "web/src/components/Mark.tsx",
     "assets/brand/tile.svg",

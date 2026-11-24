@@ -6,16 +6,16 @@ a change. What each page does and says is [ui.md](ui.md). The product principle 
 
 ## The brand
 
-The mark is the inbox design kit's icon A: a broad tray with sloped inner shoulders and a short pill floating above it,
-two filled paths in a 64×64 viewBox.
+The mark is Triage: the Inbox's three sections, Urgent, Standard and FYI, as three rows of a dot and a bar, each bar
+shorter than the one above; one filled path per row in a 64×64 viewBox.
 
-- **One geometry.** `assets/brand/mark.svg` (`currentColor`) is the master; everything else is drawn from its two paths.
+- **One geometry.** `assets/brand/mark.svg` (`currentColor`) is the master; everything else is drawn from its three paths.
 - **Never** redraw, stretch, stroke, shadow, gradient or badge the mark.
-- **Keep its viewBox.** The silhouette spans x 8–56 and y 19.6–44.5; the room around it is deliberate.
+- **Keep its viewBox.** The silhouette spans x 12.2–51.6 and y 13.2–50.8; the room around it is deliberate.
 - **A status dot goes on the tile's corner** (the tray's alert), never on the mark.
-- **Colours.** The tile is violet `#6A3DBD` with a near-white `#F6F3FC` mark, the same in every theme. In the window the
+- **Colours.** Triage: the tile is violet ink `#1D1733` and the mark's three rows, Urgent, Standard and FYI, are the window's Dark red `#FFB4AB`, amber `#EBC076` and pencil `#ACA4BD`, the same in every theme. In the window the
   mark is `--accent-ink` (purple in Light, a light purple in Dark, each theme's accent elsewhere). A coloured mark on a
-  light surface, a light one on a dark surface; never the violet tile on a dark violet panel.
+  light surface, a light one on a dark surface; the ink tile on a dark panel needs its own edge.
 - **In the window** it's `Mark` (`web/src/components/Mark.tsx`): inline SVG at 24px (a silhouette about 18×9px),
   `aria-hidden`, on the first-run page. The sidebar's brand row has no mark: the word "Inbox" in a browser, nothing
   beside the traffic lights in the macOS app.
@@ -24,11 +24,11 @@ two filled paths in a 64×64 viewBox.
 
 | File                                     | What                                                                                      | Size       |
 | ---------------------------------------- | ----------------------------------------------------------------------------------------- | ---------- |
-| `assets/brand/tile.svg`                  | the violet tile, corner 13.5 of 64, the near-white mark at the kit's proportions          | 64 viewBox |
+| `assets/brand/tile.svg`                  | the ink tile, corner 13.5 of 64, the rows in red, amber and pencil                        | 64 viewBox |
 | `assets/icon.svg`, `assets/icon.png`     | the app icon (macOS, Windows, Linux): the tile on the macOS grid (824px at 100,100), flat | 1024       |
 | `assets/trayTemplate.png`, `@2x`         | the macOS menu bar: the mark alone in black (macOS tints it), cropped with a margin       | 22×16, 2x  |
 | `assets/tray.png`, `@2x`                 | the Windows and Linux tray: the tile                                                      | 16, 32     |
-| `assets/tray-alert.png`, `@2x`           | the same, with a red dot in the corner the pill leaves clear                              | 16, 32     |
+| `assets/tray-alert.png`, `@2x`           | the same, with a red dot in the corner the rows leave clear (bottom right)                | 16, 32     |
 | `assets/overlay-alert.png`               | the Windows taskbar's badge: a red dot                                                    | 16         |
 | `web/public/icon.svg`                    | the favicon and the manifest's icon: the tile                                             | any        |
 | `web/public/icon-maskable.svg`           | the manifest's maskable icon: full bleed, the mark at three quarters inside the safe zone | any        |
