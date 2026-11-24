@@ -207,11 +207,11 @@ button {
   position: relative;
   max-width: 1520px;
   margin: 0 auto;
-  padding: 4px 40px 72px;
+  padding: 28px 40px 72px;
 }
 
 h1 {
-  margin: 0 0 28px;
+  margin: 0 0 40px;
   font-size: clamp(48px, 5.6vw, 92px);
   font-weight: 700;
   font-stretch: 75%;
@@ -228,7 +228,7 @@ h1 {
 /* The demo takes the rest of the first screen: under the bar and the headline, never past the fold. */
 .window {
   overflow: hidden;
-  height: clamp(600px, calc(100svh - 196px), 940px);
+  height: clamp(600px, calc(100svh - 232px), 940px);
   border-radius: 12px;
   background: light-dark(#eeecf3, #0b0911);
   box-shadow:
@@ -456,12 +456,12 @@ footer a {
   }
 
   h1 {
-    margin: 8px 0 20px;
+    margin: 20px 0 28px;
     font-size: clamp(40px, 9vw, 64px);
   }
 
   .window {
-    height: clamp(440px, calc(100svh - 170px), 720px);
+    height: clamp(440px, calc(100svh - 190px), 720px);
   }
 
   .below {
