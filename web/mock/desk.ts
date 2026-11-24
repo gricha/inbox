@@ -3087,6 +3087,21 @@ const MCP_SERVERS: McpView["servers"] = [
   { name: "linear", kind: "http", target: "https://mcp.linear.app/mcp", headers: false, desk: false, used_by: ["Linear check"] },
   { name: "xcodebuildmcp", kind: "stdio", target: "npx -y xcodebuildmcp@latest mcp", headers: false, desk: false, used_by: [] },
 ];
+// The demo's: the sources its notes came from (mail, a chat tracker), beside the desk's own and a tracker.
+const DEMO_MCP: McpView["servers"] = [
+  { name: "inbox", kind: "http", target: "http://localhost:47823/mcp", headers: false, desk: true, used_by: [] },
+  {
+    name: "mail",
+    kind: "http",
+    target: "https://mail.example.com/mcp",
+    headers: false,
+    desk: false,
+    used_by: ["Important personal email"],
+  },
+  { name: "chat", kind: "http", target: "https://chat.example.com/mcp", headers: false, desk: false, used_by: ["Tracker mentions"] },
+  { name: "linear", kind: "http", target: "https://mcp.linear.app/mcp", headers: false, desk: false, used_by: ["Linear check"] },
+];
+if (DEMO) MCP_SERVERS.splice(0, MCP_SERVERS.length, ...DEMO_MCP);
 
 function mcpView(checked: boolean): McpView {
   const ok = { state: "connected" as const, detail: "Connected" };
