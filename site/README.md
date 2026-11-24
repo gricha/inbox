@@ -18,7 +18,7 @@ GitHub: code reviews are one source beside your agents' questions and stuck sess
 - **The stage.** Behind the app drifts the raw pile of what wants you (review requests, CI, an agent asking for a
   permission, mail, chat mentions); in front, the live app shows it as one short list. That contrast is the page's one bold
   idea; everything else stays quiet.
-- **The rail** beside the app: "Your attention, sorted." (Instrument Sans, the app's own face, 700 at 75% width), one
+- **The rail** beside the app: "Attention is all you've got." (Instrument Sans, the app's own face, 700 at 75% width), one
   paragraph, four things to try (each takes the demo to a place; the action stays the visitor's), and Start the demo over.
   Under 1000px the words sit above the app and the things to try below it.
 - **Below the stage:** Install (one command; `/install` redirects to the repo's `install.sh`), three facts (runs on your
