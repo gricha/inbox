@@ -212,12 +212,13 @@ button {
 .rail {
   display: flex;
   flex-direction: column;
+  container-type: inline-size;
   padding-top: 16px;
 }
 
 h1 {
   margin: 0;
-  font-size: clamp(60px, 5.3vw, 80px);
+  font-size: clamp(52px, 21cqi, 80px); /* by the rail, so "all you've got." stays one line at any width */
   font-weight: 700;
   font-stretch: 75%;
   line-height: 1;
