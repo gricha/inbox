@@ -38,47 +38,49 @@
       </header>
 
       <main class="hero">
-        <div class="rail">
-          <h1><span>Attention is</span> <span>all you've got.</span></h1>
-          <p class="lead">
-            Spend it on what needs you. Inbox sorts code reviews, your agents' questions and the mail that matters by your rules and your
-            own agent, down to one short list.
-          </p>
-
-          <ul class="tries" aria-label="Things to try in the demo">
-            <li>
-              <button type="button" data-go="#/review/acme%2Fworker%23875">
-                <strong>Review a PR and hand it off</strong>
-                <span>Read the AI's guide through your change, then let your agent merge it.</span>
-              </button>
-            </li>
-            <li>
-              <button type="button" data-go="#/inquiry/q1c0ffee">
-                <strong>Answer stalled agents</strong>
-                <span>One waits on a decision, another on a permission.</span>
-              </button>
-            </li>
-            <li>
-              <button type="button" data-go="#/settings/mcp">
-                <strong>Add any source over MCP</strong>
-                <span>Mail, chat, a tracker: connect it and automations bring in what matters.</span>
-              </button>
-            </li>
-            <li>
-              <button type="button" data-go="#/">
-                <strong>Make the list yours</strong>
-                <span>Drag a row to reorder it, or right-click to snooze it.</span>
-              </button>
-            </li>
-          </ul>
-          <button type="button" class="reset" data-reset>Start the demo over</button>
-        </div>
+        <h1>Attention is all you've got.</h1>
 
         <figure class="demo">
           <div class="window">
             <iframe id="demo" src="/demo/" title="Inbox demo: the real app with made-up work in it"></iframe>
           </div>
         </figure>
+
+        <div class="below">
+          <p class="lead">
+            Spend it on what needs you. Inbox sorts code reviews, your agents' questions and the mail that matters by your rules and your
+            own agent, down to one short list.
+          </p>
+          <div class="try">
+            <ul class="tries" aria-label="Things to try in the demo">
+              <li>
+                <button type="button" data-go="#/review/acme%2Fworker%23875">
+                  <strong>Review a PR and hand it off</strong>
+                  <span>Read the AI's guide through your change, then let your agent merge it.</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" data-go="#/inquiry/q1c0ffee">
+                  <strong>Answer stalled agents</strong>
+                  <span>One waits on a decision, another on a permission.</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" data-go="#/settings/mcp">
+                  <strong>Add any source over MCP</strong>
+                  <span>Mail, chat, a tracker: connect it and automations bring in what matters.</span>
+                </button>
+              </li>
+              <li>
+                <button type="button" data-go="#/">
+                  <strong>Make the list yours</strong>
+                  <span>Drag a row to reorder it, or right-click to snooze it.</span>
+                </button>
+              </li>
+            </ul>
+            <button type="button" class="reset" data-reset>Start the demo over</button>
+          </div>
+        </div>
       </main>
     </div>
 

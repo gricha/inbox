@@ -104,7 +104,7 @@ button {
   color: var(--on-stage);
 }
 
-/* The pile shows around the app, never behind the words. */
+/* The pile shows in the band around the headline (under the top bar), with a hole behind its words, and fades out before the demo. */
 .pile {
   position: absolute;
   inset: 0;
@@ -113,7 +113,10 @@ button {
   font: 400 11px/24px var(--mono);
   opacity: var(--pile-alpha);
   white-space: nowrap;
-  mask-image: linear-gradient(to right, transparent 0, transparent 380px, #000 520px);
+  mask-image:
+    radial-gradient(ellipse min(620px, 46vw) 90px at 50% 110px, transparent 55%, #000 100%),
+    linear-gradient(to bottom, transparent 0, transparent 60px, #000 84px, #000 130px, transparent 220px);
+  mask-composite: intersect;
   pointer-events: none;
 }
 
@@ -202,57 +205,80 @@ button {
 
 .hero {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
-  gap: 48px;
-  height: clamp(640px, calc(100svh - var(--top)), 980px);
-  padding: 0 32px 32px;
-}
-
-.rail {
-  display: flex;
-  flex-direction: column;
-  container-type: inline-size;
-  padding-top: 16px;
+  max-width: 1520px;
+  margin: 0 auto;
+  padding: 4px 40px 72px;
 }
 
 h1 {
-  margin: 0;
-  font-size: clamp(52px, 21cqi, 80px); /* by the rail, so "all you've got." stays one line at any width */
+  margin: 0 0 28px;
+  font-size: clamp(48px, 5.6vw, 92px);
   font-weight: 700;
   font-stretch: 75%;
   line-height: 1;
   letter-spacing: -0.015em;
+  text-align: center;
+  text-wrap: balance;
 }
 
-h1 span {
+.demo {
+  margin: 0;
+}
+
+/* The demo takes the rest of the first screen: under the bar and the headline, never past the fold. */
+.window {
+  overflow: hidden;
+  height: clamp(600px, calc(100svh - 196px), 940px);
+  border-radius: 12px;
+  background: light-dark(#eeecf3, #0b0911);
+  box-shadow:
+    0 0 0 1px var(--window-edge),
+    var(--window-shadow);
+  color-scheme: light dark;
+}
+
+.window iframe {
   display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.below {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 64px;
+  align-items: start;
+  max-width: 1200px;
+  margin: 56px auto 0;
 }
 
 .lead {
-  max-width: 32ch;
-  margin: 20px 0 0;
-  color: var(--stage-muted);
-  font-size: 17px;
-  line-height: 1.5;
+  max-width: 34ch;
+  margin: 0;
+  color: var(--on-stage);
+  font-size: 21px;
+  line-height: 1.45;
 }
 
 .tries {
-  margin: 32px 0 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 32px;
+  margin: 0;
   padding: 0;
-  border-top: 1px solid var(--stage-line);
   list-style: none;
 }
 
 .tries li {
-  border-bottom: 1px solid var(--stage-line);
+  border-top: 1px solid var(--stage-line);
 }
 
 .tries button {
   display: block;
   width: 100%;
   min-height: 64px;
-  padding: 12px 0;
+  padding: 14px 0 18px;
   border: 0;
   background: none;
   color: var(--on-stage);
@@ -268,6 +294,7 @@ h1 span {
 
 .tries span {
   display: block;
+  margin-top: 2px;
   color: var(--stage-muted);
   font-size: 14px;
   line-height: 20px;
@@ -278,8 +305,7 @@ h1 span {
 }
 
 .reset {
-  align-self: flex-start;
-  margin-top: 20px;
+  margin-top: 12px;
   padding: 0;
   border: 0;
   background: none;
@@ -292,33 +318,6 @@ h1 span {
 
 .reset:hover {
   color: var(--on-stage);
-}
-
-.demo {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  margin: 0;
-}
-
-.window {
-  flex: 1;
-  overflow: hidden;
-  min-height: 0;
-  border-radius: 12px;
-  background: light-dark(#eeecf3, #0b0911);
-  box-shadow:
-    0 0 0 1px var(--window-edge),
-    var(--window-shadow);
-  color-scheme: light dark;
-}
-
-.window iframe {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border: 0;
 }
 
 /* Below the stage: paper. */
@@ -446,57 +445,38 @@ footer a {
   text-underline-offset: 3px;
 }
 
-/* Below the app's wide layout: the words over the app, the things to try under it. */
+/* Narrower than the app's own wide layout: one column under the demo. */
 @media (width < 1000px) {
   .top {
     padding: 0 20px;
   }
 
   .hero {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    height: auto;
-    padding: 0 20px 28px;
-  }
-
-  .rail {
-    display: contents;
+    padding: 0 20px 40px;
   }
 
   h1 {
-    margin-top: 8px;
-    font-size: 44px;
+    margin: 8px 0 20px;
+    font-size: clamp(40px, 9vw, 64px);
+  }
+
+  .window {
+    height: clamp(440px, calc(100svh - 170px), 720px);
+  }
+
+  .below {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    margin-top: 32px;
   }
 
   .lead {
     max-width: 52ch;
-    margin-top: 12px;
-    font-size: 16px;
-    line-height: 1.4;
-  }
-
-  .demo {
-    order: 1;
-    margin-top: 20px;
-  }
-
-  .window {
-    flex: none;
-    height: clamp(420px, 62svh, 640px);
-  }
-
-  .tries {
-    order: 2;
-    margin-top: 28px;
-  }
-
-  .reset {
-    order: 3;
+    font-size: 18px;
   }
 
   .pile {
-    mask-image: linear-gradient(to bottom, #000 0, transparent 110px);
+    mask-image: linear-gradient(to bottom, transparent 0, transparent 56px, #000 72px, transparent 150px);
   }
 
   .install,
@@ -525,14 +505,16 @@ footer a {
   }
 
   .hero {
-    padding: 0 12px 24px;
+    padding: 0 12px 32px;
   }
 
   h1,
-  .lead,
-  .reset,
-  .tries {
+  .below {
     margin-inline: 8px;
+  }
+
+  .tries {
+    grid-template-columns: 1fr;
   }
 
   .window {
