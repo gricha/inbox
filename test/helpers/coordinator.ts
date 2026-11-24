@@ -42,7 +42,11 @@ const args = process.argv.slice(2);
 fs.appendFileSync(path.join(__dirname, "calls"), JSON.stringify(args) + "\\n");
 // While hold exists, a look doesn't answer: a run in flight, for as long as a test wants.
 while (args[0] === "agents" && fs.existsSync(path.join(__dirname, "hold"))) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
-const busy = fs.existsSync(path.join(__dirname, "busy")) ? fs.readFileSync(path.join(__dirname, "busy"), "utf8") : null;
+// One read, not exists-then-read: the test removing it in between crashed the look, and the run with it.
+let busy = null;
+try {
+  busy = fs.readFileSync(path.join(__dirname, "busy"), "utf8");
+} catch {}
 const fail = fs.existsSync(path.join(__dirname, "fail"));
 const nobypass = fs.existsSync(path.join(__dirname, "nobypass"));
 const cp = require("node:child_process");
