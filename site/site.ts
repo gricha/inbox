@@ -50,10 +50,15 @@ for (const b of document.querySelectorAll<HTMLButtonElement>("[data-go]")) {
   });
 }
 
+// Where the demo opens: Priya's planner PR when the frame is wide enough for the app to keep its list beside a review
+// (useWide(1160) in web/src/App.tsx), else the Inbox, which a review would cover.
+const start = () => (frame && frame.clientWidth >= 1160 ? "/demo/#/review/acme%2Fapi%234127" : "/demo/");
+if (frame) frame.src = start();
+
 document.querySelector("[data-reset]")?.addEventListener("click", () => {
   const win = frame?.contentWindow;
   if (!win) return;
-  win.history.replaceState(null, "", "/demo/");
+  win.history.replaceState(null, "", start());
   win.location.reload();
 });
 
