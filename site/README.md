@@ -8,6 +8,7 @@ desk; a reload starts it again. Nothing leaves the page.
 ```bash
 npm run site         # the site on Vite at :5190
 npm run site:build   # site/dist: static files for Cloudflare
+npm run site:deploy  # build, then wrangler deploy to useinbox.dev (site/wrangler.jsonc)
 ```
 
 ## The page

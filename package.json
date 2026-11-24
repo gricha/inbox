@@ -37,6 +37,7 @@
     "test": "node --disable-warning=ExperimentalWarning --import ./test/helpers/no-agent.ts --test --test-timeout=300000 \"test/**/*.test.ts\" \"web/test/*.test.ts\" \"integrations/**/*.test.ts\"",
     "site": "vite -c site/vite.config.ts",
     "site:build": "vite build -c site/vite.config.ts",
+    "site:deploy": "npm run site:build && npx -y wrangler@4 deploy -c site/wrangler.jsonc",
     "typecheck": "tsc -p tsconfig.json && tsc -p web/tsconfig.json",
     "app": "npm run build && electron .",
     "app:dev": "node --disable-warning=ExperimentalWarning scripts/dev-app.ts",

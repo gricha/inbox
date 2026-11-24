@@ -1,0 +1,10 @@
+// useinbox.dev on Cloudflare: static assets only (site/dist), no Worker script. npm run site:deploy.
+{
+  "name": "useinbox",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./dist" },
+  "routes": [
+    { "pattern": "useinbox.dev", "custom_domain": true },
+    { "pattern": "www.useinbox.dev", "custom_domain": true },
+  ],
+}
