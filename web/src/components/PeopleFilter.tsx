@@ -8,8 +8,8 @@ const KEY_LABEL: Record<FilterKey, string> = { author: "Author", involves: "Invo
 const KEY_HELP: Record<FilterKey, string> = { author: "Who opened it", involves: "Anyone on it: asked, reviewed or said something" };
 
 // The page's filter by person: one icon button on the page's head, its count of picks on it, and a popover of the people on
-// the desk under Author and Involves, a click to pick or unpick each. The picks are the query's author:/involves: terms, so
-// the sidebar's search words and the head's kind of row still apply with them.
+// the page's rows of the kind that's on (filterPeople()) under Author and Involves, a click to pick or unpick each. The picks
+// are the query's author:/involves: terms, so the sidebar's search words and the head's kind of row still apply with them.
 export function PeopleFilter({
   filter,
   setFilter,
@@ -56,10 +56,10 @@ export function PeopleFilter({
   const q = find.trim().replace(/^@/, "").toLowerCase();
   const fits = (login: string) => !q || login.toLowerCase().includes(q) || (login === me && "you".includes(q));
   // You first, then everyone else as the desk lists them.
-  const others = people.filter((p) => p.login !== me);
+  const ordered = [...people.filter((p) => p.login === me), ...people.filter((p) => p.login !== me)];
   const lists: Record<FilterKey, string[]> = {
-    author: [...(me ? [me] : []), ...others.filter((p) => p.author).map((p) => p.login)].filter(fits),
-    involves: [...(me ? [me] : []), ...others.map((p) => p.login)].filter(fits),
+    author: ordered.flatMap((p) => (p.author && fits(p.login) ? [p.login] : [])),
+    involves: ordered.flatMap((p) => (fits(p.login) ? [p.login] : [])),
   };
 
   return (

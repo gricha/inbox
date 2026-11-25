@@ -25,6 +25,8 @@ const told = new Set<string>(); // repos whose clone the log said isn't borrowed
 
 const git = (args: string[], cwd: string, timeout = 120_000) =>
   runCommand({ file: "git", args, shell: false }, { cwd, timeout, missing: GIT_MISSING, env: ENV });
+// Named with --git-dir, not found from its folder: a git with safe.bareRepository=explicit opens no other bare repo.
+const inBare = (bare: string, args: string[], timeout?: number) => git(["--git-dir", bare, ...args], path.dirname(bare), timeout);
 
 export const prCheckout = (
   home: string,
@@ -33,8 +35,9 @@ export const prCheckout = (
   remote = `https://github.com/${item.repo}.git`,
 ) => {
   const name = item.repo.replace("/", "__");
-  const bare = path.join(home, "repos", `${name}.git`);
-  const out = path.join(home, "checkouts");
+  // Absolute, since git runs these paths from other folders.
+  const bare = path.resolve(home, "repos", `${name}.git`);
+  const out = path.resolve(home, "checkouts");
   let lock = locks.get(bare);
   if (!lock) locks.set(bare, (lock = Semaphore.makeUnsafe(1)));
   return lock.withPermits(1)(
@@ -48,14 +51,14 @@ export const prCheckout = (
         const from = clone ? ["--shared", clone] : ["--filter=blob:none", remote];
         yield* git([...AUTH, "clone", "--bare", "--quiet", ...from, bare], path.dirname(bare), 1_800_000);
       }
-      const has = yield* git(["cat-file", "-e", `${item.head_oid}^{commit}`], bare).pipe(
+      const has = yield* inBare(bare, ["cat-file", "-e", `${item.head_oid}^{commit}`]).pipe(
         Effect.as(true),
         Effect.orElseSucceed(() => false),
       );
       if (!has)
-        yield* git(
-          [...AUTH, "fetch", "--quiet", "--no-tags", remote, `+refs/pull/${item.number}/head:refs/inbox/pr/${item.number}`],
+        yield* inBare(
           bare,
+          [...AUTH, "fetch", "--quiet", "--no-tags", remote, `+refs/pull/${item.number}/head:refs/inbox/pr/${item.number}`],
           600_000,
         );
       fs.mkdirSync(out, { recursive: true });
@@ -63,11 +66,11 @@ export const prCheckout = (
         const p = path.join(out, d);
         if (Date.now() - fs.statSync(p).mtimeMs > STALE_MS) fs.rmSync(p, { recursive: true, force: true });
       }
-      yield* git(["worktree", "prune"], bare);
+      yield* inBare(bare, ["worktree", "prune"]);
       const dir = path.join(out, `${name}-${item.number}-${randomBytes(4).toString("hex")}`);
       // A blobless clone fetches the files it checks out.
-      yield* git([...AUTH, "worktree", "add", "--detach", "--quiet", dir, item.head_oid], bare, 1_800_000);
-      const done = git(["worktree", "remove", "--force", dir], bare).pipe(
+      yield* inBare(bare, [...AUTH, "worktree", "add", "--detach", "--quiet", dir, item.head_oid], 1_800_000);
+      const done = inBare(bare, ["worktree", "remove", "--force", dir]).pipe(
         Effect.ignore,
         Effect.andThen(
           Effect.sync(() => {

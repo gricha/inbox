@@ -1284,12 +1284,9 @@ const SHOTS: Shot[] = [
   },
   {
     // Sessions that need you, after the agents' questions and before every PR: rows like the others (Session, its name,
-    // quietly its folder, its call to action, its kind where a PR's author goes and why where its stage goes), and the
-    // blocked one opened in place with what it said, where it runs and its buttons.
+    // quietly its folder, its call to action, its kind where a PR's author goes and why where its stage goes); a click opens
+    // its page.
     name: "queue-session",
-    after: async (page) => {
-      if (await page.locator(".line.session.open").count()) await page.locator(".session-more button", { hasText: "Close" }).click();
-    },
     go: async (page) => {
       await at("#/")(page);
       const rows = await page.evaluate<{ order: string[]; rows: (string | null)[][] }>(`(() => {
@@ -1303,10 +1300,12 @@ const SHOTS: Shot[] = [
         };
       })()`);
       const order = rows.order.join("");
-      if (!/^q*ssc/.test(order)) failures.push(`queue-session: the Inbox's order reads ${order}`);
-      const [blocked, stalled] = rows.rows;
+      if (!/^q*sssc/.test(order)) failures.push(`queue-session: the Inbox's order reads ${order}`);
+      const [blocked, asked, stalled] = rows.rows;
       if (blocked?.join(" · ") !== "Session · Fix the flaky upload test · api · Open · Desktop · needs permission: Bash")
         failures.push(`queue-session: the blocked session's row reads ${JSON.stringify(blocked)}`);
+      if (asked?.join(" · ") !== "Session · Release notes for 4.2 · web · Resume in background · CLI · asked a question")
+        failures.push(`queue-session: the asking session's row reads ${JSON.stringify(asked)}`);
       if (
         !/^Session · Migrate the job store to SQLite · worker · Kick · Background · rate limited until \d\d:\d\d$/.test(
           stalled?.join(" · ") ?? "",
@@ -1326,34 +1325,86 @@ const SHOTS: Shot[] = [
       await page.keyboard.press("Escape");
       await page.locator(".line.session", { hasText: "Fix the flaky upload test" }).locator(".row-main").click();
       await page.waitForTimeout(200);
-      const open = await page.evaluate<{ why: string; said: string; facts: string[]; acts: [string, boolean][] } | null>(`(() => {
-        const d = document.querySelector(".line.session.open .session-more");
-        return d && {
-          why: d.querySelector(".d-why")?.textContent.trim() ?? "",
-          said: d.querySelector(".session-said")?.textContent.trim() ?? "",
-          facts: [...d.querySelectorAll(".card-facts span")].map((x) => x.textContent.trim()),
-          acts: [...d.querySelectorAll(".card-keys button")].map((b) => [b.textContent.trim(), b.classList.contains("primary")]),
+      const hash = await page.evaluate<string>("decodeURIComponent(location.hash)");
+      if (hash !== "#/session/session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21") failures.push(`queue-session: a click went to ${hash}`);
+      await at("#/")(page);
+    },
+  },
+  {
+    // A session waiting on a permission, which only the Claude app can grant: what it's doing, its last turns (its tool calls
+    // folded to a line), what it wants to run, where to answer it and Open in Claude.
+    name: "session-permission",
+    go: async (page) => {
+      await at("#/session/session%3A5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21")(page);
+      await page.locator(".session-page .ses-turns").waitFor();
+      const p = await page.evaluate<{ head: string[]; turns: string[]; wait: string; note: string; acts: [string, boolean][] }>(`(() => {
+        const q = (s) => document.querySelector(s)?.textContent.trim() ?? "";
+        return {
+          head: [q(".session-page .rv-by"), q(".session-page .rv-title"), q(".ses-why")],
+          turns: [...document.querySelectorAll(".ses-turn")].map((t) => t.classList.contains("ses-tools") ? "tools" : t.querySelector(".ses-who").textContent.trim()),
+          wait: q(".ses-wait .inq-code"),
+          note: q(".ses-note"),
+          acts: [...document.querySelectorAll(".session-page .inq-write .act")].map((b) => [b.textContent.trim(), b.classList.contains("primary")]),
         };
       })()`);
-      if (!open) failures.push("queue-session: a click doesn't open the session in place");
-      else {
-        if (!open.why.startsWith("Needs permission: Bash")) failures.push(`queue-session: its detail says ${JSON.stringify(open.why)}`);
-        if (open.said !== "Bash: Run the upload tests 20 times with retries off")
-          failures.push(`queue-session: what it said reads ${JSON.stringify(open.said)}`);
-        if (open.facts.join(" · ") !== "Desktop · /Users/you/code/api · fix/upload-flake · running")
-          failures.push(`queue-session: where it runs reads ${JSON.stringify(open.facts)}`);
-        if (
-          JSON.stringify(open.acts) !==
-          JSON.stringify([
-            ["Open", true],
-            ["Done", false],
-            ["Snooze", false],
-            ["Mute", false],
-            ["Close", false],
-          ])
-        )
-          failures.push(`queue-session: its buttons read ${JSON.stringify(open.acts)}`);
-      }
+      if (p.head.join(" · ") !== "Desktop · api · fix/upload-flake · Fix the flaky upload test · Needs permission: Bash · 18m")
+        failures.push(`session-permission: its head reads ${JSON.stringify(p.head)}`);
+      if (p.turns.join(" ") !== "You Claude tools Claude tools")
+        failures.push(`session-permission: its turns read ${JSON.stringify(p.turns)}`);
+      if (!p.wait.startsWith("for i in $(seq 20)"))
+        failures.push(`session-permission: what it wants to run reads ${JSON.stringify(p.wait)}`);
+      if (p.note !== "The Claude app runs it: answer it there.")
+        failures.push(`session-permission: its note reads ${JSON.stringify(p.note)}`);
+      if (
+        JSON.stringify(p.acts) !==
+        JSON.stringify([
+          ["Open in Claude", true],
+          ["Done", false],
+        ])
+      )
+        failures.push(`session-permission: its buttons read ${JSON.stringify(p.acts)}`);
+      if (await page.locator(".session-page textarea").count()) failures.push("session-permission: it offers a reply box it can't send");
+    },
+  },
+  {
+    // A session that asked a question and has no process: its answers one click each, a box for your own, Send, Open in Claude
+    // and its resume command; the turns before its last eight folded.
+    name: "session-question",
+    go: async (page) => {
+      await at("#/session/session%3Ac47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63")(page);
+      await page.locator(".session-page .inq-options").waitFor();
+      const p = await page.evaluate<{ ask: string; options: string[]; earlier: string; acts: string[] }>(`(() => ({
+        ask: document.querySelector(".session-page .inq-answer > .ses-ask")?.textContent.trim() ?? "",
+        options: [...document.querySelectorAll(".session-page .inq-option-answer")].map((x) => x.textContent.trim()),
+        earlier: document.querySelector(".ses-earlier")?.textContent.trim() ?? "",
+        acts: [...document.querySelectorAll(".session-page .inq-write .act")].map((b) => b.textContent.trim()),
+      }))()`);
+      if (p.ask !== "Group the changes by area or by PR?") failures.push(`session-question: it asks ${JSON.stringify(p.ask)}`);
+      if (p.options.join(" · ") !== "By area · By PR") failures.push(`session-question: its answers read ${JSON.stringify(p.options)}`);
+      if (p.earlier !== "3 earlier turns") failures.push(`session-question: the fold reads ${JSON.stringify(p.earlier)}`);
+      if (p.acts.join(" · ") !== "Send · Open in Claude · Copy resume command · Done")
+        failures.push(`session-question: its buttons read ${JSON.stringify(p.acts)}`);
+    },
+  },
+  {
+    // Your reply shows at once, before the desk answers (it never does here), as your next turn, sending.
+    name: "session-reply-shows",
+    go: async (page) => {
+      await page.route("**/reply", () => {});
+      await at("#/session/session%3Ac47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63")(page);
+      const text = "By area, and put the export API first.";
+      await page.locator(".session-page textarea").fill(text);
+      await page.locator(".session-page .inq-write .act", { hasText: "Send" }).click();
+      const mine = page.locator(".ses-you", { hasText: text });
+      await mine.waitFor({ timeout: 2000 }).catch(() => {});
+      if (!(await mine.count())) failures.push("session-reply-shows: the reply you sent isn't in its turns");
+      else if (!(await mine.locator(".busy").count())) failures.push("session-reply-shows: the reply you sent doesn't say it's sending");
+      if (await page.locator(".session-page .inq-options, .session-page textarea").count())
+        failures.push("session-reply-shows: answered, it still offers its answers and the box");
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
     },
   },
   {
@@ -6591,6 +6642,58 @@ const SHOTS: Shot[] = [
           failures.push(`filter-kinds-pages: ${hash} offers ${JSON.stringify(seen.buttons)} for rows of ${JSON.stringify(seen.rows)}`);
       }
     },
+  },
+  {
+    // The two filters narrow each other. You picked under Author: only the kinds your rows are, no Quick reviews. dana picked
+    // under Author, on Merging where dana opened none of its rows: still there, ticked, to unpick. Quick reviews on: the popover
+    // offers only who's on a quick review (the shot).
+    name: "filter-narrow",
+    go: async (page) => {
+      const kinds = () =>
+        page.evaluate<string[]>(
+          `[...document.querySelectorAll(".page-head .head-filter[aria-pressed]")].map((b) => b.getAttribute("aria-label"))`,
+        );
+      const people = page.locator(".page-head .people-filter .head-filter");
+      const group = (n: number) => page.locator(".people-pop .people-group").nth(n);
+      const offered = async () => ({
+        author: await group(0).locator(".people-who").allTextContents(),
+        involves: await group(1).locator(".people-who").allTextContents(),
+      });
+      await at("#/inflight")(page);
+      await people.click();
+      const merging = await offered();
+      if (!merging.author.length || merging.author.includes("dana"))
+        failures.push(`filter-narrow: Merging, nobody picked, offers ${JSON.stringify(merging)}`);
+      await page.keyboard.press("Escape");
+      await at("#/")(page);
+      const all = await kinds();
+      if (all.join() !== "Quick reviews,Waiting on your reply,One click")
+        failures.push(`filter-narrow: the Inbox offers ${JSON.stringify(all)}`);
+      await people.click();
+      const you = group(0).locator(".pop-item", { hasText: "You" });
+      await you.click();
+      const yours = await kinds();
+      if (yours.join() !== "Waiting on your reply,One click") failures.push(`filter-narrow: with You picked, ${JSON.stringify(yours)}`);
+      await you.click();
+      await group(0).locator(".pop-item", { hasText: "dana" }).click();
+      await page.keyboard.press("Escape");
+      await at("#/inflight")(page);
+      await people.click();
+      const kept = await offered();
+      const ticked = await group(0).locator('.pop-item[aria-pressed="true"]').allTextContents();
+      if (ticked.join() !== "dana" || kept.author.filter((p) => p === "dana").length !== 1)
+        failures.push(`filter-narrow: on Merging, Author offers ${JSON.stringify(kept.author)} and ticks ${JSON.stringify(ticked)}`);
+      await page.locator(".people-pop .people-clear").click();
+      await page.keyboard.press("Escape");
+      await at("#/")(page);
+      await page.locator('.page-head .head-filter[aria-label="Quick reviews"]').click();
+      await people.click();
+      const quick = await offered();
+      if (JSON.stringify(quick) !== JSON.stringify({ author: ["ana-k"], involves: ["You", "ana-k"] }))
+        failures.push(`filter-narrow: with Quick reviews on, the popover offers ${JSON.stringify(quick)}`);
+      await page.waitForTimeout(300);
+    },
+    after: fresh,
   },
   {
     // A pasted GitHub link is the whole search: one the desk has is focused on its page; one it hasn't is added, a placeholder

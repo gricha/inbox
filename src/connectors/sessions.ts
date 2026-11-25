@@ -9,10 +9,20 @@ import { DatabaseSync } from "node:sqlite";
 import { Effect, Result } from "effect";
 import { alive, claude, halt, readTail, type Agent } from "../coordinator.ts";
 import type { Core, Desk } from "../desk.ts";
-import { Conflict, NotFound, type CommandError } from "../errors.ts";
+import { BadRequest, Conflict, NotFound, type CommandError } from "../errors.ts";
 import { elements, isRecord, jsonOf, num, str } from "../narrow.ts";
 import { runCommand } from "../review.ts";
-import { isCoordinator, SESSION_PREFIX, type SessionAction, type SessionCard, type SessionKind } from "../types.ts";
+import {
+  isCoordinator,
+  KICK,
+  SESSION_PREFIX,
+  type SessionAction,
+  type SessionCard,
+  type SessionKind,
+  type SessionTurn,
+  type SessionView,
+  type SessionWait,
+} from "../types.ts";
 
 type Host = Core & Pick<Desk, "light">;
 
@@ -24,7 +34,12 @@ const CLI_RECENT = 24 * 3_600_000; // a terminal's session no longer running, by
 const ASK_MAX = 2000; // characters of a turn's last message the model reads
 const ASKS_PER_POLL = 3;
 const LINE = 160;
-export const KICK = "Continue where you left off.";
+const TALK = 2 * 1024 * 1024; // bytes of a transcript a session's page reads from its end
+const HEAD = 256 * 1024; // and from its start, for what you first asked
+const TURNS = 30; // turns a page shows; the rest of what it read fold
+const TURN_MAX = 4000; // characters of one turn's text
+const REPLY_MAX = 8000;
+const KEPT = 50; // sessions a page can still read after they stop needing you
 
 // Where it reads. Tests and QA point these elsewhere; nothing here writes to them.
 export interface Roots {
@@ -342,6 +357,136 @@ export function readRollout(text: string): CodexTail | null {
   return out;
 }
 
+// ---------------------------------------------------------------- a session's page
+
+export interface Talk {
+  turns: SessionTurn[];
+  earlier: number;
+  pending: { name: string; input: Record<string, unknown> | null } | null; // the last tool call with no result, as it ended
+}
+
+const cut = (text: string): string => (text.length > TURN_MAX ? `${text.slice(0, TURN_MAX - 1)}…` : text);
+
+// Its turns in order: what you said, what it said (each run of messages one turn), and each run of tool calls as one line a call.
+class Turns {
+  all: SessionTurn[] = [];
+  say(who: "you" | "agent", at: string, text: string) {
+    const t = text.trim();
+    if (!t) return;
+    const last = this.all.at(-1);
+    if (last && last.who === who) last.text = cut(`${last.text}\n\n${t}`);
+    else this.all.push({ who, at, text: cut(t) });
+  }
+  tool(at: string, line: string) {
+    const last = this.all.at(-1);
+    if (last?.who === "tools") last.lines.push(line);
+    else this.all.push({ who: "tools", at, lines: [line] });
+  }
+  talk(pending: Talk["pending"]): Talk {
+    return { turns: this.all.slice(-TURNS), earlier: Math.max(0, this.all.length - TURNS), pending };
+  }
+}
+
+// What you typed, not what Claude Code wraps around it (a command's output, a reminder, an interruption).
+const yours = (text: string): boolean => !/^\s*(<[\w-]+>|\[Request interrupted|Caveat: )/.test(text);
+
+// A Claude Code transcript's main thread, as a page shows it.
+export function readTalk(text: string): Talk {
+  const turns = new Turns();
+  const pending = new Map<string, { name: string; input: Record<string, unknown> | null }>();
+  let lastWasCall = false;
+  for (const line of text.split("\n")) {
+    const e = obj(jsonOf(line));
+    if (!e || e.isSidechain === true || e.isMeta === true || e.isApiErrorMessage === true) continue;
+    if (e.type !== "user" && e.type !== "assistant") continue;
+    const at = str(e.timestamp) ?? "";
+    const m = obj(e.message);
+    if (e.type === "user") {
+      if (typeof m?.content === "string") {
+        if (yours(m.content)) turns.say("you", at, m.content);
+      } else
+        for (const b of blocks(m)) {
+          if (b.type === "tool_result" && str(b.tool_use_id)) pending.delete(str(b.tool_use_id)!);
+          if (b.type === "text" && str(b.text) && yours(str(b.text)!)) turns.say("you", at, str(b.text)!);
+        }
+      lastWasCall = false;
+      continue;
+    }
+    lastWasCall = false;
+    for (const b of blocks(m)) {
+      if (b.type === "text" && str(b.text)) turns.say("agent", at, str(b.text)!);
+      if (b.type === "tool_use" && str(b.id)) {
+        const input = obj(b.input);
+        const name = str(b.name) ?? "a tool";
+        pending.set(str(b.id)!, { name, input });
+        if (name !== "AskUserQuestion" && name !== "ExitPlanMode") turns.tool(at, toolLine(name, input)); // the page shows them as what it waits on
+        lastWasCall = true;
+      }
+    }
+  }
+  const last = [...pending.values()].at(-1);
+  return turns.talk(lastWasCall && last ? last : null);
+}
+
+// A Codex rollout's turns: its messages, and its tool calls by name. Codex's own context (the parts in <tags>) isn't yours.
+export function readCodexTalk(text: string): Talk {
+  const turns = new Turns();
+  for (const line of text.split("\n")) {
+    const e = obj(jsonOf(line));
+    const p = obj(e?.payload);
+    if (!e || e.type !== "response_item" || !p) continue;
+    const at = str(e.timestamp) ?? "";
+    if (p.type === "message" && (p.role === "user" || p.role === "assistant")) {
+      const said = blocks(p)
+        .flatMap((b) => (b.type === "input_text" || b.type === "output_text" ? (str(b.text) ?? []) : []))
+        .join("\n\n");
+      if (p.role === "assistant") turns.say("agent", at, said);
+      else if (yours(said)) turns.say("you", at, said);
+    } else if ((p.type === "function_call" || p.type === "custom_tool_call") && str(p.name)) {
+      const args = obj(jsonOf(str(p.arguments) ?? ""));
+      turns.tool(at, toolLine(str(p.name)!, args));
+    }
+  }
+  return turns.talk(null);
+}
+
+// What it waits on, from its last tool call: a question with its options, a plan, or (when it waits on a permission) the call.
+export function waitOf(pending: Talk["pending"], reason: string | null): SessionWait | null {
+  if (!pending) return null;
+  const input = pending.input;
+  if (pending.name === "AskUserQuestion") {
+    const q = obj(elements(input?.questions)[0]);
+    const question = str(q?.question);
+    if (!question) return null;
+    const options = elements(q?.options).flatMap((o) => {
+      const label = str(obj(o)?.label);
+      return label ? [{ label, description: str(obj(o)?.description) ?? "" }] : [];
+    });
+    return { kind: "question", question, options };
+  }
+  if (pending.name === "ExitPlanMode") return { kind: "plan", plan: cut(str(input?.plan) ?? "") };
+  if (reason && /^needs (permission|sandbox access)/.test(reason)) {
+    const detail = ["command", "file_path", "path", "url", "pattern", "description"].map((k) => str(input?.[k])).find(Boolean);
+    return { kind: "permission", tool: pending.name, detail: cut(detail ?? "") };
+  }
+  return null;
+}
+
+const quoted = (p: string) => `'${p.replaceAll("'", `'\\''`)}'`;
+
+// Where to answer it when the desk can't carry it on itself; null when it can.
+function whyNot(s: Seen, c: SessionCard | null, now: number): string | null {
+  if (!c) return "It doesn't need you now.";
+  if (c.actions.includes("kick") || c.actions.includes("resume"))
+    return c.resets_at && Date.parse(c.resets_at) > now
+      ? `It's rate limited until ${untilText(Date.parse(c.resets_at), now)}: answer it after that.`
+      : null;
+  if (s.kind === "desktop") return "The Claude app runs it: answer it there.";
+  if (s.kind === "codex") return "Codex runs it: answer it there.";
+  if (s.kind === "background") return "It's running: attach to it to answer.";
+  return "It runs in a terminal: answer it there.";
+}
+
 // ---------------------------------------------------------------- deciding
 
 // One session as read this pass.
@@ -358,6 +503,7 @@ export interface Seen {
   codex: CodexTail | null;
   desktop: DesktopRecord | null;
   written: number | null; // the transcript's mtime
+  file?: string; // the transcript or rollout
 }
 
 export type Verdict =
@@ -465,8 +611,16 @@ function actionsOf(s: Pick<SessionCard, "kind" | "alive">): SessionAction[] {
   return s.alive ? [] : ["resume"];
 }
 
-const openUrl = (s: Pick<SessionCard, "kind" | "session_id">, local?: string): string | null =>
-  s.kind === "desktop" && local ? `claude://claude.ai/epitaxy/${local}` : s.kind === "codex" ? `codex://threads/${s.session_id}` : null;
+// The desktop app's own session, Codex's thread, or a Claude Code session no process runs, which the app takes in (its
+// claude://resume link) to carry on there.
+const openUrl = (s: Pick<SessionCard, "kind" | "session_id" | "alive">, local?: string): string | null =>
+  s.kind === "desktop" && local
+    ? `claude://claude.ai/epitaxy/${local}`
+    : s.kind === "codex"
+      ? `codex://threads/${s.session_id}`
+      : s.kind !== "desktop" && !s.alive
+        ? `claude://resume?session=${s.session_id}`
+        : null;
 
 const ASK_SCHEMA = {
   type: "object",
@@ -518,6 +672,7 @@ export class Sessions {
   asked = new Map<string, Asked>(); // the model's read, by session, for its last event
   askFailed = 0; // when a model call last failed: none again for a while
   records = new Map<string, { key: string; record: DesktopRecord | null }>(); // the desktop app's, by file
+  kept = new Map<string, Seen>(); // every session that needed you lately, as last read: its page reads on once it's answered
 
   constructor(desk: Host, at: Roots = roots()) {
     this.desk = desk;
@@ -589,6 +744,7 @@ export class Sessions {
         codex: null,
         desktop: rec,
         written: file ? mtime(file) : null,
+        ...(file && { file }),
       };
     };
     for (const row of rows) {
@@ -627,6 +783,7 @@ export class Sessions {
         codex: text === null ? null : readRollout(text),
         desktop: null,
         written: mtime(th.rollout),
+        file: th.rollout,
       });
     }
     return out.filter((s) => !!(s.tail ?? s.codex ?? s.row ?? s.desktop));
@@ -694,6 +851,13 @@ export class Sessions {
             verdict: { state: "blocked", reason: "asked a question", excerpt: v.excerpt, since: v.since, resets_at: null, key: v.key },
           });
       }
+      for (const s of seen) {
+        const ref = SESSION_PREFIX + s.session_id;
+        if (!next.has(ref) && !this.kept.has(ref)) continue;
+        this.kept.delete(ref);
+        this.kept.set(ref, s);
+      }
+      for (const ref of [...this.kept.keys()].slice(0, Math.max(0, this.kept.size - KEPT))) this.kept.delete(ref);
       const changed =
         JSON.stringify([...next].map(([id, f]) => [id, f.verdict, f.seen.row?.status])) !==
         JSON.stringify([...this.found].map(([id, f]) => [id, f.verdict, f.seen.row?.status]));
@@ -760,7 +924,7 @@ export class Sessions {
       resets_at: v.resets_at ? new Date(v.resets_at).toISOString() : null,
       alive: running,
       actions: actionsOf({ kind, alive: running }),
-      open_url: openUrl({ kind, session_id: s.session_id }, s.local_id),
+      open_url: openUrl({ kind, session_id: s.session_id, alive: running }, s.local_id),
       attach: kind === "background" && running && s.short_id ? `claude attach ${s.short_id}` : null,
       status: st.muted ? "muted" : snoozed ? "snoozed" : done ? "done" : "active",
       snooze_until: snoozed ? st.snooze_until : null,
@@ -775,19 +939,86 @@ export class Sessions {
     });
   }
 
-  // Kick and Resume: the coordinator's safe path, its process looked up again first. Never while it runs, never before a
-  // rate limit resets: either would start a second writer of the same session or spend a turn on nothing.
+  // A session's page: its card while it needs you, its last turns from its own transcript, and how you can answer it.
+  view(ref: string): Effect.Effect<SessionView, NotFound> {
+    return Effect.suspend(() => {
+      const f = this.found.get(ref);
+      const s = f?.seen ?? this.kept.get(ref);
+      if (!s) return Effect.fail(new NotFound({ message: `no session "${ref}" needed you lately` }));
+      const now = this.desk.now();
+      const card = f ? this.card(ref, f, now.toISOString()) : null;
+      const text = s.file ? readTail(s.file, TALK) : null;
+      const read = (t: string) => (s.kind === "codex" ? readCodexTalk(t) : readTalk(t));
+      const talk = text === null ? { turns: [], earlier: 0, pending: null } : read(text);
+      const whole = !!s.file && (fileSize(s.file) ?? 0) <= TALK;
+      const head = whole || !s.file ? null : readHead(s.file, HEAD);
+      const first = head === null ? undefined : read(head).turns.flatMap((t) => (t.who === "you" ? [{ ...t, who: t.who }] : []))[0];
+      const ask = first && !talk.turns.some((t) => t.at === first.at && t.who === "you") ? first : null;
+      const why = whyNot(s, card, now.getTime());
+      const running = !!s.row?.pid && !!s.row.status;
+      const url = card?.open_url ?? openUrl({ kind: s.kind, session_id: s.session_id, alive: running }, s.local_id);
+      return Effect.succeed({
+        id: ref,
+        session_id: s.session_id,
+        kind: s.kind,
+        name: s.name,
+        cwd: s.cwd,
+        branch: s.branch,
+        card,
+        ask,
+        turns: talk.turns,
+        earlier: whole ? talk.earlier : Math.max(1, talk.earlier),
+        waiting: card ? waitOf(talk.pending, card.reason) : null,
+        can_reply: why === null,
+        why_not: why,
+        open: url ? { label: s.kind === "codex" ? "Open in Codex" : "Open in Claude", url } : null,
+        command:
+          card?.attach ??
+          ((s.kind === "cli" || s.kind === "background") && !running ? `cd ${quoted(s.cwd)} && claude --resume ${s.session_id}` : null),
+      });
+    });
+  }
+
+  // Kick and Resume: the coordinator's safe path with its own words.
   kick(ref: string): Effect.Effect<{ args: string[]; note: string | null }, NotFound | Conflict | CommandError> {
-    return Effect.gen({ self: this }, function* () {
-      const c = yield* this.get(ref);
+    return Effect.flatMap(this.get(ref), (c) => {
       if (!c.actions.includes("kick") && !c.actions.includes("resume"))
-        return yield* new Conflict({
-          message: `${c.name} can't be started from the desk: ${c.kind === "cli" ? "it runs in a terminal" : "open it instead"}`,
-        });
+        return Effect.fail(
+          new Conflict({
+            message: `${c.name} can't be started from the desk: ${c.kind === "cli" ? "it runs in a terminal" : "open it instead"}`,
+          }),
+        );
+      return this.carryOn(c, KICK, c.actions.includes("kick") ? "kick" : "resume");
+    });
+  }
+
+  // Your reply, as the session's next turn: where the desk can carry it on (no process runs it), else it says where to answer.
+  reply(
+    ref: string,
+    text: string,
+  ): Effect.Effect<{ args: string[]; note: string | null }, NotFound | Conflict | BadRequest | CommandError> {
+    return Effect.gen({ self: this }, function* () {
+      const said = text.trim();
+      if (!said) return yield* new BadRequest({ message: "write a reply first" });
+      if (said.length > REPLY_MAX) return yield* new BadRequest({ message: `a reply is at most ${REPLY_MAX} characters` });
+      const v = yield* this.view(ref);
+      if (!v.card || v.why_not) return yield* new Conflict({ message: v.why_not ?? `${v.name} doesn't need you now` });
+      return yield* this.carryOn(v.card, said, "reply");
+    });
+  }
+
+  // Never while it runs, never before a rate limit resets: either would start a second writer of the same session or spend a
+  // turn on nothing. Its process is looked up again first.
+  carryOn(
+    c: SessionCard,
+    text: string,
+    verb: "kick" | "resume" | "reply",
+  ): Effect.Effect<{ args: string[]; note: string | null }, Conflict | CommandError> {
+    return Effect.gen({ self: this }, function* () {
       const now = this.desk.now().getTime();
       if (c.resets_at && Date.parse(c.resets_at) > now)
         return yield* new Conflict({
-          message: `${c.name} is rate limited until ${untilText(Date.parse(c.resets_at), now)}; kick it after that`,
+          message: `${c.name} is rate limited until ${untilText(Date.parse(c.resets_at), now)}; ${verb === "reply" ? "answer" : "kick"} it after that`,
         });
       const rows = parseAgents(yield* claude(["agents", "--json", "--all"])) ?? [];
       const row = rows.find((r) => r.sessionId === c.session_id);
@@ -796,14 +1027,14 @@ export class Sessions {
           message: `${c.name} is running (process ${row.pid}), so the desk won't start a second copy; open it instead`,
         });
       if (row?.id) yield* halt(stopOf(row));
-      const args = ["--resume", c.session_id, "--bg", KICK];
+      // A reply that starts with a dash would read as a flag.
+      const args = ["--resume", c.session_id, "--bg", ...(text.startsWith("-") ? ["--"] : []), text];
       const out = yield* claude(args, c.cwd);
       const note = /^note: .*/m.exec(out)?.[0] ?? null;
-      this.desk.store.logWrite(ref, c.actions.includes("kick") ? "kick" : "resume", new Date(now).toISOString());
-      this.desk.log(
-        `sessions: ${c.actions.includes("kick") ? "kicked" : "resumed"} ${c.session_id} in ${c.cwd}${note ? ` (${note})` : ""}`,
-      );
-      this.found.delete(ref); // it has a turn now; the next pass says how it goes
+      this.desk.store.logWrite(c.id, verb, new Date(now).toISOString());
+      const did = verb === "kick" ? "kicked" : verb === "resume" ? "resumed" : "replied to";
+      this.desk.log(`sessions: ${did} ${c.session_id} in ${c.cwd}${note ? ` (${note})` : ""}`);
+      this.found.delete(c.id); // it has a turn now; the next pass says how it goes
       this.desk.changed();
       this.desk.runner.fork("sessions", this.poll());
       return { args, note };
@@ -848,6 +1079,27 @@ function jobSessions(dir: string): Set<string> {
     for (const k of ["sessionId", "resumeSessionId"]) if (str(o?.[k])) out.add(str(o?.[k])!);
   }
   return out;
+}
+
+const fileSize = (file: string): number | null =>
+  Result.getOrElse(Result.try({ try: () => fs.statSync(file).size, catch: () => null }), () => null);
+
+// A file's first bytes, to its last whole line.
+function readHead(file: string, bytes: number): string | null {
+  const read = Result.try({
+    try: () => {
+      const buf = Buffer.alloc(bytes);
+      const fd = fs.openSync(file, "r");
+      try {
+        const text = buf.subarray(0, fs.readSync(fd, buf, 0, bytes, 0)).toString("utf8");
+        return text.slice(0, text.lastIndexOf("\n") + 1);
+      } finally {
+        fs.closeSync(fd);
+      }
+    },
+    catch: () => null,
+  });
+  return Result.getOrElse(read, () => null);
 }
 
 // sessionId → its transcript, over every project folder.

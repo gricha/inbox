@@ -39,6 +39,9 @@ import { GitHubAuthError, Upstream, type ErrorBody } from "../../src/errors.ts";
 import { canned } from "./diffs.ts";
 import type {
   Action,
+  SessionTurn,
+  SessionView,
+  SessionWait,
   McpView,
   ActivityEvent,
   ActivityKind,
@@ -2557,7 +2560,8 @@ const coordinator: CoordinatorView = {
 
 // Agent sessions' questions for you: one with options, one without. Answering one takes it off the main page. Then two
 // you answered: one its session never came back for, one it picked up two minutes later.
-// Two of your sessions that need you: the desktop app's, waiting on a permission, and a background one stopped by a rate limit.
+// Your sessions that need you, as the desk orders them: the desktop app's waiting on a permission, a terminal's whose process
+// is gone that asked a question, and a background one stopped by a rate limit.
 const ALL_SESSIONS: SessionCard[] = [
   {
     id: "session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21",
@@ -2579,6 +2583,25 @@ const ALL_SESSIONS: SessionCard[] = [
     snooze_until: null,
   },
   {
+    id: "session:c47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63",
+    session_id: "c47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63",
+    kind: "cli",
+    name: "Release notes for 4.2",
+    cwd: "/Users/you/code/web",
+    branch: "release/4.2",
+    state: "blocked",
+    reason: "asked a question",
+    since: iso(0.2),
+    excerpt: "Group the changes by area or by PR?",
+    resets_at: null,
+    alive: false,
+    actions: ["resume"],
+    open_url: "claude://resume?session=c47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63",
+    attach: null,
+    status: "active",
+    snooze_until: null,
+  },
+  {
     id: "session:a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
     session_id: "a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
     kind: "background",
@@ -2592,7 +2615,7 @@ const ALL_SESSIONS: SessionCard[] = [
     resets_at: new Date(T0 + HOUR).toISOString(),
     alive: false,
     actions: ["kick"],
-    open_url: null,
+    open_url: "claude://resume?session=a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
     attach: null,
     status: "active",
     snooze_until: null,
@@ -2601,7 +2624,101 @@ const ALL_SESSIONS: SessionCard[] = [
 // The demo's: the one waiting on a permission, an agent stuck on you.
 const SESSIONS = DEMO ? ALL_SESSIONS.filter((x) => x.id.startsWith("session:5f1c")) : ALL_SESSIONS;
 const sessionTriage = new Map<string, SessionCard["status"]>();
-const sessionCards = () => SESSIONS.map((x) => ({ ...x, status: sessionTriage.get(x.id) ?? "active" }));
+const sessionReplied = new Set<string>(); // answered here: off the Inbox, its page reads on
+const sessionCards = () =>
+  SESSIONS.flatMap((x) => (sessionReplied.has(x.id) ? [] : [{ ...x, status: sessionTriage.get(x.id) ?? "active" }]));
+
+// Each session's last turns, as its page reads them from its transcript, and what it waits on.
+const you = (h: number, text: string): SessionTurn => ({ who: "you", at: iso(h), text });
+const agentSaid = (h: number, text: string): SessionTurn => ({ who: "agent", at: iso(h), text });
+const ran = (h: number, ...lines: string[]): SessionTurn => ({ who: "tools", at: iso(h), lines });
+const TALKS: Record<string, { turns: SessionTurn[]; waiting: SessionWait | null }> = {
+  "session:5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21": {
+    turns: [
+      you(1.1, "The upload test in api flakes about 1 in 10 on CI. Find out why and fix it; don't just bump the timeout."),
+      agentSaid(1.05, "Looking at `test/upload.test.ts` and the retry wrapper it goes through."),
+      ran(1, "Read: test/upload.test.ts", "Read: src/upload/retry.ts", "Grep: withRetry", "Bash: Run the upload test once"),
+      agentSaid(
+        0.5,
+        "Found it: `withRetry` retries on any error, so a timeout in the first attempt starts a second upload while the first is still writing. The test then sees two parts and fails the size check.\n\nI changed the retry to skip `TimeoutError` and abort the first attempt before it retries. To check it holds, I want to run the test 20 times in a row with retries off.",
+      ),
+      ran(0.3, "Edit: src/upload/retry.ts", "Bash: Run the upload tests 20 times with retries off"),
+    ],
+    waiting: {
+      kind: "permission",
+      tool: "Bash",
+      detail: "for i in $(seq 20); do UPLOAD_RETRIES=0 npx vitest run test/upload.test.ts || exit 1; done",
+    },
+  },
+  "session:a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058": {
+    turns: [
+      you(3, "Migrate the job store from JSON files to SQLite. Keep the old files readable for one release."),
+      agentSaid(
+        2.9,
+        "Plan: a `store/sqlite.ts` behind the same `JobStore` interface, a one-time import on start, and the JSON reader kept as a fallback.",
+      ),
+      ran(2.5, "Write: src/store/sqlite.ts", "Edit: src/store/index.ts", "Bash: Run the store tests"),
+      agentSaid(1.9, "The store tests pass on SQLite. Next: importing the jobs already on disk."),
+      ran(1.7, "Write: src/store/import.ts"),
+    ],
+    waiting: null,
+  },
+  "session:c47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63": {
+    turns: [
+      you(2, "Write the release notes for 4.2 from the PRs merged since v4.1.0."),
+      ran(1.95, "Bash: List the PRs merged since v4.1.0", "Bash: Read each PR's title and labels"),
+      agentSaid(1.9, "38 PRs merged since v4.1.0. 9 are dependency bumps, which I'll fold into one line."),
+      ran(1.8, "Write: docs/releases/4.2.md"),
+      agentSaid(1.75, "Drafted `docs/releases/4.2.md`: a two-line summary, then the changes people will notice."),
+      you(1.2, "Leave out the internal refactors, nobody outside cares."),
+      agentSaid(1.15, "Dropped 11 internal PRs; the draft is down to 18 entries."),
+      ran(1.1, "Edit: docs/releases/4.2.md"),
+      you(0.5, "Mention the new export API up top."),
+      agentSaid(0.45, "Moved the export API to the top, with a short example of `GET /v2/export`."),
+      ran(0.2, "Edit: docs/releases/4.2.md"),
+    ],
+    waiting: {
+      kind: "question",
+      question: "Group the changes by area or by PR?",
+      options: [
+        { label: "By area", description: "API, web app, CLI: what most readers skim for" },
+        { label: "By PR", description: "One line per PR in merge order, with its number" },
+      ],
+    },
+  },
+};
+const sessionSent = new Map<string, SessionTurn[]>(); // your replies, in its transcript a moment after you send them
+
+function sessionView(x: SessionCard): SessionView {
+  const talk = TALKS[x.id] ?? { turns: [], waiting: null };
+  const replied = sessionReplied.has(x.id);
+  const card = replied ? null : { ...x, status: sessionTriage.get(x.id) ?? "active" };
+  const limited = !!x.resets_at && Date.parse(x.resets_at) > now();
+  const why = replied
+    ? "It doesn\u2019t need you now."
+    : x.kind === "desktop"
+      ? "The Claude app runs it: answer it there."
+      : limited
+        ? `It's rate limited until ${x.reason.slice(-5)}: answer it after that.`
+        : null;
+  return {
+    id: x.id,
+    session_id: x.session_id,
+    kind: x.kind,
+    name: x.name,
+    cwd: x.cwd,
+    branch: x.branch,
+    card,
+    ask: null,
+    turns: [...talk.turns, ...(sessionSent.get(x.id) ?? [])],
+    earlier: 0,
+    waiting: replied ? null : talk.waiting,
+    can_reply: why === null,
+    why_not: why,
+    open: x.open_url ? { label: "Open in Claude", url: x.open_url } : null,
+    command: x.kind === "desktop" ? null : `cd '${x.cwd}' && claude --resume ${x.session_id}`,
+  };
+}
 const activeSessions = () => sessionCards().filter((x) => x.status === "active");
 
 // Notes to yourself: one reminder that came due, one without a time, one for tomorrow.
@@ -4476,6 +4593,31 @@ async function respond(req: MockRequest, url: URL): Promise<unknown> {
     if (typeof body.action !== "string" || !isKeyOf(ACTIONS, body.action))
       throw new HttpError(400, `unknown action ${String(body.action)}`);
     return act(resolve(String(body.id)), body.action, typeof body.until === "string" ? body.until : undefined);
+  }
+  // A session's page, and your reply: refused where the desk refuses it; else off the Inbox at once, and in its transcript (its
+  // page) a moment later, then its answer.
+  const sessionPage = /^\/api\/sessions\/([^/]+)\/(view|reply)$/.exec(url.pathname);
+  if (sessionPage) {
+    const x = SESSIONS.find((y) => y.id === decodeURIComponent(sessionPage[1]!));
+    if (!x) throw new HttpError(404, "no session needed you lately");
+    if (sessionPage[2] === "view" && req.method === "GET") return sessionView(x);
+    if (sessionPage[2] === "reply" && req.method === "POST") {
+      const body = await readBody(req);
+      const text = typeof body.text === "string" ? body.text.trim() : "";
+      if (!text) throw new HttpError(400, "write a reply first");
+      const v = sessionView(x);
+      if (!v.can_reply) throw new HttpError(409, v.why_not ?? "it can't be answered here");
+      sessionReplied.add(x.id);
+      bump();
+      setTimeout(() => {
+        sessionSent.set(x.id, [
+          ...(sessionSent.get(x.id) ?? []),
+          { who: "you", at: new Date(now()).toISOString(), text },
+          { who: "agent", at: new Date(now()).toISOString(), text: `On it: ${text}.` },
+        ]);
+      }, 1500);
+      return { ok: true, args: ["--resume", x.session_id, "--bg", text] };
+    }
   }
   // A session's Kick and Open: the rate-limited one refuses as the desk does; nothing runs.
   const sessionAt = /^\/api\/sessions\/([^/]+)\/(kick|open)$/.exec(url.pathname);

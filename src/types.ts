@@ -1553,6 +1553,7 @@ export const SESSION_KIND: Record<SessionKind, string> = { cli: "CLI", backgroun
 // kick: start a background one again; resume: a terminal's whose process is gone, in the background; attach: copy
 // `claude attach <id>` for a background one that runs; open: the desktop app's or Codex's own link.
 export type SessionAction = "kick" | "resume" | "attach" | "open";
+export const KICK = "Continue where you left off."; // what Kick says to a session, and the page's one-click Continue
 export interface SessionCard {
   id: string; // "session:<its id>": its ref on the desk
   session_id: string; // Claude Code's session id, or Codex's thread id
@@ -1571,6 +1572,31 @@ export interface SessionCard {
   attach: string | null; // the command attach copies
   status: "active" | "done" | "snoozed" | "muted";
   snooze_until: string | null;
+}
+
+// A session's page (GET /api/sessions/:id/view): its last turns, read from its own transcript; what it waits on; whether you
+// can answer it here. Its words are the agent's and yours: text only.
+export type SessionTurn = { who: "you" | "agent"; at: string; text: string } | { who: "tools"; at: string; lines: string[] }; // a run of tool calls, one line each
+export type SessionWait =
+  | { kind: "question"; question: string; options: { label: string; description: string }[] }
+  | { kind: "permission"; tool: string; detail: string } // detail: the command, path or URL it asks to use, in full
+  | { kind: "plan"; plan: string };
+export interface SessionView {
+  id: string;
+  session_id: string;
+  kind: SessionKind;
+  name: string;
+  cwd: string;
+  branch: string | null;
+  card: SessionCard | null; // null once it no longer needs you
+  ask: { who: "you"; at: string; text: string } | null; // what you first asked it, when the turns read start after it
+  turns: SessionTurn[]; // oldest first
+  earlier: number; // turns before these; at least 1 when the read starts mid-session
+  waiting: SessionWait | null;
+  can_reply: boolean;
+  why_not: string | null; // when you can't answer it here: where to instead
+  open: { label: string; url: string } | null; // Open in Claude (or Codex), which the desk's computer opens
+  command: string | null; // to copy: claude attach, or claude --resume in its folder
 }
 
 // What an automation may do with an item. add: on your desk, pinned to Today, with its why. today, later, fyi, hide: sorted

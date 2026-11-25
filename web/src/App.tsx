@@ -66,7 +66,7 @@ import { BulkMenu, NoteMenu, QuestionMenu, RowMenu, SessionMenu, StepMenu, type 
 import type { ChainCtx } from "./components/Chain.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import { stepDrops, useReorder } from "./components/Reorder.tsx";
-import type { SessionCtx } from "./components/Session.tsx";
+import { SessionPage, type SessionCtx, type SessionPageCtx } from "./components/Session.tsx";
 import { PeopleFilter } from "./components/PeopleFilter.tsx";
 import { ShowFilter } from "./components/ShowFilter.tsx";
 import { Review } from "./components/Review.tsx";
@@ -439,7 +439,7 @@ export function App() {
     const from = lastPage.current;
     lastPage.current = route.name;
     if (from === route.name || !LIST_PAGES.has(route.name)) return;
-    const returning = (from === "review" || from === "inquiry") && left.current?.page === route.name;
+    const returning = (from === "review" || from === "inquiry" || from === "session") && left.current?.page === route.name;
     window.scrollTo(0, returning ? left.current!.y : 0);
   }, [route.name]);
 
@@ -467,7 +467,7 @@ export function App() {
   useEffect(() => {
     const from = lastRoute.current;
     lastRoute.current = route.name;
-    const trip = (n: Route["name"]) => n === "review" || n === "inquiry";
+    const trip = (n: Route["name"]) => n === "review" || n === "inquiry" || n === "session";
     if (trip(route.name) || trip(from)) return;
     setSelected(null);
     setLaneSel(null);
@@ -483,7 +483,12 @@ export function App() {
       return;
     }
     setReviewFrom(
-      route.name === "settings" || route.name === "inquiry" || route.name === "item" || route.name === "doc" || route.name === "log"
+      route.name === "settings" ||
+        route.name === "inquiry" ||
+        route.name === "session" ||
+        route.name === "item" ||
+        route.name === "doc" ||
+        route.name === "log"
         ? "queue"
         : route.name,
     );
@@ -585,14 +590,6 @@ export function App() {
   // The desk's view with the rows you placed where you put them, until it's read back.
   const placed = useMemo(() => (view && drops.length ? withDrops(view, drops) : view), [view, drops]);
   const groups = useMemo(() => groupsOf(placed, open, filter, me), [placed, open, filter, me]);
-  const people = useMemo(
-    () =>
-      filterPeople(
-        groupsOf(view, DEFAULT_OPEN, "").flatMap((g) => g.cards),
-        me,
-      ),
-    [view, me],
-  );
   // One search for every page: a page with no list (Settings) takes you to the Inbox to search it.
   const searchFor = (s: string) => {
     setFilter(s);
@@ -647,17 +644,17 @@ export function App() {
   const flat = useMemo(() => navigable(page, leaving), [page, leaving]);
   // The list on screen, or beside a review or a question: a review's is the page it was opened from, a question's the Inbox.
   const listPage = pageOf(route, reviewFrom);
-  // The page's filters, on its head or on the list beside an open item: the kinds of row its rows have, then the filter by person.
-  const kinds = useMemo(() => {
-    const keys = listPage && listPage !== "inflight" ? PAGE_GROUPS[listPage] : [];
-    const cards =
-      listPage === "inflight"
-        ? (lane?.rows ?? []).map((r) => r.card)
-        : groupsOf(placed, DEFAULT_OPEN, "")
-            .filter((g) => keys.includes(g.key))
-            .flatMap((g) => g.cards);
-    return kindButtons(cards, filter);
-  }, [listPage, lane, placed, filter]);
+  // The page's filters, on its head or on the list beside an open item: the kinds of row its rows have, then the filter by
+  // person. Each offers what's on the rows the other leaves.
+  const pageCards = useMemo(() => {
+    if (listPage === "inflight") return (lane?.rows ?? []).map((r) => r.card);
+    const keys = listPage ? PAGE_GROUPS[listPage] : [];
+    return groupsOf(placed, DEFAULT_OPEN, "")
+      .filter((g) => keys.includes(g.key))
+      .flatMap((g) => g.cards);
+  }, [listPage, lane, placed]);
+  const kinds = useMemo(() => kindButtons(pageCards, filter, me), [pageCards, filter, me]);
+  const people = useMemo(() => filterPeople(pageCards, filter, me), [pageCards, filter, me]);
   const filters = (
     <div className="head-filters">
       <ShowFilter filter={filter} setFilter={setFilter} kinds={kinds} />
@@ -1065,6 +1062,7 @@ export function App() {
   // A session's triage: it fades off the list at once, and comes back if the desk refuses.
   function sessionAct(s: SessionCard, action: "done" | "snooze" | "mute", until = "tomorrow") {
     const moved = hide([s.id]);
+    if (route.name === "session" && route.id === s.id) go({ name: "queue" });
     runUi(
       api.act(s.id, action, action === "snooze" ? until : undefined).pipe(
         Effect.tap((res) =>
@@ -1832,7 +1830,7 @@ export function App() {
   // row would; with neither, the list's first or last. Merging steps through its PRs.
   const stepAt = useRef<string | null>(null);
   function stepTo(by: 1 | -1) {
-    const shown = route.name === "review" ? route.id : route.name === "inquiry" ? inquiryOf(route.id) : null;
+    const shown = route.name === "review" || route.name === "session" ? route.id : route.name === "inquiry" ? inquiryOf(route.id) : null;
     // An issue it opened in place beside a review is where it is, not the review still drawn.
     const last = stepAt.current;
     const here = laneList
@@ -1845,7 +1843,7 @@ export function App() {
     if (id !== undefined) openAt(id);
   }
 
-  // Opens an item as a click on its row would: a review, a question's page, or a session or issue in place on its list.
+  // Opens an item as a click on its row would: a review, a question's or a session's page, or an issue in place on its list.
   function openAt(id: string) {
     if (laneList) {
       go({ name: "review", id });
@@ -1859,10 +1857,9 @@ export function App() {
       setExpanded(null);
       openInquiry(q);
     } else if (s) {
-      // A session opens in place on the Inbox, as an issue does.
-      if (route.name === "review" || route.name === "inquiry") go({ name: "queue" });
+      setExpanded(null);
       setSelected(s.id);
-      setExpanded(s.id);
+      go({ name: "session", id: s.id });
     } else if (c?.kind === "pr") {
       setExpanded(null);
       openCard(c);
@@ -1889,8 +1886,8 @@ export function App() {
   function comeBack(id: string, there: Took | null) {
     if (there === null || location.hash !== there.hash) return;
     const r = routeRef.current;
-    // An issue or a session opens in place, so the list's address stays the same after you close it.
-    if (r.name !== "review" && r.name !== "inquiry" && expandedRef.current !== there.id) return;
+    // An issue opens in place, so the list's address stays the same after you close it.
+    if (r.name !== "review" && r.name !== "inquiry" && r.name !== "session" && expandedRef.current !== there.id) return;
     setSelected(id);
     go({ name: "review", id });
   }
@@ -1920,7 +1917,7 @@ export function App() {
       return;
     }
     if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
-    if (route.name === "review" || route.name === "inquiry" || route.name === "log") return; // they read their own Esc
+    if (route.name === "review" || route.name === "inquiry" || route.name === "session" || route.name === "log") return; // they read their own Esc
     const onList = LIST_PAGES.has(route.name) || route.name === "inflight"; // where the search reads a list
     const part = route.name === "settings" ? settingsBack(route.section) : null;
     if (onList && pickedOn.length) setPicked([]);
@@ -1943,7 +1940,12 @@ export function App() {
     const mod = (MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey && !e.isComposing;
     const digit = /^Digit([1-4])$/.exec(e.code)?.[1];
     const bracket = e.code === "BracketLeft" ? -1 : e.code === "BracketRight" ? 1 : 0;
-    const listed = LIST_PAGES.has(route.name) || route.name === "inflight" || route.name === "review" || route.name === "inquiry";
+    const listed =
+      LIST_PAGES.has(route.name) ||
+      route.name === "inflight" ||
+      route.name === "review" ||
+      route.name === "inquiry" ||
+      route.name === "session";
     if (mod && digit && !(e.target instanceof HTMLElement && e.target.closest(".hotkey"))) {
       if (!e.repeat) go({ name: SIDE_PAGES[Number(digit) - 1]! });
       e.preventDefault();
@@ -2096,17 +2098,62 @@ export function App() {
   const ses: SessionCtx = {
     now,
     selected,
-    expanded,
     leaving,
     select: (s) => {
       setSelected(s.id);
     },
-    toggle: (s) => {
+    open: (s) => {
       setSelected(s.id);
-      setExpanded(expanded === s.id ? null : s.id);
+      go({ name: "session", id: s.id });
     },
     act: sessionAct,
     start: sessionStart,
+  };
+  // A session's page: your reply goes as its next turn, and it's off the list at once; a refusal is a bubble, and the page
+  // keeps your words.
+  const sesPage: SessionPageCtx = {
+    reply: (v, text) =>
+      api.replySession(v.id, text).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            gone.show(v.id, loadSeq.current);
+            flash(`Sent to ${v.name}: it carries on in the background.`);
+            refresh(0);
+          }),
+        ),
+        Effect.as(true),
+        Effect.catch((e) => Effect.as(failed(e), false)),
+      ),
+    open: (v) => {
+      runUi(
+        api.openSession(v.id).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              flash(`Opened ${v.name}.`);
+            }),
+          ),
+          Effect.catch(failed),
+        ),
+      );
+    },
+    copy: (text) => {
+      runUi(
+        copyText(text).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              flash("Copied. Run it in a terminal to open the session.");
+            }),
+          ),
+          Effect.catch(failed),
+        ),
+      );
+    },
+    done: (c) => {
+      sessionAct(c, "done");
+    },
+    back: () => {
+      go({ name: "queue" });
+    },
   };
   const inq = {
     now,
@@ -2360,6 +2407,7 @@ export function App() {
               onLoad={setPageQuestion}
             />
           )}
+          {route.name === "session" && !broken && <SessionPage key={route.id} id={route.id} loads={loads} now={now} ctx={sesPage} />}
           {route.name === "inflight" && !broken && (
             <Inflight
               view={laneShown}
