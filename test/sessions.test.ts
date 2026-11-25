@@ -961,3 +961,22 @@ test("a session the desk can't carry on says where to answer it, and refuses a r
   );
   assert.equal((await failure(t.desk.sessionView("session:nope"))).message, 'no session "session:nope" needed you lately');
 });
+
+test("a long session's page still says what you first asked, read from the transcript's start", posix, async (c) => {
+  const m = machine(c);
+  const t = await deskOn(c, m);
+  const l = lines(S.hint, m.work, Date.now());
+  const big = "x".repeat(300_000);
+  const middle = Array.from({ length: 8 }, (_, i) => [
+    l.tool(`t${i}`, "Read", { file_path: `f${i}` }),
+    l.result(`t${i}`).replace('"ok"', JSON.stringify(big)),
+  ]).flat();
+  m.agents([{ id: "bg03", cwd: m.work, kind: "background", startedAt: 1, sessionId: S.hint, name: "Long", state: "failed" }]);
+  m.transcript(S.hint, [l.prompt("Port the billing jobs to the new queue"), ...middle, l.said("Ported four of six.")]);
+  await t.poll();
+  const v = await run(t.desk.sessionView(`session:${S.hint}`));
+  assert.equal(v.ask?.text, "Port the billing jobs to the new queue");
+  assert.ok(v.earlier >= 1, "the read starts mid-session");
+  assert.ok(!v.turns.some((x) => x.who === "you"), "the ask isn't in the turns read");
+  assert.deepEqual(v.turns.at(-1), { who: "agent", at: v.turns.at(-1)!.at, text: "Ported four of six." });
+});

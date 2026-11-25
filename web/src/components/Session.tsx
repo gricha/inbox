@@ -214,6 +214,7 @@ export function SessionPage({ id, loads, now, ctx }: { id: string; loads: number
       </header>
 
       <ol className="ses-turns" aria-label="Its last turns">
+        {v.ask && <Turn t={v.ask} agent={agent} sending={false} />}
         {(hidden > 0 || v.earlier > 0) && (
           <li className="ses-earlier">
             {hidden > 0 ? (

@@ -2709,6 +2709,7 @@ function sessionView(x: SessionCard): SessionView {
     cwd: x.cwd,
     branch: x.branch,
     card,
+    ask: null,
     turns: [...talk.turns, ...(sessionSent.get(x.id) ?? [])],
     earlier: 0,
     waiting: replied ? null : talk.waiting,

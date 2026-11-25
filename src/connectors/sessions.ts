@@ -34,7 +34,8 @@ const CLI_RECENT = 24 * 3_600_000; // a terminal's session no longer running, by
 const ASK_MAX = 2000; // characters of a turn's last message the model reads
 const ASKS_PER_POLL = 3;
 const LINE = 160;
-const TALK = 512 * 1024; // bytes of a transcript a session's page reads
+const TALK = 2 * 1024 * 1024; // bytes of a transcript a session's page reads from its end
+const HEAD = 256 * 1024; // and from its start, for what you first asked
 const TURNS = 30; // turns a page shows; the rest of what it read fold
 const TURN_MAX = 4000; // characters of one turn's text
 const REPLY_MAX = 8000;
@@ -947,7 +948,12 @@ export class Sessions {
       const now = this.desk.now();
       const card = f ? this.card(ref, f, now.toISOString()) : null;
       const text = s.file ? readTail(s.file, TALK) : null;
-      const talk = text === null ? { turns: [], earlier: 0, pending: null } : s.kind === "codex" ? readCodexTalk(text) : readTalk(text);
+      const read = (t: string) => (s.kind === "codex" ? readCodexTalk(t) : readTalk(t));
+      const talk = text === null ? { turns: [], earlier: 0, pending: null } : read(text);
+      const whole = !!s.file && (fileSize(s.file) ?? 0) <= TALK;
+      const head = whole || !s.file ? null : readHead(s.file, HEAD);
+      const first = head === null ? undefined : read(head).turns.flatMap((t) => (t.who === "you" ? [{ ...t, who: t.who }] : []))[0];
+      const ask = first && !talk.turns.some((t) => t.at === first.at && t.who === "you") ? first : null;
       const why = whyNot(s, card, now.getTime());
       const running = !!s.row?.pid && !!s.row.status;
       const url = card?.open_url ?? openUrl({ kind: s.kind, session_id: s.session_id, alive: running }, s.local_id);
@@ -959,8 +965,9 @@ export class Sessions {
         cwd: s.cwd,
         branch: s.branch,
         card,
+        ask,
         turns: talk.turns,
-        earlier: talk.earlier,
+        earlier: whole ? talk.earlier : Math.max(1, talk.earlier),
         waiting: card ? waitOf(talk.pending, card.reason) : null,
         can_reply: why === null,
         why_not: why,
@@ -1072,6 +1079,27 @@ function jobSessions(dir: string): Set<string> {
     for (const k of ["sessionId", "resumeSessionId"]) if (str(o?.[k])) out.add(str(o?.[k])!);
   }
   return out;
+}
+
+const fileSize = (file: string): number | null =>
+  Result.getOrElse(Result.try({ try: () => fs.statSync(file).size, catch: () => null }), () => null);
+
+// A file's first bytes, to its last whole line.
+function readHead(file: string, bytes: number): string | null {
+  const read = Result.try({
+    try: () => {
+      const buf = Buffer.alloc(bytes);
+      const fd = fs.openSync(file, "r");
+      try {
+        const text = buf.subarray(0, fs.readSync(fd, buf, 0, bytes, 0)).toString("utf8");
+        return text.slice(0, text.lastIndexOf("\n") + 1);
+      } finally {
+        fs.closeSync(fd);
+      }
+    },
+    catch: () => null,
+  });
+  return Result.getOrElse(read, () => null);
 }
 
 // sessionId → its transcript, over every project folder.

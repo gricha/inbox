@@ -1587,8 +1587,9 @@ export interface SessionView {
   cwd: string;
   branch: string | null;
   card: SessionCard | null; // null once it no longer needs you
+  ask: { who: "you"; at: string; text: string } | null; // what you first asked it, when the turns read start after it
   turns: SessionTurn[]; // oldest first
-  earlier: number; // turns before these in what was read
+  earlier: number; // turns before these; at least 1 when the read starts mid-session
   waiting: SessionWait | null;
   can_reply: boolean;
   why_not: string | null; // when you can't answer it here: where to instead

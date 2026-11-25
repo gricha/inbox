@@ -227,7 +227,7 @@ Your own Claude Code and Codex sessions on this computer that are blocked on you
 `#/session/<id>`. What a session is doing and why it waits, and your answer, without switching apps.
 
 - Its kind, folder and branch, its name as the title, then why it's here and for how long ("Needs permission: Bash · 18m").
-- Its last turns, read from its own transcript: what you said (set off by a rule), what it said (as prose), and each run of tool calls as one quiet line ("4 steps · Read, Grep, Bash", folded open on a click). Past eight turns, the rest fold under "N earlier turns".
+- Its last turns, read from its own transcript: what you said (set off by a rule), what it said (as prose), and each run of tool calls as one quiet line ("4 steps · Read, Grep, Bash", folded open on a click). Past eight turns, the rest fold under "N earlier turns". In a long session, what you first asked it comes first.
 - What it waits on: a question with its options as a table, one click each; the command or file a permission prompt is about; its plan, open.
 - **Your reply**, where the desk can carry it on (a background session or a terminal's with no process): a box, **Send** (or ⌘↵), and **Continue where it left off** for a stalled one. What you send shows at once as your turn, sending, and reads back every 3 seconds until its transcript has it; it leaves the Inbox at once. A refusal is a bubble and puts your words back in the box.
 - Where it can't (the Claude app or Codex runs it, a terminal still open, a rate limit not reset), one line says where to answer it instead, and there's no box. A permission prompt or a plan can only be answered where it waits.
