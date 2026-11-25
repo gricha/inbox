@@ -6896,6 +6896,30 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // The desk refuses a session's Done: it comes back, and so does its fill.
+    name: "session-done-refused",
+    go: async (page) => {
+      refusing.add("/api/act");
+      await page.route("**/api/act", async (route) => {
+        await page.waitForTimeout(300); // its fill moves on first
+        await route.fulfill({ status: 409, json: { error: "The session is running again", tag: "Conflict" } });
+      });
+      await at("#/")(page);
+      const row = ".queue .line.session >> nth=0";
+      const id = await page.locator(row).getAttribute("data-id");
+      await rowMenuPick(page, row, "Done");
+      await page.waitForTimeout(1200);
+      const filled = await page.evaluate<string[]>(`[...document.querySelectorAll(".line.sel")].map((l) => l.dataset.id)`);
+      if (filled.join() !== id)
+        failures.push(`session-done-refused: after the refusal, ${JSON.stringify(filled)} filled rather than ${id}`);
+    },
+    after: async (page) => {
+      refusing.delete("/api/act");
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  {
     // The letters that were shortcuts do nothing now: no menu, toast, chat or page change, and the row keeps the focus. Only
     // "/" works, as on GitHub: it puts you in the sidebar's search.
     name: "no-keys",
@@ -6973,6 +6997,85 @@ const SHOTS: Shot[] = [
     after: async (page) => {
       await fresh(page);
       await unroute(page);
+    },
+  },
+  // GitHub takes the approval after you went on from the item it opened: the list beside keeps the item you're on.
+  {
+    name: "review-approve-moved-on",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      const mod = process.platform === "darwin" ? "Meta" : "Control";
+      const answers: Route[] = [];
+      await page.route("**/approve", (route) => {
+        answers.push(route);
+      });
+      // Opened from its row, as a click opens it, so it's the row selected.
+      await at("#/")(page);
+      await page.locator(`.queue .line[data-id="${id}"] .row-main`).click();
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(900);
+      await page.locator('.rv-actions button:has-text("Approve")').click();
+      await page.waitForTimeout(400);
+      await page.keyboard.press(`${mod}+BracketRight`);
+      await page.waitForTimeout(400);
+      const on = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      for (const r of answers.splice(0)) await r.fulfill({ json: { ok: true, url: "", stays: false } });
+      await page.waitForTimeout(600);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(400);
+      const sel = await page.evaluate<string | null>(`document.querySelector(".queue .line.sel")?.dataset.id ?? null`);
+      if (on !== `#/review/${sel}`) failures.push(`review-approve-moved-on: back from ${on}, the Inbox fills ${sel}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  // The approval opened the issue after it in place on the Inbox, and you closed that issue: a refusal leaves you on the list.
+  {
+    name: "review-approve-refused-closed",
+    go: async (page) => {
+      await at("#/")(page);
+      const ids = await rowIds(page);
+      const kinds = await page.evaluate<Record<string, string>>(`fetch("/api/queue").then((r) => r.json()).then((v) => {
+        const kinds = {};
+        const walk = (x) => {
+          if (Array.isArray(x)) x.forEach(walk);
+          else if (x && typeof x === "object") {
+            if (typeof x.id === "string" && typeof x.kind === "string") kinds[x.id] = x.kind;
+            Object.values(x).forEach(walk);
+          }
+        };
+        walk(v);
+        return kinds;
+      })`);
+      const id = ids.find((x, i) => kinds[x] === "pr" && kinds[ids[i + 1] ?? ""] === "issue");
+      const issue = rowAfter(ids, id ?? null);
+      if (!id || !issue) {
+        failures.push("review-approve-refused-closed: no PR on the Inbox has an issue after it");
+        return;
+      }
+      refusing.add("/approve");
+      await page.route("**/approve", async (route) => {
+        await page.waitForTimeout(1500); // you close the issue first
+        await route.fulfill({ status: 409, json: { error: "GitHub didn't take the approval: it has new commits", tag: "Conflict" } });
+      });
+      await page.locator(`.queue .line[data-id="${id}"] .row-main`).click();
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(900);
+      await page.locator('.rv-actions button:has-text("Approve")').click();
+      await page.waitForTimeout(400);
+      const opened = await page.locator(`.queue .line.open[data-id="${issue}"]`).count();
+      if (!opened) failures.push(`review-approve-refused-closed: approving ${id} didn't open ${issue} in place`);
+      await page.locator(`.queue .line[data-id="${issue}"] .row-main`).click();
+      await page.waitForTimeout(1800);
+      const hash = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (hash !== "#/") failures.push(`review-approve-refused-closed: after you closed ${issue}, the refusal took you to ${hash}`);
+    },
+    after: async (page) => {
+      refusing.delete("/approve");
+      await unroute(page);
+      await fresh(page);
     },
   },
   // GitHub refuses the approval after the next item opened: you're back on the PR, and a bubble says why.

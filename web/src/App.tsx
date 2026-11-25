@@ -96,6 +96,12 @@ interface Moved {
   to: string | null;
 }
 
+// Where a review that gave way took you: the address, and the item it opened there.
+interface Took {
+  hash: string;
+  id: string;
+}
+
 const LEAVES = new Set<Action>(["done", "snooze", "mute"]);
 const VERB: Partial<Record<Action, string>> = {
   done: "Done",
@@ -852,8 +858,7 @@ export function App() {
       document.querySelector(`.lane [data-id="${CSS.escape(laneCur.card.id)}"]`)?.scrollIntoView({ block: "nearest" });
   }, [onLane, laneCur]);
 
-  // Nothing is selected until you focus, right-click or open a row; a row that leaves by itself takes its selection with it
-  // (one you act on hands it on: moveOff).
+  // Nothing is selected until you focus, right-click or open a row. A row that leaves by itself takes its selection with it.
   useEffect(() => {
     if (selected === null || cursor.includes(selected)) return;
     if (pending.current?.id === selected && Date.now() < pending.current.until) return; // an undo brings it back
@@ -1018,7 +1023,7 @@ export function App() {
     const leaves = cs.filter((c) => LEAVES.has(action) && c.status === "active" && !c.resolved);
     return Effect.gen(function* () {
       setPicked([]);
-      if (leaves.length) hide(leaves.map((c) => c.id));
+      const moved = leaves.length ? hide(leaves.map((c) => c.id)) : null;
       const started = Date.now();
       const results = yield* Effect.forEach(
         cs,
@@ -1030,6 +1035,7 @@ export function App() {
         { concurrency: 4 },
       );
       const ok = results.filter((r) => r !== null);
+      if (moved && !ok.some((r) => r.c.id === moved.from)) putBack(moved);
       undoSeq.current = ok.flatMap((r) => (r.seq ? [r.seq] : []));
       undoWrite.current = null;
       yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
@@ -1056,7 +1062,7 @@ export function App() {
 
   // A session's triage: it fades off the list at once, and comes back if the desk refuses.
   function sessionAct(s: SessionCard, action: "done" | "snooze" | "mute", until = "tomorrow") {
-    hide([s.id]);
+    const moved = hide([s.id]);
     runUi(
       api.act(s.id, action, action === "snooze" ? until : undefined).pipe(
         Effect.tap((res) =>
@@ -1067,6 +1073,11 @@ export function App() {
             gone.show(s.id, loadSeq.current);
             const snoozed = SNOOZE.find((o) => o.until === until)?.toast.replace(/ \(or .*\)$/, "") ?? until;
             flash(`${action === "snooze" ? `Snoozed ${snoozed}` : VERB[action]}: ${s.name}`, false, true);
+          }),
+        ),
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            putBack(moved);
           }),
         ),
         Effect.catch(failed),
@@ -1104,15 +1115,19 @@ export function App() {
     );
   }
 
+  // Rows leaving the list fade out.
+  function fade(ids: string[]) {
+    setExpanded((e) => (e !== null && ids.includes(e) ? null : e));
+    setLeaving((s) => new Set([...s, ...ids]));
+  }
+
   // Rows leaving the list: they fade out, and the selection moves on.
   function hide(ids: string[]): Moved | null {
-    if (expanded !== null && ids.includes(expanded)) setExpanded(null);
-    setLeaving((s) => new Set([...s, ...ids]));
+    fade(ids);
     return moveOff(ids);
   }
 
-  // The selection on rows that leave moves to the row that takes their place, focused if the list had the keyboard, so ↓
-  // and Enter carry on from there. What it moved, so a refusal can put it back.
+  // The selection on leaving rows moves to the row after them, focused if the list had the keyboard. Returns it for putBack.
   function moveOff(ids: string[]): Moved | null {
     if (selected === null || !ids.includes(selected)) return null;
     const to = nextOf(itemOrder, selected, (x) => ids.includes(x));
@@ -1291,17 +1306,14 @@ export function App() {
     setActed(actedRef.current);
   }
 
-  // A write that finishes your part, with a spinner in the toast until GitHub has it. From a list its row leaves at once; from
-  // its review the next item opens at once and the row leaves once GitHub has it. A refusal brings it back, and you back to
-  // it. With nothing next, the review stays, saying what you did and where it went (`did`). `error` on what the write
-  // returns: done, but with something to say. True once GitHub has it.
+  // A write that finishes your part. From a list its row leaves at once, and from its review the next item opens (`next`).
+  // A refusal brings it back, and you back to it. True once GitHub has it.
   function finish(
     c: Card,
     sending: string,
     did: Acted,
     write: Effect.Effect<{ text: string; error?: boolean; undo?: boolean; stays?: boolean }, ApiError>,
-    // When the next item opens: at once; once GitHub has it, for a write that may keep the item on your desk (`stays`); or
-    // never, for a comment, whose review says what you did only while sending, so what you'd do next is still there.
+    // When the next item opens: at once, once GitHub has it (a write that may keep the item, `stays`), or never (a comment).
     next: "now" | "after" | "never" = "now",
   ): Effect.Effect<boolean> {
     return Effect.suspend((): Effect.Effect<boolean> => {
@@ -1317,8 +1329,9 @@ export function App() {
       mark({ ...did, sending: true });
       const around = itemOrder;
       const inReview = routeRef.current.name === "review" && routeRef.current.id === c.id;
-      const moved = inReview ? moveOff([c.id]) : hide([c.id]);
       const leaves = c.status === "active" && !c.resolved; // a cleared item stays in the Archive
+      // A review that stays open keeps its row selected until GitHub has the write.
+      const moved = !inReview ? hide([c.id]) : next === "now" && leaves ? moveOff([c.id]) : null;
       const there = next === "now" && leaves ? advance(c.id, around) : null;
       flash(sending, false, false, 60_000, true);
       return write.pipe(
@@ -1335,7 +1348,9 @@ export function App() {
               }
               if (next === "after" && leaves) advance(c.id, around);
               if (inReview) {
-                hide([c.id]);
+                // This render is a write ago, so the selection moves on only if it's still on this row.
+                fade([c.id]);
+                setSelected((s) => (s === c.id ? nextOf(itemOrderRef.current, c.id, () => false) : s));
                 yield* Effect.sleep(200); // its row fades out
               }
               gone.show(c.id, loadSeq.current);
@@ -1589,8 +1604,7 @@ export function App() {
     return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, write, "never");
   }
 
-  // Approve in a review: approved on GitHub, pinned to the commit the review showed. A merge that's now yours keeps its row
-  // (`keeps`, as the review said), so its review stays for Hand off for merge.
+  // Approve in a review, pinned to the commit it showed. `keeps`: approving makes the merge yours, so the review stays.
   function approve(c: Card, head: string, keeps: boolean) {
     const write = api.approve(c.id, head).pipe(Effect.map((r) => ({ text: `Approved ${shortRef(c)} on GitHub`, stays: r.stays })));
     runUi(finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, write, keeps ? "after" : "now"));
@@ -1829,8 +1843,7 @@ export function App() {
     if (id !== undefined) openAt(id);
   }
 
-  // An item of the list opened as a click on its row would: Merging's PR its review, a question its page, a session or an
-  // issue in place on its list.
+  // Opens an item as a click on its row would: a review, a question's page, or a session or issue in place on its list.
   function openAt(id: string) {
     if (laneList) {
       go({ name: "review", id });
@@ -1858,9 +1871,8 @@ export function App() {
     }
   }
 
-  // An action that takes the open review's item off its list opens the item that takes its place, as ⌘] would. With none
-  // left the review stays, saying what you did. Where it took you, so a refusal can bring you back.
-  function advance(id: string, around: string[]): string | null {
+  // Opens the item that takes the open review's place, as ⌘] would, and returns where, so a refusal can come back.
+  function advance(id: string, around: string[]): Took | null {
     const r = routeRef.current;
     if (r.name !== "review" || r.id !== id) return null; // you went elsewhere meanwhile
     const still = itemOrderRef.current;
@@ -1868,13 +1880,15 @@ export function App() {
     if (!to) return null;
     // This may be the render you acted in, a write ago: its lists are the ones `around` came from, so they have `to`.
     openAt(to);
-    return location.hash;
+    return { hash: location.hash, id: to };
   }
 
-  // A write refused, or kept on your desk, after its review gave way to the next item: back on its review, if you're still
-  // where that took you.
-  function comeBack(id: string, there: string | null) {
-    if (there === null || location.hash !== there) return;
+  // A write refused or kept after its review gave way: back on its review, if you're still where advance() took you.
+  function comeBack(id: string, there: Took | null) {
+    if (there === null || location.hash !== there.hash) return;
+    const r = routeRef.current;
+    // An issue or a session opens in place, so the list's address stays the same after you close it.
+    if (r.name !== "review" && r.name !== "inquiry" && expandedRef.current !== there.id) return;
     setSelected(id);
     go({ name: "review", id });
   }
