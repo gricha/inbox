@@ -219,7 +219,7 @@ export function RowFacts({ card, stage }: { card?: Card; stage?: boolean }) {
   return (
     <span className="line-facts">
       {pr?.quick && (
-        <span className="line-quick" data-tip={`Quick to review: ${pr.quick}`}>
+        <span className="line-quick" data-tip={pr.quick}>
           <svg className="i" viewBox="0 0 16 16" aria-hidden="true">
             <path d="M9 1.5 3.5 9h4.5l-1 5.5 5.5-7.5H8z" />
           </svg>

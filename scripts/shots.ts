@@ -909,6 +909,10 @@ const SHOTS: Shot[] = [
       if (head !== "InboxNew note") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the page's name`);
       if (!(await page.locator(".side-search .search input").count())) failures.push("queue: no filter at the top of the sidebar");
       if (await page.locator(".bubble").count()) failures.push("queue: a bubble while nothing's wrong");
+      const quick = await page.evaluate<string | null>(
+        `document.querySelector('.queue .line[data-id="${SECOND_URGENT}"] .line-quick')?.getAttribute("data-tip") ?? null`,
+      );
+      if (quick !== "Quick to review: low risk, 38 lines") failures.push(`queue: the quick bolt's tip is ${JSON.stringify(quick)}`);
       // Its sections under their headings, Urgent led by an agent's question, a row like the rest; a hand-back saying so on
       // its own row at every width; each row saying why it's there; every row shown, no "n more".
       const list = await page.evaluate<{
