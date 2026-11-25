@@ -35,8 +35,9 @@ export const prCheckout = (
   remote = `https://github.com/${item.repo}.git`,
 ) => {
   const name = item.repo.replace("/", "__");
-  const bare = path.join(home, "repos", `${name}.git`);
-  const out = path.join(home, "checkouts");
+  // Absolute, since git runs these paths from other folders.
+  const bare = path.resolve(home, "repos", `${name}.git`);
+  const out = path.resolve(home, "checkouts");
   let lock = locks.get(bare);
   if (!lock) locks.set(bare, (lock = Semaphore.makeUnsafe(1)));
   return lock.withPermits(1)(

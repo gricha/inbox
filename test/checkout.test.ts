@@ -76,7 +76,8 @@ test("a git that only opens bare repos it's pointed at (safe.bareRepository=expl
   process.env.GIT_CONFIG_PARAMETERS = "'safe.bareRepository=explicit'";
   try {
     for (const clone of [r.clone, null]) {
-      const c = await run(checkoutFor(r.home, { ...item, repo: `acme/${clone ? "yours" : "hub"}` }, () => clone, r.hub));
+      const home = path.relative(process.cwd(), r.home); // DESK_HOME may be relative
+      const c = await run(checkoutFor(home, { ...item, repo: `acme/${clone ? "yours" : "hub"}` }, () => clone, r.hub));
       assert.equal(fs.readFileSync(path.join(c.dir, "app.ts"), "utf8"), "export const limit = 100;\n");
       await run(c.done);
       assert.ok(!fs.existsSync(c.dir), "removed once it's done");
