@@ -11,7 +11,6 @@ import { Effect } from "effect";
 import {
   classify,
   codexThreads,
-  KICK,
   parseAgents,
   readCodexTalk,
   readDesktopRecord,
@@ -25,7 +24,7 @@ import {
   type AgentRow,
   type Seen,
 } from "../src/connectors/sessions.ts";
-import type { SessionView } from "../src/types.ts";
+import { KICK, type SessionView } from "../src/types.ts";
 import { readTail } from "../src/coordinator.ts";
 import { createApp } from "../src/server.ts";
 import { setup, WINDOW_HEADERS } from "./helpers/desk.ts";
@@ -782,7 +781,6 @@ test("a session's page reads its turns: yours, its words, its tool calls folded 
       ["agent", "Looking at the retries."],
       ["tools", ["Bash: Run the tests", "Read: src/upload.ts"]],
       ["agent", "Found it: the retry swallows the timeout.\n\nFixed."],
-      ["tools", ["AskUserQuestion"]],
     ],
   );
   assert.deepEqual(waitOf(talk.pending, "asked a question"), {

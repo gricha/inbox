@@ -9,6 +9,7 @@ export type Route =
   | { name: "queue" }
   | { name: "review"; id: string }
   | { name: "inquiry"; id: string } // an agent's question
+  | { name: "session"; id: string } // a session that needs you: its conversation, and your reply
   | { name: "item"; id: string } // a permalink's (src/links.ts): a PR opens in its review, an issue in place on its page
   | { name: "doc"; id: string } // a review document's page (src/doc.ts), by its link
   | { name: "log"; id: string } // an item's log: how it got where it is, and why
@@ -63,8 +64,8 @@ export function parseRoute(hash: string): Route {
   if (hash === "#/inflight") return { name: "inflight" };
   if (hash === "#/blocked" || hash === "#/waiting") return { name: "blocked" };
   if (hash === "#/archive") return { name: "archive" };
-  const page = /^#\/(review|inquiry|item|doc|log)\/(.+)$/.exec(hash);
-  const name = oneOf(["review", "inquiry", "item", "doc", "log"], page?.[1]);
+  const page = /^#\/(review|inquiry|session|item|doc|log)\/(.+)$/.exec(hash);
+  const name = oneOf(["review", "inquiry", "session", "item", "doc", "log"], page?.[1]);
   if (page && name) {
     const id = Result.try({ try: () => decodeURIComponent(page[2]!), catch: () => "a mangled link" });
     return Result.isSuccess(id) ? { name, id: id.success } : { name: "queue" };
@@ -75,7 +76,8 @@ export function parseRoute(hash: string): Route {
 // The page the sidebar marks current: a review is on the page it was opened from, a question on the Inbox; Settings is none.
 export function pageOf(route: Route, from: ListPage): ListPage | null {
   if (route.name === "review") return from;
-  if (route.name === "inquiry" || route.name === "item" || route.name === "doc" || route.name === "log") return "queue";
+  if (route.name === "inquiry" || route.name === "session" || route.name === "item" || route.name === "doc" || route.name === "log")
+    return "queue";
   return route.name === "settings" ? null : route.name;
 }
 
@@ -95,7 +97,6 @@ export function beside(o: {
 
 export function routeHash(r: Route): string {
   if (r.name === "settings") return `#/settings/${r.section}`;
-  if (r.name === "review" || r.name === "inquiry" || r.name === "item" || r.name === "doc" || r.name === "log")
-    return `#/${r.name}/${encodeURIComponent(r.id)}`;
+  if ("id" in r) return `#/${r.name}/${encodeURIComponent(r.id)}`;
   return r.name === "queue" ? "#/" : `#/${r.name}`;
 }

@@ -5,6 +5,7 @@ import { Cause, Data, Effect, Exit } from "effect";
 import { refusalOf, type ErrorBody } from "../../src/errors.ts";
 import type {
   BrandIcon,
+  SessionView,
   ItemRule,
   TypeCheck,
   InboxSection,
@@ -215,6 +216,10 @@ export const api = {
   // A session that needs you: Kick or Resume starts it again where it left off, Open follows its own link.
   kickSession: (id: string) => call<{ ok: true; args: string[] }>("POST", `/api/sessions/${encodeURIComponent(id)}/kick`),
   openSession: (id: string) => call<{ ok: true; url: string }>("POST", `/api/sessions/${encodeURIComponent(id)}/open`),
+  // Its page, and your reply as its next turn where the desk can carry it on.
+  sessionView: (id: string) => call<SessionView>("GET", `/api/sessions/${encodeURIComponent(id)}/view`),
+  replySession: (id: string, text: string) =>
+    call<{ ok: true; args: string[] }>("POST", `/api/sessions/${encodeURIComponent(id)}/reply`, { text }),
   automations: () => call<AutomationView[]>("GET", "/api/automations"),
   brandIcon: (slug: string) => call<BrandIcon>("GET", `/api/icons/brand/${encodeURIComponent(slug)}`),
   criteria: () => call<CriteriaView>("GET", "/api/criteria"),

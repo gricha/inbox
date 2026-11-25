@@ -280,6 +280,9 @@ test("a permalink's route names its item, and an issue opens in place on the pag
   assert.equal(pageOf({ name: "item", id: "acme/api#7" }, "archive"), "queue");
   // A question's link goes straight to its page.
   assert.deepEqual(parseRoute(hashOf({ question: "1c0ffee2" })), { name: "inquiry", id: "1c0ffee2" });
+  const ses = { name: "session", id: "session:5f1c2a90-7d3e" } as const;
+  assert.equal(routeHash(ses), "#/session/session%3A5f1c2a90-7d3e");
+  assert.deepEqual(parseRoute(routeHash(ses)), ses);
   // A review document's, to its page, on the Inbox.
   assert.deepEqual(parseRoute(hashOf({ doc: "0123456789abcdef" })), { name: "doc", id: "0123456789abcdef" });
   assert.equal(pageOf({ name: "doc", id: "0123456789abcdef" }, "archive"), "queue");
@@ -385,6 +388,7 @@ test("Settings draws a row only where it does something, and greys quiet hours w
 test("the page the sidebar marks: a review's is where it was opened from, a question's the Inbox, Settings none", () => {
   assert.equal(pageOf({ name: "queue" }, "archive"), "queue");
   assert.equal(pageOf({ name: "inquiry", id: "q1" }, "archive"), "queue");
+  assert.equal(pageOf({ name: "session", id: "session:s1" }, "archive"), "queue");
   assert.equal(pageOf({ name: "review", id: "acme/api#1" }, "archive"), "archive");
   assert.equal(pageOf({ name: "blocked" }, "queue"), "blocked");
   assert.equal(pageOf({ name: "settings", section: "github" }, "queue"), null);
@@ -397,6 +401,7 @@ test("the list beside a review or a question: from 1160px, folded by you or by t
   assert.equal(at({}), "open");
   assert.equal(at({ route: { name: "inquiry", id: "q1" } }), "open");
   assert.equal(at({ route: { name: "queue" } }), null);
+  assert.equal(at({ route: { name: "session", id: "session:s1" } }), null, "a session's page has the window to itself");
   assert.equal(at({ route: { name: "settings", section: "github" } }), null);
   assert.equal(at({ roomy: false }), null);
   assert.equal(at({ roomy: false, folded: true }), null); // no rail either

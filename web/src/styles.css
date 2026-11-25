@@ -3112,18 +3112,121 @@ html::-webkit-scrollbar-corner,
   border-left: 2px solid var(--rule-strong);
 }
 
-/* A session opened in place: what it last said, quoted in pencil, and where it runs. */
-.session-said {
+/* A session's page: its turns as one column on the review's left edge; yours set off by a rule, its tool calls one quiet
+   line each run, what it waits on a sheet like a question's answers. */
+.session-page > .ses-turns {
+  padding: 0 12px;
+}
+
+.ses-why {
+  margin: 6px 0 0;
+}
+
+.ses-turns {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  list-style: none;
+}
+
+.ses-turn {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ses-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--pencil);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.ses-said {
   margin: 0;
   padding-left: 10px;
   border-left: 2px solid var(--rule-strong);
-  color: var(--pencil);
+  color: var(--ink);
+  font-size: var(--text-md);
+  line-height: 1.55;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.session-note {
-  margin: 0;
+.ses-tools,
+.ses-earlier {
   color: var(--pencil);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.ses-tools summary {
+  cursor: pointer;
+}
+
+.ses-tools ul {
+  display: grid;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding-left: 14px;
+  list-style: none;
+}
+
+.ses-earlier button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.ses-earlier button:hover {
+  text-decoration: underline;
+}
+
+.ses-wait {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--sheet);
+}
+
+.ses-wait .inq-code {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.ses-plan summary {
+  color: var(--ink-2);
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.ses-ask {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 550;
+}
+
+.session-page .inq-answer > .ses-ask,
+.ses-note {
+  margin: 0;
+  padding: 0 12px;
+}
+
+.ses-note {
+  color: var(--pencil);
+}
+
+.inq-option:disabled {
+  cursor: default;
 }
 
 /* Merging --------------------------------------------------------------------

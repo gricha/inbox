@@ -65,7 +65,7 @@ import { BulkMenu, NoteMenu, QuestionMenu, RowMenu, SessionMenu, StepMenu, type 
 import type { ChainCtx } from "./components/Chain.tsx";
 import { Later, Queue } from "./components/Queue.tsx";
 import { stepDrops, useReorder } from "./components/Reorder.tsx";
-import type { SessionCtx } from "./components/Session.tsx";
+import { SessionPage, type SessionCtx, type SessionPageCtx } from "./components/Session.tsx";
 import { PeopleFilter } from "./components/PeopleFilter.tsx";
 import { ShowFilter } from "./components/ShowFilter.tsx";
 import { Review } from "./components/Review.tsx";
@@ -426,7 +426,7 @@ export function App() {
     const from = lastPage.current;
     lastPage.current = route.name;
     if (from === route.name || !LIST_PAGES.has(route.name)) return;
-    const returning = (from === "review" || from === "inquiry") && left.current?.page === route.name;
+    const returning = (from === "review" || from === "inquiry" || from === "session") && left.current?.page === route.name;
     window.scrollTo(0, returning ? left.current!.y : 0);
   }, [route.name]);
 
@@ -454,7 +454,7 @@ export function App() {
   useEffect(() => {
     const from = lastRoute.current;
     lastRoute.current = route.name;
-    const trip = (n: Route["name"]) => n === "review" || n === "inquiry";
+    const trip = (n: Route["name"]) => n === "review" || n === "inquiry" || n === "session";
     if (trip(route.name) || trip(from)) return;
     setSelected(null);
     setLaneSel(null);
@@ -470,7 +470,12 @@ export function App() {
       return;
     }
     setReviewFrom(
-      route.name === "settings" || route.name === "inquiry" || route.name === "item" || route.name === "doc" || route.name === "log"
+      route.name === "settings" ||
+        route.name === "inquiry" ||
+        route.name === "session" ||
+        route.name === "item" ||
+        route.name === "doc" ||
+        route.name === "log"
         ? "queue"
         : route.name,
     );
@@ -1019,7 +1024,7 @@ export function App() {
   // A session's triage: it fades off the list at once, and comes back if the desk refuses.
   function sessionAct(s: SessionCard, action: "done" | "snooze" | "mute", until = "tomorrow") {
     if (selected === s.id) setSelected(null);
-    if (expanded === s.id) setExpanded(null);
+    if (route.name === "session" && route.id === s.id) go({ name: "queue" });
     setLeaving((x) => new Set(x).add(s.id));
     runUi(
       api.act(s.id, action, action === "snooze" ? until : undefined).pipe(
@@ -1735,7 +1740,7 @@ export function App() {
   // row would; with neither, the list's first or last. Merging steps through its PRs.
   const stepAt = useRef<string | null>(null);
   function stepTo(by: 1 | -1) {
-    const shown = route.name === "review" ? route.id : route.name === "inquiry" ? inquiryOf(route.id) : null;
+    const shown = route.name === "review" || route.name === "session" ? route.id : route.name === "inquiry" ? inquiryOf(route.id) : null;
     if (laneList) {
       const at = laneRows.findIndex((r) => r.card.id === (shown ?? laneSel));
       const to = laneRows[at < 0 ? (by > 0 ? 0 : laneRows.length - 1) : at + by];
@@ -1757,10 +1762,9 @@ export function App() {
       setExpanded(null);
       openInquiry(q);
     } else if (s) {
-      // A session opens in place on the Inbox, as an issue does.
-      if (route.name === "review" || route.name === "inquiry") go({ name: "queue" });
+      setExpanded(null);
       setSelected(s.id);
-      setExpanded(s.id);
+      go({ name: "session", id: s.id });
     } else if (c?.kind === "pr") {
       setExpanded(null);
       openCard(c);
@@ -1796,7 +1800,7 @@ export function App() {
       return;
     }
     if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
-    if (route.name === "review" || route.name === "inquiry" || route.name === "log") return; // they read their own Esc
+    if (route.name === "review" || route.name === "inquiry" || route.name === "session" || route.name === "log") return; // they read their own Esc
     const onList = LIST_PAGES.has(route.name) || route.name === "inflight"; // where the search reads a list
     const part = route.name === "settings" ? settingsBack(route.section) : null;
     if (onList && pickedOn.length) setPicked([]);
@@ -1819,7 +1823,12 @@ export function App() {
     const mod = (MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey) && !e.altKey && !e.shiftKey && !e.isComposing;
     const digit = /^Digit([1-4])$/.exec(e.code)?.[1];
     const bracket = e.code === "BracketLeft" ? -1 : e.code === "BracketRight" ? 1 : 0;
-    const listed = LIST_PAGES.has(route.name) || route.name === "inflight" || route.name === "review" || route.name === "inquiry";
+    const listed =
+      LIST_PAGES.has(route.name) ||
+      route.name === "inflight" ||
+      route.name === "review" ||
+      route.name === "inquiry" ||
+      route.name === "session";
     if (mod && digit && !(e.target instanceof HTMLElement && e.target.closest(".hotkey"))) {
       if (!e.repeat) go({ name: SIDE_PAGES[Number(digit) - 1]! });
       e.preventDefault();
@@ -1972,17 +1981,62 @@ export function App() {
   const ses: SessionCtx = {
     now,
     selected,
-    expanded,
     leaving,
     select: (s) => {
       setSelected(s.id);
     },
-    toggle: (s) => {
+    open: (s) => {
       setSelected(s.id);
-      setExpanded(expanded === s.id ? null : s.id);
+      go({ name: "session", id: s.id });
     },
     act: sessionAct,
     start: sessionStart,
+  };
+  // A session's page: your reply goes as its next turn, and it's off the list at once; a refusal is a bubble, and the page
+  // keeps your words.
+  const sesPage: SessionPageCtx = {
+    reply: (v, text) =>
+      api.replySession(v.id, text).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            gone.show(v.id, loadSeq.current);
+            flash(`Sent to ${v.name}: it carries on in the background.`);
+            refresh(0);
+          }),
+        ),
+        Effect.as(true),
+        Effect.catch((e) => Effect.as(failed(e), false)),
+      ),
+    open: (v) => {
+      runUi(
+        api.openSession(v.id).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              flash(`Opened ${v.name}.`);
+            }),
+          ),
+          Effect.catch(failed),
+        ),
+      );
+    },
+    copy: (text) => {
+      runUi(
+        copyText(text).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              flash("Copied. Run it in a terminal to open the session.");
+            }),
+          ),
+          Effect.catch(failed),
+        ),
+      );
+    },
+    done: (c) => {
+      sessionAct(c, "done");
+    },
+    back: () => {
+      go({ name: "queue" });
+    },
   };
   const inq = {
     now,
@@ -2236,6 +2290,7 @@ export function App() {
               onLoad={setPageQuestion}
             />
           )}
+          {route.name === "session" && !broken && <SessionPage key={route.id} id={route.id} loads={loads} now={now} ctx={sesPage} />}
           {route.name === "inflight" && !broken && (
             <Inflight
               view={laneShown}

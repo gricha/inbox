@@ -1551,6 +1551,7 @@ export const SESSION_KIND: Record<SessionKind, string> = { cli: "CLI", backgroun
 // kick: start a background one again; resume: a terminal's whose process is gone, in the background; attach: copy
 // `claude attach <id>` for a background one that runs; open: the desktop app's or Codex's own link.
 export type SessionAction = "kick" | "resume" | "attach" | "open";
+export const KICK = "Continue where you left off."; // what Kick says to a session, and the page's one-click Continue
 export interface SessionCard {
   id: string; // "session:<its id>": its ref on the desk
   session_id: string; // Claude Code's session id, or Codex's thread id

@@ -14,6 +14,7 @@ import { elements, isRecord, jsonOf, num, str } from "../narrow.ts";
 import { runCommand } from "../review.ts";
 import {
   isCoordinator,
+  KICK,
   SESSION_PREFIX,
   type SessionAction,
   type SessionCard,
@@ -33,7 +34,6 @@ const CLI_RECENT = 24 * 3_600_000; // a terminal's session no longer running, by
 const ASK_MAX = 2000; // characters of a turn's last message the model reads
 const ASKS_PER_POLL = 3;
 const LINE = 160;
-export const KICK = "Continue where you left off.";
 const TALK = 512 * 1024; // bytes of a transcript a session's page reads
 const TURNS = 30; // turns a page shows; the rest of what it read fold
 const TURN_MAX = 4000; // characters of one turn's text
@@ -418,7 +418,7 @@ export function readTalk(text: string): Talk {
         const input = obj(b.input);
         const name = str(b.name) ?? "a tool";
         pending.set(str(b.id)!, { name, input });
-        turns.tool(at, toolLine(name, input));
+        if (name !== "AskUserQuestion" && name !== "ExitPlanMode") turns.tool(at, toolLine(name, input)); // the page shows them as what it waits on
         lastWasCall = true;
       }
     }
