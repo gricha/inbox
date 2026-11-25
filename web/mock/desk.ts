@@ -3267,6 +3267,7 @@ function overview(): Overview {
     },
     inflight: { total: recs.filter(inFlight).length },
     agent: setting("agent.coordinator"),
+    open_next: setting("queue.open_next"),
     ai_agent: agentName(setting("agent.harness")),
     rate_limit: rateLimit(),
   };

@@ -115,6 +115,7 @@ const overview: Overview = {
   focus: { now: 1, today: 1, new: 1, asks: 0, sessions: 0 },
   inflight: { total: 0 },
   agent: true,
+  open_next: false,
   ai_agent: "Claude",
   rate_limit: { remaining: 4800, reset_at: ago(-1) },
 };

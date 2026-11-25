@@ -2157,6 +2157,7 @@ export class Desk {
         },
         inflight: { total: [...snap.entries.values()].filter((e) => e.inflight).length },
         agent: this.settings["agent.coordinator"],
+        open_next: this.settings["queue.open_next"],
         ai_agent: agentName(this.settings["agent.harness"]),
         rate_limit: this.gh.api.rateLimit(),
         update: this.updates.view(),

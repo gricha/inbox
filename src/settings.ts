@@ -344,6 +344,14 @@ export const SETTINGS = [
     help: "What your rules or an automation sort to FYI goes there too; asked of you by name or pinned, never.",
   },
   {
+    key: "queue.open_next",
+    section: "queue",
+    label: "Open the next item after you act in a review",
+    type: "boolean",
+    default: false,
+    help: "After Approve, Done and the like. Off, the review stays and says what you did.",
+  },
+  {
     key: "notify.enabled",
     section: "queue",
     label: "Notify me when something needs me",

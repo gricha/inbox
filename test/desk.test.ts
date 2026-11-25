@@ -54,6 +54,14 @@ test("sync fills boards, focus and status", async () => {
   await t.cleanup();
 });
 
+test("the window opens the next item after you act in a review only once you turn it on", async (c) => {
+  const t = await setup([]);
+  c.after(t.cleanup);
+  assert.equal(runSync(t.desk.overview()).open_next, false, "a review stays by default");
+  runSync(t.desk.putSettings({ set: { "queue.open_next": true } }));
+  assert.equal(runSync(t.desk.overview()).open_next, true);
+});
+
 test("a sync forgets an automation's find about an item the desk no longer holds", async (c) => {
   const t = await setup([reviewAsk(1)]);
   c.after(t.cleanup);

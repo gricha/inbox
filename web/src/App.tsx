@@ -721,6 +721,8 @@ export function App() {
   );
   const itemOrderRef = useRef(itemOrder);
   itemOrderRef.current = itemOrder;
+  const openNextRef = useRef(false);
+  openNextRef.current = overview?.open_next ?? false;
   // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
   const known = useMemo(() => {
     const m = new Map<string, Card>();
@@ -1330,9 +1332,9 @@ export function App() {
       const around = itemOrder;
       const inReview = routeRef.current.name === "review" && routeRef.current.id === c.id;
       const leaves = c.status === "active" && !c.resolved; // a cleared item stays in the Archive
-      // A review that stays open keeps its row selected until GitHub has the write.
-      const moved = !inReview ? hide([c.id]) : next === "now" && leaves ? moveOff([c.id]) : null;
       const there = next === "now" && leaves ? advance(c.id, around) : null;
+      // A review that gave way hands its selection to what it opened. One that stays keeps it until GitHub has the write.
+      const moved = !inReview ? hide([c.id]) : there ? { from: c.id, to: there.id } : null;
       flash(sending, false, false, 60_000, true);
       return write.pipe(
         Effect.matchEffect({
@@ -1874,7 +1876,7 @@ export function App() {
   // Opens the item that takes the open review's place, as ⌘] would, and returns where, so a refusal can come back.
   function advance(id: string, around: string[]): Took | null {
     const r = routeRef.current;
-    if (r.name !== "review" || r.id !== id) return null; // you went elsewhere meanwhile
+    if (!openNextRef.current || r.name !== "review" || r.id !== id) return null; // off, or you went elsewhere meanwhile
     const still = itemOrderRef.current;
     const to = nextOf(around, id, (x) => !still.includes(x));
     if (!to) return null;
