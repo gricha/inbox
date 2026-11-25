@@ -11,6 +11,7 @@ export function Beside({
   open,
   selected,
   onFold,
+  filters,
   children,
 }: {
   name: string;
@@ -18,6 +19,7 @@ export function Beside({
   open: boolean;
   selected: string | null; // the open item's row
   onFold: () => void;
+  filters: ReactNode; // the page head's, so the list keeps them while an item is open
   children: ReactNode;
 }) {
   const body = useRef<HTMLDivElement>(null);
@@ -48,6 +50,7 @@ export function Beside({
           <h2 className="beside-name">
             {name} {!!count && <span className="count">{count}</span>}
           </h2>
+          {filters}
         </div>
       )}
       <button

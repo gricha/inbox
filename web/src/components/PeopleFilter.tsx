@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cls } from "../format.ts";
-import { FILTER_KEYS, filterOf, filterRest, parseFilter, type FilterKey } from "../filter.ts";
+import { FILTER_KEYS, parseFilter, withPeople, type FilterKey } from "../filter.ts";
 import { Avatar } from "./Avatar.tsx";
 import type { FilterPerson } from "./Filter.tsx";
 
@@ -9,7 +9,7 @@ const KEY_HELP: Record<FilterKey, string> = { author: "Who opened it", involves:
 
 // The page's filter by person: one icon button on the page's head, its count of picks on it, and a popover of the people on
 // the desk under Author and Involves, a click to pick or unpick each. The picks are the query's author:/involves: terms, so
-// the sidebar's search words still apply with them.
+// the sidebar's search words and the head's kind of row still apply with them.
 export function PeopleFilter({
   filter,
   setFilter,
@@ -23,8 +23,7 @@ export function PeopleFilter({
 }) {
   const [open, setOpen] = useState(false);
   const [find, setFind] = useState("");
-  const picks = parseFilter(filter).terms.filter((t) => t.done && t.who);
-  const rest = filterRest(filter);
+  const picks = parseFilter(filter).terms.flatMap((t) => (t.done && t.who && t.key !== "is" ? [{ key: t.key, who: t.who }] : []));
   const isYou = (who: string) => who === "you" || who === "me" || (!!me && who === me);
   const picked = (key: FilterKey, login: string) => picks.some((t) => t.key === key && (t.who === login || (login === me && isYou(t.who))));
 
@@ -32,7 +31,7 @@ export function PeopleFilter({
     const next = picked(key, login)
       ? picks.filter((t) => !(t.key === key && (t.who === login || (login === me && isYou(t.who)))))
       : [...picks, { key, who: login === me ? "you" : login }];
-    setFilter(filterOf(next, rest));
+    setFilter(withPeople(filter, next));
   }
 
   // Esc closes it, before the page reads it as "back" or "clear".
@@ -139,7 +138,7 @@ export function PeopleFilter({
                 type="button"
                 className="pop-item people-clear"
                 onClick={() => {
-                  setFilter(filterOf([], rest));
+                  setFilter(withPeople(filter, []));
                 }}
               >
                 Clear

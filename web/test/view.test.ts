@@ -86,7 +86,7 @@ import {
 import { checkDot, checkGroups } from "../src/checks.ts";
 import { hashOf } from "../../src/links.ts";
 import { bulkMenu, fyiShown, logLine, pickRange, pickToggle } from "../src/groups.ts";
-import { filterOf, filterPeople, filterRest, githubRef, parseFilter } from "../src/filter.ts";
+import { filterOf, filterPeople, filterRest, githubRef, parseFilter, shownKind, toggleShow, withPeople } from "../src/filter.ts";
 import { afterText, chainLabel, stepGuides, stepOf, toggled, waitingSteps } from "../src/groups.ts";
 import { remindTime } from "../src/groups.ts";
 import type { WaitingStep } from "../../src/types.ts";
@@ -1468,6 +1468,35 @@ test("the filter's people: author: and involves: as pills once a space follows, 
     { login: "marco", author: false },
     { login: "me", author: true },
   ]);
+});
+
+test("the filter's kinds of row: is:quick, is:reply and is:oneclick, one at a time from the head's buttons, the person picks and words kept", () => {
+  assert.deepEqual(parseFilter("is:quick fix").terms, [{ key: "is", who: "quick", done: true }]);
+  assert.equal(filterRest("is:quick author:dana fix"), "fix");
+
+  const rows = [
+    card("acme/api#1", { quick: "Quick to review: low risk, 24 lines" }),
+    card("acme/api#2", { author: "priya", by: "priya" }),
+    card("acme/web#3", { cta: "reply", author: "me", by: "you" }),
+    card("acme/web#4", { cta: "ready", author: "me", by: "you" }),
+    card("acme/web#5", { cta: "reviewers", author: "me", by: "you" }),
+    card("acme/web#6", { cta: "handoff", author: "me", by: "you" }),
+  ];
+  const view = { ...queue(), inbox: { urgent: rows, standard: [], fyi: [] } };
+  const ids = (f: string) => navigable(main(groupsOf(view, DEFAULT_OPEN, f, "me")), new Set()).map((c) => c.id);
+  assert.deepEqual(ids("is:quick "), ["acme/api#1"]);
+  assert.deepEqual(ids("is:reply "), ["acme/web#3"]);
+  assert.deepEqual(ids("is:oneclick "), ["acme/web#4", "acme/web#5", "acme/web#6"]);
+  assert.deepEqual(ids("is:quick author:priya "), [], "with a person picked too");
+  assert.deepEqual(ids("is:quick is:reply "), ["acme/api#1", "acme/web#3"], "two typed: either");
+  assert.equal(ids("is:qu").length, rows.length, "a kind still being typed filters nothing");
+
+  assert.equal(shownKind("author:dana is:reply fix"), "reply");
+  assert.equal(shownKind("author:dana fix"), null);
+  assert.equal(toggleShow("author:dana fix", "quick"), "is:quick author:dana fix");
+  assert.equal(toggleShow("is:quick author:dana fix", "reply"), "is:reply author:dana fix", "one at a time");
+  assert.equal(toggleShow("is:quick fix", "quick"), "fix");
+  assert.equal(withPeople("is:quick author:dana fix", [{ key: "involves", who: "pri" }]), "is:quick involves:pri fix");
 });
 
 test("a pasted GitHub link to a PR or an issue is its id, and as the search it finds only that row", () => {

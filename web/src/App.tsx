@@ -67,6 +67,7 @@ import { Later, Queue } from "./components/Queue.tsx";
 import { stepDrops, useReorder } from "./components/Reorder.tsx";
 import type { SessionCtx } from "./components/Session.tsx";
 import { PeopleFilter } from "./components/PeopleFilter.tsx";
+import { ShowFilter } from "./components/ShowFilter.tsx";
 import { Review } from "./components/Review.tsx";
 import { ItemLog } from "./components/ItemLog.tsx";
 import { type RuleFocus } from "./components/Rules.tsx";
@@ -624,7 +625,13 @@ export function App() {
     at.focus();
     setLanding(null);
   });
-  const peopleFilter = <PeopleFilter filter={filter} setFilter={setFilter} people={people} me={me} />;
+  // The page's filters, on its head or on the list beside an open item: the kinds of row, then the filter by person.
+  const filters = (
+    <div className="head-filters">
+      <ShowFilter filter={filter} setFilter={setFilter} />
+      <PeopleFilter filter={filter} setFilter={setFilter} people={people} me={me} />
+    </div>
+  );
   // The selection goes through the page on screen: the queue, or Later's groups; in a review, the page it came from.
   const list = route.name === "review" ? reviewFrom : route.name;
   const page = useMemo(() => {
@@ -2089,6 +2096,7 @@ export function App() {
           open={side === "open"}
           selected={openSel}
           onFold={foldList}
+          filters={filters}
         >
           {besideRows}
         </Beside>
@@ -2099,7 +2107,7 @@ export function App() {
           <PageHead
             route={route}
             from={reviewFrom}
-            people={peopleFilter}
+            filters={filters}
             onNote={() => {
               setCommenting(null);
               setNoting("new");
