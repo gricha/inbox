@@ -353,7 +353,7 @@ interface Card {
   section?: "urgent" | "standard" | "fyi"; // on the Inbox
   score?: number; // on the Inbox: 0 to 10
   reason?: string; // on the Inbox: the row's quiet why
-  quick?: string; // someone else's PR that's quick to review: "low risk, 24 lines"
+  quick?: string; // someone else's PR that's quick to review: "Quick to review: low risk, 24 lines"
   waiting?: WaitingStep[]; // a chain's head: the steps that wait on it, in the order they run (see After chains)
 }
 
