@@ -1159,6 +1159,26 @@ export interface ReviewView {
   reading_error: string | null; // its last try on this PR failed
   asks: Ask[]; // yours to your agent about it, oldest first
   viewed: string[]; // the marks of hunks (or of files without one) you marked viewed; a mark a push rewrote matches nothing on screen
+  deep: DeepReview | null; // the latest deep review (src/deep.ts), even of an older commit
+  deep_running: string | null; // when the one running now started
+  deep_error: string | null; // the last one's failure, in your words
+}
+
+// A deep review (src/deep.ts): an adversarial pass that checked the PR's premises against the repo, ran its tests and
+// probed behaviour, keeping only what it proved, the questions only a person can answer, and fixes for the author.
+export interface DeepReview {
+  intent: string; // one line: the problem it solves and how
+  intent_from: "stated" | "inferred" | "missing";
+  lean: "ship" | "fix first" | "rethink";
+  premises: { premise: string; verdict: "holds" | "fails" | "unknown"; evidence: string }[];
+  wrong: { what: string; why: string; evidence: string[]; severity: "blocker" | "fix" }[];
+  ask: { question: string; why: string }[];
+  author_fixes: string[];
+  checked: { summary: string; tests: string; probes: number };
+  head_oid: string; // the commit it read
+  model: string;
+  at: string;
+  seconds: number; // how long it took
 }
 
 // One check on a PR's head commit: a check run (an Actions job, an app's) or a commit status. Its name is untrusted GitHub text.

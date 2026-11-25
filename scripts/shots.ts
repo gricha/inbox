@@ -2129,7 +2129,10 @@ const SHOTS: Shot[] = [
       await review("acme/api#4127")(page);
       const seen = await page.evaluate<{ file: number; box: boolean }>(`(() => {
         const box = document.querySelector(".rv-comment-input");
-        return { file: Math.round(document.querySelector(".rv-file-sec, .rv-step").getBoundingClientRect().top), box: !!box && box.getBoundingClientRect().height > 0 };
+        // The deep review leads on purpose; everything else above the diff still has to fit.
+        const dp = document.querySelector(".dp");
+        const deep = dp?.previousElementSibling ? dp.getBoundingClientRect().bottom - dp.previousElementSibling.getBoundingClientRect().bottom : 0;
+        return { file: Math.round(document.querySelector(".rv-file-sec, .rv-step").getBoundingClientRect().top - deep), box: !!box && box.getBoundingClientRect().height > 0 };
       })()`);
       if (seen.box) failures.push("review-top: the comment box shows outside the Conversation tab");
       if (seen.file > 386) failures.push(`review-top: the diff starts ${seen.file}px down the window, past 386`);
@@ -2844,6 +2847,51 @@ const SHOTS: Shot[] = [
   },
   // Your own draft's one call to action is Ready for review; your ready PR's is Hand off for merge.
   { name: "review-draft", go: review("acme/web#2303") },
+  {
+    // A deep review leads the review, under its title: the lean, the intent, what's wrong with its evidence, what only you
+    // can answer; a path:line in its evidence opens that line of the diff.
+    name: "review-deep",
+    go: async (page) => {
+      await review("acme/api#4127")(page);
+      const deep = page.locator(".dp");
+      if (!(await deep.count())) {
+        failures.push("review-deep: no deep review");
+        return;
+      }
+      if ((await deep.locator(".dp-lean").innerText()) !== "Fix first") failures.push("review-deep: the lean isn't Fix first");
+      if (!(await deep.locator(".dp-wrong").count()) || !(await deep.locator(".dp-part h3", { hasText: "Only you can answer" }).count()))
+        failures.push("review-deep: what's wrong or what only you can answer is missing");
+      if (!inOrder(await tops(page, [".rv-title", ".dp", ".rv-ai"])))
+        failures.push("review-deep: it isn't between the title and the AI review");
+      const link = deep.locator("button.dp-at").first();
+      if (!(await link.count())) {
+        failures.push("review-deep: no path:line opens the diff");
+        return;
+      }
+      await link.click();
+      await page.waitForTimeout(400);
+    },
+  },
+  {
+    // Run deep review on a PR without one: it says it's running at once, then the desk's result takes its place.
+    name: "review-deep-run",
+    writes: true,
+    go: async (page) => {
+      await review("acme/web#2303")(page);
+      const run = page.locator(".dp-run", { hasText: "Run deep review" });
+      if (!(await run.count())) {
+        failures.push("review-deep-run: no Run deep review");
+        return;
+      }
+      await run.click();
+      if (!(await page.locator(".dp-meta", { hasText: "Running" }).count()))
+        failures.push("review-deep-run: it doesn't say it's running at once");
+      await page
+        .locator(".dp-lean")
+        .waitFor({ timeout: 10_000 })
+        .catch(() => failures.push("review-deep-run: no result after it ran"));
+    },
+  },
   // A bot's PR opened for someone says who and through which bot, on its row and in its review's header.
   {
     name: "review-via",

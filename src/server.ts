@@ -575,6 +575,17 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
   );
   // Hunks of a PR you marked viewed, or unmarked: { marks, viewed }. It writes nothing to GitHub, but a mark folds code away,
   // so only your hands make one.
+  // As an AI review is: your window or your own agent may start one; it writes nothing outward.
+  app.post("/api/review/:id{.+}/deep", (c) =>
+    respond(
+      c,
+      Effect.gen(function* () {
+        yield* up;
+        return yield* desk.deepReview(c.req.param("id"));
+      }),
+      { log },
+    ),
+  );
   app.post("/api/review/:id{.+}/viewed", (c) =>
     write(c, "mark what you've viewed from the PR's review in the desk's window", (b) => {
       const marks = stringsOf(b.marks);

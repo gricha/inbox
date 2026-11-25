@@ -82,6 +82,7 @@ import { CI, HandButton, ActButton, REVIEW } from "./Detail.tsx";
 import type { Spot } from "./Chat.tsx";
 import { Composer, Conversation, threadOf, type Said } from "./Conversation.tsx";
 import { AiSection, type AiShown } from "./AiSection.tsx";
+import { DeepSection } from "./DeepSection.tsx";
 import { Diagram } from "./Diagram.tsx";
 import { MoreButton, MoreMenu, WriteBox } from "./More.tsx";
 import { SaidText, spans, Words } from "./Prose.tsx";
@@ -234,6 +235,8 @@ export function Review({
   const [over, setOver] = useState(false); // without room, Files opened it over the diff
   const showSide = (room ? side : over) && !chat; // with room it's always there: no toggle hides it
   const [busy, setBusy] = useState<"ai" | null>(null);
+  // Run deep review pressed, and the result on screen then: shown running until the desk's read has it running or a new one.
+  const [deepAsked, setDeepAsked] = useState<{ at: string; was: string | null } | null>(null);
   const [drawn, setDrawn] = useState(0); // sections drawn past the first screenful
   const [picked, setPicked] = useState<Reviewer[]>([]); // who Ready for review asks
   // Each file's whole text before and after, read once per commit, so a hunk's band opens more lines on the first click.
@@ -699,6 +702,23 @@ export function Review({
     setSide(!side);
   }
 
+  // Starts the PR's deep review; the desk marks it running before it answers, so the next read shows it.
+  function runDeep() {
+    if (!v) return;
+    setDeepAsked({ at: new Date().toISOString(), was: v.deep?.at ?? null });
+    runUi(
+      api.deepReview(v.card.id).pipe(
+        Effect.match({
+          onSuccess: () => {},
+          onFailure: (e) => {
+            setDeepAsked(null);
+            flash(e.message, true);
+          },
+        }),
+      ),
+    );
+  }
+
   function askAi() {
     if (!v || busy === "ai") return;
     if (v.generating) {
@@ -1096,6 +1116,21 @@ export function Review({
         <div className="rv-main" id="rv-panel" role="tabpanel" aria-label={talking ? "Conversation" : guiding ? "Review" : "Code changes"}>
           <div className="rv-top">
             <Head card={card} me={me} now={now} resolved={resolved?.line ?? null} row={row} ai={aiShown ? ai : null} />
+            <DeepSection
+              deep={view.deep}
+              running={
+                view.deep_running ??
+                (deepAsked && (view.deep?.at ?? null) === deepAsked.was && now - Date.parse(deepAsked.at) < 15_000 ? deepAsked.at : null)
+              }
+              error={view.deep_error}
+              stale={!!view.deep && view.deep.head_oid !== item.head_oid}
+              files={view.files}
+              repo={item.repo}
+              head={item.head_oid}
+              now={now}
+              onRun={runDeep}
+              onLine={toLine}
+            />
             {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
             {isMine && !ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
             {/* Your own PR gets no AI review unless one was asked for; More still asks. */}

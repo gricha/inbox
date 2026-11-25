@@ -680,6 +680,7 @@ export interface AskOpts {
   model?: string; // a model its CLI takes (the light model's); none, your agent's own default
   effort?: string; // how hard it thinks (the light model's): Claude Code's --effort, Codex's reasoning effort; OpenCode takes none
   read?: boolean; // dir is a repo's code for it to read (src/checkout.ts), with read-only tools
+  probe?: boolean; // a deep review's (src/deep.ts): in that checkout it may also run tests and write probes, never write outward
   mcp?: YourMcp; // an AI review's: your own MCP servers, to read through
 }
 
@@ -746,6 +747,31 @@ export const makeAgentDir = (home: string): Effect.Effect<string, FsError> =>
 const GITHUB_READS = "Bash(gh api -X GET:*),Bash(gh search code:*)";
 // What fences a run that has tools: these and, with MCP servers, theirs (every tool of each, whatever you allowed).
 const FENCED = ["--permission-mode", "default", "--setting-sources", "user", "--settings", JSON.stringify({ disableAllHooks: true })];
+// A probing run does anything in its throwaway checkout but write outward: no push, nothing written to GitHub.
+const PROBE_DENY = [
+  "git push",
+  "git remote",
+  "gh api",
+  "gh auth",
+  ...["review", "comment", "merge", "close", "edit", "create", "ready", "reopen", "checkout"].map((c) => `gh pr ${c}`),
+  ...["comment", "create", "edit", "close"].map((c) => `gh issue ${c}`),
+  "gh release",
+  "gh repo",
+  "gh workflow",
+  "gh run",
+  "gh secret",
+  "gh gist",
+].map((c) => `Bash(${c}:*)`);
+const PROBING = [
+  "--permission-mode",
+  "bypassPermissions",
+  "--disallowedTools",
+  PROBE_DENY.join(","),
+  "--setting-sources",
+  "user",
+  "--settings",
+  JSON.stringify({ disableAllHooks: true }),
+];
 
 export const askClaude = Effect.fn("askClaude")(function* (
   prompt: string,
@@ -762,10 +788,10 @@ export const askClaude = Effect.fn("askClaude")(function* (
         "--output-format",
         "json",
         "--tools",
-        opts.read ? "Read,Grep,Glob,Bash" : "",
-        ...(allowed.length ? ["--allowedTools", allowed.join(","), ...FENCED] : []),
+        opts.probe ? "Read,Grep,Glob,Bash,Write,Edit" : opts.read ? "Read,Grep,Glob,Bash" : "",
+        ...(opts.probe ? PROBING : allowed.length ? ["--allowedTools", allowed.join(","), ...FENCED] : []),
         "--strict-mcp-config",
-        ...(file ? ["--mcp-config", file] : []),
+        ...(file && !opts.probe ? ["--mcp-config", file] : []),
         "--no-session-persistence",
         "--json-schema",
         JSON.stringify(opts.schema ?? SCHEMA),
