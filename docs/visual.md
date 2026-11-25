@@ -171,8 +171,8 @@ The window's scrollbar is thin (10px), a faint rounded thumb on no track, and st
 
 - Sticky, 52px (as tall as the brand row and the list's head), on `--chrome`, a hairline under it. It's a drag handle,
   its controls excepted.
-- It holds only the page's own: a list's name, the filter by person and New note (its search is in the sidebar);
-  Merging's name and the filter by person; a Settings part's name (on the rows' text); or Back for a question, a review
+- It holds only the page's own: a list's name, the filters (the kinds of row, then the filter by person) and New note
+  (its search is in the sidebar); Merging's name and the filters; a Settings part's name (on the rows' text); or Back for a question, a review
   document or a Settings view ("‹ Inbox", "‹ GitHub", "‹ Automations"). A review has its own bar in its place.
 
 ### A list page

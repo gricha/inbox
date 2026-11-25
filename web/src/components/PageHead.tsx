@@ -17,12 +17,12 @@ export function PageHead({
   route,
   from,
   onNote,
-  people,
+  filters,
 }: {
   route: Route;
   from: ListPage; // where a question or a review document goes back to
   onNote: () => void;
-  people: ReactNode; // the filter by person, on a list's head and Merging's
+  filters: ReactNode; // the kinds of row and the filter by person, on a list's head and Merging's
 }) {
   const inSettings = route.name === "settings";
   const part = inSettings ? settingsBack(route.section) : null;
@@ -41,7 +41,7 @@ export function PageHead({
       ) : route.name === "inflight" ? (
         <>
           <h1 className="head-name">Merging</h1>
-          {people}
+          {filters}
         </>
       ) : route.name === "inquiry" || route.name === "doc" ? (
         <a
@@ -59,7 +59,7 @@ export function PageHead({
           {route.name === "queue" || route.name === "blocked" || route.name === "archive" ? (
             <h1 className="head-name">{PAGE_NAME[route.name]}</h1>
           ) : null}
-          {people}
+          {filters}
           <button
             type="button"
             className="act head-note"

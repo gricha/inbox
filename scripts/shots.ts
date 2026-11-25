@@ -913,6 +913,10 @@ const SHOTS: Shot[] = [
       if (head !== "InboxNew note") failures.push(`queue: the page head reads ${JSON.stringify(head)}, not the page's name`);
       if (!(await page.locator(".side-search .search input").count())) failures.push("queue: no filter at the top of the sidebar");
       if (await page.locator(".bubble").count()) failures.push("queue: a bubble while nothing's wrong");
+      const quick = await page.evaluate<string | null>(
+        `document.querySelector('.queue .line[data-id="${SECOND_URGENT}"] .line-quick')?.getAttribute("data-tip") ?? null`,
+      );
+      if (quick !== "Quick to review: low risk, 38 lines") failures.push(`queue: the quick bolt's tip is ${JSON.stringify(quick)}`);
       // Its sections under their headings, Urgent led by an agent's question, a row like the rest; a hand-back saying so on
       // its own row at every width; each row saying why it's there; every row shown, no "n more".
       const list = await page.evaluate<{
@@ -2243,6 +2247,48 @@ const SHOTS: Shot[] = [
       if (left.open || !left.review) failures.push(`beside-issue: after Esc, ${JSON.stringify(left)}`);
       if (left.open) await page.locator(".beside .line.open .card-keys .act", { hasText: "Close" }).last().click();
     },
+  },
+  // The list beside a review keeps the page's filters on its head, on one line; Quick reviews filters the list, the review stays.
+  {
+    name: "beside-filters",
+    sizes: ["wide", "mac", "xl"],
+    go: async (page) => {
+      await at("#/")(page);
+      await review("acme/api#4127")(page);
+      const head = () =>
+        page.evaluate<{ buttons: number; fits: boolean; width: number }>(`(() => {
+          const head = document.querySelector(".beside-head").getBoundingClientRect();
+          const name = document.querySelector(".beside-name").getBoundingClientRect();
+          const buttons = [...document.querySelectorAll(".beside-head .head-filter")].map((b) => b.getBoundingClientRect());
+          const fits = buttons.every((b) => b.left >= name.right && b.right <= head.right && b.top >= head.top && b.bottom <= head.bottom);
+          return { buttons: buttons.length, fits, width: Math.round(head.width) };
+        })()`);
+      const usual = await head();
+      if (usual.buttons !== 4 || !usual.fits) failures.push(`beside-filters: the list's head has ${JSON.stringify(usual)}`);
+      // At its narrowest the buttons still fit beside the list's name.
+      const edge = await page.locator(".beside-resize").boundingBox();
+      if (edge) {
+        await page.mouse.move(edge.x + edge.width / 2, edge.y + 300);
+        await page.mouse.down();
+        await page.mouse.move(Math.max(1, edge.x - 400), edge.y + 300, { steps: 6 });
+        await page.mouse.up();
+        const narrow = await head();
+        if (!narrow.fits || narrow.width > 280)
+          failures.push(`beside-filters: at its narrowest the list's head has ${JSON.stringify(narrow)}`);
+        await page.locator(".beside-resize").dblclick();
+        await page.waitForTimeout(100);
+      }
+      await page.locator('.beside-head .head-filter[aria-label="Quick reviews"]').click();
+      await page.waitForTimeout(150);
+      const rows = await page.evaluate<{ rows: number; bolts: number; review: boolean }>(`({
+        rows: document.querySelectorAll(".beside .line[data-id]").length,
+        bolts: document.querySelectorAll(".beside .line[data-id] .line-quick").length,
+        review: location.hash.startsWith("#/review/"),
+      })`);
+      if (!rows.rows || rows.rows !== rows.bolts || !rows.review)
+        failures.push(`beside-filters: with Quick reviews on, ${JSON.stringify(rows)}`);
+    },
+    after: fresh,
   },
   // Folded, nothing's left of it but its button: the review's sidebar has room beside the diff again; kept on this device.
   {
@@ -6437,7 +6483,7 @@ const SHOTS: Shot[] = [
     name: "filter-people",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".page-head .head-filter").click();
+      await page.locator(".page-head .people-filter .head-filter").click();
       const groups = await page.locator(".people-pop .pop-title").allTextContents();
       if (groups.join(" ") !== "Author Involves") failures.push(`filter-people: the popover's groups are ${JSON.stringify(groups)}`);
       // Any part of a login finds it: jordan has "da" too.
@@ -6454,7 +6500,7 @@ const SHOTS: Shot[] = [
     name: "filter-pick",
     go: async (page) => {
       await at("#/")(page);
-      await page.locator(".page-head .head-filter").click();
+      await page.locator(".page-head .people-filter .head-filter").click();
       await page.keyboard.type("dana");
       await page.locator(".people-pop .people-group").first().locator(".pop-item").first().click();
       const count = await page.locator(".page-head .head-filter .pill-count").textContent();
@@ -6468,6 +6514,74 @@ const SHOTS: Shot[] = [
       await page.waitForTimeout(300);
     },
     after: fresh,
+  },
+  {
+    // The head's kinds of row, one at a time: Waiting on your reply shows only rows whose call to action is Reply, One click
+    // only Ready for review, Add reviewers or Hand off for merge, Quick reviews only the bolted rows; a second click every
+    // row. None of them counts as a person picked or puts words in the search.
+    name: "filter-kinds",
+    go: async (page) => {
+      await at("#/")(page);
+      const kind = (label: string) => page.locator(`.page-head .head-filter[aria-label="${label}"]`);
+      const rows = () =>
+        page.evaluate<{ ctas: string[]; bolts: number }>(`(() => {
+          const rows = [...document.querySelectorAll(".queue .line[data-id]")];
+          return { ctas: rows.map((r) => r.querySelector(".line-cta")?.textContent.trim() ?? ""), bolts: rows.filter((r) => r.querySelector(".line-quick")).length };
+        })()`);
+      const all = (await rows()).ctas.length;
+      const urgent = () => page.locator(".queue .g-urgent .group-head .count").textContent();
+      const counted = await urgent();
+      await kind("Waiting on your reply").click();
+      const reply = await rows();
+      if (!reply.ctas.length || reply.ctas.some((c) => c !== "Reply"))
+        failures.push(`filter-kinds: Waiting on your reply shows ${JSON.stringify(reply)}`);
+      await kind("One click").click();
+      const click = await rows();
+      if (!click.ctas.length || click.ctas.some((c) => !["Ready for review", "Add reviewers", "Hand off for merge"].includes(c)))
+        failures.push(`filter-kinds: One click shows ${JSON.stringify(click)}`);
+      await kind("Quick reviews").click();
+      const quick = await rows();
+      if (!quick.ctas.length || quick.bolts !== quick.ctas.length)
+        failures.push(`filter-kinds: Quick reviews shows ${JSON.stringify(quick)}`);
+      // Filtered, a section's heading counts what matches of what it holds, as Blocked's and the Archive's do.
+      const filtered = await urgent();
+      if (filtered !== `${quick.ctas.length} of ${counted}`)
+        failures.push(`filter-kinds: Urgent counts ${JSON.stringify(filtered)}, of ${counted}`);
+      const pressed = await page.locator('.page-head .head-filter[aria-pressed="true"]').getAttribute("aria-label");
+      if (pressed !== "Quick reviews") failures.push(`filter-kinds: the button that's on is ${JSON.stringify(pressed)}`);
+      if (await page.locator(".page-head .people-filter .pill-count").count())
+        failures.push("filter-kinds: the person filter counts a pick");
+      const words = await page.locator(".side-search .search input").inputValue();
+      if (words !== "") failures.push(`filter-kinds: the search box reads ${JSON.stringify(words)}`);
+      await kind("Quick reviews").click();
+      const back = (await rows()).ctas.length;
+      if (back !== all) failures.push(`filter-kinds: a second click shows ${back} rows of ${all}`);
+      await kind("Quick reviews").click(); // on for the shot
+      await page.waitForTimeout(300);
+    },
+    after: fresh,
+  },
+  {
+    // Each list page offers only the kinds of row it has: a button for a kind none of its rows are would show "No matches.".
+    name: "filter-kinds-pages",
+    sizes: ["wide"],
+    go: async (page) => {
+      for (const hash of ["#/", "#/blocked", "#/archive", "#/inflight"]) {
+        await at(hash)(page);
+        const seen = await page.evaluate<{ buttons: string[]; rows: string[] }>(`(() => {
+          const rows = [...document.querySelectorAll(".main .line[data-id]")];
+          const ctas = rows.map((r) => r.querySelector(".line-cta")?.textContent.trim() ?? "");
+          const has = [
+            rows.some((r) => r.querySelector(".line-quick")) && "Quick reviews",
+            ctas.includes("Reply") && "Waiting on your reply",
+            ctas.some((c) => ["Ready for review", "Add reviewers", "Hand off for merge"].includes(c)) && "One click",
+          ];
+          return { buttons: [...document.querySelectorAll(".page-head .head-filter[aria-pressed]")].map((b) => b.getAttribute("aria-label")), rows: has.filter(Boolean) };
+        })()`);
+        if (seen.buttons.join() !== seen.rows.join())
+          failures.push(`filter-kinds-pages: ${hash} offers ${JSON.stringify(seen.buttons)} for rows of ${JSON.stringify(seen.rows)}`);
+      }
+    },
   },
   {
     // A pasted GitHub link is the whole search: one the desk has is focused on its page; one it hasn't is added, a placeholder
