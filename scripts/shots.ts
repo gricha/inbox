@@ -6522,6 +6522,8 @@ const SHOTS: Shot[] = [
           return { ctas: rows.map((r) => r.querySelector(".line-cta")?.textContent.trim() ?? ""), bolts: rows.filter((r) => r.querySelector(".line-quick")).length };
         })()`);
       const all = (await rows()).ctas.length;
+      const urgent = () => page.locator(".queue .g-urgent .group-head .count").textContent();
+      const counted = await urgent();
       await kind("Waiting on your reply").click();
       const reply = await rows();
       if (!reply.ctas.length || reply.ctas.some((c) => c !== "Reply"))
@@ -6534,6 +6536,10 @@ const SHOTS: Shot[] = [
       const quick = await rows();
       if (!quick.ctas.length || quick.bolts !== quick.ctas.length)
         failures.push(`filter-kinds: Quick reviews shows ${JSON.stringify(quick)}`);
+      // Filtered, a section's heading counts what matches of what it holds, as Blocked's and the Archive's do.
+      const filtered = await urgent();
+      if (filtered !== `${quick.ctas.length} of ${counted}`)
+        failures.push(`filter-kinds: Urgent counts ${JSON.stringify(filtered)}, of ${counted}`);
       const pressed = await page.locator('.page-head .head-filter[aria-pressed="true"]').getAttribute("aria-label");
       if (pressed !== "Quick reviews") failures.push(`filter-kinds: the button that's on is ${JSON.stringify(pressed)}`);
       if (await page.locator(".page-head .people-filter .pill-count").count())
