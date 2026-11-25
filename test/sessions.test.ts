@@ -13,15 +13,19 @@ import {
   codexThreads,
   KICK,
   parseAgents,
+  readCodexTalk,
   readDesktopRecord,
   readRollout,
+  readTalk,
   readTranscript,
   Sessions,
   TAIL,
   untilText,
+  waitOf,
   type AgentRow,
   type Seen,
 } from "../src/connectors/sessions.ts";
+import type { SessionView } from "../src/types.ts";
 import { readTail } from "../src/coordinator.ts";
 import { createApp } from "../src/server.ts";
 import { setup, WINDOW_HEADERS } from "./helpers/desk.ts";
@@ -351,7 +355,20 @@ if (args[0] === "-p") {
 }
 log("calls", { args, cwd: process.cwd() });
 if (args[0] === "agents") process.stdout.write(fs.readFileSync(path.join(__dirname, "agents.json"), "utf8"));
-else if (args[0] === "--resume") console.log("backgrounded · kick01 · resumed");
+else if (args[0] === "--resume") {
+  // As claude does: the resumed turn lands in the session's own transcript, your words then its answer.
+  const file = path.join(__dirname, "..", ".claude", "projects", "-work", args[1] + ".jsonl");
+  const said = args.at(-1);
+  const at = new Date().toISOString();
+  const ev = (o) => JSON.stringify({ isSidechain: false, uuid: "r" + Math.random(), timestamp: at, cwd: process.cwd(), sessionId: args[1], ...o });
+  if (fs.existsSync(file))
+    fs.appendFileSync(
+      file,
+      ev({ type: "user", message: { role: "user", content: said } }) + "\\n" +
+        ev({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text: "On it: " + said }], stop_reason: "end_turn" } }) + "\\n",
+    );
+  console.log("backgrounded · kick01 · resumed");
+}
 `,
     { mode: 0o755 },
   );
@@ -732,4 +749,217 @@ test("off in Settings, it reads nothing and shows nothing", posix, async (c) => 
   const calls = m.calls().length;
   await t.poll();
   assert.equal(m.calls().length, calls, "no claude agents while it's off");
+});
+
+test("a session's page reads its turns: yours, its words, its tool calls folded to one line each, and what it waits on", () => {
+  const l = lines("aaaa-2", "/w");
+  const ask = {
+    questions: [
+      { question: "Push to main or open a PR?", options: [{ label: "Push to main", description: "Fast-forward" }, { label: "Open a PR" }] },
+    ],
+  };
+  const talk = readTalk(
+    [
+      l.prompt("<command-name>/clear</command-name>"),
+      l.prompt("Fix the flaky upload test"),
+      l.said("Looking at the retries."),
+      l.tool("t1", "Bash", { command: "npm test", description: "Run the tests" }),
+      l.result("t1"),
+      l.tool("t2", "Read", { file_path: "src/upload.ts" }),
+      l.result("t2"),
+      l.sidechain(),
+      l.apiError("overloaded", 529),
+      l.said("Found it: the retry swallows the timeout."),
+      l.said("Fixed."),
+      l.interrupted(),
+      l.tool("q1", "AskUserQuestion", ask),
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    talk.turns.map((t) => (t.who === "tools" ? ["tools", t.lines] : [t.who, t.text])),
+    [
+      ["you", "Fix the flaky upload test"],
+      ["agent", "Looking at the retries."],
+      ["tools", ["Bash: Run the tests", "Read: src/upload.ts"]],
+      ["agent", "Found it: the retry swallows the timeout.\n\nFixed."],
+      ["tools", ["AskUserQuestion"]],
+    ],
+  );
+  assert.deepEqual(waitOf(talk.pending, "asked a question"), {
+    kind: "question",
+    question: "Push to main or open a PR?",
+    options: [
+      { label: "Push to main", description: "Fast-forward" },
+      { label: "Open a PR", description: "" },
+    ],
+  });
+  const bash = readTalk([l.prompt("go"), l.tool("t9", "Bash", { command: "rm -rf build", description: "Clean" })].join("\n"));
+  assert.deepEqual(waitOf(bash.pending, "needs permission: Bash"), { kind: "permission", tool: "Bash", detail: "rm -rf build" });
+  assert.equal(waitOf(bash.pending, "no progress"), null, "a call that's only running waits on nobody");
+  const plan = readTalk([l.tool("p1", "ExitPlanMode", { plan: "1. Fix it" })].join("\n"));
+  assert.deepEqual(waitOf(plan.pending, "waiting on plan approval"), { kind: "plan", plan: "1. Fix it" });
+  assert.equal(readTalk([l.tool("t1", "Bash", {}), l.result("t1")].join("\n")).pending, null, "answered");
+  const long = readTalk(
+    Array.from({ length: 40 }, (_, i) => [l.prompt(`ask ${i}`), l.said(`said ${i}`)])
+      .flat()
+      .join("\n"),
+  );
+  assert.deepEqual([long.turns.length, long.earlier, long.turns[0]], [30, 50, { who: "you", at: long.turns[0]!.at, text: "ask 25" }]);
+});
+
+test("a Codex thread's page reads its messages and tool calls, not the context Codex wraps around your words", () => {
+  const ev = (payload: Record<string, unknown>) => JSON.stringify({ timestamp: at(0), type: "response_item", payload });
+  const talk = readCodexTalk(
+    [
+      ev({ type: "message", role: "developer", content: [{ type: "input_text", text: "rules" }] }),
+      ev({ type: "message", role: "user", content: [{ type: "input_text", text: "<environment_context>…" }] }),
+      ev({ type: "message", role: "user", content: [{ type: "input_text", text: "Bump the SDK" }] }),
+      ev({ type: "function_call", name: "shell", arguments: JSON.stringify({ command: "npm i sdk@3" }) }),
+      ev({ type: "message", role: "assistant", content: [{ type: "output_text", text: "Bumped. Ship it?" }] }),
+    ].join("\n"),
+  );
+  assert.deepEqual(
+    talk.turns.map((t) => (t.who === "tools" ? t.lines : t.text)),
+    ["Bump the SDK", ["shell: npm i sdk@3"], "Bumped. Ship it?"],
+  );
+});
+
+test(
+  "a reply from the window carries a stopped session on with your words: its own transcript has them and its answer",
+  posix,
+  async (c) => {
+    const m = machine(c);
+    const t = await deskOn(c, m);
+    const l = lines(S.bg, m.work, Date.now());
+    const ask = { questions: [{ question: "Keep the old table?", options: [{ label: "Keep it" }, { label: "Drop it" }] }] };
+    m.agents([{ id: "bg01", cwd: m.work, kind: "background", startedAt: 1, sessionId: S.bg, name: "Migrate", state: "blocked" }]);
+    m.transcript(S.bg, [l.prompt("Migrate the store"), l.said("Copied the rows."), l.tool("q1", "AskUserQuestion", ask)]);
+    await t.poll();
+    const app = createApp(t.desk, 47823);
+    const id = encodeURIComponent(`session:${S.bg}`);
+    const view = async () => (await (await app.request(`http://127.0.0.1:47823/api/sessions/${id}/view`)).json()) as SessionView;
+    const reply = (text: unknown, headers: Record<string, string> = WINDOW_HEADERS) =>
+      app.request(`http://127.0.0.1:47823/api/sessions/${id}/reply`, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+    const before = await view();
+    assert.deepEqual(
+      [before.card?.reason, before.waiting, before.can_reply, before.why_not, before.open, before.command],
+      [
+        "asked a question",
+        {
+          kind: "question",
+          question: "Keep the old table?",
+          options: [
+            { label: "Keep it", description: "" },
+            { label: "Drop it", description: "" },
+          ],
+        },
+        true,
+        null,
+        { label: "Open in Claude", url: `claude://resume?session=${S.bg}` },
+        `cd '${m.work}' && claude --resume ${S.bg}`,
+      ],
+    );
+    assert.equal((await reply("Keep it", {})).status, 403, "an agent can't answer a session");
+    assert.equal((await reply("  ")).status, 400);
+    const calls = m.calls().length;
+    const res = await reply("Keep it");
+    assert.equal(res.status, 200);
+    assert.deepEqual(
+      m
+        .calls()
+        .slice(calls)
+        .map((x) => [x.args, x.cwd]),
+      [
+        [["agents", "--json", "--all"], m.calls()[calls]!.cwd],
+        [["--resume", S.bg, "--bg", "Keep it"], m.work],
+      ],
+    );
+    assert.deepEqual(
+      t.desk.store.db
+        .prepare("SELECT action FROM events WHERE item_id = ?")
+        .all(`session:${S.bg}`)
+        .map((x) => x.action),
+      ["reply"],
+    );
+    // Off your Inbox at once; its page reads on, from the transcript the resumed turn wrote.
+    assert.deepEqual((await run(t.desk.focus())).sessions, []);
+    const after = await view();
+    assert.deepEqual(
+      after.turns.slice(-2).map((x) => (x.who === "tools" ? x.lines : [x.who, x.text])),
+      [
+        ["you", "Keep it"],
+        ["agent", "On it: Keep it"],
+      ],
+    );
+    assert.deepEqual([after.card, after.can_reply, after.why_not], [null, false, "It doesn't need you now."]);
+    assert.equal((await reply("Again")).status, 409);
+
+    // A reply that starts with a dash isn't a flag.
+    const l2 = lines(S.dead, m.work, Date.now());
+    m.agents([{ id: "bg02", cwd: m.work, kind: "background", startedAt: 1, sessionId: S.dead, name: "Docs", state: "failed" }]);
+    m.transcript(S.dead, [l2.prompt("go"), l2.said("Failed.")]);
+    while (t.desk.sessions.polling)
+      await new Promise((r) => {
+        setTimeout(r, 10);
+      }); // the look the reply started
+    await t.poll();
+    const n = m.calls().length;
+    await run(t.desk.replySession(`session:${S.dead}`, "--force it"));
+    assert.deepEqual(m.calls().at(-1)?.args, ["--resume", S.dead, "--bg", "--", "--force it"]);
+    assert.ok(m.calls().length > n);
+  },
+);
+
+test("a session the desk can't carry on says where to answer it, and refuses a reply in those words", posix, async (c) => {
+  const m = machine(c);
+  const t = await deskOn(c, m);
+  const l = lines(S.desk, m.work, Date.now());
+  m.agents([
+    {
+      pid: process.pid,
+      cwd: m.work,
+      kind: "interactive",
+      sessionId: S.cli,
+      name: "term",
+      status: "waiting",
+      waitingFor: "permission prompt",
+    },
+  ]);
+  const tl = lines(S.cli, m.work, Date.now());
+  m.transcript(S.cli, [tl.prompt("Clean up"), tl.tool("t1", "Bash", { command: "rm -rf build", description: "Clean the build" })]);
+  m.transcript(S.desk, [l.prompt("go"), l.said("Blocked.")]);
+  m.desktop({
+    sessionId: "local_abc",
+    cliSessionId: S.desk,
+    title: "Deploy",
+    cwd: m.work,
+    isArchived: false,
+    lastActivityAt: Date.now(),
+    lastTurnEdgeAt: 0,
+    postTurnSummary: { status_category: "blocked", status_detail: "Needs a token", summarizes_uuid: "x" },
+  });
+  await t.poll();
+  const desk = await run(t.desk.sessionView(`session:${S.desk}`));
+  assert.deepEqual(
+    [desk.can_reply, desk.why_not, desk.open, desk.command],
+    [false, "The Claude app runs it: answer it there.", { label: "Open in Claude", url: "claude://claude.ai/epitaxy/local_abc" }, null],
+  );
+  assert.equal((await failure(t.desk.replySession(`session:${S.desk}`, "ok"))).message, "The Claude app runs it: answer it there.");
+  const term = await run(t.desk.sessionView(`session:${S.cli}`));
+  assert.deepEqual(
+    [term.card?.reason, term.waiting, term.why_not, term.open, term.command],
+    [
+      "needs permission: Bash",
+      { kind: "permission", tool: "Bash", detail: "rm -rf build" },
+      "It runs in a terminal: answer it there.",
+      null,
+      null,
+    ],
+  );
+  assert.equal((await failure(t.desk.sessionView("session:nope"))).message, 'no session "session:nope" needed you lately');
 });

@@ -848,7 +848,7 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     });
     return respond(c, answer, { log });
   });
-  // Sessions that need you (src/connectors/sessions.ts): anyone may read one; only the desk's window or your paired phone starts one, and only a window opens one (its link opens on the desk's computer).
+  // Sessions that need you (src/connectors/sessions.ts): anyone may read one or its page; only the desk's window or your paired phone starts or answers one, and only a window opens one (its link opens on the desk's computer).
   app.get("/api/sessions/:id", (c) => respond(c, desk.session(c.req.param("id")), { log, read: true }));
   app.post("/api/sessions/:id/kick", (c) => {
     const kick = Effect.gen(function* () {
@@ -856,6 +856,16 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       return { ok: true, ...(yield* desk.kickSession(c.req.param("id"))) };
     });
     return respond(c, kick, { log });
+  });
+  app.get("/api/sessions/:id/view", (c) => respond(c, desk.sessionView(c.req.param("id")), { log, read: true }));
+  app.post("/api/sessions/:id/reply", (c) => {
+    const answer = Effect.gen(function* () {
+      yield* hands(c, "answer a session in the desk's window");
+      const b = yield* bodyOf(c);
+      if (typeof b.text !== "string") return yield* new BadRequest({ message: "need { text }" });
+      return { ok: true, ...(yield* desk.replySession(c.req.param("id"), b.text)) };
+    });
+    return respond(c, answer, { log });
   });
   app.post("/api/sessions/:id/open", (c) => {
     const open = Effect.gen(function* () {
