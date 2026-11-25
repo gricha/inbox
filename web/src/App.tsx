@@ -673,7 +673,10 @@ export function App() {
         : [],
     [queueView],
   );
-  const cursor = useMemo(() => [...inquiries.map((q) => inquiryOf(q.id)), ...stops(page, leaving)], [inquiries, page, leaving]);
+  const cursor = useMemo(
+    () => [...inquiries.map((q) => inquiryOf(q.id)), ...sessions.map((s) => s.id), ...stops(page, leaving)],
+    [inquiries, sessions, page, leaving],
+  );
   const current = flat.find((c) => c.id === selected) ?? null;
   // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
   const questionOf = (id: string) => view?.inquiries.find((q) => q.id === id) ?? (pageQuestion?.id === id ? pageQuestion : undefined);

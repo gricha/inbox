@@ -1307,6 +1307,9 @@ const SHOTS: Shot[] = [
         `[...document.querySelectorAll(".ctx > .ctx-group > .ctx-item, .ctx > .ctx-group > .ctx-subwrap > .ctx-item")].map((el) => (el.querySelector("span") ?? el).textContent.trim())`,
       );
       if (menu.join(" · ") !== "Done · Snooze · Kick") failures.push(`queue-session: a session's menu reads ${JSON.stringify(menu)}`);
+      // Right-clicked, it's selected, as any row is.
+      if (!(await page.locator(".line.session.sel", { hasText: "Migrate the job store" }).count()))
+        failures.push("queue-session: the session you right-clicked isn't filled");
       await page.keyboard.press("Escape");
       await page.locator(".line.session", { hasText: "Fix the flaky upload test" }).locator(".row-main").click();
       await page.waitForTimeout(200);
