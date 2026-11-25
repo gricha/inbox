@@ -6577,6 +6577,58 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // The two filters narrow each other. You picked under Author: only the kinds your rows are, no Quick reviews. dana picked
+    // under Author, on Merging where dana opened none of its rows: still there, ticked, to unpick. Quick reviews on: the popover
+    // offers only who's on a quick review (the shot).
+    name: "filter-narrow",
+    go: async (page) => {
+      const kinds = () =>
+        page.evaluate<string[]>(
+          `[...document.querySelectorAll(".page-head .head-filter[aria-pressed]")].map((b) => b.getAttribute("aria-label"))`,
+        );
+      const people = page.locator(".page-head .people-filter .head-filter");
+      const group = (n: number) => page.locator(".people-pop .people-group").nth(n);
+      const offered = async () => ({
+        author: await group(0).locator(".people-who").allTextContents(),
+        involves: await group(1).locator(".people-who").allTextContents(),
+      });
+      await at("#/inflight")(page);
+      await people.click();
+      const merging = await offered();
+      if (!merging.author.length || merging.author.includes("dana"))
+        failures.push(`filter-narrow: Merging, nobody picked, offers ${JSON.stringify(merging)}`);
+      await page.keyboard.press("Escape");
+      await at("#/")(page);
+      const all = await kinds();
+      if (all.join() !== "Quick reviews,Waiting on your reply,One click")
+        failures.push(`filter-narrow: the Inbox offers ${JSON.stringify(all)}`);
+      await people.click();
+      const you = group(0).locator(".pop-item", { hasText: "You" });
+      await you.click();
+      const yours = await kinds();
+      if (yours.join() !== "Waiting on your reply,One click") failures.push(`filter-narrow: with You picked, ${JSON.stringify(yours)}`);
+      await you.click();
+      await group(0).locator(".pop-item", { hasText: "dana" }).click();
+      await page.keyboard.press("Escape");
+      await at("#/inflight")(page);
+      await people.click();
+      const kept = await offered();
+      const ticked = await group(0).locator('.pop-item[aria-pressed="true"]').allTextContents();
+      if (ticked.join() !== "dana" || kept.author.filter((p) => p === "dana").length !== 1)
+        failures.push(`filter-narrow: on Merging, Author offers ${JSON.stringify(kept.author)} and ticks ${JSON.stringify(ticked)}`);
+      await page.locator(".people-pop .people-clear").click();
+      await page.keyboard.press("Escape");
+      await at("#/")(page);
+      await page.locator('.page-head .head-filter[aria-label="Quick reviews"]').click();
+      await people.click();
+      const quick = await offered();
+      if (JSON.stringify(quick) !== JSON.stringify({ author: ["ana-k"], involves: ["You", "ana-k"] }))
+        failures.push(`filter-narrow: with Quick reviews on, the popover offers ${JSON.stringify(quick)}`);
+      await page.waitForTimeout(300);
+    },
+    after: fresh,
+  },
+  {
     // A pasted GitHub link is the whole search: one the desk has is focused on its page; one it hasn't is added, a placeholder
     // row standing where it will land before the desk answers (here it never does).
     name: "paste-adds",

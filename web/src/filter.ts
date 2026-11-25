@@ -55,13 +55,23 @@ export function shownKind(s: string): ShowKey | null {
   return null;
 }
 
-// The head's buttons for a page's rows: a kind that has some, and the one that's on even with none left, to turn it off.
-export function kindButtons(cards: Card[], s: string): ShowKey[] {
-  const on = shownKind(s);
-  return SHOW_KEYS.filter((k) => k === on || cards.some(SHOWS[k]));
-}
-
 const finished = (s: string) => parseFilter(s).terms.filter((t) => t.done);
+
+const isKind = (t: FilterTerm) => t.key === "is";
+
+// The rows that fit the filter's pills of one sort, its kinds or its people: what the head's other control offers.
+const fitting = (cards: Card[], s: string, me: string, sort: (t: FilterTerm) => boolean) => {
+  const q = filterOf(finished(s).filter(sort), "");
+  return cards.filter((c) => matches(c, q, me));
+};
+
+// The head's buttons for a page's rows by whoever's picked: a kind that has some, and the one that's on even with none
+// left, to turn it off.
+export function kindButtons(cards: Card[], s: string, me: string): ShowKey[] {
+  const on = shownKind(s);
+  const rows = fitting(cards, s, me, (t) => !isKind(t));
+  return SHOW_KEYS.filter((k) => k === on || rows.some(SHOWS[k]));
+}
 
 // A head button's click: that kind of row alone, or every row when it's the one shown; the person picks and words kept.
 export function toggleShow(s: string, key: ShowKey): string {
@@ -113,16 +123,25 @@ export function matches(c: Card, q: string, me: string): boolean {
   return fits && (!text || `${c.title}\n${c.repo}\n${c.author}\n${shortRef(c)}`.toLowerCase().includes(text.toLowerCase()));
 }
 
-// Who the filter can suggest: everyone on these rows, most rows first, and whether they wrote any of them.
-export function filterPeople(cards: Card[], me: string): { login: string; author: boolean }[] {
+// Who the filter can suggest: everyone on these rows of the kind that's on, most rows first, and whether they wrote any of
+// them; then whoever's picked with no rows left, to unpick.
+export function filterPeople(cards: Card[], s: string, me: string): { login: string; author: boolean }[] {
   const seen = new Map<string, { n: number; author: boolean }>();
-  for (const c of cards) {
+  for (const c of fitting(cards, s, me, isKind)) {
     const by = c.by === "you" ? me : c.by;
     for (const p of new Set([...(c.people ?? [c.author]), by])) {
       if (!p || (c.author_bot && p === c.author)) continue;
-      const s = seen.get(p) ?? { n: 0, author: false };
-      seen.set(p, { n: s.n + 1, author: s.author || p === by || p === c.author });
+      const had = seen.get(p) ?? { n: 0, author: false };
+      seen.set(p, { n: had.n + 1, author: had.author || p === by || p === c.author });
     }
   }
-  return [...seen].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0])).map(([login, s]) => ({ login, author: s.author }));
+  const people = [...seen].sort((a, b) => b[1].n - a[1].n || a[0].localeCompare(b[0])).map(([login, p]) => ({ login, author: p.author }));
+  for (const t of finished(s)) {
+    if (isKind(t) || !t.who) continue;
+    const login = isYou(t.who.toLowerCase()) ? me : t.who;
+    const known = people.find((p) => p.login.toLowerCase() === login.toLowerCase());
+    if (known) known.author ||= t.key === "author";
+    else if (login) people.push({ login, author: t.key === "author" });
+  }
+  return people;
 }

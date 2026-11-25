@@ -572,14 +572,6 @@ export function App() {
   // The desk's view with the rows you placed where you put them, until it's read back.
   const placed = useMemo(() => (view && drops.length ? withDrops(view, drops) : view), [view, drops]);
   const groups = useMemo(() => groupsOf(placed, open, filter, me), [placed, open, filter, me]);
-  const people = useMemo(
-    () =>
-      filterPeople(
-        groupsOf(view, DEFAULT_OPEN, "").flatMap((g) => g.cards),
-        me,
-      ),
-    [view, me],
-  );
   // One search for every page: a page with no list (Settings) takes you to the Inbox to search it.
   const searchFor = (s: string) => {
     setFilter(s);
@@ -634,17 +626,17 @@ export function App() {
   const flat = useMemo(() => navigable(page, leaving), [page, leaving]);
   // The list on screen, or beside a review or a question: a review's is the page it was opened from, a question's the Inbox.
   const listPage = pageOf(route, reviewFrom);
-  // The page's filters, on its head or on the list beside an open item: the kinds of row its rows have, then the filter by person.
-  const kinds = useMemo(() => {
-    const keys = listPage && listPage !== "inflight" ? PAGE_GROUPS[listPage] : [];
-    const cards =
-      listPage === "inflight"
-        ? (lane?.rows ?? []).map((r) => r.card)
-        : groupsOf(placed, DEFAULT_OPEN, "")
-            .filter((g) => keys.includes(g.key))
-            .flatMap((g) => g.cards);
-    return kindButtons(cards, filter);
-  }, [listPage, lane, placed, filter]);
+  // The page's filters, on its head or on the list beside an open item: the kinds of row its rows have, then the filter by
+  // person. Each offers what's on the rows the other leaves.
+  const pageCards = useMemo(() => {
+    if (listPage === "inflight") return (lane?.rows ?? []).map((r) => r.card);
+    const keys = listPage ? PAGE_GROUPS[listPage] : [];
+    return groupsOf(placed, DEFAULT_OPEN, "")
+      .filter((g) => keys.includes(g.key))
+      .flatMap((g) => g.cards);
+  }, [listPage, lane, placed]);
+  const kinds = useMemo(() => kindButtons(pageCards, filter, me), [pageCards, filter, me]);
+  const people = useMemo(() => filterPeople(pageCards, filter, me), [pageCards, filter, me]);
   const filters = (
     <div className="head-filters">
       <ShowFilter filter={filter} setFilter={setFilter} kinds={kinds} />

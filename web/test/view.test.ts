@@ -1472,7 +1472,7 @@ test("the filter's people: author: and involves: as pills once a space follows, 
   assert.deepEqual(ids("author:you "), ["acme/web#8"]);
   assert.deepEqual(ids("involves:"), ["acme/api#1", "acme/api#7", "acme/web#8"], "a key with no one yet filters nothing");
 
-  assert.deepEqual(filterPeople(rows, "me"), [
+  assert.deepEqual(filterPeople(rows, "", "me"), [
     { login: "dana", author: true },
     { login: "priya", author: true },
     { login: "marco", author: false },
@@ -1508,10 +1508,47 @@ test("the filter's kinds of row: is:quick, is:reply and is:oneclick, one at a ti
   assert.equal(toggleShow("is:quick fix", "quick"), "fix");
   assert.equal(withPeople("is:quick author:dana fix", [{ key: "involves", who: "pri" }]), "is:quick involves:pri fix");
 
-  assert.deepEqual(kindButtons(rows, ""), ["quick", "reply", "oneclick"]);
-  assert.deepEqual(kindButtons([rows[0]!, rows[1]!], "author:priya "), ["quick"], "the page's rows, whoever's picked");
-  assert.deepEqual(kindButtons([rows[1]!], ""), [], "none where a kind has no row");
-  assert.deepEqual(kindButtons([rows[1]!], "is:reply "), ["reply"], "the one that's on stays, to turn it off");
+  assert.deepEqual(kindButtons(rows, "", "me"), ["quick", "reply", "oneclick"]);
+  assert.deepEqual(kindButtons([rows[1]!], "", "me"), [], "none where a kind has no row");
+  assert.deepEqual(kindButtons([rows[1]!], "is:reply ", "me"), ["reply"], "the one that's on stays, to turn it off");
+});
+
+test("the filter by person and the head's kinds of row narrow each other, and what's on stays to turn it off", () => {
+  const rows = [
+    card("acme/api#1", { quick: "Quick to review: low risk, 24 lines", people: ["dana", "marco"] }),
+    card("acme/api#2", { author: "priya", by: "priya", people: ["priya", "me"] }),
+    card("acme/web#3", { cta: "reply", author: "me", by: "you", people: ["me", "jordan"] }),
+  ];
+  const everyone = filterPeople(rows, "", "me");
+  assert.deepEqual(
+    filterPeople(rows, "is:quick ", "me"),
+    [
+      { login: "dana", author: true },
+      { login: "marco", author: false },
+    ],
+    "the kind that's on: only who's on its rows",
+  );
+  assert.deepEqual(filterPeople(rows, "is:qu", "me"), everyone, "a kind still being typed narrows no one");
+  assert.deepEqual(filterPeople(rows, "fix ", "me"), everyone, "the search's words narrow no one");
+  assert.deepEqual(
+    filterPeople(rows, "is:quick author:priya involves:jordan involves:you ", "me"),
+    [
+      { login: "dana", author: true },
+      { login: "marco", author: false },
+      { login: "priya", author: true },
+      { login: "jordan", author: false },
+      { login: "me", author: false },
+    ],
+    "who's picked stays, under Author for author:, with no rows left",
+  );
+  assert.deepEqual(filterPeople(rows, "is:quick author:Dana ", "me"), filterPeople(rows, "is:quick ", "me"), "once, whatever its case");
+
+  assert.deepEqual(kindButtons(rows, "author:dana ", "me"), ["quick"], "only the kinds of the picked person's rows");
+  assert.deepEqual(kindButtons(rows, "involves:you ", "me"), ["reply"]);
+  assert.deepEqual(kindButtons(rows, "author:priya ", "me"), []);
+  assert.deepEqual(kindButtons(rows, "is:quick author:priya ", "me"), ["quick"], "the one that's on stays, to turn it off");
+  assert.deepEqual(kindButtons(rows, "author:pri", "me"), ["quick", "reply"], "a person still being typed narrows nothing");
+  assert.deepEqual(kindButtons(rows, "author:dana nothing ", "me"), ["quick"], "the search's words narrow nothing");
 });
 
 test("a pasted GitHub link to a PR or an issue is its id, and as the search it finds only that row", () => {
