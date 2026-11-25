@@ -67,20 +67,18 @@ export function Queue({
   const urgent = mine(view.notes.urgent);
   const open = mine(view.notes.open);
   const fyi = mine(view.notes.fyi);
+  // The rows a section has before its PRs and issues: questions and sessions, then notes.
+  const leadOf = (k: GroupKey, asks: number, ns: Omit<QueueView["notes"], "later">) =>
+    k === "urgent" ? asks + ns.due.length + ns.urgent.length : k === "standard" ? ns.open.length : k === "fyi" ? ns.fyi.length : 0;
   const parts = groups
     .filter((g) => PAGE_GROUPS.queue.includes(g.key))
-    .map((g) => ({
-      g,
-      lead:
-        g.key === "urgent"
-          ? inquiries.length + shown.length + due.length + urgent.length
-          : g.key === "standard"
-            ? open.length
-            : g.key === "fyi"
-              ? fyi.length
-              : 0,
-    }))
+    .map((g) => ({ g, lead: leadOf(g.key, inquiries.length + shown.length, { due, urgent, open, fyi }) }))
     .filter(({ g, lead }) => lead > 0 || g.cards.length > 0);
+  // Filtered, a heading counts what matches of all its section holds, as Blocked's and the Archive's do.
+  const filtering = !!words;
+  const asks = view.inquiries.length + (ses ? view.sessions.filter((x) => x.status === "active").length : 0);
+  const counted = (g: Group, lead: number) =>
+    filtering ? `${g.cards.length + lead} of ${g.total + leadOf(g.key, asks, view.notes)}` : g.total + lead;
   // A row you acted on is on its way off: it fades out where it is, and the last one to go leaves the empty line.
   const any = parts.some(({ g, lead }) => lead > 0 || g.cards.some((c) => !ctx.leaving.has(c.id)));
   // A new desk's first minutes, said in the desk's words: where the empty line would be, or above the rows.
@@ -115,7 +113,7 @@ export function Queue({
                   }}
                 >
                   <span>{g.label}</span>
-                  <span className="count">{g.total + lead}</span>
+                  <span className="count">{counted(g, lead)}</span>
                 </button>
               </h2>
               {g.open && (

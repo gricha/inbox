@@ -826,14 +826,21 @@ html::-webkit-scrollbar-corner,
   display: none;
 }
 
-/* The filter by person on a page's head: an icon button before New note (on Merging's, at the head's end), its count of
-   picks on it; its popover lists the people under Author and Involves. */
-.people-filter {
-  position: relative;
+/* A page's filters, on its head before New note (on Merging's, at the head's end) and on the list beside an open item: the
+   kinds of row the page has, each an icon button that's on or off, then the filter by person, its count of picks on it;
+   its popover lists the people under Author and Involves. */
+.head-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-left: auto;
 }
 
-.people-filter + .head-note {
+.people-filter {
+  position: relative;
+}
+
+.head-filters + .head-note {
   margin-left: -8px;
 }
 
@@ -841,8 +848,12 @@ html::-webkit-scrollbar-corner,
   padding: 0 9px;
 }
 
-.head-filter.on {
+/* On: filled with the accent's wash, so a list narrowed by it says so from across the window. */
+.head-filter.on,
+.head-filter.on:hover:not(:disabled) {
   border-color: var(--chrome-pill);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
 }
 
 .people-pop {
@@ -2390,7 +2401,8 @@ html::-webkit-scrollbar-corner,
 }
 
 .beside-head label,
-.beside-head input {
+.beside-head input,
+.beside-head button {
   -webkit-app-region: no-drag;
 }
 
