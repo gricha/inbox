@@ -323,6 +323,14 @@ export function pickRange(order: string[], anchor: string | null, id: string): s
   return order.slice(Math.min(from, to), Math.max(from, to) + 1);
 }
 
+// The row that takes a leaving row's place: the next one in screen order that isn't leaving too, else the one before it.
+export function nextOf(order: string[], id: string, leaving: (id: string) => boolean): string | null {
+  const at = order.indexOf(id);
+  if (at < 0) return null;
+  const stays = (x: string) => x !== id && !leaving(x);
+  return order.slice(at + 1).find(stays) ?? order.slice(0, at).findLast(stays) ?? null;
+}
+
 // ⌘-click: this one added, or dropped if it's picked already.
 export const pickToggle = (picked: string[], id: string): string[] =>
   picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id];

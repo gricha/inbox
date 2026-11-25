@@ -39,6 +39,7 @@ import {
   inboxCount,
   inquiryOf,
   navigable,
+  nextOf,
   pickRange,
   pickToggle,
   PAGE_GROUPS,
@@ -86,6 +87,12 @@ interface Toast {
   error?: boolean;
   undo?: boolean;
   busy?: boolean; // a write on its way to GitHub: a spinner until it lands
+}
+
+// The selection a leaving row handed on: to the row that took its place, or nobody.
+interface Moved {
+  from: string;
+  to: string | null;
 }
 
 const LEAVES = new Set<Action>(["done", "snooze", "mute"]);
@@ -678,6 +685,16 @@ export function App() {
   }, [lane, filter, me, backed.shown]);
   const laneRows = useMemo(() => laneShown?.rows ?? [], [laneShown]);
   const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? null;
+  // The list's items in screen order, as ⌘] steps through them: Merging's PRs, or the questions, sessions and rows.
+  const itemOrder = useMemo(
+    () =>
+      laneList
+        ? laneRows.map((r) => r.card.id)
+        : [...inquiries.map((q) => inquiryOf(q.id)), ...sessions.map((s) => s.id), ...flat.map((c) => c.id)],
+    [laneList, laneRows, inquiries, sessions, flat],
+  );
+  const itemOrderRef = useRef(itemOrder);
+  itemOrderRef.current = itemOrder;
   // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
   const known = useMemo(() => {
     const m = new Map<string, Card>();
@@ -815,7 +832,8 @@ export function App() {
       document.querySelector(`.lane [data-id="${CSS.escape(laneCur.card.id)}"]`)?.scrollIntoView({ block: "nearest" });
   }, [onLane, laneCur]);
 
-  // Nothing is selected until you focus, right-click or open a row; a row that leaves takes its selection with it.
+  // Nothing is selected until you focus, right-click or open a row; a row that leaves by itself takes its selection with it
+  // (one you act on hands it on: moveOff).
   useEffect(() => {
     if (selected === null || cursor.includes(selected)) return;
     if (pending.current?.id === selected && Date.now() < pending.current.until) return; // an undo brings it back
@@ -901,30 +919,39 @@ export function App() {
     const leaves = LEAVES.has(action) && c.status === "active" && !c.resolved;
     // A move to another section is drawn there at once, where the desk puts it, as a drop is.
     const to = action === "urgent" || action === "standard" || action === "fyi" ? { id: c.id, section: action } : null;
-    return Effect.gen(function* () {
-      if (leaves) hide(c);
+    return Effect.suspend(() => {
+      const around = itemOrder;
+      const moved = leaves ? hide([c.id]) : null;
       if (to) setDrops((x) => [...x.filter((y) => y.id !== c.id), to]);
-      const started = Date.now();
-      const res = yield* api.act(c.id, action, until);
-      if (to) yield* load();
-      undoSeq.current = res.undo_seq ? [res.undo_seq] : []; // before the animation, so a quick Undo undoes this action
-      undoWrite.current = null;
-      if (leaves) {
-        yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
-        gone.show(c.id, loadSeq.current);
-      }
-      const verb = action === "snooze" ? `Snoozed ${snoozeOptions(c).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
-      flash(`${verb}: ${shortRef(c)}`, false, true);
-    }).pipe(
-      Effect.catch(failed),
-      Effect.ensuring(
-        Effect.sync(() => {
-          if (leaves) unhide(c.id);
-          if (to) setDrops((x) => x.filter((y) => y !== to));
-          refresh(0);
-        }),
-      ),
-    );
+      return Effect.gen(function* () {
+        const started = Date.now();
+        const res = yield* api.act(c.id, action, until);
+        if (to) yield* load();
+        undoSeq.current = res.undo_seq ? [res.undo_seq] : []; // before the animation, so a quick Undo undoes this action
+        undoWrite.current = null;
+        if (leaves) {
+          yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
+          gone.show(c.id, loadSeq.current);
+          advance(c.id, around);
+        }
+        const verb = action === "snooze" ? `Snoozed ${snoozeOptions(c).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
+        flash(`${verb}: ${shortRef(c)}`, false, true);
+      }).pipe(
+        Effect.catch((e) =>
+          Effect.sync(() => {
+            putBack(moved);
+            flash(e.message, true);
+          }),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (leaves) unhide(c.id);
+            if (to) setDrops((x) => x.filter((y) => y !== to));
+            refresh(0);
+          }),
+        ),
+      );
+    });
   }
 
   // A row you dragged, or moved up or down from its menu: drawn where you put it at once, then the desk's view read back;
@@ -971,7 +998,7 @@ export function App() {
     const leaves = cs.filter((c) => LEAVES.has(action) && c.status === "active" && !c.resolved);
     return Effect.gen(function* () {
       setPicked([]);
-      leaves.forEach(hide);
+      if (leaves.length) hide(leaves.map((c) => c.id));
       const started = Date.now();
       const results = yield* Effect.forEach(
         cs,
@@ -1009,9 +1036,7 @@ export function App() {
 
   // A session's triage: it fades off the list at once, and comes back if the desk refuses.
   function sessionAct(s: SessionCard, action: "done" | "snooze" | "mute", until = "tomorrow") {
-    if (selected === s.id) setSelected(null);
-    if (expanded === s.id) setExpanded(null);
-    setLeaving((x) => new Set(x).add(s.id));
+    hide([s.id]);
     runUi(
       api.act(s.id, action, action === "snooze" ? until : undefined).pipe(
         Effect.tap((res) =>
@@ -1059,11 +1084,27 @@ export function App() {
     );
   }
 
-  // A row leaving the list: it fades out, and takes its selection with it.
-  function hide(c: Card) {
-    if (selected === c.id) setSelected(null);
-    if (expanded === c.id) setExpanded(null);
-    setLeaving((s) => new Set(s).add(c.id));
+  // Rows leaving the list: they fade out, and the selection moves on.
+  function hide(ids: string[]): Moved | null {
+    if (expanded !== null && ids.includes(expanded)) setExpanded(null);
+    setLeaving((s) => new Set([...s, ...ids]));
+    return moveOff(ids);
+  }
+
+  // The selection on rows that leave moves to the row that takes their place, focused if the list had the keyboard, so ↓
+  // and Enter carry on from there. What it moved, so a refusal can put it back.
+  function moveOff(ids: string[]): Moved | null {
+    if (selected === null || !ids.includes(selected)) return null;
+    const to = nextOf(itemOrder, selected, (x) => ids.includes(x));
+    setSelected(to);
+    const on = document.activeElement;
+    if (to && LIST_PAGES.has(route.name) && (!on || on === document.body || on.closest(".line[data-id], .ctx")))
+      document.querySelector<HTMLElement>(`.main .line[data-id="${CSS.escape(to)}"] .row-main`)?.focus({ preventScroll: true });
+    return { from: selected, to };
+  }
+
+  function putBack(m: Moved | null) {
+    if (m) setSelected((s) => (s === m.to ? m.from : s));
   }
 
   function unhide(id: string) {
@@ -1197,7 +1238,7 @@ export function App() {
   function answerInquiry(q: Inquiry, text: string, dismiss = false): Effect.Effect<boolean> {
     return Effect.suspend(() => {
       const id = inquiryOf(q.id);
-      if (selected === id) setSelected(null);
+      moveOff([id]);
       answered.show(q.id, true);
       return api.answerInquiry(q.id, dismiss ? { dismiss: true } : { text }).pipe(
         Effect.match({
@@ -1251,19 +1292,26 @@ export function App() {
         markActed(c.id, to);
       };
       mark({ ...did, sending: true });
-      hide(c);
+      const around = itemOrder;
+      const moved = hide([c.id]);
       flash(sending, false, false, 60_000, true);
       return write.pipe(
         Effect.match({
           onSuccess: (r) => {
             // Still on your desk (ready with nobody asked to review it): it went nowhere, and its next step shows in place.
             mark(r.stays || !shown ? before : { ...did, sending: false });
-            if (!r.stays) gone.show(c.id, loadSeq.current);
+            if (r.stays) putBack(moved);
+            else {
+              gone.show(c.id, loadSeq.current);
+              // A comment leaves the review as it was, so you can still approve; cleared items stay in the Archive.
+              if (shown && c.status === "active" && !c.resolved) advance(c.id, around);
+            }
             flash(r.text, r.error, r.undo);
             return true;
           },
           onFailure: (e) => {
             mark(before);
+            putBack(moved);
             flash(e.message, true);
             return false;
           },
@@ -1727,19 +1775,25 @@ export function App() {
   const stepAt = useRef<string | null>(null);
   function stepTo(by: 1 | -1) {
     const shown = route.name === "review" ? route.id : route.name === "inquiry" ? inquiryOf(route.id) : null;
-    if (laneList) {
-      const at = laneRows.findIndex((r) => r.card.id === (shown ?? laneSel));
-      const to = laneRows[at < 0 ? (by > 0 ? 0 : laneRows.length - 1) : at + by];
-      if (to) go({ name: "review", id: to.card.id });
-      return;
-    }
-    const order = [...inquiries.map((q) => inquiryOf(q.id)), ...sessions.map((x) => x.id), ...flat.map((c) => c.id)];
     // An issue it opened in place beside a review is where it is, not the review still drawn.
     const last = stepAt.current;
-    const here = last !== null && (last === expanded || last === shown) ? last : (shown ?? expanded ?? selected);
-    const at = here === null ? -1 : order.indexOf(here);
-    const id = order[at < 0 ? (by > 0 ? 0 : order.length - 1) : at + by];
-    if (id === undefined) return;
+    const here = laneList
+      ? (shown ?? laneSel)
+      : last !== null && (last === expanded || last === shown)
+        ? last
+        : (shown ?? expanded ?? selected);
+    const at = here === null ? -1 : itemOrder.indexOf(here);
+    const id = itemOrder[at < 0 ? (by > 0 ? 0 : itemOrder.length - 1) : at + by];
+    if (id !== undefined) openAt(id);
+  }
+
+  // An item of the list opened as a click on its row would: Merging's PR its review, a question its page, a session or an
+  // issue in place on its list.
+  function openAt(id: string) {
+    if (laneList) {
+      go({ name: "review", id });
+      return;
+    }
     stepAt.current = id;
     const q = inquiries.find((x) => inquiryOf(x.id) === id);
     const s = sessions.find((x) => x.id === id);
@@ -1760,6 +1814,17 @@ export function App() {
       if (route.name === "review" || route.name === "inquiry") go({ name: listPage ?? "queue" });
       if (expanded !== c.id) toggle(c);
     }
+  }
+
+  // An action that took the open review's item off its list opens the item that took its place, as ⌘] would. With none
+  // left the review stays, saying what you did.
+  function advance(id: string, around: string[]) {
+    const r = routeRef.current;
+    if (r.name !== "review" || r.id !== id) return; // you went elsewhere meanwhile
+    const still = itemOrderRef.current;
+    const to = nextOf(around, id, (x) => !still.includes(x));
+    // This may be the render you acted in, a write ago: its lists are the ones `around` came from, so they have `to`.
+    if (to) openAt(to);
   }
 
   // ↓ and ↑ on a list page move to the row after or before the focused one (else the selected one; with neither, the first or

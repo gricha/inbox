@@ -205,6 +205,10 @@ const rowMenuPick = async (page: Page, row: string, item: string) => {
   await page.locator(row).locator(".row-main").click({ button: "right" });
   await page.locator(".ctx-item", { hasText: item }).first().click();
 };
+// The Inbox's items in screen order, as ⌘] steps through them (notes aren't among them), and the one after `id`.
+const rowIds = (page: Page) =>
+  page.evaluate<string[]>(`[...document.querySelectorAll(".queue .line[data-id]:not(.memo)")].map((l) => l.dataset.id)`);
+const rowAfter = (ids: string[], id: string | null) => (id === null ? null : (ids[ids.indexOf(id) + 1] ?? null));
 // Where each selector's first match starts down the page, or -1 when there's none: read at once, never waited for.
 const tops = (page: Page, sels: string[]) =>
   page.evaluate<number[]>(`${JSON.stringify(sels)}.map((s) => document.querySelector(s)?.getBoundingClientRect().top ?? -1)`);
@@ -6749,17 +6753,24 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Done in a row's menu: the row leaves and takes its fill with it; no neighbour is filled in its place. Held, so the mock
-    // keeps the row for the next size's shots.
-    name: "row-done-unselected",
+    // Done in a row's menu: the row leaves and hands its fill and the focus to the row after it. Held, so the mock keeps the
+    // row for the next size's shots.
+    name: "row-done-next",
     go: async (page) => {
       await page.route("**/api/act", async (route) => {
         if (field(route.request().postDataJSON(), "action") !== "done") await route.continue();
       });
       await at("#/")(page);
-      await rowMenuPick(page, ".queue .line:not(.inq) >> nth=1", "Done");
+      const row = ".queue .line:not(.inq, .session, .memo) >> nth=1";
+      const next = rowAfter(await rowIds(page), await page.locator(row).getAttribute("data-id"));
+      await rowMenuPick(page, row, "Done");
       await page.waitForTimeout(400);
-      if (await page.locator(".line.sel").count()) failures.push("row-done-unselected: a row is filled after the one you finished left");
+      const seen = await page.evaluate<{ filled: string[]; focused: string | null }>(`({
+        filled: [...document.querySelectorAll(".line.sel")].map((l) => l.dataset.id),
+        focused: document.activeElement?.closest(".line")?.dataset.id ?? null,
+      })`);
+      if (seen.filled.join() !== next || seen.focused !== next)
+        failures.push(`row-done-next: after Done, ${JSON.stringify(seen)} rather than ${next} filled and focused`);
     },
     // The reload drops the held write first: unrouting while it's held would let it through to the mock.
     after: async (page) => {
@@ -6818,6 +6829,26 @@ const SHOTS: Shot[] = [
       const button = await page.locator('.rv-actions button:has-text("Approve")').count();
       if (said !== "\u2713 You approved" || button)
         failures.push(`review-approved: the bar reads ${JSON.stringify(said)} with ${button} Approve`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  // Approve, and once GitHub has it the item after it on the Inbox opens, the toast saying what you did. Answered in the
+  // browser, so the mock keeps the PR for the next size's shots.
+  {
+    name: "review-approve-next",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      await at("#/")(page);
+      const next = rowAfter(await rowIds(page), id);
+      await page.route("**/approve", (route) => route.fulfill({ json: { ok: true, url: "", stays: false } }));
+      await review(id, ['.rv-actions button:has-text("Approve")'])(page);
+      await page.waitForTimeout(600);
+      const hash = await page.evaluate<string>("location.hash");
+      if (!next || hash !== `#/review/${encodeURIComponent(next)}`)
+        failures.push(`review-approve-next: after Approve, ${hash} is open rather than ${next ?? "the next row"}'s review`);
     },
     after: async (page) => {
       await unroute(page);
