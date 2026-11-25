@@ -9,7 +9,6 @@ import {
   type AiReview,
   type Ask,
   type Bucket,
-  type DeepReview,
   type Handoff,
   type IssueReview,
   type Note,
@@ -332,38 +331,7 @@ export const NoteSchema = schemaOf<Omit<Note, "waiting" | "facts">>()(
   }),
 );
 
-// A PR's deep review as the agent answers it, and as the desk keeps it with its last failure (kv `deep:<id>`).
-export const DeepAnswerSchema = Schema.Struct({
-  intent: Schema.String,
-  intent_from: Schema.Literals(["stated", "inferred", "missing"]),
-  lean: Schema.Literals(["ship", "fix first", "rethink"]),
-  premises: arrayOf(
-    Schema.Struct({ premise: Schema.String, verdict: Schema.Literals(["holds", "fails", "unknown"]), evidence: Schema.String }),
-  ),
-  wrong: arrayOf(
-    Schema.Struct({
-      what: Schema.String,
-      why: Schema.String,
-      evidence: arrayOf(Schema.String),
-      severity: Schema.Literals(["blocker", "fix"]),
-    }),
-  ),
-  ask: arrayOf(Schema.Struct({ question: Schema.String, why: Schema.String })),
-  author_fixes: arrayOf(Schema.String),
-  checked: Schema.Struct({ summary: Schema.String, tests: Schema.String, probes: Schema.Number }),
-});
-const DeepReviewSchema = schemaOf<DeepReview>()(
-  Schema.Struct({
-    ...DeepAnswerSchema.fields,
-    head_oid: Schema.String,
-    model: Schema.String,
-    at: Schema.String,
-    seconds: Schema.Number,
-  }),
-);
-const DeepSchema = Schema.Struct({ review: Schema.NullOr(DeepReviewSchema), error: Schema.NullOr(Schema.String) });
-
 // The kv keys with a shape of their own, and the prefixes whose keys (`issue_fail:<id>`) share one, read and written typed
 // through Store.kv(), putKv(), kvAt(), putKvAt() and byPrefix(). The rest still go through read() and set().
 export const KV = { blocked: BlockedSchema } as const;
-export const KV_PREFIX = { "issue_fail:": IssueFailSchema, "pushed:": PushedSchema, "deep:": DeepSchema } as const;
+export const KV_PREFIX = { "issue_fail:": IssueFailSchema, "pushed:": PushedSchema } as const;

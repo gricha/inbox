@@ -190,7 +190,6 @@ export const api = {
     call<{ ok: true; undo_seq: number }>("POST", "/api/place", { id, section, ...at }),
   // ahead: before you open it, so the desk starts no AI review or read for it.
   review: (id: string, ahead = false) => call<ReviewView>("GET", `/api/review/${encodeURIComponent(id)}${ahead ? "?ahead=1" : ""}`),
-  deepReview: (id: string) => call<{ ok: true; running: string }>("POST", `/api/review/${encodeURIComponent(id)}/deep`, {}),
   aiReview: (id: string, force = false) => call<{ ok: true; ai: AiReview }>("POST", `/api/review/${encodeURIComponent(id)}/ai`, { force }),
   // The calls that write to GitHub: the review's Approve and replies, and Ready for review on your own draft.
   approve: (id: string, head_oid: string) =>

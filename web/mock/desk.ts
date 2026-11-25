@@ -63,7 +63,6 @@ import type {
   Criterion,
   InboxSection,
   ChunkRanking,
-  DeepReview,
   Ci,
   Config,
   ConfigError,
@@ -4162,68 +4161,8 @@ function reviewView(r: Rec, ahead = false): ReviewView {
     reading_error: null,
     asks: ASKS.filter((a) => a.item_id === r.id),
     viewed: [...(VIEWED.get(r.id) ?? [])],
-    deep: DEEPS.get(r.id) ?? null,
-    deep_running: DEEP_RUNNING.get(r.id) ?? null,
-    deep_error: null,
   };
 }
-
-// Deep reviews (src/deep.ts): the planner's written, any other one a clean pass a few seconds after it's asked for.
-const DEEP_RUNNING = new Map<string, string>();
-const DEEPS = new Map<string, DeepReview>([
-  [
-    "acme/api#4127",
-    {
-      intent: "Long queries stream rows as the scan finds them and stop at a time budget, returning what they have marked partial.",
-      intent_from: "stated",
-      lean: "fix first",
-      premises: [
-        {
-          premise: "Callers can tell a partial result from a complete one",
-          verdict: "fails",
-          evidence: "src/routes/query.ts:34 sets X-Partial-Results, but the SDK's `query()` reads only the body (sdk/query.ts:58)",
-        },
-        {
-          premise: "Nothing else bounds query time today",
-          verdict: "holds",
-          evidence: "rg 'timeout|budget' src/planner finds only this PR's budget",
-        },
-        {
-          premise: "Scans can stop between batches without leaking a cursor",
-          verdict: "holds",
-          evidence: "src/planner/stream.ts:14 returns early; scan() closes its cursor in finally (scan.ts:41)",
-        },
-      ],
-      wrong: [
-        {
-          what: "?budget= isn't validated: `budget=abc` turns the budget off and `budget=0` returns an empty partial result",
-          why: "A typo in a client silently changes what every query returns",
-          evidence: [
-            "src/routes/query.ts:30 `const budget = Number(req.query.budget)`",
-            "$ curl '/v2/query?budget=0' → 200, rows: [], X-Partial-Results: true",
-          ],
-          severity: "fix",
-        },
-      ],
-      ask: [
-        {
-          question: "Should the 2 s default apply to existing callers, or only to those that pass ?budget=?",
-          why: "Slow queries that completed before now come back partial, and the SDK can't tell",
-        },
-      ],
-      author_fixes: ["Add a test for the route's X-Partial-Results header", "Reject a non-numeric ?budget= with a 400"],
-      checked: {
-        summary: "Read the diff, the planner, scan, the route and the SDK's query()",
-        tests: "pnpm test planner: 41 passed",
-        probes: 1,
-      },
-      head_oid: "c41d9e2",
-      model: "claude-opus-5-5",
-      at: iso(0.5),
-      seconds: 312,
-    },
-  ],
-]);
 
 // ---------------------------------------------------------------------------
 // Sync simulation
@@ -4792,44 +4731,11 @@ async function respond(req: MockRequest, url: URL): Promise<unknown> {
     bump();
     return { ok: true, url: "" };
   }
-  const review = /^\/api\/review\/(.+?)(\/ai|\/approve|\/reply|\/viewed|\/deep)?$/.exec(url.pathname);
+  const review = /^\/api\/review\/(.+?)(\/ai|\/approve|\/reply|\/viewed)?$/.exec(url.pathname);
   if (review) {
     const r = resolve(decodeURIComponent(review[1]!));
     if (req.method === "GET" && !review[2]) return reviewView(r, url.searchParams.get("ahead") === "1");
     // As the desk: kept by mark, nothing sent anywhere.
-    // As the desk: answered at once, then the result a few seconds later.
-    if (req.method === "POST" && review[2] === "/deep") {
-      const running = DEEP_RUNNING.get(r.id) ?? new Date(now()).toISOString();
-      if (!DEEP_RUNNING.has(r.id)) {
-        DEEP_RUNNING.set(r.id, running);
-        setTimeout(() => {
-          DEEP_RUNNING.delete(r.id);
-          DEEPS.set(r.id, {
-            intent: r.seed.body ?? r.seed.title,
-            intent_from: r.seed.body ? "stated" : "inferred",
-            lean: "ship",
-            premises: [
-              {
-                premise: "The change is needed: nothing in the repo already does it",
-                verdict: "holds",
-                evidence: "rg finds no other implementation",
-              },
-            ],
-            wrong: [],
-            ask: [],
-            author_fixes: [],
-            checked: { summary: "Read the diff and its callers", tests: "12 passed", probes: 0 },
-            head_oid: itemOf(r).head_oid,
-            model: "claude-opus-5-5",
-            at: new Date(now()).toISOString(),
-            seconds: 4,
-          });
-          bump();
-        }, 4000);
-        bump();
-      }
-      return { ok: true, running };
-    }
     if (req.method === "POST" && review[2] === "/viewed") {
       const { marks, viewed } = await readBody(req);
       if (!Array.isArray(marks) || typeof viewed !== "boolean") throw new HttpError(400, "need { marks, viewed }");
