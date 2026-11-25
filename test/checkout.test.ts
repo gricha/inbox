@@ -70,6 +70,24 @@ test("with no clone of yours, the desk clones it from GitHub (blobless) and chec
   fs.rmSync(r.root, { recursive: true });
 });
 
+test("a git that only opens bare repos it's pointed at (safe.bareRepository=explicit) still checks the head out", posix, async () => {
+  const r = repos();
+  const item = { repo: "acme/api", number: 7, head_oid: r.head };
+  process.env.GIT_CONFIG_PARAMETERS = "'safe.bareRepository=explicit'";
+  try {
+    for (const clone of [r.clone, null]) {
+      const home = path.relative(process.cwd(), r.home); // DESK_HOME may be relative
+      const c = await run(checkoutFor(home, { ...item, repo: `acme/${clone ? "yours" : "hub"}` }, () => clone, r.hub));
+      assert.equal(fs.readFileSync(path.join(c.dir, "app.ts"), "utf8"), "export const limit = 100;\n");
+      await run(c.done);
+      assert.ok(!fs.existsSync(c.dir), "removed once it's done");
+    }
+  } finally {
+    delete process.env.GIT_CONFIG_PARAMETERS;
+    fs.rmSync(r.root, { recursive: true });
+  }
+});
+
 test("a head that can't be fetched is why there's no review, in words its review shows", posix, async () => {
   const r = repos();
   const gone = await failure(
