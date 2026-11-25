@@ -11,7 +11,7 @@ export type FilterKey = (typeof FILTER_KEYS)[number];
 
 // The filter's kinds of row, a button each on the page's head: is:quick (a bolt), is:reply (a Reply) and is:oneclick (your
 // PR one button moves on: Ready for review, Add reviewers, Hand off for merge).
-export const SHOW_KEYS = ["quick", "reply", "oneclick"] as const;
+const SHOW_KEYS = ["quick", "reply", "oneclick"] as const;
 
 export type ShowKey = (typeof SHOW_KEYS)[number];
 
@@ -53,6 +53,12 @@ export function shownKind(s: string): ShowKey | null {
     if (k) return k;
   }
   return null;
+}
+
+// The head's buttons for a page's rows: a kind that has some, and the one that's on even with none left, to turn it off.
+export function kindButtons(cards: Card[], s: string): ShowKey[] {
+  const on = shownKind(s);
+  return SHOW_KEYS.filter((k) => k === on || cards.some(SHOWS[k]));
 }
 
 const finished = (s: string) => parseFilter(s).terms.filter((t) => t.done);

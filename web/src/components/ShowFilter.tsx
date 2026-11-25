@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { SHOW_KEYS, shownKind, toggleShow, type ShowKey } from "../filter.ts";
+import { shownKind, toggleShow, type ShowKey } from "../filter.ts";
 import { cls } from "../format.ts";
 
 const SHOW: Record<ShowKey, { label: string; tip: string; icon: ReactNode }> = {
@@ -47,12 +47,12 @@ const SHOW: Record<ShowKey, { label: string; tip: string; icon: ReactNode }> = {
 };
 
 // The head's kinds of row, a button each before the filter by person: a click shows only that kind (the query's is: term),
-// a click on the one that's on shows every row again.
-export function ShowFilter({ filter, setFilter }: { filter: string; setFilter: (s: string) => void }) {
+// a click on the one that's on shows every row again. `kinds` are the buttons the page's rows call for (kindButtons()).
+export function ShowFilter({ filter, setFilter, kinds }: { filter: string; setFilter: (s: string) => void; kinds: ShowKey[] }) {
   const on = shownKind(filter);
   return (
     <>
-      {SHOW_KEYS.map((k) => (
+      {kinds.map((k) => (
         <button
           key={k}
           type="button"

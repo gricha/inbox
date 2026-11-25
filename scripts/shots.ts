@@ -6555,6 +6555,28 @@ const SHOTS: Shot[] = [
     after: fresh,
   },
   {
+    // Each list page offers only the kinds of row it has: a button for a kind none of its rows are would show "No matches.".
+    name: "filter-kinds-pages",
+    sizes: ["wide"],
+    go: async (page) => {
+      for (const hash of ["#/", "#/blocked", "#/archive", "#/inflight"]) {
+        await at(hash)(page);
+        const seen = await page.evaluate<{ buttons: string[]; rows: string[] }>(`(() => {
+          const rows = [...document.querySelectorAll(".main .line[data-id]")];
+          const ctas = rows.map((r) => r.querySelector(".line-cta")?.textContent.trim() ?? "");
+          const has = [
+            rows.some((r) => r.querySelector(".line-quick")) && "Quick reviews",
+            ctas.includes("Reply") && "Waiting on your reply",
+            ctas.some((c) => ["Ready for review", "Add reviewers", "Hand off for merge"].includes(c)) && "One click",
+          ];
+          return { buttons: [...document.querySelectorAll(".page-head .head-filter[aria-pressed]")].map((b) => b.getAttribute("aria-label")), rows: has.filter(Boolean) };
+        })()`);
+        if (seen.buttons.join() !== seen.rows.join())
+          failures.push(`filter-kinds-pages: ${hash} offers ${JSON.stringify(seen.buttons)} for rows of ${JSON.stringify(seen.rows)}`);
+      }
+    },
+  },
+  {
     // A pasted GitHub link is the whole search: one the desk has is focused on its page; one it hasn't is added, a placeholder
     // row standing where it will land before the desk answers (here it never does).
     name: "paste-adds",

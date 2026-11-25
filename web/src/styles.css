@@ -827,8 +827,8 @@ html::-webkit-scrollbar-corner,
 }
 
 /* A page's filters, on its head before New note (on Merging's, at the head's end) and on the list beside an open item: the
-   kinds of row, each an icon button that's on or off, then the filter by person, its count of picks on it; its popover
-   lists the people under Author and Involves. */
+   kinds of row the page has, each an icon button that's on or off, then the filter by person, its count of picks on it;
+   its popover lists the people under Author and Involves. */
 .head-filters {
   display: flex;
   align-items: center;
@@ -848,8 +848,12 @@ html::-webkit-scrollbar-corner,
   padding: 0 9px;
 }
 
-.head-filter.on {
+/* On: filled with the accent's wash, so a list narrowed by it says so from across the window. */
+.head-filter.on,
+.head-filter.on:hover:not(:disabled) {
   border-color: var(--chrome-pill);
+  background: var(--accent-wash);
+  color: var(--accent-ink);
 }
 
 .people-pop {

@@ -52,7 +52,7 @@ import {
   withoutRows,
 } from "./groups.ts";
 import { beside, pageOf, parseRoute, routeHash, settingsBack, type ListPage, type Route } from "./route.ts";
-import { filterPeople, matches } from "./filter.ts";
+import { filterPeople, kindButtons, matches } from "./filter.ts";
 import type { RowCtx } from "./components/CardRow.tsx";
 import { startSentry } from "./sentry.ts";
 import { CommentBar } from "./components/CommentBar.tsx";
@@ -625,13 +625,6 @@ export function App() {
     at.focus();
     setLanding(null);
   });
-  // The page's filters, on its head or on the list beside an open item: the kinds of row, then the filter by person.
-  const filters = (
-    <div className="head-filters">
-      <ShowFilter filter={filter} setFilter={setFilter} />
-      <PeopleFilter filter={filter} setFilter={setFilter} people={people} me={me} />
-    </div>
-  );
   // The selection goes through the page on screen: the queue, or Later's groups; in a review, the page it came from.
   const list = route.name === "review" ? reviewFrom : route.name;
   const page = useMemo(() => {
@@ -641,6 +634,23 @@ export function App() {
   const flat = useMemo(() => navigable(page, leaving), [page, leaving]);
   // The list on screen, or beside a review or a question: a review's is the page it was opened from, a question's the Inbox.
   const listPage = pageOf(route, reviewFrom);
+  // The page's filters, on its head or on the list beside an open item: the kinds of row its rows have, then the filter by person.
+  const kinds = useMemo(() => {
+    const keys = listPage && listPage !== "inflight" ? PAGE_GROUPS[listPage] : [];
+    const cards =
+      listPage === "inflight"
+        ? (lane?.rows ?? []).map((r) => r.card)
+        : groupsOf(placed, DEFAULT_OPEN, "")
+            .filter((g) => keys.includes(g.key))
+            .flatMap((g) => g.cards);
+    return kindButtons(cards, filter);
+  }, [listPage, lane, placed, filter]);
+  const filters = (
+    <div className="head-filters">
+      <ShowFilter filter={filter} setFilter={setFilter} kinds={kinds} />
+      <PeopleFilter filter={filter} setFilter={setFilter} people={people} me={me} />
+    </div>
+  );
   const laneList = listPage === "inflight";
   // Agents' questions lead the main page (one waits on each); the filter reads them too.
   const inquiries = useMemo(() => {

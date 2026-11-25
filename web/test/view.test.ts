@@ -86,7 +86,17 @@ import {
 import { checkDot, checkGroups } from "../src/checks.ts";
 import { hashOf } from "../../src/links.ts";
 import { bulkMenu, fyiShown, logLine, pickRange, pickToggle } from "../src/groups.ts";
-import { filterOf, filterPeople, filterRest, githubRef, parseFilter, shownKind, toggleShow, withPeople } from "../src/filter.ts";
+import {
+  filterOf,
+  filterPeople,
+  filterRest,
+  githubRef,
+  kindButtons,
+  parseFilter,
+  shownKind,
+  toggleShow,
+  withPeople,
+} from "../src/filter.ts";
 import { afterText, chainLabel, stepGuides, stepOf, toggled, waitingSteps } from "../src/groups.ts";
 import { remindTime } from "../src/groups.ts";
 import type { WaitingStep } from "../../src/types.ts";
@@ -1497,6 +1507,11 @@ test("the filter's kinds of row: is:quick, is:reply and is:oneclick, one at a ti
   assert.equal(toggleShow("is:quick author:dana fix", "reply"), "is:reply author:dana fix", "one at a time");
   assert.equal(toggleShow("is:quick fix", "quick"), "fix");
   assert.equal(withPeople("is:quick author:dana fix", [{ key: "involves", who: "pri" }]), "is:quick involves:pri fix");
+
+  assert.deepEqual(kindButtons(rows, ""), ["quick", "reply", "oneclick"]);
+  assert.deepEqual(kindButtons([rows[0]!, rows[1]!], "author:priya "), ["quick"], "the page's rows, whoever's picked");
+  assert.deepEqual(kindButtons([rows[1]!], ""), [], "none where a kind has no row");
+  assert.deepEqual(kindButtons([rows[1]!], "is:reply "), ["reply"], "the one that's on stays, to turn it off");
 });
 
 test("a pasted GitHub link to a PR or an issue is its id, and as the search it finds only that row", () => {
