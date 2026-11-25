@@ -6838,28 +6838,107 @@ const SHOTS: Shot[] = [
       await fresh(page);
     },
   },
-  // Approve, and once GitHub has it the item after it on the Inbox opens, the toast saying what you did. Answered in the
-  // browser, so the mock keeps the PR for the next size's shots.
+  // Approve, and the item after it on the Inbox opens at once, the toast spinning while GitHub (here never) answers; the PR
+  // keeps its row until then. The held request stays held (unrouting would let it through to the mock); a reload drops it.
   {
     name: "review-approve-next",
     go: async (page) => {
       const id = "acme/api#4127";
       await at("#/")(page);
       const next = rowAfter(await rowIds(page), id);
-      await page.route("**/approve", (route) => route.fulfill({ json: { ok: true, url: "", stays: false } }));
+      await page.route("**/approve", () => {});
       await review(id, ['.rv-actions button:has-text("Approve")'])(page);
-      await page.waitForTimeout(600);
       const hash = await page.evaluate<string>("location.hash");
       if (!next || hash !== `#/review/${encodeURIComponent(next)}`)
-        failures.push(`review-approve-next: after Approve, ${hash} is open rather than ${next ?? "the next row"}'s review`);
+        failures.push(`review-approve-next: as you approve, ${hash} is open rather than ${next ?? "the next row"}'s review`);
+      // Beside it, where there's room, the PR you approved keeps its row until GitHub has the approval.
+      const beside = await page.locator(".beside").count();
+      if (beside && !(await page.locator(`.beside .line[data-id="${id}"]:not(.leaving)`).count()))
+        failures.push("review-approve-next: the PR you approved left the list before GitHub had the approval");
     },
     after: async (page) => {
+      await fresh(page);
+      await unroute(page);
+    },
+  },
+  // GitHub refuses the approval after the next item opened: you're back on the PR, and a bubble says why.
+  {
+    name: "review-approve-refused",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      refusing.add("/approve");
+      await page.route("**/approve", async (route) => {
+        await page.waitForTimeout(500); // the next item opens first
+        await route.fulfill({ status: 409, json: { error: "GitHub didn't take the approval: it has new commits", tag: "Conflict" } });
+      });
+      await review(id, ['.rv-actions button:has-text("Approve")'])(page);
+      await page.waitForTimeout(800);
+      const hash = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (hash !== `#/review/${id}`) failures.push(`review-approve-refused: after the refusal, ${hash} is open`);
+    },
+    after: async (page) => {
+      refusing.delete("/approve");
       await unroute(page);
       await fresh(page);
     },
   },
-  // Approve at once: the review stays, its Approve now what you did, in the Archive, a spinner while GitHub (here never)
-  // answers. Last: its toast would sit over the next shot.
+  // Approving makes the merge yours: the review stays, for Hand off for merge, while GitHub (here never) answers.
+  {
+    name: "review-approve-keeps",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      await page.route("**/api/review/**", async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        const res = await route.fetch();
+        const v: unknown = await res.json();
+        if (isRecord(v)) Object.assign(v, { approve: { ok: true, reason: null, keeps: true } });
+        await route.fulfill({ response: res, json: v });
+      });
+      await page.route("**/approve", () => {});
+      await review(id, ['.rv-actions button:has-text("Approve")'])(page);
+      await page.waitForTimeout(300);
+      const hash = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (hash !== `#/review/${id}`) failures.push(`review-approve-keeps: approving a merge that's yours opened ${hash}`);
+    },
+    after: async (page) => {
+      await fresh(page);
+      await unroute(page);
+    },
+  },
+  // Request changes refused after the next item opened: back on the PR, its box open with what you wrote.
+  {
+    name: "review-request-changes-refused",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      const words = "Cap the retries, and test the cap.";
+      refusing.add("/api/github");
+      await page.route("**/api/github", async (route) => {
+        await page.waitForTimeout(500); // the next item opens first
+        await route.fulfill({ status: 409, json: { error: "GitHub didn't take the review: it has new commits", tag: "Conflict" } });
+      });
+      await review(id, [MORE, '.more-pop .pop-item:has-text("Request changes")'])(page);
+      await page.keyboard.type(words);
+      await page.locator(".rv-changes .act.primary").click();
+      await page.waitForTimeout(250);
+      const away = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (away === `#/review/${id}`) failures.push("review-request-changes-refused: sending didn't open the next item");
+      await page.waitForTimeout(800);
+      const hash = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      const kept = await page
+        .locator(".rv-changes textarea")
+        .inputValue({ timeout: 5000 })
+        .catch(() => null);
+      if (hash !== `#/review/${id}` || kept !== words)
+        failures.push(`review-request-changes-refused: after the refusal, ${hash} with ${JSON.stringify(kept)} in the box`);
+    },
+    after: async (page) => {
+      refusing.delete("/api/github");
+      await unroute(page);
+      await fresh(page);
+    },
+  },
+  // Approve at once: the next item opens, a spinner in the toast while GitHub (here never) answers. Last: its toast would
+  // sit over the next shot.
   {
     name: "review-approve",
     go: async (page) => {

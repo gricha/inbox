@@ -3129,7 +3129,19 @@ export class Desk {
     const mine = it.reviews.findLast((r) => r.author.toLowerCase() === me);
     if (mine?.state === "approved" && mine.commit === it.head_oid) return { ...no("you approved this commit"), approved: true as const };
     if (!this.writer) return no("approving isn't available in this desk");
-    return { ok: true, reason: null };
+    return { ok: true, reason: null, ...(this.approvalKeeps(it, it.head_oid) && { keeps: true as const }) };
+  }
+
+  // A merge that's yours once you approve keeps the PR on the desk, for Hand off for merge.
+  private approvalKeeps(it: Item, head: string): boolean {
+    const approved: Item["reviews"][number] = {
+      author: this.me(),
+      author_bot: false,
+      state: "approved",
+      at: this.now().toISOString(),
+      commit: head,
+    };
+    return mergeOwed({ ...it, reviews: [...it.reviews, approved] }, this.me());
   }
 
   // POST /api/review/:id/approve: one of the desk's GitHub writes (with Send), on your click; `head` is the commit the view showed, so a newer push isn't approved unread.
@@ -3152,15 +3164,8 @@ export class Desk {
         said: ({ url }) => `approved ${id} on GitHub${url ? ` (${url})` : ""}`,
         after: ({ url }) =>
           Effect.gen({ self: this }, function* () {
-            // A merge that's now yours keeps it on the desk, for Hand off for merge; Done still puts it away.
-            const approved: Item["reviews"][number] = {
-              author: this.me(),
-              author_bot: false,
-              state: "approved",
-              at: this.now().toISOString(),
-              commit: head,
-            };
-            const stays = mergeOwed({ ...e.item, reviews: [...e.item.reviews, approved] }, this.me());
+            // Done still puts away one it keeps.
+            const stays = this.approvalKeeps(e.item, head);
             if (!stays) yield* this.doneAfterWrite(id);
             this.refreshAfter(id);
             return { url, stays };

@@ -115,15 +115,19 @@ export function MoreMenu({
 export function WriteBox({
   label,
   placeholder,
+  kept = "",
+  onText,
   onSend,
   onClose,
 }: {
   label: string;
   placeholder: string;
+  kept?: string; // the words you left in it
+  onText?: (text: string) => void;
   onSend: (body: string) => void;
   onClose: () => void;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(kept);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     box.current?.scrollIntoView({ block: "nearest" }); // at 900px and below it opens under the fold
@@ -144,6 +148,7 @@ export function WriteBox({
         value={text}
         onChange={(e) => {
           setText(e.target.value);
+          onText?.(e.target.value);
         }}
         onKeyDown={(e) => {
           if (e.repeat) return;

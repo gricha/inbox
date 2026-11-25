@@ -1146,7 +1146,8 @@ export interface ReviewView {
   ai_error: string | null; // the last failed attempt on this commit, or why AI reviews are paused
   generating: boolean; // its job is running
   ai_job: Job | null; // its AI review's job: running, or for this commit
-  approve: { ok: boolean; reason: string | null; approved?: true }; // reason: why not, e.g. "it's your PR"; approved: you approved its head
+  // reason: why not, e.g. "it's your PR"; approved: you approved its head; keeps: approving makes its merge yours, so it stays
+  approve: { ok: boolean; reason: string | null; approved?: true; keeps?: true };
   activity: ActivityEvent[]; // the PR's last 8 events, newest first
   stack: Stack | null; // its stack, with it current
   checks: Checks | null; // its head commit's checks, one by one; null: none ran, or they couldn't be fetched

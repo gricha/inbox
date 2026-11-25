@@ -923,8 +923,8 @@ export function App() {
     // A move to another section is drawn there at once, where the desk puts it, as a drop is.
     const to = action === "urgent" || action === "standard" || action === "fyi" ? { id: c.id, section: action } : null;
     return Effect.suspend(() => {
-      const around = itemOrder;
       const moved = leaves ? hide([c.id]) : null;
+      const there = leaves ? advance(c.id, itemOrder) : null;
       if (to) setDrops((x) => [...x.filter((y) => y.id !== c.id), to]);
       return Effect.gen(function* () {
         const started = Date.now();
@@ -935,7 +935,6 @@ export function App() {
         if (leaves) {
           yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
           gone.show(c.id, loadSeq.current);
-          advance(c.id, around);
         }
         const verb = action === "snooze" ? `Snoozed ${snoozeOptions(c).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
         flash(`${verb}: ${shortRef(c)}`, false, true);
@@ -943,6 +942,7 @@ export function App() {
         Effect.catch((e) =>
           Effect.sync(() => {
             putBack(moved);
+            comeBack(c.id, there);
             flash(e.message, true);
           }),
         ),
@@ -1274,15 +1274,18 @@ export function App() {
     setActed(actedRef.current);
   }
 
-  // A write that finishes your part takes it off the list at once, with a spinner in the toast until GitHub has it; a
-  // refusal brings it back. A review stays open, saying what you did and where it went (`did`). `error` on what the write
+  // A write that finishes your part, with a spinner in the toast until GitHub has it. From a list its row leaves at once; from
+  // its review the next item opens at once and the row leaves once GitHub has it. A refusal brings it back, and you back to
+  // it. With nothing next, the review stays, saying what you did and where it went (`did`). `error` on what the write
   // returns: done, but with something to say. True once GitHub has it.
   function finish(
     c: Card,
     sending: string,
     did: Acted,
     write: Effect.Effect<{ text: string; error?: boolean; undo?: boolean; stays?: boolean }, ApiError>,
-    shown = true, // false: the review says it only while sending (a comment), so what you'd do next is still there
+    // When the next item opens: at once; once GitHub has it, for a write that may keep the item on your desk (`stays`); or
+    // never, for a comment, whose review says what you did only while sending, so what you'd do next is still there.
+    next: "now" | "after" | "never" = "now",
   ): Effect.Effect<boolean> {
     return Effect.suspend((): Effect.Effect<boolean> => {
       // Still sending from this review: a second press waits for it. Once it's done, the next write (Hand off after Approve) goes.
@@ -1296,28 +1299,39 @@ export function App() {
       };
       mark({ ...did, sending: true });
       const around = itemOrder;
-      const moved = hide([c.id]);
+      const inReview = routeRef.current.name === "review" && routeRef.current.id === c.id;
+      const moved = inReview ? moveOff([c.id]) : hide([c.id]);
+      const leaves = c.status === "active" && !c.resolved; // a cleared item stays in the Archive
+      const there = next === "now" && leaves ? advance(c.id, around) : null;
       flash(sending, false, false, 60_000, true);
       return write.pipe(
-        Effect.match({
-          onSuccess: (r) => {
-            // Still on your desk (ready with nobody asked to review it): it went nowhere, and its next step shows in place.
-            mark(r.stays || !shown ? before : { ...did, sending: false });
-            if (r.stays) putBack(moved);
-            else {
+        Effect.matchEffect({
+          onSuccess: (r) =>
+            Effect.gen(function* () {
+              // Still on your desk (ready with nobody asked to review it): it went nowhere, and its next step shows in place.
+              mark(r.stays || next === "never" ? before : { ...did, sending: false });
+              flash(r.text, r.error, r.undo);
+              if (r.stays) {
+                putBack(moved);
+                comeBack(c.id, there);
+                return true;
+              }
+              if (next === "after" && leaves) advance(c.id, around);
+              if (inReview) {
+                hide([c.id]);
+                yield* Effect.sleep(200); // its row fades out
+              }
               gone.show(c.id, loadSeq.current);
-              // A comment leaves the review as it was, so you can still approve; cleared items stay in the Archive.
-              if (shown && c.status === "active" && !c.resolved) advance(c.id, around);
-            }
-            flash(r.text, r.error, r.undo);
-            return true;
-          },
-          onFailure: (e) => {
-            mark(before);
-            putBack(moved);
-            flash(e.message, true);
-            return false;
-          },
+              return true;
+            }),
+          onFailure: (e) =>
+            Effect.sync(() => {
+              mark(before);
+              putBack(moved);
+              comeBack(c.id, there);
+              flash(e.message, true);
+              return false;
+            }),
         }),
         Effect.ensuring(
           Effect.sync(() => {
@@ -1490,7 +1504,14 @@ export function App() {
         Effect.succeed({ text: `${e.message}. Ask ${names} on GitHub.`, error: true, stays: true }),
       ),
     );
-    return finish(c, `Marking ${shortRef(c)} ready for review…`, { what: "Marked ready for review", where: "archive" }, write);
+    // With nobody picked, it's the desk that knows whether anyone's asked to review it.
+    return finish(
+      c,
+      `Marking ${shortRef(c)} ready for review…`,
+      { what: "Marked ready for review", where: "archive" },
+      write,
+      picked.length ? "now" : "after",
+    );
   }
 
   function markReady(c: Card, picked: Reviewer[] = []) {
@@ -1548,13 +1569,14 @@ export function App() {
   // refusal keeps your words in it.
   function comment(c: Card, body: string): Effect.Effect<boolean> {
     const write = api.comment(c.id, body).pipe(Effect.as({ text: `Commented on ${shortRef(c)} on GitHub` }));
-    return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, write, false);
+    return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, write, "never");
   }
 
-  // Approve in a review: approved on GitHub, pinned to the commit the review showed. A merge that's now yours keeps its row.
-  function approve(c: Card, head: string) {
+  // Approve in a review: approved on GitHub, pinned to the commit the review showed. A merge that's now yours keeps its row
+  // (`keeps`, as the review said), so its review stays for Hand off for merge.
+  function approve(c: Card, head: string, keeps: boolean) {
     const write = api.approve(c.id, head).pipe(Effect.map((r) => ({ text: `Approved ${shortRef(c)} on GitHub`, stays: r.stays })));
-    runUi(finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, write));
+    runUi(finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, write, keeps ? "after" : "now"));
   }
 
   // A button that opens its row's menu, at the button: an opened issue's Snooze, with Snooze open.
@@ -1819,15 +1841,25 @@ export function App() {
     }
   }
 
-  // An action that took the open review's item off its list opens the item that took its place, as ⌘] would. With none
-  // left the review stays, saying what you did.
-  function advance(id: string, around: string[]) {
+  // An action that takes the open review's item off its list opens the item that takes its place, as ⌘] would. With none
+  // left the review stays, saying what you did. Where it took you, so a refusal can bring you back.
+  function advance(id: string, around: string[]): string | null {
     const r = routeRef.current;
-    if (r.name !== "review" || r.id !== id) return; // you went elsewhere meanwhile
+    if (r.name !== "review" || r.id !== id) return null; // you went elsewhere meanwhile
     const still = itemOrderRef.current;
     const to = nextOf(around, id, (x) => !still.includes(x));
+    if (!to) return null;
     // This may be the render you acted in, a write ago: its lists are the ones `around` came from, so they have `to`.
-    if (to) openAt(to);
+    openAt(to);
+    return location.hash;
+  }
+
+  // A write refused, or kept on your desk, after its review gave way to the next item: back on its review, if you're still
+  // where that took you.
+  function comeBack(id: string, there: string | null) {
+    if (there === null || location.hash !== there) return;
+    setSelected(id);
+    go({ name: "review", id });
   }
 
   // ↓ and ↑ on a list page move to the row after or before the focused one (else the selected one; with neither, the first or

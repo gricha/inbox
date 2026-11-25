@@ -44,8 +44,10 @@ import {
   holding,
   holdKeys,
   isSending,
+  keepChanges,
   keepComment,
   keepDraft,
+  keptChanges,
   keptComment,
   keptDraft,
   keysHeld,
@@ -207,7 +209,7 @@ export function Review({
   acted: Acted | undefined; // what you did on it from here: shown in place of the button you pressed
   row: InflightRow | null; // your PR in Merging: what it waits on and the coordinator's note go under the facts, as in Merging
   // Approve, Ready for review, Ask reviewers: App sends these, as from a row; it leaves the desk, and the review goes back to the list.
-  onApprove: (c: Card, head: string) => void;
+  onApprove: (c: Card, head: string, keeps: boolean) => void; // keeps: approving makes the merge yours, so it stays
   onReady: (c: Card, picked: Reviewer[]) => void;
   onAskReviewers: (c: Card, picked: Reviewer[]) => void; // your ready PR nobody's asked to review: ask who you picked
   onAddReviewer: (c: Card, r: Reviewer) => Effect.Effect<boolean>; // one picked in the sidebar: asked at once
@@ -240,7 +242,7 @@ export function Review({
   const wholes = useRef(new Map<string, Promise<FileDiffLoadedFiles>>());
   const [more, setMore] = useState(false); // the More menu
   // The sidebar's checks and reviewers, listed: every PR opens with each in one line.
-  const [writing, setWriting] = useState(false); // Request changes, being written
+  const [writing, setWriting] = useState(() => !!keptChanges(id)); // Request changes, being written
   // Your comment on the PR, unsent: kept here, not in its box, so a refusal, acting on the PR or its closing never loses it,
   // and per PR for this window, as a line's is, so leaving the review and coming back finds it; sent, it's cleared.
   const [comment, setComment] = useState(() => keptComment(id));
@@ -729,7 +731,7 @@ export function Review({
   function approve() {
     if (!v) return;
     if (!canApprove) flash(`Can't approve: ${v.approve.reason ?? "not allowed"}`, true);
-    else onApprove(v.card, read);
+    else onApprove(v.card, read, !!v.approve.keeps);
   }
 
   function run(k: string) {
@@ -1133,18 +1135,25 @@ export function Review({
             <WriteBox
               label="Request changes"
               placeholder="What needs to change"
+              kept={keptChanges(card.id)}
+              onText={(t) => {
+                keepChanges(card.id, t);
+              }}
               onSend={(body) => {
                 runUi(
                   onGithub(card, "request_changes", read, body).pipe(
                     Effect.tap((done) =>
                       Effect.sync(() => {
-                        if (done) setWriting(false);
+                        if (!done) return;
+                        keepChanges(card.id, "");
+                        setWriting(false);
                       }),
                     ),
                   ),
                 );
               }}
               onClose={() => {
+                keepChanges(card.id, "");
                 setWriting(false);
               }}
             />

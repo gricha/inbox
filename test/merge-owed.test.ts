@@ -62,11 +62,15 @@ test("the merge is yours: approved by you, its author can't merge it, nobody hol
 test("a merge you owe isn't resolved by your approval, Done puts it away, and its row hands it off for merge", async (c) => {
   const writer = { ...refuseWrites(), approve: () => Effect.succeed({ url: "" }) };
   const fresh = approvedByMe(68, { reviews: [] });
-  const t = await setup([approvedByMe(66), approvedByMe(67, { author_can_merge: true }), fresh], { desk: { writer } });
+  const theirs = approvedByMe(69, { reviews: [], author_can_merge: true });
+  const t = await setup([approvedByMe(66), approvedByMe(67, { author_can_merge: true }), fresh, theirs], { desk: { writer } });
   c.after(t.cleanup);
   const route = t.gh.route;
-  t.gh.route = (q) => (q.includes("review-requested:@me") ? ["acme/api#66", "acme/api#67", "acme/api#68"] : route(q)); // as reviewed-by:@me lists them
+  t.gh.route = (q) => (q.includes("review-requested:@me") ? ["acme/api#66", "acme/api#67", "acme/api#68", "acme/api#69"] : route(q)); // as reviewed-by:@me lists them
   await run(t.desk.sync());
+  // The window opens the next item as you press Approve, unless approving keeps this one for Hand off for merge.
+  assert.equal((await run(t.desk.reviewView("api#68"))).approve.keeps, true, "approving makes the merge yours");
+  assert.equal((await run(t.desk.reviewView("api#69"))).approve.keeps, undefined, "a collaborator merges their own");
   const card = (ref: string) => runSync(t.desk.item(ref)).card;
   assert.equal(card("api#66").resolved, null);
   assert.equal(card("api#67").resolved, "you approved", "a collaborator's: your part is done");
