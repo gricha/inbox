@@ -1170,17 +1170,18 @@ export interface ReviewView {
   deep_error: string | null; // the last one's failure, in your words
 }
 
-// A deep review (src/deep.ts): an adversarial pass that checked the PR's premises against the repo, ran its tests and
-// probed behaviour, keeping only what it proved, the questions only a person can answer, and fixes for the author.
+// A deep review (src/deep.ts): an adversarial pass that puts the PR in context, weighs its production risk and blast
+// radius, and judges its direction against its intent. CI runs the tests.
 export interface DeepReview {
-  goal: string; // what the author says it achieves, attributed as theirs
+  goal: string; // the intent: what the author says it achieves
+  fit: string; // how this PR serves that intent
   intent_from: "stated" | "inferred" | "missing";
   change: string; // how behaviour changes, before to after
+  risk: string; // the blast radius: what breaks in production if it's wrong, for whom, how it's undone
   lean: "ship" | "fix first" | "rethink";
   lean_why: string; // the one line that decides it
   caveat: string; // one uncertainty about the whole change and what would settle it, or ""
   steps: DeepStep[]; // the Review tab's guide, over the diff's hunk ids
-  checked: { tests: string; probes: number };
   picture: DeepPicture | null;
   head_oid: string; // the commit it read
   model: string;

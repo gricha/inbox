@@ -2652,7 +2652,7 @@ export class Desk {
       };
       this.store.putKvAt("deep:", item.id, { review, error: null });
       this.log(
-        `deep review of ${item.id}: ${review.lean}, ${review.steps.length} steps, ${review.steps.flatMap((s) => s.notes).length} notes; tests: ${review.checked.tests}; ${seconds}s`,
+        `deep review of ${item.id}: ${review.lean}, ${review.steps.length} steps, ${review.steps.flatMap((s) => s.notes).length} notes; ${seconds}s`,
       );
     }).pipe(
       Effect.catch((e) =>

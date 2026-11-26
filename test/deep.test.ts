@@ -16,9 +16,11 @@ import { run } from "./helpers/run.ts";
 
 const ID = "acme/api#1";
 const ANSWER = {
-  goal: "The author's goal: long queries return the rows found so far.",
+  goal: "Long queries return the rows found so far.",
+  fit: "The budget gets there; an unchecked `?budget=` undoes it.",
   intent_from: "stated",
   change: "Before, a query returned every row at the end; now it stops at a budget.",
+  risk: "Every query caller; a revert undoes it.",
   lean: "fix first",
   lean_why: "`?budget=` isn't validated (The budget).",
   caveat: "",
@@ -32,7 +34,6 @@ const ANSWER = {
       ],
     },
   ],
-  checked: { tests: "41 passed", probes: 1 },
   picture: {
     step: 0,
     title: "The budget",
@@ -186,13 +187,14 @@ test("a deep review's steps keep only this diff's hunks, become the Review tab's
   const graph = { kind: "flow" as const, direction: "LR" as const, nodes: [], edges: [], groups: [] };
   const deep: DeepReview = {
     goal: "g",
+    fit: "f",
     intent_from: "stated",
     change: "c",
+    risk: "r",
     lean: "fix first",
     lean_why: "w",
     caveat: "",
     steps,
-    checked: { tests: "", probes: 0 },
     picture: { id: "deep", title: "t", caption: "c", graph, step: 0 },
     head_oid: "abc",
     model: "m",

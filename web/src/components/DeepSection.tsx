@@ -4,8 +4,8 @@ import { withCode } from "./Prose.tsx";
 
 const LEAN = { ship: "Ship", "fix first": "Fix first", rethink: "Rethink" } as const;
 
-// The review's top (src/deep.ts): the author's goal, the lean and the line that decides it with a link to its step, how
-// behaviour changes, and the one thing about the whole change it couldn't settle. Its findings are in the steps below.
+// The review's top (src/deep.ts): the intent under its heading and how the PR fits it, the lean and the line that decides it with a link to its step, how
+// behaviour changes, its blast radius, and the one thing about the whole change it couldn't settle. Its findings are in the steps below.
 export function DeepSection({
   deep,
   running,
@@ -37,7 +37,7 @@ export function DeepSection({
             <span className="dp-meta">Reviewing · started {ago(running, now)}</span>
           ) : (
             <>
-              <span className="dp-meta">Reads the repo, runs the tests and checks what the PR assumes</span>
+              <span className="dp-meta">Reads the repo, weighs what the PR risks in production and whether it's the right change</span>
               {run(error ? "Try again" : "Review it")}
             </>
           )}
@@ -51,11 +51,13 @@ export function DeepSection({
   const deciding = blocker >= 0 ? blocker : kinds.findIndex((k) => k.has("issue"));
   return (
     <section className={cls("dp", running && "dp-busy")} aria-label="Review">
-      <p className="dp-goal">
-        {deep.intent_from === "missing" && <b className="dp-missing">Intent not stated · </b>}
-        {withCode(deep.goal)}
+      <h2 className="dp-h">
+        Intent
+        {deep.intent_from === "missing" && <span className="dp-missing"> · not stated</span>}
         {deep.intent_from === "inferred" && <span className="dp-meta"> · inferred from the code</span>}
-      </p>
+      </h2>
+      <p className="dp-goal">{withCode(deep.goal)}</p>
+      <p className="dp-fit">{withCode(deep.fit)}</p>
       <p className="dp-lean-line">
         <b className={cls("dp-lean", `dp-${deep.lean.replace(" ", "-")}`)}>{LEAN[deep.lean]}</b> {withCode(deep.lean_why)}
         {deep.lean !== "ship" && deciding >= 0 && (
@@ -74,6 +76,9 @@ export function DeepSection({
         )}
       </p>
       <p className="dp-change">{withCode(deep.change)}</p>
+      <p className="dp-risk">
+        <span className="dp-meta">Blast radius:</span> {withCode(deep.risk)}
+      </p>
       {deep.caveat && (
         <p className="dp-caveat">
           <span className="dp-meta">Not settled:</span> {withCode(deep.caveat)}
@@ -82,7 +87,6 @@ export function DeepSection({
       <div className="dp-head">
         <span className="dp-meta">
           {running ? `Reviewing again · started ${ago(running, now)}` : stale ? "Of an earlier commit" : `Reviewed ${ago(deep.at, now)}`}
-          {deep.checked.tests && ` · Tests: ${deep.checked.tests}`}
         </span>
         {!running && run(stale ? "Review this commit" : "Review again")}
       </div>

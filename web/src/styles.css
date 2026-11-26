@@ -7508,6 +7508,17 @@ a.rv-part-row:hover {
   line-height: 1.5;
 }
 
+.dp-h {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-read-sm);
+  font-weight: 600;
+}
+
+.dp-fit {
+  color: var(--ink);
+}
+
 .dp-lean-line {
   color: var(--ink);
 }

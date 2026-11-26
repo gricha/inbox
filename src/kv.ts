@@ -342,8 +342,10 @@ export const NoteSchema = schemaOf<Omit<Note, "waiting" | "facts">>()(
 // A PR's deep review as the agent answers it, and as the desk keeps it with its last failure (kv `deep:<id>`).
 export const DeepAnswerSchema = Schema.Struct({
   goal: Schema.String,
+  fit: Schema.String,
   intent_from: Schema.Literals(["stated", "inferred", "missing"]),
   change: Schema.String,
+  risk: Schema.String,
   lean: Schema.Literals(["ship", "fix first", "rethink"]),
   lean_why: Schema.String,
   caveat: Schema.String,
@@ -363,7 +365,6 @@ export const DeepAnswerSchema = Schema.Struct({
       ),
     }),
   ),
-  checked: Schema.Struct({ tests: Schema.String, probes: Schema.Number }),
   picture: Schema.Struct({ step: Schema.Number, title: Schema.String, caption: Schema.String, source: Schema.String }),
 });
 const DeepReviewSchema = schemaOf<DeepReview>()(

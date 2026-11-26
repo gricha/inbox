@@ -878,7 +878,7 @@ interface TypeCheck {
 
 ### Deep reviews
 
-`POST /api/review/:id/deep` starts a PR's deep review unless one is running, and answers at once with `{ ok, running }` (when it started); the review's `deep`, `deep_running` and `deep_error` say where it stands. It runs your own Claude Code in a checkout of the PR's head (`src/checkout.ts`) with the prompt and schema in `src/deep.ts`: it may read, run the tests and write probes there (`--permission-mode bypassPermissions`), never push or write to GitHub (`PROBE_DENY` in `src/review.ts`), with none of your MCP servers. Kept per PR in kv `deep:<id>` with the commit it read, beside its last failure. Codex and OpenCode aren't supported yet.
+`POST /api/review/:id/deep` starts a PR's deep review unless one is running, and answers at once with `{ ok, running }` (when it started); the review's `deep`, `deep_running` and `deep_error` say where it stands. It runs your own Claude Code in a checkout of the PR's head (`src/checkout.ts`) with the prompt and schema in `src/deep.ts`: it reads, and may write a small probe there when reading can't settle a risk (CI runs the tests) (`--permission-mode bypassPermissions`), never push or write to GitHub (`PROBE_DENY` in `src/review.ts`), with none of your MCP servers. Kept per PR in kv `deep:<id>` with the commit it read, beside its last failure. Codex and OpenCode aren't supported yet.
 
 ### Your own agent
 

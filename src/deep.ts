@@ -1,8 +1,7 @@
-// A deep review: an adversarial pass over a PR in its own checkout. The agent reads the PR's claims as hypotheses, checks
-// what the change rests on against the repo, runs its tests and probes behaviour. It then says what problem the change
-// solves, how things were before and after, walks the change in steps over its hunks, and keeps only what it proved
-// wrong, the questions only a person can answer, and small fixes for the author. One prompt for every PR: only who reads
-// it differs.
+// A deep review: an adversarial pass over a PR in its own checkout. CI runs the tests; this reads the PR's claims as
+// hypotheses, puts the change in context, weighs its risk to production and its blast radius, and judges whether its
+// direction and design are sound and match its intent. It walks the change in steps over its hunks, each step's findings
+// in it. One prompt for every PR: only who reads it differs.
 import { Result } from "effect";
 import { parseDiagram } from "./diagram.ts";
 import { DeepAnswerSchema } from "./kv.ts";
@@ -28,10 +27,11 @@ export const deepPrompt = (item: Pick<Item, "repo" | "number">, yours: boolean, 
 
 Your working directory is a checkout of the PR's head commit.
 
-Your job has two parts. First, find what would make a careful senior engineer on this codebase stop or change this PR,
-and prove it. Second, give the reader the understanding they need to judge the change themselves: what problem it solves,
-how the system behaved before and after, and a walk through its code in the order that builds that understanding. Your
-reader trusts you only for what you prove and has little time: every line you write must carry information they need.
+CI runs the tests; your job is what CI can't do. Put the change in context, weigh what it risks in production and how far
+a mistake would reach, and judge whether its direction and design are sound and do what the author intends. Give the
+reader what they need to decide: what problem it solves, how the system behaves before and after, and a walk through its
+code in the order that builds that understanding. Your reader trusts you only for what you show and has little time:
+every line you write must carry information they need.
 
 ## How to work
 
@@ -45,21 +45,31 @@ reader trusts you only for what you prove and has little time: every line you wr
    the problem exist; does something in the codebase already do this; is this the right place for it. Then what it
    assumes about callers, inputs, data, concurrency, lifecycle, configuration, failure modes and deploy order. The most
    expensive mistakes are code that shouldn't exist and code built on a false belief about the system.
-4. **Investigate.** For each premise and each risky part of the change, spend effort in proportion to how bad it would be
-   if wrong times how unsure you are. Search for existing equivalents, read callers and callees, read \`git log\` and
-   \`git blame\` for why the current code is the way it is. Run the relevant tests if the repo lets you. When a small
-   script or throwaway test is the cheapest way to know how something behaves, write it under \`./.review-probe/\` and
-   run it; change no tracked file. When a premise depends on something outside the checkout (a dependency's code, a
-   chart, a config elsewhere), fetch it and look rather than taking the author's word. Don't settle for "unclear" when a
-   tool can answer it. Spend little on changes that are low-risk and plainly right.
+4. **Context.** Read what the change touches and what touches it: callers and callees, the code it replaces, \`git log\`
+   and \`git blame\` for why the current code is the way it is, and anything outside the checkout it depends on (a
+   dependency's code, a chart, a config elsewhere): fetch it and look rather than taking the author's word.
+5. **Risk and blast radius.** If this is wrong in production, what breaks, for whom, how far it spreads (one endpoint, a
+   service, every tenant, stored data), how soon anyone would notice, and how it's undone (a revert, a flag, or a data
+   migration that can't be). Spend effort in proportion to how bad it would be if wrong times how unsure you are; little
+   on changes that are low-risk and plainly right. Don't run the test suite: CI does. When reading can't settle a
+   specific risk (how a library behaves under load, what a query returns), a small script under \`./.review-probe/\` is
+   allowed; change no tracked file.
+6. **Direction.** Is this the right change: the right place, the right layer, consistent with how the codebase does the
+   same thing elsewhere, no simpler way already there, and does it achieve the stated goal? A sound design with a small
+   bug is \`fix first\`; a design that's wrong for the goal is \`rethink\`.
 
 ## What you report
 
 The review replaces reading the diff cold: a short top, then the change in steps, each step's findings in it.
 
-- **goal:** what the author says this achieves, as theirs ("The author's goal: …"), for someone who doesn't know this
-  code. Define a term the reader may not know in a few words the first time it appears.
+- **goal:** the intent: what the author says this achieves, for someone who doesn't know this code, in one or two
+  sentences. It sits under the heading "Intent", so don't prefix it. Define a term the reader may not know in a few words
+  the first time it appears.
+- **fit:** how this PR serves that intent, in one sentence: whether it gets there, and where it falls short or does more
+  than it needs to.
 - **change:** how behaviour changes, before to after, in one or two sentences: what happens, to what, when.
+- **risk:** the blast radius in one or two sentences: what would break in production if this is wrong, for whom, and how
+  it's undone. Say plainly when it's small.
 - **lean** and **lean_why:** \`ship\`, \`fix first\` or \`rethink\`, and the one line that decides it (the page links its step, so don't name it).
   Never \`ship\` while a premise about necessity, safety or correctness fails; \`rethink\` when the change
   shouldn't exist as written.
@@ -70,9 +80,9 @@ The review replaces reading the diff cold: a short top, then the change in steps
   one sentence on the behaviour this code changes, or the concern in it. A routine step (a mechanical follow-up) gets a
   plain \`why\` and no notes. Leave out hunks not worth reading.
 - **notes**, inside the step they're about: what you found there, each once, in the one step it belongs to.
-  - \`kind\`: \`blocker\` (proved, must change), \`issue\` (proved, should change), \`question\` (only a person can
-    answer), \`verified\` (a check that passed and matters to the decision, such as a test or probe confirming the
-    change works), \`nit\` (small and mechanical).
+  - \`kind\`: \`blocker\` (shown, must change), \`issue\` (shown, should change), \`question\` (only a person can
+    answer), \`verified\` (something you checked that a reader would otherwise worry about), \`nit\` (small and
+    mechanical).
   - \`text\`: what was observed and its consequence, in that order. \`ask\`: the change or answer it needs, as a request,
     or "". \`at\`: the \`path:line\` in the diff it's about, so it sits on that line, or "". \`evidence\`: the command and
     the line of output, or the quote, that shows it, short.
@@ -120,9 +130,11 @@ const obj = (properties: Record<string, object>) => ({
 
 // The answer's shape, its lengths the review's budget.
 export const DEEP_SCHEMA = obj({
-  goal: str(280, "What the author says it achieves, attributed as theirs."),
+  goal: str(280, "The intent: what the author says it achieves."),
+  fit: str(240, "How this PR serves that intent, in one sentence."),
   intent_from: { enum: ["stated", "inferred", "missing"] },
   change: str(300, "How behaviour changes, before to after."),
+  risk: str(300, "The blast radius: what breaks in production if this is wrong, for whom, and how it's undone."),
   lean: { enum: ["ship", "fix first", "rethink"] },
   lean_why: str(180, "The one line that decides it."),
   caveat: str(240, "One uncertainty about the whole change and what would settle it, or empty."),
@@ -144,7 +156,6 @@ export const DEEP_SCHEMA = obj({
       ),
     }),
   ),
-  checked: obj({ tests: str(140, "What ran and the result, or why none could."), probes: { type: "integer", minimum: 0 } }),
   picture: obj({
     step: { type: "integer", minimum: 0 },
     title: str(60),

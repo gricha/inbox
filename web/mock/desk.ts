@@ -4243,10 +4243,12 @@ const DEEPS = new Map<string, DeepReview>([
   [
     "acme/api#4127",
     {
-      goal: "The author's goal: dashboards on large projects show the rows a long query has found instead of timing out with nothing.",
+      goal: "Dashboards on large projects show the rows a long query has found instead of timing out with nothing.",
+      fit: "Stopping the query at a time budget gets there, but an unchecked `?budget=` can turn the budget off or return nothing.",
       intent_from: "stated",
       change:
         "Before, a query scanned to the end and returned every row at once. Now it stops at a time budget (2 s, or `?budget=` in ms) and returns the rows so far, marked partial.",
+      risk: "Every `/v2/query` caller: with the 2 s default, slow queries that completed before come back partial. A revert undoes it; nothing is stored.",
       lean: "fix first",
       lean_why: "`?budget=` isn't checked: `budget=abc` turns the budget off and `budget=0` returns nothing, marked partial.",
       caveat:
@@ -4299,16 +4301,15 @@ const DEEPS = new Map<string, DeepReview>([
           hunks: ["h5"],
           notes: [
             {
-              kind: "verified",
-              text: "Batching and abort behave as the tests say; nothing tests the route's header or `partial`.",
+              kind: "issue",
+              text: "The tests cover batching and abort; nothing tests the route's header or `partial`, the part callers see.",
               ask: "Add a route test for `X-Partial-Results`.",
               at: "",
-              evidence: "pnpm test planner: 41 passed",
+              evidence: "",
             },
           ],
         },
       ],
-      checked: { tests: "pnpm test planner: 41 passed", probes: 2 },
       picture: deepPicture(
         2,
         "Where a partial result goes",
@@ -4906,14 +4907,15 @@ async function respond(req: MockRequest, url: URL): Promise<unknown> {
         setTimeout(() => {
           DEEP_RUNNING.delete(r.id);
           DEEPS.set(r.id, {
-            goal: `The author's goal: ${r.seed.title}.`,
+            goal: r.seed.title,
+            fit: "It does what it says, in the place the repo does the same thing elsewhere.",
             intent_from: r.seed.body ? "stated" : "inferred",
             change: "The new path runs where the old one did, with its callers unchanged.",
+            risk: "Small: one code path, undone by a revert.",
             lean: "ship",
             lean_why: "The tests pass and nothing in the repo already does this.",
             caveat: "",
             steps: [],
-            checked: { tests: "12 passed", probes: 0 },
             picture: null,
             head_oid: itemOf(r).head_oid,
             model: "claude-opus-5-5",
