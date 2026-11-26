@@ -217,7 +217,7 @@ import {
   type Sorted,
 } from "./kv.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { deepGuide, deepOf, deepPrompt, deepSchema, pictureOf, stepsOf } from "./deep.ts";
+import { deepGuide, deepOf, deepPrompt, deepSchema, gradeOf, pictureOf, stepsOf } from "./deep.ts";
 import {
   agentDir,
   agentDown,
@@ -2673,8 +2673,11 @@ export class Desk {
       const seconds = Math.round((Date.now() - started) / 1000);
       const picture = pictureOf(answer.picture);
       if (picture.refused) this.log(`deep review of ${item.id}: its picture: ${picture.refused}: dropped`);
+      const grade = gradeOf(answer);
+      if (grade.raised) this.log(`deep review of ${item.id}: graded low with a ${grade.raised} reason: raised to medium`);
       const review: DeepReview = {
         ...answer,
+        risk_level: grade.level,
         steps: stepsOf(answer.steps, pr.files),
         picture: picture.diagram,
         head_oid: item.head_oid,

@@ -95,8 +95,25 @@ The review replaces reading the diff cold: a short top, then the change in steps
 - **change:** how behaviour changes, before to after, in one or two sentences: what happens, to what, when.
 - **risk:** the blast radius in one or two sentences: the scope you can show (which service, which pods, which phase,
   which data) and the concrete consequence there if this is wrong. Name how it's undone only when that's harder than a
-  revert. Say plainly when it's small. **risk_level** grades it: \`low\` (contained, easy to undo), \`medium\` (one
-  service or a group of users, undone by a deploy), \`high\` (many users, stored data, security, or hard to undo).
+  revert. Say plainly when it's small.
+- **risk_level:** how bad it is if this change is wrong, across what it reaches; not how likely that is (your findings and
+  lean say that, so \`low\` can go with \`fix first\` and \`high\` with \`ship\`). Grade the most severe credible consequence
+  this change introduces or worsens, through a mechanism you can name; not defects it leaves as they were, and not chains
+  that need failures you have no reason to expect.
+  - \`high\`: losing, corrupting or exposing stored data people or services rely on and that isn't rebuilt on its own;
+    access or authority someone shouldn't have (identity, permissions, text outsiders can write newly reaching a model or
+    code that can write, run or send); silently skipping an enforced security or release check; damage a revert doesn't
+    repair (a migration that rewrites or drops data or can't be reversed, something sent); or breaking a production path
+    your reading shows many users or services take.
+  - \`medium\`: a production feature, a group of users or teams, or another service misbehaves until a deploy fixes it
+    (self-hosted: until its next release); data damaged but recoverable; or a contract other code relies on changes.
+  - \`low\`: presentation, analytics or attribution wrong, dev or test only, internal with nothing downstream acting on
+    it, or behind a flag that stays off; and a revert undoes all of it.
+  - Grade the scope you showed: one caller, an internal service or an experimental label isn't by itself evidence the
+    consequence is small. A flag change grades what it turns on, at the share it reaches; a kill switch that works
+    within minutes counts as a revert.
+  - **risk_reasons** name consequences you can support, not topics the change touches: \`data\`, \`security\` and
+    \`irreversible\` each mean at least \`medium\`, and the desk holds you to it.
 - **lean** and **lean_why:** \`ship\`, \`fix first\` or \`rethink\`, and the one line that decides it (the page links its step, so don't name it).
   Never \`ship\` while a premise about necessity, safety or correctness fails; \`rethink\` when the change
   shouldn't exist as written.
@@ -249,6 +266,14 @@ export const deepSchema = (tags: readonly { id: string }[] = []) =>
 
 type Answer = Omit<DeepReview, "head_oid" | "model" | "at" | "seconds" | "picture"> & {
   picture: { step: number; title: string; caption: string; source: string };
+};
+
+// Its grade held to its own reasons: a data, security or irreversible consequence is at least medium. `raised`: the reason
+// that raised it, for the log, or null when the grade stood.
+const FLOOR = new Set(["data", "security", "irreversible"]);
+export const gradeOf = (a: Pick<Answer, "risk_level" | "risk_reasons">): { level: Answer["risk_level"]; raised: string | null } => {
+  const why = a.risk_level === "low" ? a.risk_reasons.find((r) => FLOOR.has(r.factor)) : undefined;
+  return why ? { level: "medium", raised: why.factor } : { level: a.risk_level, raised: null };
 };
 
 // The agent's answer as a deep review, or why it isn't one.

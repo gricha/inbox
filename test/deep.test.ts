@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
 import type { ReviewDeps } from "../src/desk.ts";
-import { deepGuide, stepsOf } from "../src/deep.ts";
+import { deepGuide, gradeOf, stepsOf } from "../src/deep.ts";
 import { askClaude, type PrText } from "../src/review.ts";
 import type { DeepReview } from "../src/types.ts";
 import { reviewAsk, setup } from "./helpers/desk.ts";
@@ -282,4 +282,12 @@ test("a deep review's steps keep only this diff's hunks, become the Review tab's
     both.notes.map((n) => n.flag),
     ["blocker", "nit"],
   );
+});
+
+test("a deep review's grade is held to its own reasons: low with a data, security or irreversible consequence is medium", () => {
+  const why = (factor: "data" | "security" | "irreversible" | "reach" | "contract") => [{ factor, why: "w" }];
+  assert.deepEqual(gradeOf({ risk_level: "low", risk_reasons: why("data") }), { level: "medium", raised: "data" });
+  assert.deepEqual(gradeOf({ risk_level: "low", risk_reasons: why("security") }), { level: "medium", raised: "security" });
+  assert.deepEqual(gradeOf({ risk_level: "low", risk_reasons: why("reach") }), { level: "low", raised: null }, "a narrow reach stays low");
+  assert.deepEqual(gradeOf({ risk_level: "high", risk_reasons: why("contract") }), { level: "high", raised: null }, "never lowered");
 });
