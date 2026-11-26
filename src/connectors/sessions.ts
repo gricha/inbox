@@ -766,6 +766,32 @@ function desksOwn(cwd: string, name: string | undefined, home: string): boolean 
   return c === h || c.startsWith(h + path.sep) || cwd === home || cwd.startsWith(home + path.sep);
 }
 
+// The GitHub repo (owner/name) a directory is a clone or worktree of, from its git config's origin; null when it isn't one.
+const repos = new Map<string, string | null>();
+export function repoAt(cwd: string): string | null {
+  if (repos.has(cwd)) return repos.get(cwd)!;
+  let dir = cwd;
+  let git: string | null = null;
+  while (!git) {
+    const at = path.join(dir, ".git");
+    if (fs.existsSync(at)) git = at;
+    else if (path.dirname(dir) === dir) break;
+    else dir = path.dirname(dir);
+  }
+  let common = git;
+  if (git && fs.statSync(git).isFile()) {
+    const gitdir = /^gitdir:\s*(.+)$/m.exec(readText(git) ?? "")?.[1]?.trim();
+    const worktree = gitdir ? path.resolve(path.dirname(git), gitdir) : null;
+    const up = worktree ? readText(path.join(worktree, "commondir"))?.trim() : null;
+    common = worktree ? (up ? path.resolve(worktree, up) : worktree) : null;
+  }
+  const config = common ? (readText(path.join(common, "config")) ?? "") : "";
+  const origin = /\[remote "origin"\][^[]*?url\s*=\s*(\S+)/.exec(config)?.[1] ?? "";
+  const repo = /github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/.exec(origin)?.[1] ?? null;
+  repos.set(cwd, repo);
+  return repo;
+}
+
 export class Sessions {
   readonly id = "sessions";
   readonly name = "Sessions";
@@ -781,6 +807,7 @@ export class Sessions {
   hosts = new Map<string, SessionHost>(); // the sessions the desk runs for you, by ref
   guardMs = GUARD;
   kept = new Map<string, Seen>(); // every session that needed you lately, as last read: its page reads on once it's answered
+  recent = new Map<string, Seen>(); // every session the last pass saw, by ref, needing you or not
 
   constructor(desk: Host, at: Roots = roots()) {
     this.desk = desk;
@@ -936,6 +963,7 @@ export class Sessions {
       if (!rows) return;
       const now = this.desk.now().getTime();
       const seen = yield* Effect.sync(() => this.look(rows, now));
+      this.recent = new Map(seen.map((x) => [SESSION_PREFIX + x.session_id, x]));
       const next = new Map<string, Found>();
       let asks = 0;
       for (const s of seen) {
@@ -1087,12 +1115,21 @@ export class Sessions {
     });
   }
 
+  // The Claude Code session working on a PR's branch in a clone of its repo, the latest one written to: what opened it.
+  // Codex's can't be told anything from here.
+  openedBy(repo: string, branch: string): Seen | null {
+    const on = [...this.recent.values()].filter(
+      (x) => x.kind !== "codex" && x.branch === branch && repoAt(x.cwd)?.toLowerCase() === repo.toLowerCase(),
+    );
+    return on.toSorted((a, b) => (b.written ?? 0) - (a.written ?? 0))[0] ?? null;
+  }
+
   // A session's page: its card while it needs you, its last turns from its own transcript, what it waits on (asked of the
   // desk while the desk runs it), and how you can answer it.
   view(ref: string): Effect.Effect<SessionView, NotFound> {
     return Effect.suspend(() => {
       const f = this.found.get(ref);
-      const s = f?.seen ?? this.kept.get(ref);
+      const s = f?.seen ?? this.kept.get(ref) ?? this.recent.get(ref);
       if (!s) return Effect.fail(new NotFound({ message: `no session "${ref}" needed you lately` }));
       const now = this.desk.now();
       const card = f ? this.card(ref, f, now.toISOString()) : null;

@@ -78,6 +78,7 @@ import type {
   SetupAgent,
   SetupView,
   AiReview,
+  DeepNote,
   DeepReview,
   Ask,
   AsksView,
@@ -160,6 +161,7 @@ import {
   placeNotes,
   RANK,
   SECRET_SET,
+  SESSION_PREFIX,
   UNTIL,
   untilTime,
 } from "./types.ts";
@@ -278,6 +280,20 @@ const ACTIVE = { done_at: null, snooze_until: null, snooze_when: null, snoozed_a
 const QUICK_LINES = 200; // at most this many lines changed for a PR to be quick to review
 const WARM_AT_ONCE = 3; // the main page's diffs and conversations fetched ahead after a sync, this many at a time
 const CHECKS_KEPT = 200; // PRs whose checks are kept, the least recently asked for going first
+const SENDBACK_ROUNDS = 3; // a draft's findings go back to its session at most this many times; then it's on your desk
+const SENDBACK_HOLD = 3 * 60 * 60_000; // how long a draft sent back waits for its session's push before it's on your desk anyway
+// What a draft's session is told: the findings, each where it is and what it asks, and what happens next.
+const sendBackText = (it: Item, me: string, found: DeepNote[]): string =>
+  [
+    `Inbox reviewed your draft ${it.url} at ${it.head_oid.slice(0, 7)} before it goes to @${me}, and found ${found.length === 1 ? "this" : `these ${found.length}`} to fix:`,
+    "",
+    ...found.map(
+      (n, i) =>
+        `${i + 1}. ${n.kind === "blocker" ? "Blocker" : "Issue"}${n.at ? ` at ${n.at}` : ""}: ${n.text}${n.ask ? ` ${n.ask}` : ""}${n.evidence ? `\n   Evidence: ${n.evidence}` : ""}`,
+    ),
+    "",
+    `Fix what holds up and push to ${it.head_ref ?? "its branch"}: the desk reviews it again. If one is wrong, say why in the PR description. Leave it a draft.`,
+  ].join("\n");
 const AI_RETRY = 30 * 60_000; // how long failures in a row pause AI reviews nobody asked for
 const ISSUE_AGAIN_MS = 6 * 3_600_000; // an issue that moved on is pre-reviewed again by the pump at most this often; opening it asks at once
 const ISSUE_RETRY_MS = 3_600_000; // a failed try on a version of an issue waits this long
@@ -1868,6 +1884,12 @@ export class Desk {
     // A head shows its chain where it needs you: where the desk places it, or, pinned or moved, when its next step is yours.
     // Otherwise the chain waits on someone else, on Blocked; a broken one shows where its head does.
     const parked = new Set<string>();
+    // Your draft its session is fixing waits on Blocked, wherever the rules put it.
+    for (const [id, e] of entries) {
+      if (!best.has(id) || !this.sentBack(e, reviews)) continue;
+      best.delete(id);
+      parked.add(id);
+    }
     for (const id of after.steps.keys()) {
       const e = entries.get(id);
       if (!e || nodeState(id) === "broken" || needs.has(id)) continue;
@@ -2338,11 +2360,14 @@ export class Desk {
         const e = snap.entries.get(id)!;
         const c = this.card(e, this.shownAt(e, snap), snap);
         const waits = e.analysis.signals.pr.waits;
-        c.why = e.inflight
-          ? "is in Merging"
-          : waits !== ""
-            ? waits
-            : (e.resolved?.reason ?? (e.status === "active" ? "is open" : `is ${e.status}`));
+        const back = this.sentBack(e, snap.reviews);
+        c.why = back
+          ? `sent back to ${back.name}: ${back.issues} ${back.issues === 1 ? "issue" : "issues"} its review found`
+          : e.inflight
+            ? "is in Merging"
+            : waits !== ""
+              ? waits
+              : (e.resolved?.reason ?? (e.status === "active" ? "is open" : `is ${e.status}`));
         return c;
       });
       sections.blocked = blockedOrder([...sections.blocked, ...merging, ...parked].map(aged), (id) => snap.deps.get(id)?.needs ?? []);
@@ -2672,6 +2697,54 @@ export class Desk {
     );
   }
 
+  // Your draft's review found blockers or issues: they go back to the session that opened it, which fixes them and pushes,
+  // and the PR waits on Blocked meanwhile, not on your desk. A clean review, no session to tell, or SENDBACK_ROUNDS tries
+  // put it on your desk as any PR. Nothing here writes to GitHub.
+  private returnFindings(e: Entry, deep: DeepReview): Effect.Effect<void> {
+    return Effect.gen({ self: this }, function* () {
+      const it = e.item;
+      const was = this.store.kvAt("sentback:", it.id);
+      const found = deep.steps.flatMap((x) => x.notes).filter((n) => n.kind === "blocker" || n.kind === "issue");
+      if (!found.length || !e.analysis.signals.me.author || !it.draft || !it.head_ref) {
+        if (was) this.store.unset(`sentback:${it.id}`);
+        return;
+      }
+      if ((was?.rounds ?? 0) >= SENDBACK_ROUNDS) return;
+      const s = this.sessions.openedBy(it.repo, it.head_ref);
+      if (!s) return;
+      const ref = SESSION_PREFIX + s.session_id;
+      const sent = yield* this.sessions.send(ref, sendBackText(it, this.me(), found)).pipe(
+        Effect.as(true),
+        Effect.catch((err) =>
+          Effect.sync(() => {
+            this.log(`review of ${it.id}: couldn't send its findings back to ${s.name}: ${err.message}`);
+            return false;
+          }),
+        ),
+      );
+      if (!sent) return;
+      const rounds = (was?.rounds ?? 0) + 1;
+      this.store.putKvAt("sentback:", it.id, {
+        head: it.head_oid,
+        session: ref,
+        name: s.name,
+        issues: found.length,
+        rounds,
+        at: this.now().toISOString(),
+      });
+      this.log(`review of ${it.id}: sent ${found.length} back to ${s.name} (${s.session_id}), round ${rounds}`);
+      this.changed();
+    });
+  }
+
+  // Sent back and not on your desk yet: its session hasn't pushed, or its push isn't reviewed yet, within SENDBACK_HOLD.
+  sentBack(e: Entry, reviews: Snapshot["reviews"]): { name: string; issues: number } | null {
+    const rec = this.store.kvAt("sentback:", e.item.id);
+    if (!rec || !e.item.draft || this.now().getTime() - Date.parse(rec.at) > SENDBACK_HOLD) return null;
+    const reviewing = rec.head !== e.item.head_oid && reviews.get(e.item.id)?.head_oid !== e.item.head_oid;
+    return rec.head === e.item.head_oid || reviewing ? { name: rec.name, issues: rec.issues } : null;
+  }
+
   // The marks (ReviewHunk.mark, ReviewRest.mark) you marked viewed on a PR, kept while it's on the desk.
   private viewedOf(id: string): string[] {
     return this.store.read(`viewed:${id}`, arrayOf(Schema.String)) ?? [];
@@ -2786,6 +2859,7 @@ export class Desk {
         if (checkout && this.deeply()) {
           const deep = yield* this.runDeep(e.item, e.analysis.signals.me.author, pr, own.own?.extra ?? "", checkout);
           written = { ...deepGuide(deep, pr.files, null), skill: own.hash };
+          yield* this.returnFindings(e, deep);
         } else {
           const code = checkout ? yield* checkout(e.item) : null;
           written = yield* this.review

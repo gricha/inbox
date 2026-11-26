@@ -407,9 +407,23 @@ const DeepReviewSchema = schemaOf<DeepReview>()(
     seconds: Schema.Number,
   }),
 );
+// Your draft's review findings sent back to the session that opened it (Desk.returnFindings()): the commit they're of, to whom.
+const SentBackSchema = Schema.Struct({
+  head: Schema.String,
+  session: Schema.String,
+  name: Schema.String,
+  issues: Schema.Number,
+  rounds: Schema.Number,
+  at: Schema.String,
+});
 const DeepSchema = Schema.Struct({ review: Schema.NullOr(DeepReviewSchema), error: Schema.NullOr(Schema.String) });
 
 // The kv keys with a shape of their own, and the prefixes whose keys (`issue_fail:<id>`) share one, read and written typed
 // through Store.kv(), putKv(), kvAt(), putKvAt() and byPrefix(). The rest still go through read() and set().
 export const KV = { blocked: BlockedSchema } as const;
-export const KV_PREFIX = { "issue_fail:": IssueFailSchema, "pushed:": PushedSchema, "deep:": DeepSchema } as const;
+export const KV_PREFIX = {
+  "issue_fail:": IssueFailSchema,
+  "pushed:": PushedSchema,
+  "deep:": DeepSchema,
+  "sentback:": SentBackSchema,
+} as const;
