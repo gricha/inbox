@@ -12,6 +12,7 @@ import { deepGuide, stepsOf } from "../src/deep.ts";
 import type { PrText } from "../src/review.ts";
 import type { DeepReview } from "../src/types.ts";
 import { reviewAsk, setup } from "./helpers/desk.ts";
+import { posix } from "./helpers/platform.ts";
 import { run } from "./helpers/run.ts";
 
 const ID = "acme/api#1";
@@ -118,7 +119,7 @@ const until = async (ok: () => Promise<boolean>) => {
   assert.fail("timed out waiting");
 };
 
-test("a deep review answers at once, runs on in the PR's checkout, and keeps what it found with the commit it read", async (c) => {
+test("a deep review answers at once, runs on in the PR's checkout, and keeps what it found with the commit it read", posix, async (c) => {
   const fake = fakeClaude(c, ANSWER);
   const t = await deskWithCheckout(c);
   fake.hold();
@@ -146,21 +147,25 @@ test("a deep review answers at once, runs on in the PR's checkout, and keeps wha
   assert.ok(t.removed(), "its checkout is removed once it's done");
 });
 
-test("a deep review's run may probe in its checkout and never writes outward: no push, no GitHub writes, no MCP servers", async (c) => {
-  const fake = fakeClaude(c, ANSWER);
-  const t = await deskWithCheckout(c);
-  await run(t.desk.deepReview(ID));
-  await until(async () => fake.calls().length > 0 && (await run(t.desk.reviewView(ID))).deep_running === null);
-  const args = fake.calls()[0]!;
-  const after = (flag: string) => args[args.indexOf(flag) + 1] ?? "";
-  assert.equal(after("--tools"), "Read,Grep,Glob,Bash,Write,Edit");
-  assert.equal(after("--permission-mode"), "bypassPermissions");
-  for (const denied of ["Bash(git push:*)", "Bash(gh api:*)", "Bash(gh pr review:*)", "Bash(gh pr comment:*)", "Bash(gh pr merge:*)"])
-    assert.ok(after("--disallowedTools").split(",").includes(denied), `${denied} is denied`);
-  assert.ok(args.includes("--strict-mcp-config") && !args.includes("--mcp-config"), "none of your MCP servers");
-});
+test(
+  "a deep review's run may probe in its checkout and never writes outward: no push, no GitHub writes, no MCP servers",
+  posix,
+  async (c) => {
+    const fake = fakeClaude(c, ANSWER);
+    const t = await deskWithCheckout(c);
+    await run(t.desk.deepReview(ID));
+    await until(async () => fake.calls().length > 0 && (await run(t.desk.reviewView(ID))).deep_running === null);
+    const args = fake.calls()[0]!;
+    const after = (flag: string) => args[args.indexOf(flag) + 1] ?? "";
+    assert.equal(after("--tools"), "Read,Grep,Glob,Bash,Write,Edit");
+    assert.equal(after("--permission-mode"), "bypassPermissions");
+    for (const denied of ["Bash(git push:*)", "Bash(gh api:*)", "Bash(gh pr review:*)", "Bash(gh pr comment:*)", "Bash(gh pr merge:*)"])
+      assert.ok(after("--disallowedTools").split(",").includes(denied), `${denied} is denied`);
+    assert.ok(args.includes("--strict-mcp-config") && !args.includes("--mcp-config"), "none of your MCP servers");
+  },
+);
 
-test("a deep review whose answer isn't one keeps its failure in your words, and the last good one stays", async (c) => {
+test("a deep review whose answer isn't one keeps its failure in your words, and the last good one stays", posix, async (c) => {
   fakeClaude(c, { lean: "maybe" });
   const t = await deskWithCheckout(c);
   await run(t.desk.deepReview(ID));
