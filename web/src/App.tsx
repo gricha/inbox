@@ -2112,8 +2112,8 @@ export function App() {
   // A session's page: your message or answer goes to it, and it's off the list at once; a refusal is a bubble, and the page
   // keeps your words.
   const sesPage: SessionPageCtx = {
-    send: (v, text, allow) =>
-      api.sendSession(v.id, text, allow).pipe(
+    send: (v, text, answer) =>
+      api.sendSession(v.id, text, answer).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             gone.show(v.id, loadSeq.current);

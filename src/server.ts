@@ -876,7 +876,9 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       yield* hands(c, "write to a session in the desk's window");
       const b = yield* bodyOf(c);
       if (typeof b.text !== "string") return yield* new BadRequest({ message: "need { text }" });
-      return { ok: true, ...(yield* desk.sendSession(c.req.param("id"), b.text, b.allow === true)) };
+      // allow or deny: an answer to the call it waits on, `call` naming the one the page showed.
+      const answer = typeof b.allow === "boolean" ? { allow: b.allow, ...(typeof b.call === "string" && { call: b.call }) } : undefined;
+      return { ok: true, ...(yield* desk.sendSession(c.req.param("id"), b.text, answer)) };
     });
     return respond(c, send, { log });
   });
@@ -887,7 +889,9 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       if (typeof b.ask !== "string" || typeof b.allow !== "boolean") return yield* new BadRequest({ message: "need { ask, allow }" });
       yield* desk.answerSession(c.req.param("id"), b.ask, {
         allow: b.allow,
-        ...(typeof b.answer === "string" && { answer: b.answer }),
+        ...(isRecord(b.answers) && {
+          answers: Object.fromEntries(Object.entries(b.answers).filter((x): x is [string, string] => typeof x[1] === "string")),
+        }),
         ...(typeof b.message === "string" && { message: b.message }),
       });
       return { ok: true };

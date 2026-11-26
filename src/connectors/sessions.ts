@@ -7,7 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
-import { Effect, Result } from "effect";
+import { Effect, Result, Semaphore } from "effect";
 import { alive, claude, halt, readTail, type Agent } from "../coordinator.ts";
 import { kill } from "../children.ts";
 import type { Core, Desk } from "../desk.ts";
@@ -43,6 +43,7 @@ const HEAD = 256 * 1024; // and from its start, for what you first asked
 const TURNS = 30; // turns a page shows; the rest of what it read fold
 const TURN_MAX = 4000; // characters of one turn's text
 const REPLY_MAX = 8000;
+const GUARD_EVERY = 30_000; // how often the desk checks that nothing else took up a session it runs
 const RESUME_TIMEOUT = 60 * 60_000; // a Codex or OpenCode turn the desk started on a message: it may fix and push in it
 const KEPT = 50; // sessions a page can still read after they stop needing you
 const GUARD = 4_000; // after taking one over, when the desk looks whether its app started it again
@@ -525,27 +526,34 @@ export function readCodexTalk(text: string): Talk {
   return turns.talk(null);
 }
 
-// What it waits on, from its last tool call: a question with its options, a plan, or (when it waits on a permission) the call.
-export function waitOf(pending: Talk["pending"], reason: string | null, ask?: string): SessionWait | null {
+// A call as an answer names it: its tool and input, so the desk answers the call the page showed and no other.
+const callKey = (name: string, input: unknown): string => `${name} ${JSON.stringify(input ?? null)}`;
+
+// What it waits on, from its last tool call: its questions with their options, a plan, or (when it waits on a permission)
+// the call. `context`: its last words before it asked.
+export function waitOf(pending: Talk["pending"], reason: string | null, ask?: string, context = ""): SessionWait | null {
   if (!pending) return null;
   const input = pending.input;
-  const asked = ask ? { ask } : {};
+  const base = { call: callKey(pending.name, input), context, ...(ask && { ask }) };
   if (pending.name === "AskUserQuestion") {
-    const q = obj(elements(input?.questions)[0]);
-    const question = str(q?.question);
-    if (!question) return null;
-    const options = elements(q?.options).flatMap((o) => {
-      const label = str(obj(o)?.label);
-      return label ? [{ label, description: str(obj(o)?.description) ?? "" }] : [];
+    const questions = elements(input?.questions).flatMap((x) => {
+      const q = obj(x);
+      const question = str(q?.question);
+      if (!question) return [];
+      const options = elements(q?.options).flatMap((o) => {
+        const label = str(obj(o)?.label);
+        return label ? [{ label, description: str(obj(o)?.description) ?? "" }] : [];
+      });
+      const rec = options.find((o) => /\(recommended\)/i.test(o.label));
+      return [{ question, options, ...(rec && { pick: rec.label }), multi: q?.multiSelect === true }];
     });
-    const rec = options.find((o) => /\(recommended\)/i.test(o.label));
-    return { kind: "question", question, options, ...(rec && { pick: rec.label }), ...asked };
+    return questions.length ? { kind: "question", questions, ...base } : null;
   }
-  if (pending.name === "ExitPlanMode") return { kind: "plan", plan: cut(str(input?.plan) ?? ""), ...asked };
+  if (pending.name === "ExitPlanMode") return { kind: "plan", plan: cut(str(input?.plan) ?? ""), ...base };
   // "needs you" with a call left open: a background session that stopped on its permission prompt.
   if (reason && /^needs (permission|sandbox access|you$)/.test(reason)) {
     const detail = ["command", "file_path", "path", "url", "pattern", "description"].map((k) => str(input?.[k])).find(Boolean);
-    return { kind: "permission", tool: pending.name, detail: cut(detail ?? ""), ...asked };
+    return { kind: "permission", tool: pending.name, detail: cut(detail ?? ""), ...base };
   }
   return null;
 }
@@ -842,6 +850,8 @@ export class Sessions {
   askFailed = 0; // when a model call last failed: none again for a while
   records = new Map<string, { key: string; record: DesktopRecord | null }>(); // the desktop app's, by file
   hosts = new Map<string, SessionHost>(); // the sessions the desk runs for you, by ref
+  ended = new Map<string, string>(); // why the desk's run of a session failed, by ref, until you write to it again
+  starting = new Map<string, Semaphore.Semaphore>(); // one start of a session's process at a time, by ref
   guardMs = GUARD;
   kept = new Map<string, Seen>(); // every session that needed you lately, as last read: its page reads on once it's answered
   recent = new Map<string, Seen>(); // every session the last pass saw, by ref, needing you or not
@@ -1020,7 +1030,13 @@ export class Sessions {
             verdict: {
               state: "blocked",
               reason,
-              excerpt: oneLine(excerpt?.kind === "question" ? excerpt.question : excerpt?.kind === "permission" ? excerpt.detail : ""),
+              excerpt: oneLine(
+                excerpt?.kind === "question"
+                  ? (excerpt.questions[0]?.question ?? "")
+                  : excerpt?.kind === "permission"
+                    ? excerpt.detail
+                    : "",
+              ),
               since: asked.at,
               resets_at: null,
               key: asked.id,
@@ -1136,7 +1152,10 @@ export class Sessions {
       excerpt: v.excerpt,
       resets_at: v.resets_at ? new Date(v.resets_at).toISOString() : null,
       alive: running,
-      actions: actionsOf({ kind, alive: running }),
+      // Nothing to start before a rate limit resets: the desk would refuse it.
+      actions: actionsOf({ kind, alive: running }).filter(
+        (x) => !(v.resets_at && v.resets_at > Date.parse(now) && (x === "kick" || x === "resume")),
+      ),
       open_url: openUrl({ kind, session_id: s.session_id, alive: running }, s.local_id),
       attach: kind === "background" && running && s.short_id ? `claude attach ${s.short_id}` : null,
       status: st.muted ? "muted" : snoozed ? "snoozed" : done ? "done" : "active",
@@ -1224,6 +1243,10 @@ export class Sessions {
       const host = this.hosting(ref);
       const why = whyNot(s, card, now.getTime(), !!host);
       const running = !host && !!s.row?.pid && !!s.row.status;
+      // Its last words before it asked, which say why: the newest turn of its own.
+      const last = talk.turns.findLast((t) => t.who === "agent" && !!t.text);
+      const said = last && last.who !== "tools" ? last.text : "";
+      const context = said.length > 400 ? `${said.slice(0, 399)}…` : said;
       const url = openUrl({ kind: s.kind, session_id: s.session_id, alive: running }, s.local_id);
       const asked = host?.asks[0];
       return Effect.succeed({
@@ -1238,19 +1261,33 @@ export class Sessions {
         turns: talk.turns,
         earlier: whole ? talk.earlier : Math.max(1, talk.earlier),
         waiting: asked
-          ? waitOf({ name: asked.tool, input: asked.input }, "needs permission", asked.id)
+          ? waitOf({ name: asked.tool, input: asked.input }, "needs permission", asked.id, context)
           : host?.busy
             ? null
             : card
-              ? (waitOf(talk.pending, card.reason) ?? this.question(s, card))
+              ? (waitOf(talk.pending, card.reason, undefined, context) ?? this.question(s, card))
               : null,
         live: host ? { busy: host.busy, saying: host.saying, error: host.error } : null,
         can_reply: why === null,
         why_not: why,
         open: url ? { label: s.kind === "codex" ? "Open in Codex" : "Open in Claude", url } : null,
-        command:
-          card?.attach ??
-          ((s.kind === "cli" || s.kind === "background") && !running ? `cd ${quoted(s.cwd)} && claude --resume ${s.session_id}` : null),
+        // None while the desk runs it: a second process of the same session would be a second writer.
+        command: host
+          ? null
+          : (card?.attach ??
+            ((s.kind === "cli" || s.kind === "background") && !running ? `cd ${quoted(s.cwd)} && claude --resume ${s.session_id}` : null)),
+        runs: host
+          ? "inbox"
+          : s.kind === "codex"
+            ? "codex"
+            : running
+              ? s.kind === "desktop"
+                ? "app"
+                : s.kind === "background"
+                  ? "background"
+                  : "terminal"
+              : "none",
+        notice: host ? null : (this.ended.get(ref) ?? null),
       });
     });
   }
@@ -1260,7 +1297,8 @@ export class Sessions {
     const a = this.asked.get(s.session_id);
     if (card.state !== "blocked" || !a?.question || (a.key !== s.tail?.key && a.key !== s.codex?.key)) return null;
     const pick = a.options.some((o) => o.label === a.pick) ? { pick: a.pick } : {};
-    return { kind: "question", question: a.question, options: a.options.map((o) => ({ label: o.label, description: o.why })), ...pick };
+    const options = a.options.map((o) => ({ label: o.label, description: o.why }));
+    return { kind: "question", questions: [{ question: a.question, options, ...pick, multi: false }], call: `words ${a.key}`, context: "" };
   }
 
   // The desk's own process for it, while it runs.
@@ -1271,11 +1309,12 @@ export class Sessions {
 
   // Your message, as its next turn: to the process the desk runs it in, started first where nothing else runs it. Never a
   // second writer: one the Claude app, a terminal or a running background job holds says where to answer it instead.
-  // allow: you allowed the call it waited on when its process went: allowed when it asks for it again, so one click does it.
+  // `answer`: allow or deny the call it waits on, `call` naming the one the page showed: one it no longer asks for is refused,
+  // so a click never answers a call you didn't see. Starts of a session's process are one at a time.
   send(
     ref: string,
     text: string,
-    allow = false,
+    answer?: { allow: boolean; call?: string },
   ): Effect.Effect<{ started: boolean }, NotFound | Conflict | BadRequest | CommandError | UnsafeArgument> {
     return Effect.gen({ self: this }, function* () {
       const said = text.trim();
@@ -1283,59 +1322,83 @@ export class Sessions {
       if (said.length > REPLY_MAX) return yield* new BadRequest({ message: `a message is at most ${REPLY_MAX} characters` });
       const v = yield* this.view(ref);
       const at = this.desk.now().toISOString();
-      const pending = allow ? this.pendingCall(ref) : null;
-      if (allow && !pending) return yield* new Conflict({ message: "it isn't waiting on a call any more" });
+      const pending = answer ? this.pendingCall(ref) : null;
+      if (answer && !pending) return yield* new Conflict({ message: "It isn't waiting on that any more." });
+      if (answer?.call && pending && callKey(pending.tool, JSON.parse(pending.input)) !== answer.call)
+        return yield* new Conflict({ message: "It asks for something else now: look at it again." });
+      const pre = pending && answer ? { ...pending, allow: answer.allow, message: said } : null;
+      const verb = !answer ? "reply" : answer.allow ? "allow" : "deny";
+      this.ended.delete(ref);
       const live = this.hosting(ref);
       if (live) {
-        if (pending) live.allowed = pending;
+        if (pre) live.pre = pre;
         live.say(said);
-        this.desk.store.logWrite(ref, pending ? "allow" : "reply", at);
+        this.desk.store.logWrite(ref, verb, at);
         return { started: false };
       }
       if (v.why_not) return yield* new Conflict({ message: v.why_not });
-      const rows = parseAgents(yield* claude(["agents", "--json", "--all"])) ?? [];
-      const row = rows.find((r) => r.sessionId === v.session_id);
-      if (row?.pid && alive(row.pid) && row.status === "busy")
-        return yield* new Conflict({ message: "It's working right now: it doesn't need you yet." });
-      // Waiting on you in the Claude app, a terminal or a background job: the desk stops that process, as the app does an idle
-      // session's, so the desk is its one writer; the app reads its turns from the transcript when it's opened there again.
-      if (row?.id) yield* halt(stopOf(row));
-      else if (row?.pid && alive(row.pid)) yield* letGo(row.pid);
-      const host = new SessionHost(
-        v.session_id,
-        v.cwd,
-        () => {
+      let lock = this.starting.get(ref);
+      if (!lock) this.starting.set(ref, (lock = Semaphore.makeUnsafe(1)));
+      return yield* lock.withPermits(1)(
+        Effect.gen({ self: this }, function* () {
+          // Another send started it while this one waited: it goes to that process.
+          const started = this.hosting(ref);
+          if (started) {
+            if (pre) started.pre = pre;
+            started.say(said);
+            this.desk.store.logWrite(ref, verb, at);
+            return { started: false };
+          }
+          const rows = parseAgents(yield* claude(["agents", "--json", "--all"])) ?? [];
+          const row = rows.find((r) => r.sessionId === v.session_id);
+          if (row?.pid && alive(row.pid) && row.status === "busy")
+            return yield* new Conflict({ message: "It's working right now: it doesn't need you yet." });
+          // Waiting on you in the Claude app, a terminal or a background job: the desk stops that process, as the app does an
+          // idle session's, so the desk is its one writer; the app reads its turns from the transcript when it's opened again.
+          if (row?.id) yield* halt(stopOf(row));
+          else if (row?.pid && alive(row.pid)) yield* letGo(row.pid);
+          const host: SessionHost = new SessionHost(
+            v.session_id,
+            v.cwd,
+            () => {
+              this.desk.changed();
+            },
+            () => {
+              if (host.error) this.ended.set(ref, host.error);
+              this.desk.runner.fork("sessions", this.poll());
+            },
+          );
+          yield* host.start();
+          this.hosts.set(ref, host);
+          if (pre) host.pre = pre;
+          host.say(said);
+          this.desk.store.logWrite(ref, verb, at);
+          this.desk.log(`sessions: talking to ${v.session_id} in ${v.cwd}${row?.pid ? ` (took it over from process ${row.pid})` : ""}`);
+          this.found.delete(ref); // it has a turn now; the next pass says how it goes
           this.desk.changed();
-        },
-        () => {
-          this.desk.runner.fork("sessions", this.poll());
-        },
+          this.desk.runner.fork("sessions", this.guard(host));
+          return { started: true };
+        }),
       );
-      yield* host.start();
-      this.hosts.set(ref, host);
-      if (pending) host.allowed = pending;
-      host.say(said);
-      this.desk.store.logWrite(ref, pending ? "allow" : "reply", at);
-      this.desk.log(`sessions: talking to ${v.session_id} in ${v.cwd}${row?.pid ? ` (took it over from process ${row.pid})` : ""}`);
-      this.found.delete(ref); // it has a turn now; the next pass says how it goes
-      this.desk.changed();
-      if (row?.pid) this.desk.runner.fork("sessions", this.guard(host));
-      return { started: true };
     });
   }
 
   // Taken over from the Claude app: if the app starts it again meanwhile, the desk lets go rather than be a second writer.
   guard(host: SessionHost): Effect.Effect<void> {
     return Effect.gen({ self: this }, function* () {
-      yield* Effect.sleep(this.guardMs);
-      if (host.closed) return;
-      const rows = parseAgents(yield* claude(["agents", "--json", "--all"])) ?? [];
-      const other = rows.find((r) => r.sessionId === host.sessionId && r.pid && r.pid !== host.child?.pid && alive(r.pid));
-      if (!other) return;
-      yield* host.close();
-      host.error = "Claude picked it up again: answer it there.";
-      this.desk.log(`sessions: ${host.sessionId} started again elsewhere (process ${other.pid}); the desk let go`);
-      this.desk.changed();
+      // Watched as long as the desk runs it: soon after it starts, then every half minute.
+      for (let wait = this.guardMs; !host.closed; wait = Math.max(this.guardMs, GUARD_EVERY)) {
+        yield* Effect.sleep(wait);
+        if (host.closed) return;
+        const rows = parseAgents(yield* claude(["agents", "--json", "--all"])) ?? [];
+        const other = rows.find((r) => r.sessionId === host.sessionId && r.pid && r.pid !== host.child?.pid && alive(r.pid));
+        if (!other) continue;
+        host.error = "Claude picked it up again: answer it there.";
+        yield* host.close();
+        this.desk.log(`sessions: ${host.sessionId} started again elsewhere (process ${other.pid}); the desk let go`);
+        this.desk.changed();
+        return;
+      }
     }).pipe(Effect.ignore);
   }
 
@@ -1348,16 +1411,17 @@ export class Sessions {
   }
 
   // Your answer to what it asked while the desk runs it: a permission allowed or denied, a question's pick, a plan approved.
-  answer(ref: string, ask: string, a: { allow: boolean; answer?: string; message?: string }): Effect.Effect<void, NotFound | Conflict> {
+  answer(
+    ref: string,
+    ask: string,
+    a: { allow: boolean; answers?: Record<string, string>; message?: string },
+  ): Effect.Effect<void, NotFound | Conflict> {
     return Effect.suspend(() => {
       const host = this.hosting(ref);
       const asked = host?.asks.find((x) => x.id === ask);
-      if (!host || !asked) return Effect.fail(new Conflict({ message: "it isn't waiting on that any more" }));
-      const q = obj(elements(asked.input?.questions)[0]);
-      const input =
-        asked.tool === "AskUserQuestion" && a.answer && str(q?.question)
-          ? { ...asked.input, answers: { [str(q?.question)!]: a.answer } }
-          : asked.input;
+      if (!host || !asked) return Effect.fail(new Conflict({ message: "It isn't waiting on that any more." }));
+      // Every question's answer, by its question, as AskUserQuestion takes them; a multi-select's joined with commas.
+      const input = asked.tool === "AskUserQuestion" && a.answers ? { ...asked.input, answers: a.answers } : asked.input;
       const no = filled(a.message?.trim()) ?? (asked.tool === "ExitPlanMode" ? "Keep planning." : "No, don't.");
       host.answer(ask, a.allow, input, no);
       this.desk.store.logWrite(ref, a.allow ? "allow" : "deny", this.desk.now().toISOString());
@@ -1366,9 +1430,11 @@ export class Sessions {
   }
 
   // Let go of it, so the Claude app or a terminal can carry it on: its input ends and it exits.
-  release(ref: string): Effect.Effect<void> {
+  // Never mid-turn: closing it then would stop its work part way.
+  release(ref: string): Effect.Effect<void, Conflict> {
     return Effect.suspend(() => {
       const h = this.hosting(ref);
+      if (h?.busy) return Effect.fail(new Conflict({ message: "It's working: open it there once its turn ends." }));
       return h ? h.close() : Effect.void;
     });
   }
@@ -1400,6 +1466,11 @@ export class Sessions {
   // Kick and Resume: the coordinator's safe path with its own words.
   kick(ref: string): Effect.Effect<{ args: string[]; note: string | null }, NotFound | Conflict | CommandError> {
     return Effect.flatMap(this.get(ref), (c) => {
+      const now = this.desk.now().getTime();
+      if (c.resets_at && Date.parse(c.resets_at) > now)
+        return Effect.fail(
+          new Conflict({ message: `${c.name} is rate limited until ${untilText(Date.parse(c.resets_at), now)}; kick it after that` }),
+        );
       if (!c.actions.includes("kick") && !c.actions.includes("resume"))
         return Effect.fail(
           new Conflict({

@@ -47,7 +47,7 @@ export class SessionHost {
   error: string | null = null; // how its last turn or its process failed
   closed = false;
   idle: NodeJS.Timeout | null = null;
-  allowed: { tool: string; input: string } | null = null; // the call you allowed before it asked again: allowed when it does
+  pre: { tool: string; input: string; allow: boolean; message: string } | null = null; // your answer to a call before it asked again: given when it does
   changed: () => void;
   gone: () => void; // its process ended
 
@@ -80,7 +80,11 @@ export class SessionHost {
       child.stderr?.setEncoding("utf8").on("data", (d: string) => {
         stderr = (stderr + d).slice(-4096);
       });
-      child.stdin?.on("error", () => {}); // a write after it exited: its close says why
+      child.stdin?.on("error", (e) => {
+        // A write after it exited: its close says why. Before that, it's why your message didn't reach it.
+        if (!this.closed) this.error = `Your message didn't reach it: ${e.message}`;
+        this.changed();
+      });
       child.on("error", (e: NodeJS.ErrnoException) => {
         this.error = e.code === "ENOENT" ? `${claudeCommand()} not found` : e.message;
       });
@@ -134,9 +138,9 @@ export class SessionHost {
       if (req?.subtype === "can_use_tool" && str(req.tool_name)) {
         const ask = { id, tool: str(req.tool_name)!, input: obj(req.input), at: new Date().toISOString() };
         this.asks = [...this.asks, ask];
-        const pre = this.allowed;
-        this.allowed = null;
-        if (pre && pre.tool === ask.tool && pre.input === JSON.stringify(ask.input)) this.answer(id, true, null, "");
+        const pre = this.pre;
+        this.pre = null;
+        if (pre && pre.tool === ask.tool && pre.input === JSON.stringify(ask.input)) this.answer(id, pre.allow, null, pre.message);
         else this.changed();
       } else this.write({ type: "control_response", response: { subtype: "error", request_id: id, error: "not supported by Inbox" } });
       return;

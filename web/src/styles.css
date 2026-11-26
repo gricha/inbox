@@ -3112,9 +3112,10 @@ html::-webkit-scrollbar-corner,
   border-left: 2px solid var(--rule-strong);
 }
 
-/* A session's page, as a chat: a compact head with its buttons on the right; its turns close together (yours on a sheet, its
-   words as prose, each run of tool calls one pencil line, its images inline); what it waits on a sheet; the box to write in
-   held at the window's bottom. */
+/* A session's page, decision first: a compact head (where it is and runs, one status, its quiet links); what it waits on
+   on a sheet, with what it said before asking, its answers and a box of its own; the conversation folded under it. With
+   nothing asked it's a chat: turns close together (yours on a sheet, its words as prose, each run of tool calls one pencil
+   line, its images small), the box held at the window's bottom. */
 .session-page {
   display: grid;
   gap: 14px;
@@ -3142,14 +3143,28 @@ html::-webkit-scrollbar-corner,
   overflow-wrap: anywhere;
 }
 
-.ses-acts {
-  display: flex;
-  gap: 2px;
+/* Where it runs now: Inbox in the accent, anywhere else in pencil. */
+.ses-runs {
   margin-left: auto;
+  color: var(--pencil);
 }
 
-.ses-acts .act {
-  padding: 3px 9px;
+.ses-runs-here {
+  color: var(--accent-ink);
+}
+
+.ses-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 14px;
+}
+
+.ses-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-left: auto;
   font-size: var(--text-sm);
 }
 
@@ -3254,15 +3269,15 @@ html::-webkit-scrollbar-corner,
 .ses-images img {
   display: block;
   max-width: 100%;
-  max-height: 260px;
+  max-height: 160px;
   border-radius: 8px;
   box-shadow: 0 0 0 1px var(--rule);
 }
 
 .ses-wait {
   display: grid;
-  gap: 8px;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 12px 14px;
   border-radius: 10px;
   background: var(--sheet);
   box-shadow: inset 0 0 0 1px var(--rule);
@@ -3287,6 +3302,54 @@ html::-webkit-scrollbar-corner,
   color: var(--ink-2);
   font-weight: 550;
   cursor: pointer;
+}
+
+/* What it said before it asked: why it asks, quietly, a few lines at most. */
+.ses-context {
+  display: grid;
+  gap: 2px;
+  max-height: 7.5em;
+  overflow: hidden;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+
+.ses-context-who {
+  color: var(--pencil);
+  font-size: var(--text-xs);
+}
+
+.ses-q {
+  display: grid;
+  gap: 6px;
+}
+
+.ses-hint {
+  margin: 0;
+  color: var(--pencil);
+  font-size: var(--text-xs);
+}
+
+.inq-option.on {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.ses-why {
+  min-height: 24px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+
+/* The conversation under an ask: one quiet line until you open it. */
+.ses-convo > summary {
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.ses-convo[open] > summary {
+  margin-bottom: 10px;
 }
 
 .ses-ask {
@@ -3314,6 +3377,13 @@ html::-webkit-scrollbar-corner,
 .ses-input {
   min-height: 24px;
   max-height: 40vh;
+}
+
+/* The box inside an ask: on its sheet, not held at the bottom. */
+.ses-compose.ses-compose-in {
+  position: static;
+  align-items: center;
+  box-shadow: inset 0 0 0 1px var(--rule);
 }
 
 .ses-note {

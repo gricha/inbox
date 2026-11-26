@@ -1678,10 +1678,20 @@ export type SessionTurn =
   | { who: "you" | "agent"; at: string; text: string; images?: SessionImage[] }
   | { who: "tools"; at: string; lines: string[]; images?: SessionImage[] }; // a run of tool calls, one line each
 // ask: the request it waits on while the desk runs it, which an answer names; without one, you answer with a message.
-export type SessionWait =
-  | { kind: "question"; question: string; options: { label: string; description: string }[]; pick?: string; ask?: string } // pick: the one it recommends
-  | { kind: "permission"; tool: string; detail: string; ask?: string } // detail: the command, path or URL it asks to use, in full
-  | { kind: "plan"; plan: string; ask?: string };
+// One question of an ask: its options; pick, the one it recommends; multi: it takes more than one.
+interface SessionQuestion {
+  question: string;
+  options: { label: string; description: string }[];
+  pick?: string;
+  multi: boolean;
+}
+// What a session waits on. `ask`: the request's id while the desk runs it; `call`: the call the page showed, which an answer
+// names so the desk acts only on that one; `context`: its last words before it asked, which say why.
+export type SessionWait = { call: string; context: string; ask?: string } & (
+  | { kind: "question"; questions: SessionQuestion[] }
+  | { kind: "permission"; tool: string; detail: string } // detail: the command, path or URL it asks to use, in full
+  | { kind: "plan"; plan: string }
+);
 export interface SessionView {
   id: string;
   session_id: string;
@@ -1695,6 +1705,8 @@ export interface SessionView {
   earlier: number; // turns before these; at least 1 when the read starts mid-session
   waiting: SessionWait | null;
   live: { busy: boolean; saying: string; error: string | null } | null; // while the desk runs it: its turn as it goes
+  runs: "inbox" | "app" | "terminal" | "background" | "codex" | "none"; // where it runs now, not where it started
+  notice: string | null; // why the desk's last run of it ended, when it failed: kept until you write again
   can_reply: boolean;
   why_not: string | null; // when you can't answer it here: where to instead
   open: { label: string; url: string } | null; // Open in Claude (or Codex), which the desk's computer opens

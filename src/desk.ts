@@ -3844,19 +3844,20 @@ export class Desk {
   }
 
   // Your message, from the desk's window or your paired phone: the session's next turn, in the process the desk runs it in.
+  // `answer`: it allows or denies the call it waits on, the one `call` names.
   sendSession(
     ref: string,
     text: string,
-    allow = false,
+    answer?: { allow: boolean; call?: string },
   ): Effect.Effect<{ started: boolean }, NotFound | Conflict | BadRequest | CommandError | UnsafeArgument> {
-    return this.sessions.send(ref, text, allow);
+    return this.sessions.send(ref, text, answer);
   }
 
   // Your answer to what a session the desk runs asks: a permission, a question's pick, a plan.
   answerSession(
     ref: string,
     ask: string,
-    a: { allow: boolean; answer?: string; message?: string },
+    a: { allow: boolean; answers?: Record<string, string>; message?: string },
   ): Effect.Effect<void, NotFound | Conflict> {
     return this.sessions.answer(ref, ask, a);
   }

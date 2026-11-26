@@ -1306,23 +1306,23 @@ const SHOTS: Shot[] = [
       const order = rows.order.join("");
       if (!/^q*sssc/.test(order)) failures.push(`queue-session: the Inbox's order reads ${order}`);
       const [blocked, asked, stalled] = rows.rows;
-      if (blocked?.join(" · ") !== "Session · Fix the flaky upload test · api · Open · Desktop · needs permission: Bash")
+      if (blocked?.join(" · ") !== "Session · Fix the flaky upload test · api · Review · Desktop · needs permission: Bash")
         failures.push(`queue-session: the blocked session's row reads ${JSON.stringify(blocked)}`);
-      if (asked?.join(" · ") !== "Session · Release notes for 4.2 · web · Resume in background · CLI · asked a question")
+      if (asked?.join(" · ") !== "Session · Release notes for 4.2 · web · Answer · CLI · asked a question")
         failures.push(`queue-session: the asking session's row reads ${JSON.stringify(asked)}`);
       if (
-        !/^Session · Migrate the job store to SQLite · worker · Kick · Background · rate limited until \d\d:\d\d$/.test(
+        !/^Session · Migrate the job store to SQLite · worker ·  · Background · rate limited until \d\d:\d\d$/.test(
           stalled?.join(" · ") ?? "",
         )
       )
         failures.push(`queue-session: the stalled session's row reads ${JSON.stringify(stalled)}`);
-      // Its menu, as minimal as a PR's: Done, Snooze (to a time), then its call to action.
+      // Its menu, as minimal as a PR's: Done, Snooze (to a time), then its call to action: none before its rate limit resets.
       await page.locator(".line.session", { hasText: "Migrate the job store" }).locator(".row-main").click({ button: "right" });
       await page.locator(".ctx-item").first().waitFor();
       const menu = await page.evaluate<string[]>(
         `[...document.querySelectorAll(".ctx > .ctx-group > .ctx-item, .ctx > .ctx-group > .ctx-subwrap > .ctx-item")].map((el) => (el.querySelector("span") ?? el).textContent.trim())`,
       );
-      if (menu.join(" · ") !== "Done · Snooze · Kick") failures.push(`queue-session: a session's menu reads ${JSON.stringify(menu)}`);
+      if (menu.join(" · ") !== "Done · Snooze") failures.push(`queue-session: a session's menu reads ${JSON.stringify(menu)}`);
       // Right-clicked, it's selected, as any row is.
       if (!(await page.locator(".line.session.sel", { hasText: "Migrate the job store" }).count()))
         failures.push("queue-session: the session you right-clicked isn't filled");
@@ -1335,41 +1335,55 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A session waiting on a permission in the Claude app (the desk takes it over when you answer): compact, its buttons in its head, its last turns (its tool calls
-    // a line a run, the chart it read inline), what it wants to run with Allow and Deny, and the box to write to it.
+    // A session waiting on a permission in the Claude app (the desk takes it over when you answer), decision first: its head
+    // (where it is and runs, one status, quiet links), then what it asks with what it said before asking, the command, a box
+    // for why not, Allow once and Deny; the conversation folded under it, its tool calls a line a run and the chart inline.
     name: "session-permission",
     go: async (page) => {
       await at("#/session/session%3A5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21")(page);
-      await page.locator(".session-page .ses-turns").waitFor();
+      await page.locator(".session-page .ses-wait").waitFor();
+      if (!inOrder(await tops(page, [".ses-head", ".ses-wait", ".ses-convo"])))
+        failures.push("session-permission: what it asks isn't right under its head, the conversation after it");
+      if (await page.locator(".ses-convo[open]").count()) failures.push("session-permission: the conversation isn't folded under the ask");
+      await page.locator(".ses-convo > summary").click();
       await page.locator(".ses-images img").evaluate("(i) => i.decode()");
       const p = await page.evaluate<{
         head: string[];
         turns: string[];
+        context: string;
         wait: string;
         acts: string[];
-        head_acts: string[];
-        box: boolean;
+        links: string[];
+        why: string;
       }>(`(() => {
         const q = (s) => document.querySelector(s)?.textContent.trim() ?? "";
         return {
-          head: [q(".ses-where"), q(".ses-title"), q(".ses-state")],
+          head: [q(".ses-where"), q(".ses-runs"), q(".ses-title"), q(".ses-state")],
           turns: [...document.querySelectorAll(".ses-turn")].map((t) => t.classList.contains("ses-tools") ? (t.querySelector("img") ? "tools+image" : "tools") : t.classList.contains("ses-you") ? "you" : "agent"),
+          context: q(".ses-context"),
           wait: q(".ses-wait .inq-code"),
           acts: [...document.querySelectorAll(".ses-wait .act")].map((b) => b.textContent.trim()),
-          head_acts: [...document.querySelectorAll(".ses-acts .act")].map((b) => b.textContent.trim()),
-          box: !!document.querySelector(".ses-compose textarea"),
+          links: [...document.querySelectorAll(".ses-acts .link-btn")].map((b) => b.textContent.trim()),
+          why: document.querySelector(".ses-wait textarea")?.getAttribute("placeholder") ?? "",
         };
       })()`);
-      if (p.head.join(" · ") !== "Desktop · api · fix/upload-flake · Fix the flaky upload test · Needs permission: Bash · 18m")
+      if (
+        p.head.join(" · ") !==
+        "Desktop · api · fix/upload-flake · In the Claude app · Fix the flaky upload test · Needs permission: Bash · 18m"
+      )
         failures.push(`session-permission: its head reads ${JSON.stringify(p.head)}`);
       if (p.turns.join(" ") !== "you agent tools+image agent tools")
         failures.push(`session-permission: its turns read ${JSON.stringify(p.turns)}`);
+      if (!p.context.includes("run the test 20 times"))
+        failures.push(`session-permission: what it said before asking reads ${JSON.stringify(p.context)}`);
       if (!p.wait.startsWith("for i in $(seq 20)"))
         failures.push(`session-permission: what it wants to run reads ${JSON.stringify(p.wait)}`);
-      if (p.acts.join(" · ") !== "Allow · Deny") failures.push(`session-permission: its answers read ${JSON.stringify(p.acts)}`);
-      if (p.head_acts.join(" · ") !== "Open in Claude · Done")
-        failures.push(`session-permission: its head's buttons read ${JSON.stringify(p.head_acts)}`);
-      if (!p.box) failures.push("session-permission: no box to write to it");
+      if (p.acts.join(" · ") !== "Allow once · Deny") failures.push(`session-permission: its answers read ${JSON.stringify(p.acts)}`);
+      if (p.why !== "Why not (goes with Deny)") failures.push(`session-permission: its box says ${JSON.stringify(p.why)}`);
+      if (p.links.join(" · ") !== "Open in Claude · Dismiss")
+        failures.push(`session-permission: its head's links read ${JSON.stringify(p.links)}`);
+      await page.locator(".ses-convo > summary").click();
+      await page.evaluate("window.scrollTo(0, 0)");
     },
   },
   {
@@ -1378,7 +1392,7 @@ const SHOTS: Shot[] = [
     writes: true,
     go: async (page) => {
       await at("#/session/session%3A5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21")(page);
-      await page.locator(".ses-wait .act", { hasText: "Allow" }).click();
+      await page.locator(".ses-wait .act", { hasText: "Allow once" }).click();
       const mine = page.locator(".ses-you", { hasText: "Go ahead." });
       await mine.waitFor({ timeout: 1000 }).catch(() => {});
       if (!(await mine.count())) failures.push("session-allow: Allow doesn't show what it sent at once");
@@ -1391,7 +1405,8 @@ const SHOTS: Shot[] = [
       await done.waitFor({ timeout: 8000 }).catch(() => failures.push("session-allow: its answer never lands"));
       await page.waitForTimeout(300);
       const state = await page.locator(".ses-state").textContent();
-      if (state?.trim() !== "Your turn") failures.push(`session-allow: once its turn ends the head reads ${JSON.stringify(state)}`);
+      if (state?.trim() !== "Its turn ended: nothing asked")
+        failures.push(`session-allow: once its turn ends the head reads ${JSON.stringify(state)}`);
     },
     after: async (page) => {
       await fetch(`http://127.0.0.1:${MOCK}/api/mock/sessions`, { method: "POST" });
@@ -1399,8 +1414,8 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A terminal's session that asked a question: its answers one click each, the one it recommends first and marked, the box
-    // for your own answer.
+    // A terminal's session that asked a question: its answers one click each, said as what a click does, the one it recommends
+    // first and marked Recommended, the box for your own answer in the same card.
     name: "session-question",
     go: async (page) => {
       await at("#/session/session%3Ac47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63")(page);
@@ -1408,14 +1423,14 @@ const SHOTS: Shot[] = [
       const p = await page.evaluate<{ ask: string; options: string[]; box: string; head: string[] }>(`(() => ({
         ask: document.querySelector(".ses-wait .ses-ask")?.textContent.trim() ?? "",
         options: [...document.querySelectorAll(".session-page .inq-option-answer")].map((x) => x.textContent.trim()),
-        box: document.querySelector(".ses-compose textarea")?.getAttribute("placeholder") ?? "",
-        head: [...document.querySelectorAll(".ses-acts .act")].map((b) => b.textContent.trim()),
+        box: document.querySelector(".ses-wait .ses-compose textarea")?.getAttribute("placeholder") ?? "",
+        head: [...document.querySelectorAll(".ses-acts .link-btn")].map((b) => b.textContent.trim()),
       }))()`);
       if (p.ask !== "Group the changes by area or by PR?") failures.push(`session-question: it asks ${JSON.stringify(p.ask)}`);
-      if (p.options.join(" · ") !== "By areaits pick · By PR")
+      if (p.options.join(" · ") !== "Use “By area”Recommended · Use “By PR”")
         failures.push(`session-question: its answers read ${JSON.stringify(p.options)}`);
       if (p.box !== "Or answer in your own words") failures.push(`session-question: its box says ${JSON.stringify(p.box)}`);
-      if (p.head.join(" · ") !== "Open in Claude · Copy resume command · Done")
+      if (p.head.join(" · ") !== "Open in Claude · Copy resume command · Dismiss")
         failures.push(`session-question: its head's buttons read ${JSON.stringify(p.head)}`);
     },
   },
@@ -1443,7 +1458,9 @@ const SHOTS: Shot[] = [
       const mine = page.locator(".ses-you", { hasText: text });
       await mine.waitFor({ timeout: 2000 }).catch(() => {});
       if (!(await mine.count())) failures.push("session-send-shows: what you sent isn't in its turns");
-      else if (!(await mine.locator(".busy").count())) failures.push("session-send-shows: what you sent doesn't say it's sending");
+      else if ((await page.locator(".ses-busy").textContent())?.trim() !== "Sending")
+        failures.push("session-send-shows: the page doesn't say it's sending, once");
+      if ((await page.locator(".busy").count()) !== 1) failures.push("session-send-shows: more than one sign it's sending");
       if (await page.locator(".session-page .inq-options").count())
         failures.push("session-send-shows: answered, it still offers its answers");
       if ((await page.locator(".ses-compose textarea").inputValue()) !== "")

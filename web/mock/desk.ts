@@ -2616,7 +2616,7 @@ const ALL_SESSIONS: SessionCard[] = [
     excerpt: "API Error: Rate limit reached for your five-hour window",
     resets_at: new Date(T0 + HOUR).toISOString(),
     alive: false,
-    actions: ["kick"],
+    actions: [], // nothing to start before its rate limit resets
     open_url: "claude://resume?session=a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058",
     attach: null,
     status: "active",
@@ -2653,6 +2653,9 @@ const TALKS: Record<string, { turns: SessionTurn[]; waiting: SessionWait | null 
       kind: "permission",
       tool: "Bash",
       detail: "for i in $(seq 20); do UPLOAD_RETRIES=0 npx vitest run test/upload.test.ts || exit 1; done",
+      call: "Bash upload-20",
+      context:
+        "I changed the retry to skip `TimeoutError` and abort the first attempt before it retries. To check it holds, I want to run the test 20 times in a row with retries off.",
     },
   },
   "session:a83e61d4-0b52-4f7c-8e3a-91c4d6b2f058": {
@@ -2684,12 +2687,19 @@ const TALKS: Record<string, { turns: SessionTurn[]; waiting: SessionWait | null 
     ],
     waiting: {
       kind: "question",
-      question: "Group the changes by area or by PR?",
-      options: [
-        { label: "By PR", description: "One line per PR in merge order, with its number" },
-        { label: "By area", description: "API, web app, CLI: what most readers skim for" },
+      questions: [
+        {
+          question: "Group the changes by area or by PR?",
+          options: [
+            { label: "By PR", description: "One line per PR in merge order, with its number" },
+            { label: "By area", description: "API, web app, CLI: what most readers skim for" },
+          ],
+          pick: "By area",
+          multi: false,
+        },
       ],
-      pick: "By area",
+      call: "AskUserQuestion group",
+      context: "Moved the export API to the top, with a short example of `GET /v2/export`.",
     },
   },
 };
@@ -2769,7 +2779,9 @@ function sessionView(x: SessionCard): SessionView {
     can_reply: why === null,
     why_not: why,
     open: x.open_url ? { label: "Open in Claude", url: x.open_url } : null,
-    command: x.kind === "desktop" ? null : `cd '${x.cwd}' && claude --resume ${x.session_id}`,
+    command: live || x.kind === "desktop" ? null : `cd '${x.cwd}' && claude --resume ${x.session_id}`,
+    runs: live ? "inbox" : x.alive ? (x.kind === "desktop" ? "app" : x.kind === "background" ? "background" : "terminal") : "none",
+    notice: null,
   };
 }
 const activeSessions = () => sessionCards().filter((x) => x.status === "active");

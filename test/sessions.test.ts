@@ -709,7 +709,7 @@ test(
     await t.poll();
     const id = `session:${S.bg}`;
     const card = await run(t.desk.session(id));
-    assert.deepEqual([card.reason, card.actions], [`rate limited until ${untilText(resets, now)}`, ["kick"]]);
+    assert.deepEqual([card.reason, card.actions], [`rate limited until ${untilText(resets, now)}`, []], "nothing to start until it resets");
     assert.equal(
       (await failure(t.desk.kickSession(id))).message,
       `Migrate is rate limited until ${untilText(resets, now)}; kick it after that`,
@@ -835,19 +835,34 @@ test("a session's page reads its turns: yours, its words, its tool calls folded 
       ["agent", "Found it: the retry swallows the timeout.\n\nFixed."],
     ],
   );
-  assert.deepEqual(waitOf(talk.pending, "asked a question"), {
-    kind: "question",
-    question: "Push to main or open a PR?",
-    options: [
-      { label: "Push to main", description: "Fast-forward" },
-      { label: "Open a PR", description: "" },
-    ],
-  });
+  const asked = waitOf(talk.pending, "asked a question");
+  assert.deepEqual(asked && asked.kind === "question" && asked.questions, [
+    {
+      question: "Push to main or open a PR?",
+      options: [
+        { label: "Push to main", description: "Fast-forward" },
+        { label: "Open a PR", description: "" },
+      ],
+      multi: false,
+    },
+  ]);
+  assert.match(asked?.call ?? "", /^AskUserQuestion /, "it names the call it shows");
   const bash = readTalk([l.prompt("go"), l.tool("t9", "Bash", { command: "rm -rf build", description: "Clean" })].join("\n"));
-  assert.deepEqual(waitOf(bash.pending, "needs permission: Bash"), { kind: "permission", tool: "Bash", detail: "rm -rf build" });
+  assert.deepEqual(waitOf(bash.pending, "needs permission: Bash", undefined, "Cleaning first."), {
+    kind: "permission",
+    tool: "Bash",
+    detail: "rm -rf build",
+    call: 'Bash {"command":"rm -rf build","description":"Clean"}',
+    context: "Cleaning first.",
+  });
   assert.equal(waitOf(bash.pending, "no progress"), null, "a call that's only running waits on nobody");
   const plan = readTalk([l.tool("p1", "ExitPlanMode", { plan: "1. Fix it" })].join("\n"));
-  assert.deepEqual(waitOf(plan.pending, "waiting on plan approval"), { kind: "plan", plan: "1. Fix it" });
+  assert.deepEqual(waitOf(plan.pending, "waiting on plan approval"), {
+    kind: "plan",
+    plan: "1. Fix it",
+    call: 'ExitPlanMode {"plan":"1. Fix it"}',
+    context: "",
+  });
   assert.equal(readTalk([l.tool("t1", "Bash", {}), l.result("t1")].join("\n")).pending, null, "answered");
   const long = readTalk(
     Array.from({ length: 40 }, (_, i) => [l.prompt(`ask ${i}`), l.said(`said ${i}`)])
@@ -945,7 +960,10 @@ test(
     // A permission: it waits on you, on the page and on your Inbox, until you allow it.
     await post("message", { text: "run the tests" });
     v = await until(view, (x) => x.waiting?.kind === "permission");
-    assert.deepEqual(v.waiting, { kind: "permission", tool: "Bash", detail: "npm test", ask: "req-bash" });
+    assert.deepEqual(
+      [v.waiting?.kind, v.waiting?.kind === "permission" && v.waiting.detail, v.waiting?.ask],
+      ["permission", "npm test", "req-bash"],
+    );
     await t.poll();
     assert.deepEqual(
       (await run(t.desk.focus())).sessions.map((x) => [x.reason, x.excerpt]),
@@ -959,16 +977,23 @@ test(
     // A question: your pick goes back as its answer.
     await post("message", { text: "ask me" });
     v = await until(view, (x) => x.waiting?.kind === "question");
-    assert.deepEqual(v.waiting, {
-      kind: "question",
-      question: "Keep the old table?",
-      options: [
-        { label: "Keep it", description: "" },
-        { label: "Drop it", description: "" },
+    assert.deepEqual(
+      [v.waiting?.kind === "question" && v.waiting.questions, v.waiting?.ask],
+      [
+        [
+          {
+            question: "Keep the old table?",
+            options: [
+              { label: "Keep it", description: "" },
+              { label: "Drop it", description: "" },
+            ],
+            multi: false,
+          },
+        ],
+        "req-q",
       ],
-      ask: "req-q",
-    });
-    await post("answer", { ask: "req-q", allow: true, answer: "Drop it" });
+    );
+    await post("answer", { ask: "req-q", allow: true, answers: { "Keep the old table?": "Drop it" } });
     await until(view, (x) => lastSaid(x) === "You picked Drop it.");
 
     await post("message", { text: "run them again" });
@@ -1012,8 +1037,9 @@ test(
     await t.poll();
     const id = `session:${S.bg}`;
     const view = () => run(t.desk.sessionView(id));
-    assert.equal((await view()).waiting?.kind, "permission");
-    await run(t.desk.sendSession(id, "Go ahead.", true));
+    const shown = (await view()).waiting;
+    assert.equal(shown?.kind, "permission");
+    await run(t.desk.sendSession(id, "Go ahead.", { allow: true, call: shown?.call ?? "" }));
     await until(view, (v) => lastSaid(v) === "Ran it.");
     assert.deepEqual(m.answers(), [
       { subtype: "success", request_id: "req-bash", response: { behavior: "allow", updatedInput: { command: "npm test" } } },
@@ -1021,6 +1047,43 @@ test(
     // A call you didn't allow still asks.
     await run(t.desk.sendSession(id, "run it once more"));
     await until(view, (v) => v.waiting?.kind === "permission");
+  },
+);
+
+test(
+  "an answer names the call it was shown: one the session no longer asks for is refused, Deny denies it when it asks again, and two sends start one process",
+  posix,
+  async (c) => {
+    const m = machine(c);
+    const t = await deskOn(c, m);
+    const l = lines(S.bg, m.work, Date.now());
+    m.agents([{ id: "bg01", cwd: m.work, kind: "background", startedAt: 1, sessionId: S.bg, name: "CI", state: "blocked" }]);
+    m.transcript(S.bg, [l.prompt("Fix CI"), l.tool("t0", "Bash", { command: "npm test" })]);
+    await t.poll();
+    const id = `session:${S.bg}`;
+    const view = () => run(t.desk.sessionView(id));
+    const shown = (await view()).waiting!;
+    assert.equal(
+      (await failure(t.desk.sendSession(id, "Go ahead.", { allow: true, call: 'Bash {"command":"rm -rf /"}' }))).message,
+      "It asks for something else now: look at it again.",
+      "not the call the page showed",
+    );
+    const both = await Promise.all([
+      run(t.desk.sendSession(id, "run nothing, not on main", { allow: false, call: shown.call })),
+      run(t.desk.sendSession(id, "and say why")),
+    ]);
+    assert.deepEqual(
+      both.map((x) => x.started).toSorted((a, b) => Number(a) - Number(b)),
+      [false, true],
+      "one process: the second send goes to it",
+    );
+    await until(view, (v) => v.turns.some((x) => x.who === "agent" && x.text.includes("Okay, not running it: run nothing, not on main")));
+    assert.deepEqual(
+      m.answers().map((x) => [x.request_id, x.response.behavior]),
+      [["req-bash", "deny"]],
+    );
+    const v = await view();
+    assert.deepEqual([v.runs, v.command], ["inbox", null], "while the desk runs it: no resume command, a second writer");
   },
 );
 
@@ -1055,15 +1118,17 @@ test(
     const view = () => run(t.desk.sessionView(id));
     const v = await view();
     assert.deepEqual([v.can_reply, v.why_not, v.open?.url], [true, null, "claude://claude.ai/epitaxy/local_abc"]);
-    assert.deepEqual(v.waiting, {
-      kind: "question",
-      question: "Push to main or open a PR?",
-      options: [
-        { label: "Open a PR", description: "CI runs first" },
-        { label: "Push to main", description: "Ships now" },
-      ],
-      pick: "Open a PR",
-    });
+    assert.deepEqual(v.waiting?.kind === "question" && v.waiting.questions, [
+      {
+        question: "Push to main or open a PR?",
+        options: [
+          { label: "Open a PR", description: "CI runs first" },
+          { label: "Push to main", description: "Ships now" },
+        ],
+        pick: "Open a PR",
+        multi: false,
+      },
+    ]);
     // At work, it doesn't need you: left alone.
     m.agents([{ ...appRow, status: "busy" }]);
     assert.equal((await failure(t.desk.sendSession(id, "Open a PR"))).message, "It's working right now: it doesn't need you yet.");

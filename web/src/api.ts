@@ -219,9 +219,10 @@ export const api = {
   openSession: (id: string) => call<{ ok: true; url: string }>("POST", `/api/sessions/${encodeURIComponent(id)}/open`),
   // Its page; your message as its next turn, and your answer to what it asks, while the desk runs it.
   sessionView: (id: string) => call<SessionView>("GET", `/api/sessions/${encodeURIComponent(id)}/view`),
-  sendSession: (id: string, text: string, allow = false) =>
-    call<{ ok: true; started: boolean }>("POST", `/api/sessions/${encodeURIComponent(id)}/message`, { text, allow }),
-  answerSession: (id: string, ask: string, a: { allow: boolean; answer?: string; message?: string }) =>
+  // answer: allow or deny the call it waits on, naming the one shown; none, a message.
+  sendSession: (id: string, text: string, answer?: { allow: boolean; call: string }) =>
+    call<{ ok: true; started: boolean }>("POST", `/api/sessions/${encodeURIComponent(id)}/message`, { text, ...answer }),
+  answerSession: (id: string, ask: string, a: { allow: boolean; answers?: Record<string, string>; message?: string }) =>
     call<{ ok: true }>("POST", `/api/sessions/${encodeURIComponent(id)}/answer`, { ask, ...a }),
   automations: () => call<AutomationView[]>("GET", "/api/automations"),
   brandIcon: (slug: string) => call<BrandIcon>("GET", `/api/icons/brand/${encodeURIComponent(slug)}`),
