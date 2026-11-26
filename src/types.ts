@@ -926,6 +926,20 @@ export interface ReviewNote {
 
 export const NOTE_KINDS = ["blocker", "issue", "question", "verified", "nit"] as const;
 export type NoteKind = (typeof NOTE_KINDS)[number];
+// What an AI review says makes a PR risky, how it fits its intent, and the kinds of interface it can change.
+export const RISK_FACTORS = [
+  "data",
+  "security",
+  "contract",
+  "concurrency",
+  "deploy",
+  "irreversible",
+  "reach",
+  "untested",
+  "other",
+] as const;
+export const INTENT_FITS = ["matches", "partial", "differs", "undescribed"] as const;
+export const INTERFACE_KINDS = ["function", "type", "endpoint", "schema", "config", "event", "cli", "permission", "other"] as const;
 
 // Where your inline comment goes: a line of a PR's diff, or a range from `start` to it.
 export interface InlineAt {
@@ -963,7 +977,7 @@ export interface AiReview {
   at: string;
 }
 
-type RiskFactor = "data" | "security" | "contract" | "concurrency" | "deploy" | "irreversible" | "reach" | "untested" | "other";
+type RiskFactor = (typeof RISK_FACTORS)[number];
 
 export interface ReviewLook {
   path: string;
@@ -975,7 +989,7 @@ export interface ReviewLook {
 
 export interface ReviewInterface {
   name: string;
-  kind: "function" | "type" | "endpoint" | "schema" | "config" | "event" | "cli" | "permission" | "other";
+  kind: (typeof INTERFACE_KINDS)[number];
   change: "added" | "changed" | "removed";
   breaking: boolean;
   impact: string;
@@ -1183,6 +1197,7 @@ export interface ReviewView {
   asks: Ask[]; // yours to your agent about it, oldest first
   viewed: string[]; // the marks of hunks (or of files without one) you marked viewed; a mark a push rewrote matches nothing on screen
   deep: DeepReview | null; // the latest deep review (src/deep.ts), even of an older commit
+  deep_on: boolean; // the desk's review here is a deep review (Claude Code, with a checkout): the AI review's place is its
   deep_running: string | null; // when the one running now started
   deep_error: string | null; // the last one's failure, in your words
 }
@@ -1195,7 +1210,20 @@ export interface DeepReview {
   intent_from: "stated" | "inferred" | "missing";
   change: string; // how behaviour changes, before to after
   risk: string; // the blast radius: what breaks in production if it's wrong, for whom, how it's undone
-  risk_level: "low" | "medium" | "high"; // the sidebar's risk
+  risk_level: "low" | "medium" | "high"; // the review's risk, as the queue and the sidebar read it
+  risk_reasons: { factor: RiskFactor; why: string }[];
+  verdict: "look" | "skim" | "skip"; // how much of a person's attention it needs
+  intent_fit: (typeof INTENT_FITS)[number];
+  since: string; // a re-review: what changed since your last review, or ""
+  interfaces: {
+    name: string;
+    kind: ReviewInterface["kind"];
+    change: ReviewInterface["change"];
+    breaking: boolean;
+    impact: string;
+    at: string;
+  }[];
+  tags: { id: string; tags: string[] }[]; // the hunks your tags' asks are yes for, by hunk id
   lean: "ship" | "fix first" | "rethink";
   lean_why: string; // the one line that decides it
   caveat: string; // one uncertainty about the whole change and what would settle it, or ""

@@ -6,9 +6,20 @@ import { Result } from "effect";
 import { parseDiagram } from "./diagram.ts";
 import { DeepAnswerSchema } from "./kv.ts";
 import { decode } from "./narrow.ts";
-import { hunksOf, type PrSaid } from "./review.ts";
+import { hunksOf, parseTags, tagsText, type PrSaid } from "./review.ts";
 import { onLines } from "./sections.ts";
-import type { AiReview, DeepNote, DeepReview, Item, NoteKind, ReviewFile, ReviewNote } from "./types.ts";
+import {
+  INTENT_FITS,
+  INTERFACE_KINDS,
+  RISK_FACTORS,
+  type AiReview,
+  type DeepNote,
+  type DeepReview,
+  type Item,
+  type NoteKind,
+  type ReviewFile,
+  type ReviewNote,
+} from "./types.ts";
 
 const READER = {
   author:
@@ -22,7 +33,14 @@ const hunkLines = (files: ReviewFile[]) =>
     .map((h) => `${h.id} ${h.path} ${h.header} (+${h.additions} −${h.deletions})`)
     .join("\n");
 
-export const deepPrompt = (item: Pick<Item, "repo" | "number">, yours: boolean, files: ReviewFile[], said: PrSaid | null) => {
+// For the desk as well as the reader: the commit you last reviewed, your tags' questions, your own review instructions.
+export interface DeepAsk {
+  since: string | null;
+  tags: readonly { id: string; ask: string }[];
+  own: string;
+}
+
+export const deepPrompt = (item: Pick<Item, "repo" | "number">, yours: boolean, files: ReviewFile[], said: PrSaid | null, ask: DeepAsk) => {
   const pr = `${item.number} -R ${item.repo}`;
   return `You are reviewing pull request ${item.repo}#${item.number} adversarially. ${READER[yours ? "author" : "reviewer"]}
 
@@ -126,6 +144,34 @@ a step's \`why\` says only what that step adds, and the picture's caption says w
 Not: "The DB check has no bound shorter than 30s." But: "While the DB check was blocked, \`/health/live\` didn't answer
 within 5 s; whether Kubernetes then restarts the pod depends on its probe settings."
 
+## For the desk
+
+The desk sorts the owner's queue by these, so answer them for every PR:
+
+- **verdict:** how much of a person's attention it needs: \`look\` (read it closely: logic, behaviour, data, security),
+  \`skim\` (glance at it), \`skip\` (nothing a person needs to check: generated, mechanical, or plainly right).
+- **risk_level** (above) and **risk_reasons:** up to four, each a factor (\`data\`, \`security\`, \`contract\`,
+  \`concurrency\`, \`deploy\`, \`irreversible\`, \`reach\`, \`untested\`, \`other\`) and why in one line.
+- **intent_fit:** \`matches\`, \`partial\`, \`differs\` (it does something other than it says) or \`undescribed\`.
+- **since:** ${ask.since ? `the reader reviewed it before, at ${ask.since}: one sentence on what changed since then (\`git diff ${ask.since}..HEAD\`) and whether it settles what they'd have raised.` : `"".`}
+- **interfaces:** what it adds, changes or removes that other code or people depend on (a function or type others
+  import, an endpoint, a schema, config, an event, a CLI, a permission), each with whether it breaks existing callers, the
+  impact in one line, and \`at\` (\`path:line\`). None: an empty list.
+- **tags:** ${
+    ask.tags.length
+      ? `
+${tagsText("the reader", ask.tags)}`
+      : "an empty list."
+  }
+${
+  ask.own
+    ? `
+## The owner's own review instructions
+
+${ask.own}
+`
+    : ""
+}
 ## The diff's hunks
 
 ${hunkLines(files) || "(none could be read: name hunks in the order gh pr diff shows them, h1 first)"}
@@ -144,42 +190,62 @@ const obj = (properties: Record<string, object>) => ({
   properties,
 });
 
-// The answer's shape, its lengths the review's budget.
-export const DEEP_SCHEMA = obj({
-  goal: str(280, "The intent: what the author says it achieves."),
-  fit: str(240, "How this PR serves that intent, in one sentence."),
-  intent_from: { enum: ["stated", "inferred", "missing"] },
-  change: str(300, "How behaviour changes, before to after."),
-  risk: str(300, "The blast radius: what breaks in production if this is wrong, for whom, and how it's undone."),
-  risk_level: { enum: ["low", "medium", "high"] },
-  lean: { enum: ["ship", "fix first", "rethink"] },
-  lean_why: str(180, "The one line that decides it."),
-  caveat: str(240, "One uncertainty about the whole change and what would settle it, or empty."),
-  steps: items(
-    6,
-    obj({
-      title: str(28),
-      why: str(200, "One sentence: the behaviour this code changes, or the concern in it."),
-      hunks: items(12, str(6)),
-      notes: items(
-        3,
-        obj({
-          kind: { enum: ["blocker", "issue", "question", "verified", "nit"] },
-          text: str(220, "What was observed and its consequence."),
-          ask: str(160, "The change or answer it needs, or empty."),
-          at: str(160, "path:line in the diff, or empty."),
-          evidence: str(200, "The command and output, or the quote, that shows it."),
-        }),
-      ),
+// The answer's shape, its lengths the review's budget; with your tags, the hunks they're yes for.
+export const deepSchema = (tags: readonly { id: string }[] = []) =>
+  obj({
+    goal: str(280, "The intent: what the author says it achieves."),
+    fit: str(240, "How this PR serves that intent, in one sentence."),
+    intent_from: { enum: ["stated", "inferred", "missing"] },
+    change: str(300, "How behaviour changes, before to after."),
+    risk: str(300, "The blast radius: what breaks in production if this is wrong, for whom, and how it's undone."),
+    risk_level: { enum: ["low", "medium", "high"] },
+    risk_reasons: items(4, obj({ factor: { enum: [...RISK_FACTORS] }, why: str(160) })),
+    verdict: { enum: ["look", "skim", "skip"] },
+    intent_fit: { enum: [...INTENT_FITS] },
+    since: str(240),
+    interfaces: items(
+      5,
+      obj({
+        name: str(80),
+        kind: { enum: [...INTERFACE_KINDS] },
+        change: { enum: ["added", "changed", "removed"] },
+        breaking: { type: "boolean" },
+        impact: str(160),
+        at: str(160),
+      }),
+    ),
+    tags: items(
+      tags.length ? 60 : 0,
+      obj({ id: str(6), tags: items(tags.length, tags.length ? { enum: tags.map((t) => t.id) } : str(40)) }),
+    ),
+    lean: { enum: ["ship", "fix first", "rethink"] },
+    lean_why: str(180, "The one line that decides it."),
+    caveat: str(240, "One uncertainty about the whole change and what would settle it, or empty."),
+    steps: items(
+      6,
+      obj({
+        title: str(28),
+        why: str(200, "One sentence: the behaviour this code changes, or the concern in it."),
+        hunks: items(12, str(6)),
+        notes: items(
+          3,
+          obj({
+            kind: { enum: ["blocker", "issue", "question", "verified", "nit"] },
+            text: str(220, "What was observed and its consequence."),
+            ask: str(160, "The change or answer it needs, or empty."),
+            at: str(160, "path:line in the diff, or empty."),
+            evidence: str(200, "The command and output, or the quote, that shows it."),
+          }),
+        ),
+      }),
+    ),
+    picture: obj({
+      step: { type: "integer", minimum: 0 },
+      title: str(60),
+      caption: str(160, "One sentence: what to see in it."),
+      source: str(2048, "Mermaid in the grammar the prompt gives."),
     }),
-  ),
-  picture: obj({
-    step: { type: "integer", minimum: 0 },
-    title: str(60),
-    caption: str(160, "One sentence: what to see in it."),
-    source: str(2048, "Mermaid in the grammar the prompt gives."),
-  }),
-});
+  });
 
 type Answer = Omit<DeepReview, "head_oid" | "model" | "at" | "seconds" | "picture"> & {
   picture: { step: number; title: string; caption: string; source: string };
@@ -263,12 +329,34 @@ export const deepGuide = (deep: DeepReview, files: ReviewFile[], ai: AiReview | 
   };
   return {
     ...base,
-    verdict: deep.lean === "ship" ? "skim" : "look",
+    verdict: deep.verdict,
     risk: deep.risk_level,
-    risk_reasons: [{ factor: "reach", why: deep.risk }],
+    risk_reasons: deep.risk_reasons,
+    intent: { goal: deep.goal, fit: deep.intent_fit, gap: deep.fit, stack: "" },
+    ...(deep.since && { since: deep.since }),
+    interfaces: deep.interfaces.flatMap((x) => {
+      const spot = spotOf(x.at, hunks);
+      return [
+        {
+          name: x.name,
+          kind: x.kind,
+          change: x.change,
+          breaking: x.breaking,
+          impact: x.impact,
+          side: "new" as const,
+          path: spot?.path ?? "",
+          line: spot?.line ?? 0,
+        },
+      ];
+    }),
+    ...(deep.tags.length > 0 && { tags: parseTags(deep.tags, files) ?? {} }),
+    code: true,
     summary: deep.goal,
     head_oid: deep.head_oid,
-    concerns: [],
+    model: deep.model,
+    at: deep.at,
+    // What it asks to change, for what reads an AI review's concerns: a quick review is never offered over one.
+    concerns: steps.flatMap((st) => st.notes.filter((n) => n.kind === "blocker" || n.kind === "issue").map(noteText)),
     notes,
     look: [],
     improvements: [],

@@ -43,7 +43,7 @@ import { readOmarchy, watchOmarchy } from "./omarchy.ts";
 import type { AppUpdater } from "./updates.ts";
 import { Remote, readTailnet, sameSecret, serveOff, serveOn } from "./remote.ts";
 import { checkoutFor } from "./checkout.ts";
-import { dropHostSession, fetchPr, generateReview, installed, loggedIn } from "./review.ts";
+import { askClaude, dropHostSession, fetchPr, generateReview, installed, loggedIn } from "./review.ts";
 import { fetchIssue, findClone, generateIssueReview } from "./issue.ts";
 import { DOC_CSP } from "./render.ts";
 import { isSecret } from "./settings.ts";
@@ -1505,6 +1505,7 @@ export const startDesk = Effect.fnUntraced(function* (
       fetchPr,
       generate: generateReview,
       checkout: (item) => checkoutFor(home, item, findClone, undefined, log),
+      deep: (prompt, dir, schema) => askClaude(prompt, { dir, read: true, probe: true, schema }),
       loggedIn,
       installed,
     },

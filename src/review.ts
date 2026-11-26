@@ -37,21 +37,24 @@ import { GH_MISSING } from "./github/client.ts";
 import type { PrContext } from "./github/index.ts";
 import { elements, field, isRecord, jsonOf, num, str, strings } from "./narrow.ts";
 import { as, claudeUsage, meter, type Usage } from "./usage.ts";
-import type {
-  AiReview,
-  ChunkRanking,
-  ReviewDiagram,
-  ReviewInterface,
-  ReviewLook,
-  Item,
-  ReviewFile,
-  ReviewGuide,
-  ReviewHunk,
-  HunkTag,
-  ReviewNote,
-  ReviewOrder,
-  ReviewRest,
-  Signals,
+import {
+  INTENT_FITS as FITS,
+  INTERFACE_KINDS as KINDS,
+  RISK_FACTORS as FACTORS,
+  type AiReview,
+  type ChunkRanking,
+  type ReviewDiagram,
+  type ReviewInterface,
+  type ReviewLook,
+  type Item,
+  type ReviewFile,
+  type ReviewGuide,
+  type ReviewHunk,
+  type HunkTag,
+  type ReviewNote,
+  type ReviewOrder,
+  type ReviewRest,
+  type Signals,
 } from "./types.ts";
 
 const STATUSES = ["added", "removed", "modified", "renamed", "copied", "changed", "unchanged"] as const;
@@ -66,9 +69,6 @@ const MAX_CHUNKS = 20;
 const MAX_WHY = 80;
 const MAX_STEPS = 8;
 const MAX_LOOK_LINES = 15;
-const FACTORS = ["data", "security", "contract", "concurrency", "deploy", "irreversible", "reach", "untested", "other"] as const;
-const FITS = ["matches", "partial", "differs", "undescribed"] as const;
-const KINDS = ["function", "type", "endpoint", "schema", "config", "event", "cli", "permission", "other"] as const;
 const TIMEOUT = 30 * 60_000; // a large PR at a high effort takes Codex well past 5 minutes; a slow review beats a failed one
 const MAX_OUTPUT = 64 * 1024 * 1024;
 // Lockfiles and snapshots eat the budget and say nothing a reviewer reads.
@@ -578,7 +578,7 @@ function promptDiff(files: ReviewFile[], ids: boolean): { text: string; hunks: H
 // ---------------------------------------------------------------- the prompt
 
 // Your tags' questions, in your words: config.toml is yours, not GitHub's, so they're outside the fence.
-function tagsText(me: string, tags: readonly { id: string; ask: string }[]): string {
+export function tagsText(me: string, tags: readonly { id: string; ask: string }[]): string {
   return [
     `- tags: ${me}'s own labels for hunks, each a yes-or-no question about one hunk, by id:`,
     ...tags.map((t) => `  - ${t.id}: ${t.ask.replaceAll(/\s+/g, " ").trim()}`),
@@ -1802,7 +1802,7 @@ function parseChunks(raw: unknown, files: ReviewFile[], notes: ReviewNote[], cap
 }
 
 // Only hunks the prompt showed can be tagged, by mark so an unchanged hunk keeps them past a push; each hunk once.
-function parseTags(raw: unknown, files: ReviewFile[]): Record<string, string[]> | undefined {
+export function parseTags(raw: unknown, files: ReviewFile[]): Record<string, string[]> | undefined {
   const { hunks, read } = promptDiff(files, true);
   const byId = new Map(hunks.map((h) => [h.id, h]));
   const out: Record<string, string[]> = {};

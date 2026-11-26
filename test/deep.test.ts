@@ -9,7 +9,7 @@ import path from "node:path";
 import { Effect } from "effect";
 import type { ReviewDeps } from "../src/desk.ts";
 import { deepGuide, stepsOf } from "../src/deep.ts";
-import type { PrText } from "../src/review.ts";
+import { askClaude, type PrText } from "../src/review.ts";
 import type { DeepReview } from "../src/types.ts";
 import { reviewAsk, setup } from "./helpers/desk.ts";
 import { posix } from "./helpers/platform.ts";
@@ -23,6 +23,12 @@ const ANSWER = {
   change: "Before, a query returned every row at the end; now it stops at a budget.",
   risk: "Every query caller; a revert undoes it.",
   risk_level: "medium",
+  risk_reasons: [{ factor: "contract", why: "Callers get partial rows" }],
+  verdict: "look",
+  intent_fit: "partial",
+  since: "",
+  interfaces: [],
+  tags: [],
   lean: "fix first",
   lean_why: "`?budget=` isn't validated (The budget).",
   caveat: "",
@@ -91,6 +97,7 @@ async function deskWithCheckout(c: TestContext) {
   const deps: ReviewDeps = {
     fetchPr: () => Effect.succeed({ body: "why", files: [] } satisfies PrText),
     generate: () => Effect.die("no AI review in these tests"),
+    deep: (prompt, dir, schema) => askClaude(prompt, { dir, read: true, probe: true, schema }),
     checkout: () =>
       Effect.succeed({
         dir: code,
@@ -144,6 +151,12 @@ test("a deep review answers at once, runs on in the PR's checkout, and keeps wha
     { lean: "fix first", why: ANSWER.lean_why, head: v.item.head_oid, model: "claude-opus-5-5", picture: "flow" },
   );
   assert.equal(fake.calls().length, 1, "one run for both asks");
+  // It is the PR's review: what the queue and the judge read (risk, its reasons, the verdict, the intent's fit) is its own.
+  assert.deepEqual(
+    { risk: v.ai?.risk, factors: v.ai?.risk_reasons?.map((r) => r.factor), verdict: v.ai?.verdict, fit: v.ai?.intent?.fit },
+    { risk: "medium", factors: ["contract"], verdict: "look", fit: "partial" },
+  );
+  assert.equal((await run(t.desk.reviewView(ID))).generating, false, "a review of this commit isn't run again");
   assert.ok(t.removed(), "its checkout is removed once it's done");
 });
 
@@ -170,6 +183,25 @@ test(
       assert.ok(deny.includes(`Bash(gh repo ${write}:*)`), `gh repo ${write} is denied`);
   },
 );
+
+test("the desk's own review is the deep review, and an AI review of the commit from before them still wants one", posix, async (c) => {
+  const fake = fakeClaude(c, ANSWER);
+  const t = await deskWithCheckout(c);
+  const wants = () => {
+    const snap = t.desk.snapshot();
+    return t.desk.wantsAi(snap.entries.get(ID)!, snap);
+  };
+  await until(async () => (await run(t.desk.reviewView(ID))).deep !== null);
+  assert.equal(fake.calls().length, 1, "the sync started it, as it would an AI review");
+  assert.equal(wants(), false);
+  // As if its review were from before deep reviews: the AI review of this commit is there, its deep review isn't.
+  t.desk.store.putKvAt("deep:", ID, { review: null, error: null });
+  assert.equal(wants(), true, "the old review leaves it wanting one");
+  await run(t.desk.deepReview(ID));
+  await until(async () => (await run(t.desk.reviewView(ID))).deep !== null);
+  assert.equal(wants(), false, "its deep review of this commit settles it");
+  assert.equal(fake.calls().length, 2);
+});
 
 test("a deep review whose answer isn't one keeps its failure in your words, and the last good one stays", posix, async (c) => {
   fakeClaude(c, { lean: "maybe" });
@@ -204,6 +236,12 @@ test("a deep review's steps keep only this diff's hunks, become the Review tab's
     change: "c",
     risk: "r",
     risk_level: "low",
+    risk_reasons: [],
+    verdict: "skim",
+    intent_fit: "matches",
+    since: "",
+    interfaces: [],
+    tags: [],
     lean: "fix first",
     lean_why: "w",
     caveat: "",

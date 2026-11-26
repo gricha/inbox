@@ -8,6 +8,7 @@ import {
   AmbiguousRef,
   BadRequest,
   Busy,
+  ClaudeBadOutput,
   ClaudeNotLoggedIn,
   Conflict,
   Forbidden,
@@ -77,6 +78,7 @@ import type {
   SetupAgent,
   SetupView,
   AiReview,
+  DeepReview,
   Ask,
   AsksView,
   IssueReview,
@@ -214,18 +216,19 @@ import {
   type Sorted,
 } from "./kv.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { DEEP_SCHEMA, deepGuide, deepOf, deepPrompt, pictureOf, stepsOf } from "./deep.ts";
+import { deepGuide, deepOf, deepPrompt, deepSchema, pictureOf, stepsOf } from "./deep.ts";
 import {
   agentDir,
   agentDown,
-  askClaude,
   forgetCodexServers,
   forgetOpencodeServers,
   notLoggedIn,
   pausedWords,
   reviewOrder,
   saidOf,
+  type ClaudeAnswer,
   type FetchPrError,
+  type PrSaid,
   type PrText,
   type YourMcp,
 } from "./review.ts";
@@ -456,6 +459,7 @@ export interface ReviewDeps {
     mcp?: YourMcp,
   ): Effect.Effect<AiReview, CommandError | ClaudeError>;
   checkout?(item: Item): Effect.Effect<Checkout, NoCheckout>; // the PR's head from your clone, for the agent to read
+  deep?(prompt: string, dir: string, schema: object): Effect.Effect<ClaudeAnswer, CommandError | ClaudeError>; // a deep review's run in that checkout
   loggedIn?(agent: agents.DriverId): Effect.Effect<boolean>; // the CLI's own status command; absent: nothing checks it
   installed?(agent: agents.DriverId): boolean; // its CLI is on PATH; absent: none is
 }
@@ -2593,57 +2597,61 @@ export class Desk {
         viewed: this.viewedOf(id),
         ...talk,
         deep,
-        deep_running: this.deeps.get(id) ?? null,
-        deep_error: this.deeps.has(id) ? null : (this.store.kvAt("deep:", id)?.error ?? null),
+        deep_on: this.deeply(),
+        deep_running: running && this.deeply() ? (job?.started_at ?? null) : null,
+        deep_error: running ? null : (this.store.kvAt("deep:", id)?.error ?? null),
       };
     });
   }
 
   // ---------------------------------------------------------------- deep reviews (src/deep.ts)
 
-  private deeps = new Map<string, string>(); // running, by PR id: when each started
+  // The review the desk runs is a deep review where it can be: your agent is Claude Code and the PR's code checks out.
+  // Codex and OpenCode, or a desk without checkouts, get the AI review.
+  deeply(): boolean {
+    return !!this.review?.checkout && !!this.review.deep && this.agent() === "claude-code";
+  }
 
-  // POST /api/review/:id/deep: starts the PR's deep review unless one is running, and answers at once; it runs on.
+  // POST /api/review/:id/deep (Review again): the PR's review, run now unless one is; it answers at once and runs on.
   deepReview(ref: string): Effect.Effect<{ ok: true; running: string }, RefError | BadRequest | Conflict> {
     return Effect.gen({ self: this }, function* () {
       const e = yield* this.pr(ref);
-      const id = e.item.id;
-      const checkout = this.review?.checkout?.bind(this.review);
-      if (!checkout) return yield* new Conflict({ message: "A deep review needs the PR's code, which this desk can't check out" });
-      if (this.agent() !== "claude-code")
-        return yield* new Conflict({ message: "Deep reviews run on Claude Code for now: Settings → Agent" });
-      const running = this.deeps.get(id);
-      if (running) return { ok: true as const, running };
-      const at = this.now().toISOString();
-      this.deeps.set(id, at);
-      this.runner.fork("deep review", this.runDeep(e.item, e.analysis.signals.me.author, checkout), id);
-      this.changed();
-      return { ok: true as const, running: at };
+      if (!this.review?.checkout)
+        return yield* new Conflict({ message: "A deep review needs the PR's code, which this desk can't check out" });
+      if (!this.deeply()) return yield* new Conflict({ message: "Deep reviews run on Claude Code for now: Settings → Agent" });
+      this.startAi(e.item.id);
+      return { ok: true as const, running: this.jobs.get("ai_review", e.item.id)?.started_at ?? this.now().toISOString() };
     });
   }
 
-  // In the PR's own checkout, with tests and probes; kept per PR with its commit, or its failure kept beside the last one.
-  private runDeep(item: Item, yours: boolean, checkout: (item: Item) => Effect.Effect<Checkout, NoCheckout>): Effect.Effect<void> {
+  // In the PR's own checkout, reading what it needs and probing what reading can't settle; kept per PR with its commit,
+  // or its failure kept beside the last one.
+  private runDeep(
+    item: Item,
+    yours: boolean,
+    pr: PrText & { said?: PrSaid; tags: readonly { id: string; ask: string }[] },
+    own: string,
+    checkout: (item: Item) => Effect.Effect<Checkout, NoCheckout>,
+  ): Effect.Effect<DeepReview, AiError> {
     const started = Date.now();
     return Effect.gen({ self: this }, function* () {
-      // The diff's hunks, so its steps can name them, and what reviewers said, so it doesn't ask what's already settled.
-      const files = (yield* this.prText(item.id).pipe(Effect.orElseSucceed(() => null)))?.files ?? [];
-      const ctx = yield* this.convos.context(item.id).pipe(Effect.orElseSucceed(() => null));
       const code = yield* checkout(item);
-      const prompt = deepPrompt(item, yours, files, ctx && saidOf(ctx));
-      const out = yield* askClaude(prompt, { dir: code.dir, read: true, probe: true, schema: DEEP_SCHEMA }).pipe(
-        Effect.ensuring(code.done),
-      );
+      const prompt = deepPrompt(item, yours, pr.files, pr.said ?? null, {
+        since: pr.since ? pr.since.base.slice(0, 12) : null,
+        tags: pr.tags,
+        own,
+      });
+      const out = yield* this.review!.deep!(prompt, code.dir, deepSchema(pr.tags)).pipe(Effect.ensuring(code.done));
       const got = deepOf(out.answer);
       const answer = yield* Result.isFailure(got)
-        ? Effect.fail(new BadRequest({ message: `its answer didn't parse: ${got.failure}` }))
+        ? Effect.fail(new ClaudeBadOutput({ message: `its answer didn't parse: ${got.failure}` }))
         : Effect.succeed(got.success);
       const seconds = Math.round((Date.now() - started) / 1000);
       const picture = pictureOf(answer.picture);
       if (picture.refused) this.log(`deep review of ${item.id}: its picture: ${picture.refused}: dropped`);
-      const review = {
+      const review: DeepReview = {
         ...answer,
-        steps: stepsOf(answer.steps, files),
+        steps: stepsOf(answer.steps, pr.files),
         picture: picture.diagram,
         head_oid: item.head_oid,
         model: out.model,
@@ -2652,19 +2660,13 @@ export class Desk {
       };
       this.store.putKvAt("deep:", item.id, { review, error: null });
       this.log(
-        `deep review of ${item.id}: ${review.lean}, ${review.steps.length} steps, ${review.steps.flatMap((s) => s.notes).length} notes; ${seconds}s`,
+        `deep review of ${item.id}: ${review.lean}, ${review.risk_level} risk, ${review.verdict}, ${review.steps.length} steps, ${review.steps.flatMap((x) => x.notes).length} notes; ${seconds}s`,
       );
+      return review;
     }).pipe(
-      Effect.catch((e) =>
+      Effect.tapError((e) =>
         Effect.sync(() => {
           this.store.putKvAt("deep:", item.id, { review: this.store.kvAt("deep:", item.id)?.review ?? null, error: messageOf(e) });
-          this.log(`deep review of ${item.id} failed: ${messageOf(e)}`);
-        }),
-      ),
-      Effect.ensuring(
-        Effect.sync(() => {
-          this.deeps.delete(item.id);
-          this.changed();
         }),
       ),
     );
@@ -2779,10 +2781,26 @@ export class Desk {
           ...(ctx && { said: saidOf(ctx) }),
           tags: asksOf(this.loaded?.tags ?? []),
         };
-        const code = this.review.checkout ? yield* this.review.checkout(e.item) : null;
-        const written = yield* this.review
-          .generate(e.item, e.analysis.signals, snap.best.get(id)?.why ?? "", pr, this.agentDir(), this.agent(), code?.dir, this.yourMcp())
-          .pipe(Effect.ensuring(code?.done ?? Effect.void));
+        const checkout = this.review.checkout?.bind(this.review);
+        let written: AiReview;
+        if (checkout && this.deeply()) {
+          const deep = yield* this.runDeep(e.item, e.analysis.signals.me.author, pr, own.own?.extra ?? "", checkout);
+          written = { ...deepGuide(deep, pr.files, null), skill: own.hash };
+        } else {
+          const code = checkout ? yield* checkout(e.item) : null;
+          written = yield* this.review
+            .generate(
+              e.item,
+              e.analysis.signals,
+              snap.best.get(id)?.why ?? "",
+              pr,
+              this.agentDir(),
+              this.agent(),
+              code?.dir,
+              this.yourMcp(),
+            )
+            .pipe(Effect.ensuring(code?.done ?? Effect.void));
+        }
         const doc = yield* this.writeDoc(e.item, pr.files, written);
         const ai = doc ? { ...written, doc } : written;
         this.store.set(`review:${id}`, ai);
@@ -2946,11 +2964,17 @@ export class Desk {
     );
   }
 
+  // Its head has the desk's review; where reviews are deep, an AI review from before them still wants its deep review.
+  private reviewed(it: Item, snap: Snapshot): boolean {
+    if (snap.reviews.get(it.id)?.head_oid !== it.head_oid) return false;
+    return !this.deeply() || this.store.kvAt("deep:", it.id)?.review?.head_oid === it.head_oid;
+  }
+
   // A reviewable PR with no AI review of its head yet, nor a job for it: one that failed retries on its own, or waits for you.
   wantsAi(e: Entry, snap: Snapshot): boolean {
     const it = e.item;
     if (!this.reviewable(e) || this.generating.has(it.id)) return false;
-    if (snap.reviews.get(it.id)?.head_oid === it.head_oid) return false;
+    if (this.reviewed(it, snap)) return false;
     const j = this.jobs.get("ai_review", it.id);
     return !(j && j.head === it.head_oid && j.state !== "done");
   }
@@ -3007,7 +3031,7 @@ export class Desk {
       if (room <= 0 || !this.autoAi()) return; // a run that failed at once may have paused them
       const e = snap.entries.get(j.key);
       if (e?.item.kind !== "pr" || e.item.state !== "open") this.jobs.drop(j.kind, j.key);
-      else if (snap.reviews.get(j.key)?.head_oid === e.item.head_oid) this.jobs.done(j.kind, j.key);
+      else if (this.reviewed(e.item, snap)) this.jobs.done(j.kind, j.key);
       else if (!this.generating.has(j.key)) {
         this.startAi(j.key, false);
         room--;

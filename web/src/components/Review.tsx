@@ -706,7 +706,8 @@ export function Review({
   }
 
   // A deep review of this commit with steps guides the Review tab, and says what the AI review's summary would.
-  const deepGuides = !!v?.deep && v.files.length > 0 && v.deep.head_oid === v.diff_head && v.deep.steps.length > 0;
+  // A deep review is this PR's review: it takes the AI review's place, landed or on its way.
+  const deepGuides = !!v?.deep_on || (!!v?.deep && v.files.length > 0 && v.deep.head_oid === v.diff_head && v.deep.steps.length > 0);
 
   // Starts the PR's deep review; the desk marks it running before it answers, so the next read shows it.
   function runDeep() {
