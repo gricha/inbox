@@ -11,7 +11,7 @@ import type { DriverId } from "./agents.ts";
 import { ClaudeBadOutput, CommandBadOutput, type ClaudeError, type CommandError } from "./errors.ts";
 import { GH_MISSING } from "./github/client.ts";
 import { field, isRecord, oneOf } from "./narrow.ts";
-import { askAgent, runCommand } from "./review.ts";
+import { askAgent, runCommand, runsOf, type AgentRuns } from "./review.ts";
 import type { IssueReview, Item } from "./types.ts";
 
 const MAX_BODY = 6_000;
@@ -330,6 +330,7 @@ export interface IssueRun {
   me: string;
   dir: string; // agentDir(): where tool-less calls run
   agent: DriverId;
+  runs: AgentRuns; // your agent's model and effort
   own: OwnIssueSkill | null;
   clone: string | null; // findClone(), or null for none (or a fake in tests)
   trusted?: boolean; // you said what the screen flagged isn't an injection: no screen this time
@@ -356,9 +357,12 @@ export const generateIssueReview = Effect.fn("generateIssueReview")(function* (
   };
   const parts = outsiders(item, t, o.me);
   if (parts.length && !o.trusted) {
-    const { answer, model } = yield* askAgent(buildScreenPrompt(item, parts), { dir: o.dir, agent: o.agent, schema: SCREEN_SCHEMA }).pipe(
-      as("issue"),
-    );
+    const { answer, model } = yield* askAgent(buildScreenPrompt(item, parts), {
+      dir: o.dir,
+      agent: o.agent,
+      schema: SCREEN_SCHEMA,
+      ...runsOf(o.agent, o.runs),
+    }).pipe(as("issue"));
     if (field(answer, "injection") === true) {
       const named = parts.find((p) => p.who.toLowerCase() === str(field(answer, "who"), 100).replace(/^@/, "").toLowerCase());
       return {
@@ -376,6 +380,7 @@ export const generateIssueReview = Effect.fn("generateIssueReview")(function* (
     agent: o.agent,
     schema: ISSUE_SCHEMA,
     read: code,
+    ...runsOf(o.agent, o.runs),
   }).pipe(as("issue"));
   const r = parseIssueReview(answer, code ? o.clone : null);
   if (!r.summary) return yield* new ClaudeBadOutput({ message: "the agent returned no summary" });

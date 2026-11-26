@@ -290,7 +290,7 @@ console.log(exit._tag === "Failure" && Cause.hasInterruptsOnly(exit.cause) ? "in
 
 test("a missing claude command says where to set its path", async () => {
   const command = path.join(os.tmpdir(), "no-such-claude");
-  const e = await failure(askClaude("hi", { command, dir: os.tmpdir() }));
+  const e = await failure(askClaude("hi", { model: "", command, dir: os.tmpdir() }));
   assert.deepEqual([e._tag, e.message], ["CommandNotFound", `${command} not found: install Claude Code so claude runs from your PATH`]);
 });
 
@@ -313,7 +313,7 @@ test(
     );
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
     const dir = agentDir(home);
-    assert.deepEqual(await run(askClaude("PROMPT", { command: f.bin, dir })), {
+    assert.deepEqual(await run(askClaude("PROMPT", { model: "", command: f.bin, dir })), {
       answer: { summary: "ok" },
       model: "claude-opus-5[1m]",
       usage: [{ model: "claude-opus-5[1m]", input: 0, output: 0, cache_read: 0, cache_write: 0, cost: null }],
@@ -379,7 +379,7 @@ test(
     const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
     const dir = agentDir(home);
     const schema = { type: "object", properties: { summary: { type: "string" } } };
-    assert.deepEqual(await run(askAgent("PROMPT", { agent: "codex", command: f.bin, dir, schema })), {
+    assert.deepEqual(await run(askAgent("PROMPT", { model: "", agent: "codex", command: f.bin, dir, schema })), {
       answer: { summary: "ok" },
       model: "codex",
       usage: [],
@@ -445,7 +445,7 @@ test(
   posix,
   async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-agent-"));
-    const ask = (script: string) => failure(askAgent("hi", { agent: "codex", command: fakeCodex(script).bin, dir }));
+    const ask = (script: string) => failure(askAgent("hi", { model: "", agent: "codex", command: fakeCodex(script).bin, dir }));
     const stderr = await ask(`echo 'Error: Not logged in. Run codex login.' >&2; exit 1`);
     assert.ok(stderr instanceof ClaudeNotLoggedIn);
     assert.deepEqual(
@@ -465,7 +465,7 @@ test(
     assert.deepEqual([other._tag, other.message, agentDown(other)], ["ClaudeApiError", "model overloaded", false]);
     // A retry notice along the way isn't the answer's failure.
     const f = fakeCodex(`echo '{"type":"error","message":"Reconnecting... 1/5"}'; ${ANSWERED}`);
-    assert.deepEqual(await run(askAgent("hi", { agent: "codex", command: f.bin, dir })), {
+    assert.deepEqual(await run(askAgent("hi", { model: "", agent: "codex", command: f.bin, dir })), {
       answer: { summary: "ok" },
       model: "codex",
       usage: [],
@@ -483,7 +483,7 @@ echo '{"type":"thread.started","thread_id":"t1"}'; echo '{"type":"turn.started"}
 while :; do sleep 0.1; done`);
   process.env.DESK_CODEX = f.bin;
   try {
-    const e = await failure(codexRun("hi", { dir, timeout: 1000 }));
+    const e = await failure(codexRun("hi", { model: "", dir, timeout: 1000 }));
     assert.deepEqual([e._tag, e.message], ["CommandTimeout", "no answer in 1 second, so it was stopped"]);
   } finally {
     process.env.DESK_CODEX = NO_AGENT.DESK_CODEX;
@@ -498,7 +498,7 @@ test(
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-agent-"));
     const failing = fakeCodex(ANSWERED);
     fs.writeFileSync(path.join(failing.dir, "list-fails"), "");
-    const e = await failure(askAgent("hi", { agent: "codex", command: failing.bin, dir }));
+    const e = await failure(askAgent("hi", { model: "", agent: "codex", command: failing.bin, dir }));
     assert.deepEqual(
       [e._tag, e.message, agentDown(e)],
       ["CodexServersUnknown", "Couldn't confirm Codex's MCP servers are off, so it didn't run: boom", true],
@@ -508,16 +508,16 @@ test(
     for (const printed of ["not json", '{"linear":"on"}', '[{"enabled":true}]']) {
       const odd = fakeCodex(ANSWERED);
       fs.writeFileSync(path.join(odd.dir, "servers"), printed);
-      const bad = await failure(askAgent("hi", { agent: "codex", command: odd.bin, dir }));
+      const bad = await failure(askAgent("hi", { model: "", agent: "codex", command: odd.bin, dir }));
       assert.equal(bad._tag, "CodexServersUnknown", printed);
       assert.ok(!fs.existsSync(path.join(odd.dir, "cwd-listing")), `${printed}: the call never ran`);
     }
     const f = fakeCodex(ANSWERED);
-    await run(askAgent("hi", { agent: "codex", command: f.bin, dir }));
-    await run(askAgent("hi", { agent: "codex", command: f.bin, dir }));
+    await run(askAgent("hi", { model: "", agent: "codex", command: f.bin, dir }));
+    await run(askAgent("hi", { model: "", agent: "codex", command: f.bin, dir }));
     assert.equal(f.read("lists").trim().split("\n").length, 1, "listed once for both calls");
     forgetCodexServers();
-    await run(askAgent("hi", { agent: "codex", command: f.bin, dir }));
+    await run(askAgent("hi", { model: "", agent: "codex", command: f.bin, dir }));
     assert.equal(f.read("lists").trim().split("\n").length, 2, "another agent chosen: listed again");
     assert.deepEqual(
       [tomlKey("node_repl"), tomlKey("a-b"), tomlKey("my.server"), tomlKey('q"x')],
@@ -534,9 +534,13 @@ test("the tool-less call is Claude Code's unless the agent is Codex", posix, asy
   process.env.DESK_CLAUDE = claude.bin;
   process.env.DESK_CODEX = codex.bin;
   try {
-    assert.deepEqual((await run(askAgent("hi", { dir }))).answer, { summary: "from claude" });
-    assert.deepEqual((await run(askAgent("hi", { dir, agent: "claude-code" }))).answer, { summary: "from claude" });
-    assert.deepEqual(await run(askAgent("hi", { dir, agent: "codex" })), { answer: { summary: "from codex" }, model: "codex", usage: [] });
+    assert.deepEqual((await run(askAgent("hi", { model: "", dir }))).answer, { summary: "from claude" });
+    assert.deepEqual((await run(askAgent("hi", { model: "", dir, agent: "claude-code" }))).answer, { summary: "from claude" });
+    assert.deepEqual(await run(askAgent("hi", { model: "", dir, agent: "codex" })), {
+      answer: { summary: "from codex" },
+      model: "codex",
+      usage: [],
+    });
   } finally {
     process.env.DESK_CLAUDE = NO_AGENT.DESK_CLAUDE;
     process.env.DESK_CODEX = NO_AGENT.DESK_CODEX;
@@ -621,7 +625,9 @@ test("an answer with no summary fails the review as bad output, and asks no seco
   process.env.DESK_CLAUDE = f.bin;
   try {
     const item = makeItem();
-    const e = await failure(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home)));
+    const e = await failure(
+      generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home), "claude-code", { model: "", effort: "" }),
+    );
     assert.deepEqual([e._tag, e.message], ["ClaudeBadOutput", "the agent returned no summary"]);
     assert.equal(fs.readFileSync(path.join(f.dir, "calls"), "utf8").split("\n").filter(Boolean).length, 1);
   } finally {
@@ -1046,7 +1052,15 @@ test(
     try {
       const item = makeItem({ head_oid: "c0ffee" });
       const ai = await run(
-        generateReview(item, signalsOf(item), "", { body: "Only admins reach the planner.", files: [FILE] }, agentDir(home)),
+        generateReview(
+          item,
+          signalsOf(item),
+          "",
+          { body: "Only admins reach the planner.", files: [FILE] },
+          agentDir(home),
+          "claude-code",
+          { model: "", effort: "" },
+        ),
       );
       assert.deepEqual(ai.concerns, ["Drops rows past the limit with no way to page."]);
       assert.deepEqual(
@@ -1101,7 +1115,12 @@ test(
         { id: "types-only", ask: "Does it change\nonly types?" },
         { id: "comments-only", ask: "Only comments?" },
       ];
-      const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE], tags }, agentDir(home)));
+      const ai = await run(
+        generateReview(item, signalsOf(item), "", { body: "", files: [FILE], tags }, agentDir(home), "claude-code", {
+          model: "",
+          effort: "",
+        }),
+      );
       const prompt = fs.readFileSync(path.join(f.dir, "stdin"), "utf8");
       assert.match(prompt, /^- tags: me's own labels for hunks/m);
       assert.match(prompt, /^ {2}- types-only: Does it change only types\?$/m);
@@ -1150,7 +1169,9 @@ test(
     process.env.DESK_CLAUDE = f.bin;
     try {
       const item = makeItem();
-      const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home)));
+      const ai = await run(
+        generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home), "claude-code", { model: "", effort: "" }),
+      );
       assert.deepEqual(ai.concerns, ["Concern 3.", "Concern 4.", "Concern 5.", "Concern 6.", "Concern 7.", "Concern 8."]);
       assert.equal(ai.dropped, 2, "the check's two, not the cap");
     } finally {
@@ -1183,7 +1204,9 @@ test(
       process.env.DESK_CLAUDE = f.bin;
       try {
         const item = makeItem();
-        const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home)));
+        const ai = await run(
+          generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home), "claude-code", { model: "", effort: "" }),
+        );
         assert.equal(ai.notes.length, kept);
         assert.equal(fs.readFileSync(path.join(f.dir, "calls"), "utf8").split("\n").filter(Boolean).length, calls);
       } finally {
@@ -1221,7 +1244,12 @@ test(
     process.env.DESK_CLAUDE = f.bin;
     try {
       const item = makeItem({ head_oid: "c0ffee" });
-      const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE, LOCK] }, agentDir(home)));
+      const ai = await run(
+        generateReview(item, signalsOf(item), "", { body: "", files: [FILE, LOCK] }, agentDir(home), "claude-code", {
+          model: "",
+          effort: "",
+        }),
+      );
       const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
       const schema = JSON.parse(args[args.indexOf("--json-schema") + 1]!) as { required: string[]; properties: Record<string, unknown> };
       assert.ok(schema.required.includes("chunks") && "chunks" in schema.properties);
@@ -1525,7 +1553,9 @@ test("with Codex chosen, the AI review and its check both run on codex, and its 
   process.env.DESK_CLAUDE = claude.bin;
   try {
     const item = makeItem();
-    const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home), "codex"));
+    const ai = await run(
+      generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home), "codex", { model: "", effort: "" }),
+    );
     assert.deepEqual([ai.summary, ai.concerns, ai.verdict, ai.model], ["Caps rows.", ["Drops rows past the limit."], "look", "codex"]);
     assert.equal(f.read("calls").split("\n").filter(Boolean).length, 2, "the writer and the check");
     assert.ok(!fs.existsSync(path.join(claude.dir, "calls")), "claude never ran");
@@ -1550,7 +1580,18 @@ test(
     process.env.DESK_CLAUDE = f.bin;
     try {
       const item = makeItem();
-      const ai = await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home), "claude-code", repo));
+      const ai = await run(
+        generateReview(
+          item,
+          signalsOf(item),
+          "",
+          { body: "", files: [FILE] },
+          agentDir(home),
+          "claude-code",
+          { model: "", effort: "" },
+          repo,
+        ),
+      );
       const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
       assert.equal(args[args.indexOf("--tools") + 1], "Read,Grep,Glob,Bash");
       assert.equal(args[args.indexOf("--allowedTools") + 1], "Bash(gh api -X GET:*),Bash(gh search code:*)", "of Bash, GitHub reads only");
@@ -1591,7 +1632,19 @@ test(
       const item = makeItem();
       const linear = { type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer x" } };
       const mcp = { desk: "http://localhost:47823/mcp", claude: { linear, "my.server": { command: "srv" } } };
-      await run(generateReview(item, signalsOf(item), "", { body: "", files: [FILE] }, agentDir(home), "claude-code", undefined, mcp));
+      await run(
+        generateReview(
+          item,
+          signalsOf(item),
+          "",
+          { body: "", files: [FILE] },
+          agentDir(home),
+          "claude-code",
+          { model: "", effort: "" },
+          undefined,
+          mcp,
+        ),
+      );
       const args = fs.readFileSync(path.join(f.dir, "args"), "utf8").split("\n");
       assert.ok(args.includes("--strict-mcp-config"), "a PR's .mcp.json never loads");
       assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.dir, "mcp"), "utf8")), { mcpServers: mcp.claude });
@@ -1624,7 +1677,7 @@ test("an AI review on Codex keeps your MCP servers that are on, but the desk's o
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "desk-home-"));
   try {
     const mcp = { desk: "http://127.0.0.1:47823/mcp", claude: {} };
-    await run(askAgent("PROMPT", { agent: "codex", command: f.bin, dir: agentDir(home), mcp }));
+    await run(askAgent("PROMPT", { model: "", agent: "codex", command: f.bin, dir: agentDir(home), mcp }));
     const args = f.args().join(" ");
     assert.match(args, /mcp_servers\.desk\.enabled=false/);
     assert.match(args, /mcp_servers\.linear\.enabled=true/);
@@ -1642,7 +1695,7 @@ test("Codex reading a checkout keeps its shell, to read with, in its read-only s
     forgetCodexServers();
     const f = fakeCodex(`echo '{"summary":"ok"}' > "$out"; echo '{"type":"turn.completed","usage":{"input_tokens":9,"output_tokens":3}}'`);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "desk-codex-"));
-    await run(askAgent("P", { command: f.bin, dir, agent: "codex", read }));
+    await run(askAgent("P", { model: "", command: f.bin, dir, agent: "codex", read }));
     const a = f.args();
     fs.rmSync(f.dir, { recursive: true });
     fs.rmSync(dir, { recursive: true });
@@ -1741,6 +1794,7 @@ function fakeDeps(chunks?: unknown) {
   const fetched: string[] = [];
   const started: string[] = [];
   const agents: string[] = [];
+  const models: string[] = [];
   const repos: (string | undefined)[] = [];
   const gates = new Map<string, ReturnType<typeof deferred>>();
   let fail: string | null = null;
@@ -1750,10 +1804,11 @@ function fakeDeps(chunks?: unknown) {
         fetched.push(`${item.id}@${item.head_oid}`);
         return { body: "why", files: [FILE] } satisfies PrText;
       }),
-    generate: (item, _s, _why, pr, _dir, agent, repo) =>
+    generate: (item, _s, _why, pr, _dir, agent, runs, repo) =>
       Effect.gen(function* () {
         started.push(item.id);
         agents.push(agent);
+        models.push(runs.model);
         repos.push(repo);
         const g = deferred();
         gates.set(item.id, g);
@@ -1780,6 +1835,7 @@ function fakeDeps(chunks?: unknown) {
     fetched,
     started,
     agents,
+    models,
     repos,
     release: async (id: string) => {
       gates.get(id)!.resolve();
@@ -2067,6 +2123,14 @@ test("logging in after a lapsed login retries at the next sync, without waiting 
   const asked = checks.length;
   await t.sync();
   assert.equal(checks.length, asked, "nothing waits on the login: no more checks");
+  t.cleanup();
+});
+
+test("AI reviews run on your agent's model from Settings → Agent, never on its CLI's own default", async () => {
+  const t = await setup([ask(1)], { settings: { "agent.coordinator_model": "claude-opus-5-5" } });
+  await t.sync();
+  await t.f.release("acme/api#1");
+  assert.deepEqual(t.f.models, ["claude-opus-5-5"]);
   t.cleanup();
 });
 

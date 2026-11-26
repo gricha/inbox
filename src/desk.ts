@@ -227,6 +227,7 @@ import {
   pausedWords,
   reviewOrder,
   saidOf,
+  type AgentRuns,
   type ClaudeAnswer,
   type FetchPrError,
   type PrSaid,
@@ -470,11 +471,12 @@ export interface ReviewDeps {
     pr: PrText,
     dir: string,
     agent: agents.DriverId,
+    runs: AgentRuns, // your agent's model and effort: every review names them
     code?: string,
     mcp?: YourMcp,
   ): Effect.Effect<AiReview, CommandError | ClaudeError>;
   checkout?(item: Item): Effect.Effect<Checkout, NoCheckout>; // the PR's head from your clone, for the agent to read
-  deep?(prompt: string, dir: string, schema: object): Effect.Effect<ClaudeAnswer, CommandError | ClaudeError>; // a deep review's run in that checkout
+  deep?(prompt: string, dir: string, schema: object, runs: AgentRuns): Effect.Effect<ClaudeAnswer, CommandError | ClaudeError>; // a deep review's run in that checkout
   loggedIn?(agent: agents.DriverId): Effect.Effect<boolean>; // the CLI's own status command; absent: nothing checks it
   installed?(agent: agents.DriverId): boolean; // its CLI is on PATH; absent: none is
 }
@@ -2630,6 +2632,12 @@ export class Desk {
 
   // ---------------------------------------------------------------- deep reviews (src/deep.ts)
 
+  // Your agent's model and effort (Settings → Agent): every review, deep review, issue review and automation names them,
+  // so none runs on the CLI's own default.
+  agentRuns(): AgentRuns {
+    return this.coordinator.runs();
+  }
+
   // The review the desk runs is a deep review where it can be: your agent is Claude Code and the PR's code checks out.
   // Codex and OpenCode, or a desk without checkouts, get the AI review.
   deeply(): boolean {
@@ -2665,7 +2673,7 @@ export class Desk {
         tags: pr.tags,
         own,
       });
-      const out = yield* this.review!.deep!(prompt, code.dir, deepSchema(pr.tags)).pipe(Effect.ensuring(code.done));
+      const out = yield* this.review!.deep!(prompt, code.dir, deepSchema(pr.tags), this.agentRuns()).pipe(Effect.ensuring(code.done));
       const got = deepOf(out.answer);
       const answer = yield* Result.isFailure(got)
         ? Effect.fail(new ClaudeBadOutput({ message: `its answer didn't parse: ${got.failure}` }))
@@ -2872,6 +2880,7 @@ export class Desk {
               pr,
               this.agentDir(),
               this.agent(),
+              this.agentRuns(),
               code?.dir,
               this.yourMcp(),
             )
@@ -3231,7 +3240,15 @@ export class Desk {
       const work = Effect.gen({ self: this }, function* () {
         const t = yield* issues.fetch(it);
         const own = yield* this.issueSkill();
-        const run = { me: this.me(), dir: this.agentDir(), agent: this.agent(), own, clone: issues.clone(it.repo), trusted: trust };
+        const run = {
+          me: this.me(),
+          dir: this.agentDir(),
+          agent: this.agent(),
+          runs: this.agentRuns(),
+          own,
+          clone: issues.clone(it.repo),
+          trusted: trust,
+        };
         return yield* issues.generate(it, t, run);
       });
       return yield* work.pipe(

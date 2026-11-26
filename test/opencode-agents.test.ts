@@ -129,7 +129,7 @@ test(
       additionalProperties: false,
       required: ["summary"],
     };
-    assert.deepEqual(await run(askAgent("PROMPT", { agent: "opencode", dir, schema })), {
+    assert.deepEqual(await run(askAgent("PROMPT", { model: "", agent: "opencode", dir, schema })), {
       answer: { summary: "ok" },
       model: "opencode",
       usage: [],
@@ -163,7 +163,7 @@ test(
     });
     const ask = (error: object) => {
       f.file("fail", JSON.stringify(error));
-      return failure(askAgent("hi", { agent: "opencode", dir }));
+      return failure(askAgent("hi", { model: "", agent: "opencode", dir }));
     };
     const login = await ask({ name: "APIError", data: { message: "User not found.", statusCode: 401 } });
     assert.deepEqual([login._tag, login.message, agentDown(login)], ["ClaudeNotLoggedIn", OPENCODE_NOT_LOGGED_IN, true]);
@@ -187,7 +187,7 @@ test("an OpenCode call never runs unless its config is read: one that can't be h
     fs.rmSync(dir, { recursive: true, force: true });
   });
   f.file("configfail", "");
-  const e = await failure(askAgent("hi", { agent: "opencode", dir }));
+  const e = await failure(askAgent("hi", { model: "", agent: "opencode", dir }));
   assert.equal(e._tag, "CodexServersUnknown");
   assert.match(e.message, /^Couldn't confirm OpenCode's MCP servers are off, so it didn't run: /);
   assert.equal(agentDown(e), true);
@@ -209,7 +209,7 @@ test("your own OPENCODE_CONFIG_CONTENT stays, under the desk's servers and agent
     fs.rmSync(dir, { recursive: true, force: true });
   });
   f.file("answer", '{"summary":"ok"}');
-  await run(askAgent("hi", { agent: "opencode", dir }));
+  await run(askAgent("hi", { model: "", agent: "opencode", dir }));
   const got = config(f.runs()[0]!) as unknown as {
     theme: string;
     mcp: Record<string, unknown>;
@@ -403,7 +403,7 @@ test("an AI review on OpenCode keeps your MCP servers that are on, every tool of
     }),
   );
   f.file("answer", '{"summary":"ok"}');
-  await run(askAgent("hi", { agent: "opencode", dir, mcp: { desk: "http://127.0.0.1:47823/mcp", claude: {} } }));
+  await run(askAgent("hi", { model: "", agent: "opencode", dir, mcp: { desk: "http://127.0.0.1:47823/mcp", claude: {} } }));
   const cfg = config(f.runs()[0]!);
   assert.deepEqual(cfg.mcp, { linear: { enabled: true }, desk: { enabled: false } });
   const permission = cfg.agent[OPENCODE_AGENT]!.permission as Record<string, string>;

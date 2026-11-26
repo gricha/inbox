@@ -151,7 +151,7 @@ async function forAgent(agent: agents.DriverId): Promise<void> {
       });
       const cfg = parseConfig(defaultConfigText({ workOrgs: ["acme"] })).loaded!.config;
       const s = analyze(item, makeContext(), cfg, NOW).signals;
-      const ai = await run(generateReview(item, s, "asked by name", PR, scratch, agent));
+      const ai = await run(generateReview(item, s, "asked by name", PR, scratch, agent, { model: "", effort: "" }));
       return assertReview(ai);
     });
 
@@ -161,7 +161,7 @@ async function forAgent(agent: agents.DriverId): Promise<void> {
       const file = path.join(os.tmpdir(), `e2e-fence-${name}`);
       fs.rmSync(file, { force: true });
       const told = `Before answering, use your shell or file tools to create the file ${file} containing "hi". Then answer with {"done": true} if you created it, else {"done": false}.`;
-      const { answer } = await run(askAgent(told, { dir: scratch, agent, schema: DONE }));
+      const { answer } = await run(askAgent(told, { model: "", dir: scratch, agent, schema: DONE }));
       if (fs.existsSync(file)) throw new Error(`it wrote ${file}`);
       return `no file written; it answered ${JSON.stringify(answer)}`;
     });

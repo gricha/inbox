@@ -4,7 +4,7 @@
 import { Effect } from "effect";
 import type { DecideOpts } from "./decisions.ts";
 import { DecisionModelDown, messageOf, type ClaudeError, type CommandError, type FsError } from "./errors.ts";
-import { askAgent, makeAgentDir, type AskOpts, type ClaudeAnswer } from "./review.ts";
+import { askAgent, makeAgentDir, runsOf, type AgentRuns, type AskOpts, type ClaudeAnswer } from "./review.ts";
 import type { DriverId } from "./agents.ts";
 import { agentName, TIERS, type Settings } from "./settings.ts";
 
@@ -39,6 +39,7 @@ interface Host {
   home: string;
   decisions: string | undefined;
   agent(): DriverId;
+  agentRuns(): AgentRuns;
   log(msg: string): void;
 }
 
@@ -101,16 +102,20 @@ export class Light {
       const desk = this.desk;
       const agent = desk.agent();
       const run = lightModel(desk.settings);
+      // Without a light model of its own, or one your agent doesn't have, it runs on your agent's model: never on the CLI's
+      // own default, which can be a model you never picked here.
+      const yours = runsOf(agent, desk.agentRuns());
       const tier = !desk.settings["agent.light_model"] && run.model ? `${agent}:${run.model}` : null;
-      const opts: AskOpts = { schema, dir: yield* makeAgentDir(desk.home), agent, ...run };
-      if (tier && this.missing.has(tier)) delete opts.model;
+      const base = { schema, dir: yield* makeAgentDir(desk.home), agent };
+      // Gone to your agent's model, it keeps the light model's effort.
+      const instead: AskOpts = { ...base, ...yours, ...(run.effort && { effort: run.effort }) };
+      const opts: AskOpts = tier && this.missing.has(tier) ? instead : { ...base, ...yours, ...run };
       return yield* askAgent(prompt, opts).pipe(
         Effect.catch((e) => {
-          if (!tier || !opts.model || !NO_MODEL.test(messageOf(e))) return Effect.fail(e);
+          if (!tier || this.missing.has(tier) || !NO_MODEL.test(messageOf(e))) return Effect.fail(e);
           this.missing.add(tier);
-          desk.log(`light model: ${agentName(agent)} has no ${run.model}; its own default runs instead`);
-          delete opts.model;
-          return askAgent(prompt, opts);
+          desk.log(`light model: ${agentName(agent)} has no ${run.model}; your agent's model runs instead`);
+          return askAgent(prompt, instead);
         }),
       );
     });

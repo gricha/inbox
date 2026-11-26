@@ -167,7 +167,16 @@ const ANALYSIS = {
 test("an outsider's issue the screen flags stops there: one tool-less call, and no agent reads it further", posix, async () => {
   const f = fakeClaude([{ injection: true, who: "@mallory", why: 'it says "ignore your instructions"' }]);
   const r = await withClaude(f, () =>
-    run(generateIssueReview(issue(), text(), { me: "me", dir: os.tmpdir(), agent: "claude-code", own: null, clone: "/nowhere" })),
+    run(
+      generateIssueReview(issue(), text(), {
+        me: "me",
+        dir: os.tmpdir(),
+        agent: "claude-code",
+        runs: { model: "", effort: "" },
+        own: null,
+        clone: "/nowhere",
+      }),
+    ),
   );
   assert.deepEqual(r.injection, { who: "mallory", why: 'it says "ignore your instructions"' });
   assert.equal(r.summary, "");
@@ -182,7 +191,16 @@ test("past the screen, Claude Code reads your clone with Read, Grep and Glob onl
   fs.writeFileSync(path.join(clone, "src", "list.ts"), "x");
   const f = fakeClaude([{ injection: false, who: "", why: "" }, ANALYSIS]);
   const r = await withClaude(f, () =>
-    run(generateIssueReview(issue(), text(), { me: "me", dir: os.tmpdir(), agent: "claude-code", own: null, clone })),
+    run(
+      generateIssueReview(issue(), text(), {
+        me: "me",
+        dir: os.tmpdir(),
+        agent: "claude-code",
+        runs: { model: "", effort: "" },
+        own: null,
+        clone,
+      }),
+    ),
   );
   const [screen, analysis] = f.calls();
   assert.ok(screen && analysis);
@@ -196,7 +214,17 @@ test("past the screen, Claude Code reads your clone with Read, Grep and Glob onl
   // A maintainer's issue needs no screen; you saying a flag was wrong skips it too.
   const g = fakeClaude([ANALYSIS]);
   await withClaude(g, () =>
-    run(generateIssueReview(issue(), text(), { me: "me", dir: os.tmpdir(), agent: "claude-code", own: null, clone, trusted: true })),
+    run(
+      generateIssueReview(issue(), text(), {
+        me: "me",
+        dir: os.tmpdir(),
+        agent: "claude-code",
+        runs: { model: "", effort: "" },
+        own: null,
+        clone,
+        trusted: true,
+      }),
+    ),
   );
   assert.equal(g.calls().length, 1);
   fs.rmSync(clone, { recursive: true });

@@ -673,11 +673,31 @@ export function dropHostSession(env: NodeJS.ProcessEnv): string[] {
 export const claudeCommand = () => (process.env.DESK_CLAUDE?.trim() ? process.env.DESK_CLAUDE : "claude");
 
 // Where it runs and the answer's shape. Interrupting the run kills it (the desk stopping).
+// The options an agent call takes from your agent's runs: its model always, its effort where the agent takes one.
+export const runsOf = (agent: DriverId, runs: AgentRuns): { model: string; effort?: string } => ({
+  model: runs.model,
+  ...(runs.effort && agent !== "opencode" && { effort: runs.effort }),
+});
+
+// Claude Code's flags for them: what a `claude -p` the desk starts carries (test/agent-model.test.ts checks every one does).
+export const modelArgs = (runs: AgentRuns): string[] => [
+  ...(runs.model ? ["--model", runs.model] : []),
+  ...(runs.effort ? ["--effort", runs.effort] : []),
+];
+
+// The model and effort your agent runs with, from Settings → Agent: what every review and agent call names.
+export interface AgentRuns {
+  model: string;
+  effort: string;
+}
+
 export interface AskOpts {
   dir: string; // agentDir(): claude keeps a ~/.claude/projects entry per directory it runs in
   schema?: object;
   agent?: DriverId; // agent.harness: Claude Code unless it says Codex or OpenCode
-  model?: string; // a model its CLI takes (the light model's); none, your agent's own default
+  // Which model runs it, always said: your agent's model (Settings → Agent, Desk.runs()) or the light model's. Never left
+  // to the CLI's own default, which can be a model you never picked here; "" only when you left the setting empty.
+  model: string;
   effort?: string; // how hard it thinks (the light model's): Claude Code's --effort, Codex's reasoning effort; OpenCode takes none
   read?: boolean; // dir is a repo's code for it to read (src/checkout.ts), with read-only tools
   probe?: boolean; // a deep review's (src/deep.ts): in that checkout it may also run tests and write probes, never write outward
@@ -1442,7 +1462,8 @@ export const generateReview = Effect.fn("generateReview")(function* (
   why: string,
   pr: PrText,
   dir: string,
-  agent: DriverId = "claude-code",
+  agent: DriverId,
+  runs: AgentRuns,
   repo?: string, // the PR's head checked out (src/checkout.ts), for the agent to read
   mcp?: YourMcp,
 ): Effect.fn.Return<AiReview, CommandError | ClaudeError> {
@@ -1452,6 +1473,7 @@ export const generateReview = Effect.fn("generateReview")(function* (
     read: !!repo,
     ...(mcp && { mcp }),
     schema: reviewSchema(pr.tags),
+    ...runsOf(agent, runs),
   }).pipe(as("review"));
   const r = readReview(answer, pr.files);
   if (!r.summary) return yield* new ClaudeBadOutput({ message: "the agent returned no summary" });
@@ -1462,7 +1484,7 @@ export const generateReview = Effect.fn("generateReview")(function* (
     ...r.improvements,
     ...breaking.map((x) => ({ ...x, body: `${x.name} (${x.change}, breaking): ${x.impact}` })),
   ];
-  const held = all.length ? yield* checkClaims(item, pr, all, dir, agent, repo) : new Set<number>();
+  const held = all.length ? yield* checkClaims(item, pr, all, dir, agent, runs, repo) : new Set<number>();
   let at = 0;
   const holds = () => held.has(at++);
   const checked = {
@@ -1538,12 +1560,21 @@ function buildCheckPrompt(item: Item, pr: PrText, comments: Placed[], code: bool
 }
 
 // Which comments held up: c1, c2, … by their place in `comments`; one it didn't say holds is out.
-const checkClaims = Effect.fnUntraced(function* (item: Item, pr: PrText, comments: Placed[], dir: string, agent: DriverId, repo?: string) {
+const checkClaims = Effect.fnUntraced(function* (
+  item: Item,
+  pr: PrText,
+  comments: Placed[],
+  dir: string,
+  agent: DriverId,
+  runs: AgentRuns,
+  repo?: string,
+) {
   const { answer } = yield* askAgent(buildCheckPrompt(item, pr, comments, !!repo), {
     dir: repo ?? dir,
     schema: CHECK_SCHEMA,
     agent,
     read: !!repo,
+    ...runsOf(agent, runs),
   }).pipe(as("review"));
   const held = new Set<number>();
   for (const c of list(field(answer, "comments"))) {

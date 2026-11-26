@@ -97,7 +97,7 @@ async function deskWithCheckout(c: TestContext) {
   const deps: ReviewDeps = {
     fetchPr: () => Effect.succeed({ body: "why", files: [] } satisfies PrText),
     generate: () => Effect.die("no AI review in these tests"),
-    deep: (prompt, dir, schema) => askClaude(prompt, { dir, read: true, probe: true, schema }),
+    deep: (prompt, dir, schema) => askClaude(prompt, { model: "", dir, read: true, probe: true, schema }),
     checkout: () =>
       Effect.succeed({
         dir: code,

@@ -78,6 +78,7 @@ function light(home: string, set: Partial<Settings>, logs: string[] = []) {
     home,
     decisions: undefined,
     agent: () => driverOf(settings["agent.harness"]),
+    agentRuns: () => ({ model: settings["agent.coordinator_model"], effort: settings["agent.coordinator_effort"] }),
     log: (m) => {
       logs.push(m);
     },
@@ -107,26 +108,30 @@ test(
   },
 );
 
-test("a tier model your agent doesn't have gives way to its own default, at the same effort, and isn't tried again", posix, async (c) => {
-  const f = fakes(c);
-  fs.writeFileSync(f.at("noluna"), "");
-  const logs: string[] = [];
-  const l = light(f.dir, { "agent.harness": "codex" }, logs);
-  const { answer } = await run(l.ask("hi", SCHEMA));
-  assert.deepEqual(answer, { ok: true });
-  const [luna, plain] = f.codexCalls();
-  assert.equal(after(luna!, "--model"), "gpt-5.6-luna");
-  assert.ok(!plain!.includes("--model"), "its own default");
-  assert.ok(plain!.includes('model_reasoning_effort="low"'));
-  assert.match(logs.join("\n"), /Codex has no gpt-5\.6-luna; its own default runs instead/);
-  await run(l.ask("again", SCHEMA));
-  assert.equal(f.codexCalls().length, 3);
-  assert.ok(!f.codexCalls()[2]!.includes("--model"), "not asked for Luna again");
+test(
+  "a tier model your agent doesn't have gives way to your agent's model, at the same effort, and isn't tried again",
+  posix,
+  async (c) => {
+    const f = fakes(c);
+    fs.writeFileSync(f.at("noluna"), "");
+    const logs: string[] = [];
+    const l = light(f.dir, { "agent.harness": "codex", "agent.coordinator_model": "gpt-6" }, logs);
+    const { answer } = await run(l.ask("hi", SCHEMA));
+    assert.deepEqual(answer, { ok: true });
+    const [luna, plain] = f.codexCalls();
+    assert.equal(after(luna!, "--model"), "gpt-5.6-luna");
+    assert.equal(after(plain!, "--model"), "gpt-6", "your agent's model, never the CLI's own default");
+    assert.ok(plain!.includes('model_reasoning_effort="low"'));
+    assert.match(logs.join("\n"), /Codex has no gpt-5\.6-luna; your agent's model runs instead/);
+    await run(l.ask("again", SCHEMA));
+    assert.equal(f.codexCalls().length, 3);
+    assert.equal(after(f.codexCalls()[2]!, "--model"), "gpt-6", "not asked for Luna again");
 
-  // A model you set fails as itself.
-  const yours = light(f.dir, { "agent.harness": "codex", "agent.light_model": "gpt-5.6-luna" });
-  await assert.rejects(run(yours.ask("hi", SCHEMA)), /not a valid model ID/);
-});
+    // A model you set fails as itself.
+    const yours = light(f.dir, { "agent.harness": "codex", "agent.light_model": "gpt-5.6-luna" });
+    await assert.rejects(run(yours.ask("hi", SCHEMA)), /not a valid model ID/);
+  },
+);
 
 test("agent.rules_model is read as the light model, saved under its new name on start, and kept per agent under either name", async (c) => {
   const t = await setup([], { settings: { "agent.rules_model": "sonnet" } });

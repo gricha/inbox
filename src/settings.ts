@@ -239,7 +239,7 @@ export const SETTINGS = [
     placeholder: "Its own default",
     pattern: "^[\\w.:/@-]{1,80}$",
     pattern_hint: "a model's name as your agent's own command takes it, like opus",
-    help: "Which model answers Ask your agent and works your hand-offs; empty, your agent's own default.",
+    help: "Runs Ask your agent, your hand-offs, every review and automation; empty, your agent's own default.",
   },
   {
     key: "agent.coordinator_effort",

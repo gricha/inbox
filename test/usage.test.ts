@@ -71,9 +71,9 @@ test("a call is kept under the work it was for, once, and summed by work and mod
     store.addUsage(`2026-11-1${8 - n}T00:00:00Z`, `c${n++}`, work, usage);
   });
   try {
-    await run(askClaude("a", { command: bin, dir }).pipe(as("review")));
-    await run(askClaude("b", { command: bin, dir }).pipe(as("review")));
-    await run(askClaude("c", { command: bin, dir }));
+    await run(askClaude("a", { model: "", command: bin, dir }).pipe(as("review")));
+    await run(askClaude("b", { model: "", command: bin, dir }).pipe(as("review")));
+    await run(askClaude("c", { model: "", command: bin, dir }));
   } finally {
     meterTo(null);
   }

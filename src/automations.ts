@@ -20,6 +20,8 @@ import { BadRequest, ClaudeBadOutput, McpServerMissing, messageOf, NotFound, typ
 import {
   agentDown,
   askAgent,
+  modelArgs,
+  runsOf,
   claudeCommand,
   claudeEnvelope,
   claudeMissing,
@@ -73,6 +75,7 @@ type Host = Core &
     | "light"
     | "mcpUrl"
     | "agent"
+    | "agentRuns"
     | "line"
     | "connectors"
     | "syncedAt"
@@ -1095,6 +1098,7 @@ export class Automations {
         Effect.gen({ self: this }, function* () {
           const spawnAs = yield* claudeSpawn(claudeCommand(), [
             "-p",
+            ...modelArgs(this.desk.agentRuns()),
             "--output-format",
             "json",
             "--permission-mode",
@@ -1146,6 +1150,7 @@ export class Automations {
         schema: schemaFor(a),
         desk: { url, tools: READ_TOOLS.map((t) => `inbox_${t}`), ...(a.mcp && { keep: a.mcp }) },
         timeout: TIMEOUT,
+        ...runsOf(agent, this.desk.agentRuns()),
       };
       const got = yield* agent === "codex" ? codexRun(said, opts) : opencodeRun(said, opts);
       if (!this.all().some((x) => x.id === a.id)) return "gone" as const; // deleted while it ran
@@ -1429,6 +1434,7 @@ export class Automations {
         dir: yield* makeAgentDir(desk.home),
         agent: desk.agent(),
         schema: recommendSchema(t),
+        ...runsOf(desk.agent(), desk.agentRuns()),
       });
       const bad = (message: string) =>
         new ClaudeBadOutput({ message: `its recommendation for a held note ${message}`, excerpt: JSON.stringify(answer).slice(0, 500) });
