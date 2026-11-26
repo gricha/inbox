@@ -8,23 +8,33 @@ import os from "node:os";
 import path from "node:path";
 import { Effect } from "effect";
 import type { ReviewDeps } from "../src/desk.ts";
+import { deepGuide, stepsOf } from "../src/deep.ts";
 import type { PrText } from "../src/review.ts";
+import type { DeepReview } from "../src/types.ts";
 import { reviewAsk, setup } from "./helpers/desk.ts";
 import { run } from "./helpers/run.ts";
 
 const ID = "acme/api#1";
 const ANSWER = {
-  intent: "Streams rows and stops at a time budget.",
+  goal: "The author's goal: long queries return the rows found so far.",
   intent_from: "stated",
+  change: "Before, a query returned every row at the end; now it stops at a budget.",
   lean: "fix first",
-  premises: [{ premise: "Callers read the partial flag", verdict: "fails", evidence: "src/sdk.ts:58 reads only the body" }],
-  wrong: [
-    { what: "?budget= isn't validated", why: "A typo turns the budget off", evidence: ["src/route.ts:30 Number(q)"], severity: "fix" },
+  lean_why: "`?budget=` isn't validated (The budget).",
+  caveat: "",
+  steps: [
+    {
+      title: "The budget",
+      why: "Checked between batches.",
+      hunks: ["h1", "h99"],
+      notes: [
+        { kind: "issue", text: "`budget=abc` turns the budget off.", ask: "Reject it with a 400.", at: "src/route.ts:30", evidence: "" },
+      ],
+    },
   ],
-  ask: [{ question: "Should the default budget apply to old callers?", why: "Their slow queries come back partial" }],
-  author_fixes: ["Reject a non-numeric budget"],
-  checked: { summary: "Read the diff and the SDK", tests: "41 passed", probes: 1 },
+  checked: { tests: "41 passed", probes: 1 },
   picture: {
+    step: 0,
     title: "The budget",
     caption: "Where the budget is read.",
     source: 'flowchart LR\n  a["route"] --> b["plan"]\n  b --> c["stream"]',
@@ -123,13 +133,12 @@ test("a deep review answers at once, runs on in the PR's checkout, and keeps wha
   assert.deepEqual(
     {
       lean: v.deep?.lean,
-      wrong: v.deep?.wrong.length,
-      ask: v.deep?.ask.length,
+      why: v.deep?.lean_why,
       head: v.deep?.head_oid,
       model: v.deep?.model,
       picture: v.deep?.picture?.graph.kind,
     },
-    { lean: "fix first", wrong: 1, ask: 1, head: v.item.head_oid, model: "claude-opus-5-5", picture: "flow" },
+    { lean: "fix first", why: ANSWER.lean_why, head: v.item.head_oid, model: "claude-opus-5-5", picture: "flow" },
   );
   assert.equal(fake.calls().length, 1, "one run for both asks");
   assert.ok(t.removed(), "its checkout is removed once it's done");
@@ -157,4 +166,54 @@ test("a deep review whose answer isn't one keeps its failure in your words, and 
   const v = await run(t.desk.reviewView(ID));
   assert.equal(v.deep, null);
   assert.match(v.deep_error ?? "", /didn't parse/);
+});
+
+test("a deep review's steps keep only this diff's hunks, become the Review tab's guide, and pin each finding to its line", () => {
+  const files = [
+    { path: "a.ts", previous_path: null, status: "modified" as const, additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n-a\n+b" },
+    { path: "src/b.ts", previous_path: null, status: "modified" as const, additions: 1, deletions: 0, patch: "@@ -3,0 +4 @@\n+c" },
+  ];
+  const blocker = { kind: "blocker" as const, text: "It hangs.", ask: "Bound it.", at: "b.ts:4", evidence: "probe: timed out" };
+  const question = { kind: "question" as const, text: "Old callers change.", ask: "Only new ones?", at: "", evidence: "" };
+  const steps = stepsOf(
+    [
+      { title: "Core", why: "What it's for.", hunks: ["h2", "h9"], notes: [blocker, question] },
+      { title: "Gone", why: "Names nothing here.", hunks: ["h9"], notes: [] },
+    ],
+    files,
+  );
+  assert.deepEqual(steps, [{ title: "Core", why: "What it's for.", hunks: ["h2"], notes: [blocker, question] }]);
+  const graph = { kind: "flow" as const, direction: "LR" as const, nodes: [], edges: [], groups: [] };
+  const deep: DeepReview = {
+    goal: "g",
+    intent_from: "stated",
+    change: "c",
+    lean: "fix first",
+    lean_why: "w",
+    caveat: "",
+    steps,
+    checked: { tests: "", probes: 0 },
+    picture: { id: "deep", title: "t", caption: "c", graph, step: 0 },
+    head_oid: "abc",
+    model: "m",
+    at: "2026-11-25T00:00:00Z",
+    seconds: 1,
+  };
+  const ai = deepGuide(deep, files, null);
+  assert.deepEqual(ai.guide?.steps, [
+    {
+      title: "Core",
+      body: "What it's for.",
+      check: "",
+      note: "**Question:** Old callers change. Only new ones?",
+      diagram: "deep",
+      hunks: [{ id: "h2", path: "src/b.ts" }],
+    },
+  ]);
+  assert.deepEqual(ai.notes, [{ path: "src/b.ts", line: 4, side: "new", body: "It hangs. Bound it. (probe: timed out)", flag: "blocker" }]);
+  assert.deepEqual(
+    ai.chunks?.ranked.map((c) => [c.id, c.level]),
+    [["h2", "look"]],
+    "a hunk no step names is skipped",
+  );
 });

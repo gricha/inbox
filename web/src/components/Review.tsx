@@ -24,6 +24,7 @@ import {
   type ReviewFile,
   type ReviewLook,
   type ReviewNote,
+  type NoteKind,
   type Reviewer,
   type ReviewView,
   type Stack,
@@ -95,7 +96,7 @@ import { Splitter, type Width } from "./Splitter.tsx";
 // What sits under a line of the diff: an AI note (index: its place in reading order), a review thread, the comment you're
 // writing, or one you sent that the conversation doesn't show yet.
 type Meta =
-  | { kind: "note"; index: number; body: string }
+  | { kind: "note"; index: number; body: string; is?: NoteKind }
   | { kind: "look"; line: number; end: number; why: string }
   | { kind: "thread"; id: string }
   | { kind: "draft" }
@@ -704,6 +705,9 @@ export function Review({
     setSide(!side);
   }
 
+  // A deep review of this commit with steps guides the Review tab, and says what the AI review's summary would.
+  const deepGuides = !!v?.deep && v.files.length > 0 && v.deep.head_oid === v.diff_head && v.deep.steps.length > 0;
+
   // Starts the PR's deep review; the desk marks it running before it answers, so the next read shows it.
   function runDeep() {
     if (!v) return;
@@ -1117,7 +1121,7 @@ export function Review({
         {toggle}
         <div className="rv-main" id="rv-panel" role="tabpanel" aria-label={talking ? "Conversation" : guiding ? "Review" : "Code changes"}>
           <div className="rv-top">
-            <Head card={card} me={me} now={now} resolved={resolved?.line ?? null} row={row} ai={aiShown ? ai : null} />
+            <Head card={card} me={me} now={now} resolved={resolved?.line ?? null} row={row} ai={aiShown && !deepGuides ? ai : null} />
             {!talking && walking && (
               <DeepSection
                 deep={view.deep}
@@ -1127,18 +1131,17 @@ export function Review({
                 }
                 error={view.deep_error}
                 stale={!!view.deep && view.deep.head_oid !== item.head_oid}
-                files={view.files}
-                repo={item.repo}
-                head={item.head_oid}
                 now={now}
                 onRun={runDeep}
-                onLine={toLine}
+                onStep={(k) => {
+                  if (steps[k]) toStep(k);
+                }}
               />
             )}
             {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
             {isMine && !ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
             {/* Your own PR gets no AI review unless one was asked for; More still asks. */}
-            {aiShown && (
+            {aiShown && !deepGuides && (
               <AiSection
                 ai={ai}
                 busy={view.generating || busy === "ai"}
@@ -2440,7 +2443,7 @@ function SectionView({
         .map((n): DiffLineAnnotation<Meta> => ({
           side: sideOf(n.note.side),
           lineNumber: n.note.line,
-          metadata: { kind: "note", index: n.index, body: n.note.body },
+          metadata: { kind: "note", index: n.index, body: n.note.body, ...(n.note.flag && { is: n.note.flag }) },
         })),
       ...threads.map((t): DiffLineAnnotation<Meta> => ({
         side: sideOf(t.side ?? "new"),
@@ -2568,7 +2571,10 @@ function SectionView({
           ))}
         </div>
       )}
-      {!shut && mine.filter((n) => !n.inline).map((n) => <Note key={n.index} index={n.index} body={n.note.body} bug={n.index < bugs} />)}
+      {!shut &&
+        mine
+          .filter((n) => !n.inline)
+          .map((n) => <Note key={n.index} index={n.index} body={n.note.body} bug={n.index < bugs} is={n.note.flag} />)}
       {!shut && fileDiff && (
         <FileDiff<Meta>
           className="rv-diff"
@@ -2580,7 +2586,7 @@ function SectionView({
           lineAnnotations={annotations}
           renderAnnotation={(a) => {
             const m = a.metadata;
-            if (m.kind === "note") return <Note key={`n${m.index}`} index={m.index} body={m.body} bug={m.index < bugs} />;
+            if (m.kind === "note") return <Note key={`n${m.index}`} index={m.index} body={m.body} bug={m.index < bugs} is={m.is} />;
             if (m.kind === "look") return <Look key={`l${m.line}`} line={m.line} end={m.end} why={m.why} />;
             if (m.kind === "draft") return composer(writing?.thread ? "Reply" : rangeLabel(writing?.at));
             if (m.kind === "sent") return <Yours key={`s${m.url}`} body={m.body} url={m.url} />;
@@ -2864,10 +2870,13 @@ function Look({ line, end, why }: { line: number; end: number; why: string }) {
 
 // Claude's words on the PR's code, drawn as the AI review's are: code as code, a URL as text.
 // The AI review's note on a line; a concern says so first: it's a potential bug, with what shows it and how to confirm it.
-function Note({ index, body, bug }: { index: number; body: string; bug: boolean }) {
+// A deep review's says what it is: a blocker, an issue, a question for you, what it verified, or a nit.
+const NOTE_LABEL: Record<NoteKind, string> = { blocker: "Blocker", issue: "Issue", question: "Question", verified: "Verified", nit: "Nit" };
+function Note({ index, body, bug, is }: { index: number; body: string; bug: boolean; is?: NoteKind | undefined }) {
+  const label = is ? NOTE_LABEL[is] : bug ? "Potential bug" : null;
   return (
-    <div className={cls("rv-note", bug && "bug")} data-note={index}>
-      {bug && <b className="rv-bug">Potential bug</b>}
+    <div className={cls("rv-note", (is ? is === "blocker" || is === "issue" : bug) && "bug", is && `rv-note-${is}`)} data-note={index}>
+      {label && <b className="rv-bug">{label}</b>}
       {spans(unlinked(inline(body)))}
     </div>
   );

@@ -186,7 +186,8 @@ const review =
     await page.evaluate(`document.querySelector(".beside-list")?.scrollTo(0, 0)`);
     await at(`#/review/${encodeURIComponent(id)}`)(page);
     // One opened to reply starts on its Conversation tab: the shots read its diff, as every other's, unless they ask for the tab.
-    await page.locator(".rv-diff, .rv-talk:not([hidden])").first().waitFor({ timeout: 15_000 });
+    // A guide's first step counts: its diff draws once it's scrolled to, past a deep review's picture on a short window.
+    await page.locator(".rv-diff, .rv-step, .rv-talk:not([hidden])").first().waitFor({ timeout: 15_000 });
     const tabs = page.locator(".rv-views .head-tab");
     // The Review tab comes with the AI review's steps, which may land after the diff: a click on Code changes keeps it there.
     const tab = tabs.filter({ hasText: view }).first();
@@ -2187,10 +2188,7 @@ const SHOTS: Shot[] = [
       await review("acme/api#4127")(page);
       const seen = await page.evaluate<{ file: number; box: boolean }>(`(() => {
         const box = document.querySelector(".rv-comment-input");
-        // The deep review leads on purpose; everything else above the diff still has to fit.
-        const dp = document.querySelector(".dp");
-        const deep = dp?.previousElementSibling ? dp.getBoundingClientRect().bottom - dp.previousElementSibling.getBoundingClientRect().bottom : 0;
-        return { file: Math.round(document.querySelector(".rv-file-sec, .rv-step").getBoundingClientRect().top - deep), box: !!box && box.getBoundingClientRect().height > 0 };
+        return { file: Math.round(document.querySelector(".rv-file-sec, .rv-step").getBoundingClientRect().top), box: !!box && box.getBoundingClientRect().height > 0 };
       })()`);
       if (seen.box) failures.push("review-top: the comment box shows outside the Conversation tab");
       if (seen.file > 386) failures.push(`review-top: the diff starts ${seen.file}px down the window, past 386`);
@@ -2906,46 +2904,52 @@ const SHOTS: Shot[] = [
   // Your own draft's one call to action is Ready for review; your ready PR's is Hand off for merge.
   { name: "review-draft", go: review("acme/web#2303") },
   {
-    // A deep review leads the review, under its title: the lean, the intent, what's wrong with its evidence, what only you
-    // can answer; a path:line in its evidence opens that line of the diff.
+    // The review is a deep review's: under the title its goal and lean, with a link to the step that decides it; each
+    // finding a note on its line in that step, labelled by kind; its picture in the step it explains; no AI review beside it.
     name: "review-deep",
     go: async (page) => {
       await review("acme/api#4127")(page);
       await page.locator(".rv-views .head-tab", { hasText: "Review" }).click();
       const deep = page.locator(".dp");
       if (!(await deep.count())) {
-        failures.push("review-deep: no deep review");
+        failures.push("review-deep: no review top");
         return;
       }
       if ((await deep.locator(".dp-lean").innerText()) !== "Fix first") failures.push("review-deep: the lean isn't Fix first");
-      if (!(await deep.locator(".dp-fix, .dp-blocker").count()) || !(await deep.locator(".dp-ask").count()))
-        failures.push("review-deep: what's wrong or what only you can answer is missing");
-      if (!(await deep.locator("figure, .diagram, svg").count())) failures.push("review-deep: no picture");
-      if (!inOrder(await tops(page, [".rv-title", ".dp", ".rv-ai"])))
-        failures.push("review-deep: it isn't between the title and the AI review");
-      const link = deep.locator("button.dp-at").first();
-      if (!(await link.count())) {
-        failures.push("review-deep: no path:line opens the diff");
+      if (!inOrder(await tops(page, [".rv-title", ".dp", ".rv-step"])))
+        failures.push("review-deep: it isn't between the title and its steps");
+      if (await page.locator(".rv-ai").count()) failures.push("review-deep: the AI review's summary shows beside the deep review's");
+      if (!(await page.locator(".rv-step figure, .rv-step svg").count())) failures.push("review-deep: no picture in a step");
+      if (!(await page.locator(".rv-note-issue", { hasText: "Issue" }).count()))
+        failures.push("review-deep: the issue isn't a labelled note on its line");
+      if (!(await page.locator(".rv-note-question, .rv-step-note", { hasText: "Question" }).count()))
+        failures.push("review-deep: no question in its step");
+      const to = deep.locator(".dp-run", { hasText: /^Step \d/ });
+      if (!(await to.count())) {
+        failures.push("review-deep: the lean doesn't link to its step");
         return;
       }
-      await page.locator(".dp").scrollIntoViewIfNeeded();
+      await to.click();
+      await page.waitForTimeout(400);
+      const stepTop = await page.locator("#rv-step-2").evaluate((el) => el.getBoundingClientRect().top);
+      if (stepTop < 0 || stepTop > 300) failures.push(`review-deep: Step 3 isn't in view after its link (${Math.round(stepTop)}px)`);
     },
   },
   {
-    // Run deep review on a PR without one: it says it's running at once, then the desk's result takes its place.
+    // Review it on a PR without one: it says it's reviewing at once, then the desk's result takes its place.
     name: "review-deep-run",
     writes: true,
     go: async (page) => {
       await review("acme/web#2303")(page);
       await page.locator(".rv-views .head-tab", { hasText: "Review" }).click();
-      const run = page.locator(".dp-run", { hasText: "Run deep review" });
+      const run = page.locator(".dp-run", { hasText: "Review it" });
       if (!(await run.count())) {
-        failures.push("review-deep-run: no Run deep review");
+        failures.push("review-deep-run: no Review it");
         return;
       }
       await run.click();
-      if (!(await page.locator(".dp-meta", { hasText: "Running" }).count()))
-        failures.push("review-deep-run: it doesn't say it's running at once");
+      if (!(await page.locator(".dp-meta", { hasText: "Reviewing" }).count()))
+        failures.push("review-deep-run: it doesn't say it's reviewing at once");
       await page
         .locator(".dp-lean")
         .waitFor({ timeout: 10_000 })

@@ -214,7 +214,7 @@ import {
   type Sorted,
 } from "./kv.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { DEEP_SCHEMA, deepOf, deepPrompt, pictureOf } from "./deep.ts";
+import { DEEP_SCHEMA, deepGuide, deepOf, deepPrompt, pictureOf, stepsOf } from "./deep.ts";
 import {
   agentDir,
   agentDown,
@@ -2555,6 +2555,11 @@ export class Desk {
       const e = snap.entries.get(id)!;
       if (!ahead && this.autoAi() && this.wantsAi(e, snap)) this.startAi(id);
       const d = yield* this.item(id);
+      // A deep review of this commit, with steps, guides the Review tab in the AI review's place.
+      const deep = this.store.kvAt("deep:", id)?.review ?? null;
+      const guidedBy = deep && deep.head_oid === (got.head ?? e.item.head_oid) && deep.steps.length > 0 ? deep : null;
+      // Its steps and its findings, pinned to their lines, are then what the window draws as the review.
+      const shownAi = guidedBy ? deepGuide(guidedBy, got.files, d.ai_stale ? null : d.ai) : d.ai;
       const job = this.jobs.get("ai_review", id);
       const running = job?.state === "running";
       const own = !running && job?.head === e.item.head_oid ? job.error : null;
@@ -2567,9 +2572,14 @@ export class Desk {
         files: got.files,
         diff_head: got.head ?? e.item.head_oid,
         files_error: got.error,
-        order: reviewOrder(got.files, d.ai, d.ai_stale, tagsOf(this.loaded?.tags ?? [], got.files, e.analysis.signals, d.ai?.tags)),
-        ai: d.ai,
-        ai_stale: d.ai_stale,
+        order: reviewOrder(
+          got.files,
+          shownAi,
+          guidedBy ? false : d.ai_stale,
+          tagsOf(this.loaded?.tags ?? [], got.files, e.analysis.signals, d.ai?.tags),
+        ),
+        ai: shownAi,
+        ai_stale: guidedBy ? false : d.ai_stale,
         ai_error: running ? null : (own ?? paused),
         generating: running,
         ai_job: running || job?.head === e.item.head_oid ? (this.autoAiOn() ? this.aiWaits(job) : job) : null,
@@ -2582,7 +2592,7 @@ export class Desk {
         merge: mergeLine(d.item),
         viewed: this.viewedOf(id),
         ...talk,
-        deep: this.store.kvAt("deep:", id)?.review ?? null,
+        deep,
         deep_running: this.deeps.get(id) ?? null,
         deep_error: this.deeps.has(id) ? null : (this.store.kvAt("deep:", id)?.error ?? null),
       };
@@ -2616,8 +2626,12 @@ export class Desk {
   private runDeep(item: Item, yours: boolean, checkout: (item: Item) => Effect.Effect<Checkout, NoCheckout>): Effect.Effect<void> {
     const started = Date.now();
     return Effect.gen({ self: this }, function* () {
+      // The diff's hunks, so its steps can name them, and what reviewers said, so it doesn't ask what's already settled.
+      const files = (yield* this.prText(item.id).pipe(Effect.orElseSucceed(() => null)))?.files ?? [];
+      const ctx = yield* this.convos.context(item.id).pipe(Effect.orElseSucceed(() => null));
       const code = yield* checkout(item);
-      const out = yield* askClaude(deepPrompt(item, yours), { dir: code.dir, read: true, probe: true, schema: DEEP_SCHEMA }).pipe(
+      const prompt = deepPrompt(item, yours, files, ctx && saidOf(ctx));
+      const out = yield* askClaude(prompt, { dir: code.dir, read: true, probe: true, schema: DEEP_SCHEMA }).pipe(
         Effect.ensuring(code.done),
       );
       const got = deepOf(out.answer);
@@ -2627,10 +2641,18 @@ export class Desk {
       const seconds = Math.round((Date.now() - started) / 1000);
       const picture = pictureOf(answer.picture);
       if (picture.refused) this.log(`deep review of ${item.id}: its picture: ${picture.refused}: dropped`);
-      const review = { ...answer, picture: picture.diagram, head_oid: item.head_oid, model: out.model, at: this.now().toISOString(), seconds };
+      const review = {
+        ...answer,
+        steps: stepsOf(answer.steps, files),
+        picture: picture.diagram,
+        head_oid: item.head_oid,
+        model: out.model,
+        at: this.now().toISOString(),
+        seconds,
+      };
       this.store.putKvAt("deep:", item.id, { review, error: null });
       this.log(
-        `deep review of ${item.id}: ${review.lean}, ${review.wrong.length} wrong, ${review.ask.length} to ask; tests: ${review.checked.tests}; ${seconds}s`,
+        `deep review of ${item.id}: ${review.lean}, ${review.steps.length} steps, ${review.steps.flatMap((s) => s.notes).length} notes; tests: ${review.checked.tests}; ${seconds}s`,
       );
     }).pipe(
       Effect.catch((e) =>

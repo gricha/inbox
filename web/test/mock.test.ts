@@ -382,7 +382,7 @@ test("review view: canned diffs whose notes sit on real lines, and approve as a 
   const { data: v } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/api#4127")}`);
   assert.equal(v.card.id, "acme/api#4127");
   assert.deepEqual([v.item.additions, v.item.deletions, v.item.changed_files], [62, 7, 5], "the header matches the files");
-  assert.ok(v.ai && v.ai.notes.length > 2 && !v.ai_stale);
+  assert.ok(v.ai && v.ai.notes.length >= 2 && !v.ai_stale);
   const { data: py } = await call<ReviewView>("GET", `/api/review/${encodeURIComponent("acme/ml-pipeline#311")}`);
   assert.ok(py.ai);
   // parseReview moves a note it can't place to line 0; every canned note, quoting its own line, must stay where it was put.
@@ -391,7 +391,11 @@ test("review view: canned diffs whose notes sit on real lines, and approve as a 
     concerns: [],
     notes: ai.notes.map((n) => ({ ...n, quote: lineAt(files, n) })),
   });
-  assert.deepEqual(parseReview(quoted(v.ai, v.files), v.files).notes, v.ai.notes);
+  // 4127's notes are its deep review's, each flagged by kind; the agent's own answer has no flag to parse.
+  assert.deepEqual(
+    parseReview(quoted(v.ai, v.files), v.files).notes,
+    v.ai.notes.map((n) => ({ path: n.path, line: n.line, side: n.side, body: n.body })),
+  );
   assert.deepEqual(parseReview(quoted(py.ai, py.files), py.files).notes, py.ai.notes);
   for (const f of [...v.files, ...py.files]) {
     for (const h of (f.patch ?? "").matchAll(/^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@.*\n((?:[ +-].*(?:\n|$))*)/gm)) {
@@ -425,23 +429,20 @@ test("review view: the desk's reading order for a ranked review, a capped one, n
     const raw = x.ai!.chunks!.ranked.map(({ id, level, why }) => ({ id, level, why }));
     assert.deepEqual(parseReview({ ...x.ai, chunks: raw }, x.files).chunks, x.ai!.chunks);
   }
-  // The test file's note keeps it in the reading list, after what Claude ranked.
+  // 4127's deep review: its steps' hunks in their order, the one no step names skipped.
   assert.deepEqual(
-    v.order.chunks.map((h) => [h.rank, h.level, h.path, h.why === ""]),
+    v.order.chunks.map((h) => [h.rank, h.level, h.path]),
     [
-      [1, "look", "src/planner/plan.ts", false],
-      [2, "look", "src/routes/query.ts", false],
-      [3, "skim", "src/planner/stream.ts", false],
-      [4, "skim", "test/planner/stream.test.ts", true],
+      [1, "look", "src/planner/stream.ts"],
+      [2, "look", "src/planner/plan.ts"],
+      [3, "look", "src/planner/plan.ts"],
+      [4, "look", "src/routes/query.ts"],
+      [5, "look", "test/planner/stream.test.ts"],
     ],
   );
-  // What Claude left out stays in view, marked Skip; only the desk's own calls fold.
   assert.deepEqual(
     v.order.skipped.map((h) => [h.level, h.path]),
-    [
-      ["skip", "src/planner/plan.ts"],
-      ["skip", "docs/api/query.md"],
-    ],
+    [["skip", "docs/api/query.md"]],
   );
   assert.deepEqual(v.order.rest, []);
   assert.equal(new Set(v.order.notes).size, v.ai!.notes.length, "every note once");

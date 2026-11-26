@@ -25,6 +25,7 @@ import { catchAllOf, parseConfig, resolveRules, spaceOf } from "../../src/config
 import { GITHUB_RULES } from "../../src/connectors/github-rules.ts";
 import { compile, renderTemplate } from "../../src/expr.ts";
 import { CLAUDE_PAUSED, hunksOf, lineAt, parseReview, parseSteps, reviewOrder } from "../../src/review.ts";
+import { deepGuide } from "../../src/deep.ts";
 import { parseDiagram } from "../../src/diagram.ts";
 import { docOf } from "../../src/doc.ts";
 import { renderDoc } from "../../src/render.ts";
@@ -4185,6 +4186,11 @@ function reviewView(r: Rec, ahead = false): ReviewView {
   }
   const mine = d.card.by === "you";
   const { files } = canned(r.id, r.seed.repo, r.seed.n, r.seed.title, r.seed.size);
+  // As the desk: a deep review of this commit with steps guides the Review tab.
+  const kept = DEEPS.get(r.id) ?? null;
+  const deep = kept && !kept.head_oid ? { ...kept, head_oid: d.item.head_oid } : kept;
+  const guide = deep && deep.head_oid === d.item.head_oid && deep.steps.length > 0 ? deep : null;
+  const shown = guide ? deepGuide(guide, files, d.ai_stale ? null : d.ai) : d.ai;
   return {
     card: replyOnly(r) ? { ...d.card, cta: "reply" } : d.card,
     item: d.item,
@@ -4192,9 +4198,9 @@ function reviewView(r: Rec, ahead = false): ReviewView {
     files,
     diff_head: d.item.head_oid,
     files_error: null,
-    order: reviewOrder(files, d.ai, d.ai_stale, tagsOf(files)),
-    ai: d.ai,
-    ai_stale: d.ai_stale,
+    order: reviewOrder(files, shown, guide ? false : d.ai_stale, tagsOf(files)),
+    ai: shown,
+    ai_stale: guide ? false : d.ai_stale,
     ai_error: generating.has(r.id)
       ? null
       : (aiErrors.get(r.id) ?? (wants && autoAiOn() && aiPaused ? `AI reviews are paused: ${aiPaused}` : null)),
@@ -4219,16 +4225,16 @@ function reviewView(r: Rec, ahead = false): ReviewView {
     reading_error: null,
     asks: ASKS.filter((a) => a.item_id === r.id),
     viewed: [...(VIEWED.get(r.id) ?? [])],
-    deep: DEEPS.get(r.id) ?? null,
+    deep,
     deep_running: DEEP_RUNNING.get(r.id) ?? null,
     deep_error: null,
   };
 }
 
 // A deep review's picture as the desk keeps one: parsed by the grammar, or none.
-function deepPicture(title: string, caption: string, source: string): DeepReview["picture"] {
+function deepPicture(inStep: number, title: string, caption: string, source: string): DeepReview["picture"] {
   const got = parseDiagram(source);
-  return got.ok ? { id: "deep", title, caption, source, graph: got.graph } : null;
+  return got.ok ? { id: "deep", title, caption, source, graph: got.graph, step: inStep } : null;
 }
 
 // Deep reviews (src/deep.ts): the planner's written, any other one a clean pass a few seconds after it's asked for.
@@ -4237,52 +4243,76 @@ const DEEPS = new Map<string, DeepReview>([
   [
     "acme/api#4127",
     {
-      intent: "Long queries stream rows as the scan finds them and stop at a time budget, returning what they have marked partial.",
+      goal: "The author's goal: dashboards on large projects show the rows a long query has found instead of timing out with nothing.",
       intent_from: "stated",
+      change:
+        "Before, a query scanned to the end and returned every row at once. Now it stops at a time budget (2 s, or `?budget=` in ms) and returns the rows so far, marked partial.",
       lean: "fix first",
-      premises: [
+      lean_why: "`?budget=` isn't checked: `budget=abc` turns the budget off and `budget=0` returns nothing, marked partial.",
+      caveat:
+        "Whether dashboards time out because of scan length or something upstream isn't shown; a trace of one slow dashboard request would settle it.",
+      steps: [
         {
-          premise: "Callers can tell a partial result from a complete one",
-          verdict: "fails",
-          evidence: "src/routes/query.ts:34 sets X-Partial-Results, but the SDK's `query()` reads only the body (sdk/query.ts:58)",
+          title: "Rows as they come",
+          why: "Rows now arrive in batches of 500, and a batch stops early when the caller aborts.",
+          hunks: ["h1"],
+          notes: [],
         },
         {
-          premise: "Nothing else bounds query time today",
-          verdict: "holds",
-          evidence: "rg 'timeout|budget' src/planner finds only this PR's budget",
-        },
-        {
-          premise: "Scans can stop between batches without leaking a cursor",
-          verdict: "holds",
-          evidence: "src/planner/stream.ts:14 returns early; scan() closes its cursor in finally (scan.ts:41)",
-        },
-      ],
-      wrong: [
-        {
-          what: "?budget= isn't validated: `budget=abc` turns the budget off and `budget=0` returns an empty partial result",
-          why: "A typo in a client silently changes what every query returns",
-          evidence: [
-            "src/routes/query.ts:30 `const budget = Number(req.query.budget)`",
-            "$ curl '/v2/query?budget=0' → 200, rows: [], X-Partial-Results: true",
+          title: "The budget",
+          why: "The planner checks its deadline after each batch and returns what it has, marked partial.",
+          hunks: ["h2", "h3"],
+          notes: [
+            {
+              kind: "question",
+              text: "The budget is checked only between batches: with a 4 s batch and a 2 s budget, the query ran 4.1 s.",
+              ask: "Is one batch past the budget acceptable, or should a batch stop at the deadline?",
+              at: "src/planner/plan.ts:23",
+              evidence: "probe: slowScan(4000) with budget 2000 → 4.1 s, partial: true",
+            },
           ],
-          severity: "fix",
         },
-      ],
-      ask: [
         {
-          question: "Should the 2 s default apply to existing callers, or only to those that pass ?budget=?",
-          why: "Slow queries that completed before now come back partial, and the SDK can't tell",
+          title: "Where it's set",
+          why: "The route reads the budget from the query string and marks a partial result in a header.",
+          hunks: ["h4"],
+          notes: [
+            {
+              kind: "issue",
+              text: "`Number(req.query.budget)` isn't checked: `budget=abc` is NaN, so the budget never ends; `budget=0` returns no rows, marked partial.",
+              ask: "Reject a non-numeric or non-positive `?budget=` with a 400.",
+              at: "src/routes/query.ts:30",
+              evidence: "$ curl '/v2/query?budget=0' → 200, rows: [], X-Partial-Results: 1",
+            },
+            {
+              kind: "question",
+              text: "The 2 s default applies to every caller, so slow queries that completed before now come back partial.",
+              ask: "Should the default apply only to callers that pass `?budget=`?",
+              at: "",
+              evidence: "",
+            },
+          ],
+        },
+        {
+          title: "Tests",
+          why: "Cover batching and abort.",
+          hunks: ["h5"],
+          notes: [
+            {
+              kind: "verified",
+              text: "Batching and abort behave as the tests say; nothing tests the route's header or `partial`.",
+              ask: "Add a route test for `X-Partial-Results`.",
+              at: "",
+              evidence: "pnpm test planner: 41 passed",
+            },
+          ],
         },
       ],
-      author_fixes: ["Add a test for the route's X-Partial-Results header", "Reject a non-numeric ?budget= with a 400"],
-      checked: {
-        summary: "Read the diff, the planner, scan, the route and the SDK's query()",
-        tests: "pnpm test planner: 41 passed",
-        probes: 1,
-      },
+      checked: { tests: "pnpm test planner: 41 passed", probes: 2 },
       picture: deepPicture(
+        2,
         "Where a partial result goes",
-        "The route marks a cut-short query partial in a header, and the SDK never reads it, so callers take partial rows as complete.",
+        "The route marks a cut-short query partial, and how far that reaches callers depends on what reads it.",
         `flowchart LR
   caller["Callers"] --> sdk["SDK query()"]
   sdk --> route["/v2/query route"]:::changed
@@ -4291,9 +4321,9 @@ const DEEPS = new Map<string, DeepReview>([
   stream --> scan[("scan cursor")]
   plan -->|"partial: true"| route
   route -->|"X-Partial-Results"| sdk
-  sdk -.->|"body only"| caller`,
+  sdk -->|"rows"| caller`,
       ),
-      head_oid: "c41d9e2",
+      head_oid: "", // of whatever commit the mock's item is at
       model: "claude-opus-5-5",
       at: iso(0.5),
       seconds: 312,
@@ -4876,20 +4906,14 @@ async function respond(req: MockRequest, url: URL): Promise<unknown> {
         setTimeout(() => {
           DEEP_RUNNING.delete(r.id);
           DEEPS.set(r.id, {
-            intent: r.seed.body ?? r.seed.title,
+            goal: `The author's goal: ${r.seed.title}.`,
             intent_from: r.seed.body ? "stated" : "inferred",
+            change: "The new path runs where the old one did, with its callers unchanged.",
             lean: "ship",
-            premises: [
-              {
-                premise: "The change is needed: nothing in the repo already does it",
-                verdict: "holds",
-                evidence: "rg finds no other implementation",
-              },
-            ],
-            wrong: [],
-            ask: [],
-            author_fixes: [],
-            checked: { summary: "Read the diff and its callers", tests: "12 passed", probes: 0 },
+            lean_why: "The tests pass and nothing in the repo already does this.",
+            caveat: "",
+            steps: [],
+            checked: { tests: "12 passed", probes: 0 },
             picture: null,
             head_oid: itemOf(r).head_oid,
             model: "claude-opus-5-5",

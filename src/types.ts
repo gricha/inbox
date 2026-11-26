@@ -920,7 +920,11 @@ export interface ReviewNote {
   line: number;
   side: "new" | "old"; // old = a removed line, numbered in the old file
   body: string;
+  flag?: NoteKind; // a deep review's: what it is, which its label says; none, the AI review's (a concern says Potential bug)
 }
+
+export const NOTE_KINDS = ["blocker", "issue", "question", "verified", "nit"] as const;
+export type NoteKind = (typeof NOTE_KINDS)[number];
 
 // Where your inline comment goes: a line of a PR's diff, or a range from `start` to it.
 export interface InlineAt {
@@ -1169,19 +1173,39 @@ export interface ReviewView {
 // A deep review (src/deep.ts): an adversarial pass that checked the PR's premises against the repo, ran its tests and
 // probed behaviour, keeping only what it proved, the questions only a person can answer, and fixes for the author.
 export interface DeepReview {
-  intent: string; // one line: the problem it solves and how
+  goal: string; // what the author says it achieves, attributed as theirs
   intent_from: "stated" | "inferred" | "missing";
+  change: string; // how behaviour changes, before to after
   lean: "ship" | "fix first" | "rethink";
-  premises: { premise: string; verdict: "holds" | "fails" | "unknown"; evidence: string }[];
-  wrong: { what: string; why: string; evidence: string[]; severity: "blocker" | "fix" }[];
-  ask: { question: string; why: string }[];
-  author_fixes: string[];
-  checked: { summary: string; tests: string; probes: number };
-  picture: ReviewDiagram | null; // how the change works and where it breaks, when the grammar took it (src/diagram.ts)
+  lean_why: string; // the one line that decides it
+  caveat: string; // one uncertainty about the whole change and what would settle it, or ""
+  steps: DeepStep[]; // the Review tab's guide, over the diff's hunk ids
+  checked: { tests: string; probes: number };
+  picture: DeepPicture | null;
   head_oid: string; // the commit it read
   model: string;
   at: string;
   seconds: number; // how long it took
+}
+
+// A deep review's one picture, drawn in its step (0-based).
+interface DeepPicture extends ReviewDiagram {
+  step: number;
+}
+
+interface DeepStep {
+  title: string;
+  why: string; // one sentence: the behaviour this code changes, or the concern in it
+  hunks: string[];
+  notes: DeepNote[]; // what it found here, each on its line (`at`) when it has one
+}
+
+export interface DeepNote {
+  kind: NoteKind;
+  text: string; // what was observed and what it means
+  ask: string; // the change or answer it needs, or ""
+  at: string; // path:line in the diff, or ""
+  evidence: string; // the command and output, or the quote, that shows it
 }
 
 // One check on a PR's head commit: a check run (an Actions job, an app's) or a commit status. Its name is untrusted GitHub text.

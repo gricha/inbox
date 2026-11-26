@@ -7484,36 +7484,36 @@ a.rv-part-row:hover {
   color: var(--ink);
 }
 
-/* A deep review (DeepSection.tsx): the lean in colour, one picture, then a line each with a dot that says what it is
-   (red: a blocker or a premise that fails; amber: a fix or one unverified; the accent: a question for you). */
+/* The review's top (DeepSection.tsx): the goal in ink, the lean in colour with the line that decides it, then quieter
+   lines for the change, what's unsettled and when it ran. */
 .dp {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   margin: 0;
-  padding: 10px 0 12px;
-  border-top: 1px solid var(--rule);
-  border-bottom: 1px solid var(--rule);
   color: var(--ink-2);
   font-size: var(--text-read-sm);
+}
+
+.dp p {
+  margin: 0;
 }
 
 .dp-busy {
   opacity: 0.6;
 }
 
-.dp-head {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 10px;
-  align-items: baseline;
+.dp-goal {
+  color: var(--ink);
+  font-size: var(--text-read-lg);
+  line-height: 1.5;
 }
 
-.dp-name {
+.dp-lean-line {
   color: var(--ink);
-  font-weight: 600;
 }
 
 .dp-lean {
+  margin-right: 4px;
   font-weight: 600;
 }
 
@@ -7529,12 +7529,18 @@ a.rv-part-row:hover {
   color: var(--red);
 }
 
+.dp-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
 .dp-meta {
   color: var(--pencil);
 }
 
-.dp-run,
-.dp-fold {
+.dp-run {
   padding: 0;
   border: 0;
   background: none;
@@ -7543,110 +7549,17 @@ a.rv-part-row:hover {
   cursor: pointer;
 }
 
-.dp-run {
+.dp-head .dp-run {
   margin-left: auto;
 }
 
-.dp-run:hover,
-.dp-fold:hover {
+.dp-run:hover {
   text-decoration: underline;
 }
 
-.dp-error {
-  margin: 0;
-  color: var(--red);
-}
-
-.dp-intent {
-  margin: 0;
-  color: var(--ink);
-}
-
+.dp-error,
 .dp-missing {
   color: var(--red);
-}
-
-.dp ul {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.dp-line {
-  display: grid;
-  grid-template-columns: 8px 1fr;
-  gap: 10px;
-  align-items: start;
-}
-
-.dp-mark {
-  width: 8px;
-  height: 8px;
-  margin-top: 7px;
-  border-radius: 50%;
-  background: var(--faint);
-}
-
-.dp-blocker .dp-mark {
-  background: var(--red);
-}
-
-.dp-fix .dp-mark {
-  background: var(--amber);
-}
-
-.dp-fails .dp-mark {
-  border: 2px solid var(--red);
-  background: none;
-}
-
-.dp-unknown .dp-mark {
-  border: 2px solid var(--amber);
-  background: none;
-}
-
-.dp-ask .dp-mark {
-  background: var(--accent);
-}
-
-.dp-what {
-  color: var(--ink);
-}
-
-.dp-why {
-  color: var(--pencil);
-}
-
-.dp-ev {
-  overflow-wrap: anywhere;
-  color: var(--pencil);
-  font: var(--text-xs) / 1.5 var(--mono);
-}
-
-.dp-at {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent-ink);
-  font: inherit;
-  text-decoration: underline;
-  text-decoration-color: var(--rule-strong);
-  text-underline-offset: 2px;
-  cursor: pointer;
-}
-
-.dp-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  color: var(--pencil);
-  font-size: var(--text-xs);
-}
-
-.dp-list {
-  padding-left: 18px !important;
 }
 
 .rv-ai {
@@ -9130,6 +9043,32 @@ p.rv-next {
   margin-right: 6px;
   color: var(--amber);
   font-weight: 600;
+}
+
+/* A deep review's note: a blocker in red, a question in the accent, what it verified in green, a nit quiet. */
+.rv-note.rv-note-blocker {
+  border-left-color: var(--red);
+}
+
+.rv-note-blocker .rv-bug {
+  color: var(--red);
+}
+
+.rv-note-question {
+  border-left-color: var(--accent);
+}
+
+.rv-note-question .rv-bug {
+  color: var(--accent-ink);
+}
+
+.rv-note-verified .rv-bug {
+  color: var(--green);
+}
+
+.rv-note-nit .rv-bug {
+  color: var(--ink-2);
+  font-weight: 500;
 }
 
 /* A look range: the lines to read even if nothing else, marked in ink. */

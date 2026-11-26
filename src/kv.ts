@@ -6,6 +6,7 @@ import { schemaOf } from "./narrow.ts";
 import {
   BUCKETS,
   INBOX_SECTIONS,
+  NOTE_KINDS,
   type AiReview,
   type Ask,
   type Bucket,
@@ -88,7 +89,13 @@ export const MergingSchema = schemaOf<Merging>()(
 );
 const BlockedSchema = Schema.Record(Schema.String, Schema.Struct({ since: Schema.String, by: Schema.String }));
 export type Blocked = typeof BlockedSchema.Type;
-const ReviewNoteSchema = Schema.Struct({ path: Schema.String, line: Schema.Number, side: lineSide, body: Schema.String });
+const ReviewNoteSchema = Schema.Struct({
+  path: Schema.String,
+  line: Schema.Number,
+  side: lineSide,
+  body: Schema.String,
+  flag: Schema.optionalKey(Schema.Literals(NOTE_KINDS)),
+});
 const DiagramGraphSchema = Schema.Union([
   Schema.Struct({
     kind: Schema.Literal("flow"),
@@ -334,30 +341,43 @@ export const NoteSchema = schemaOf<Omit<Note, "waiting" | "facts">>()(
 
 // A PR's deep review as the agent answers it, and as the desk keeps it with its last failure (kv `deep:<id>`).
 export const DeepAnswerSchema = Schema.Struct({
-  intent: Schema.String,
+  goal: Schema.String,
   intent_from: Schema.Literals(["stated", "inferred", "missing"]),
+  change: Schema.String,
   lean: Schema.Literals(["ship", "fix first", "rethink"]),
-  premises: arrayOf(
-    Schema.Struct({ premise: Schema.String, verdict: Schema.Literals(["holds", "fails", "unknown"]), evidence: Schema.String }),
-  ),
-  wrong: arrayOf(
+  lean_why: Schema.String,
+  caveat: Schema.String,
+  steps: arrayOf(
     Schema.Struct({
-      what: Schema.String,
+      title: Schema.String,
       why: Schema.String,
-      evidence: arrayOf(Schema.String),
-      severity: Schema.Literals(["blocker", "fix"]),
+      hunks: arrayOf(Schema.String),
+      notes: arrayOf(
+        Schema.Struct({
+          kind: Schema.Literals(NOTE_KINDS),
+          text: Schema.String,
+          ask: Schema.String,
+          at: Schema.String,
+          evidence: Schema.String,
+        }),
+      ),
     }),
   ),
-  ask: arrayOf(Schema.Struct({ question: Schema.String, why: Schema.String })),
-  author_fixes: arrayOf(Schema.String),
-  checked: Schema.Struct({ summary: Schema.String, tests: Schema.String, probes: Schema.Number }),
-  picture: Schema.Struct({ title: Schema.String, caption: Schema.String, source: Schema.String }),
+  checked: Schema.Struct({ tests: Schema.String, probes: Schema.Number }),
+  picture: Schema.Struct({ step: Schema.Number, title: Schema.String, caption: Schema.String, source: Schema.String }),
 });
 const DeepReviewSchema = schemaOf<DeepReview>()(
   Schema.Struct({
     ...DeepAnswerSchema.fields,
     picture: Schema.NullOr(
-      Schema.Struct({ id: Schema.String, title: Schema.String, caption: Schema.String, source: opt(Schema.String), graph: DiagramGraphSchema }),
+      Schema.Struct({
+        id: Schema.String,
+        title: Schema.String,
+        caption: Schema.String,
+        source: opt(Schema.String),
+        graph: DiagramGraphSchema,
+        step: Schema.Number,
+      }),
     ),
     head_oid: Schema.String,
     model: Schema.String,
