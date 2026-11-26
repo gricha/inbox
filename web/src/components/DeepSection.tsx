@@ -1,10 +1,12 @@
 import { useState, type ReactNode } from "react";
 import type { DeepReview, ReviewFile } from "../../../src/types.ts";
 import { ago, cls } from "../format.ts";
+import { Diagram } from "./Diagram.tsx";
 import { withCode } from "./Prose.tsx";
 
-// A deep review (src/deep.ts) at the top of a PR's review: what it proved wrong, what only you can answer, the premises
-// that don't hold, then what it ran. Every `path:line` in it opens that line of the diff, or the file on GitHub.
+// A deep review (src/deep.ts), leading the Review tab: its lean, the intent, one picture of how the change works and where
+// it breaks, then a line per thing it proved wrong, per premise that doesn't hold and per question only you can answer.
+// Evidence, the premises that hold and the author's small fixes fold away. A `path:line` opens that line of the diff.
 export function DeepSection({
   deep,
   running,
@@ -28,14 +30,15 @@ export function DeepSection({
   onRun: () => void;
   onLine: (path: string, side: "new" | "old", line: number) => void;
 }) {
-  const [fixes, setFixes] = useState(false);
-  const [holds, setHolds] = useState(false);
+  const [open, setOpen] = useState<string | null>(null); // the fold that's open: an item's evidence, the premises, the fixes
+  const toggle = (k: string) => {
+    setOpen(open === k ? null : k);
+  };
   // A path:line in its text: a link to the diff when the PR changed that file, else to the file on GitHub.
   const linked = (s: string): ReactNode => {
     const m = /([\w./@-]+\.\w+):(\d+)/.exec(s);
     if (!m) return withCode(s);
     const [all, p = "", n = "0"] = m;
-    const at = m.index;
     const file = files.find((f) => f.path === p || f.path.endsWith(`/${p}`));
     const line = Number(n);
     const link = file ? (
@@ -57,9 +60,9 @@ export function DeepSection({
     );
     return (
       <>
-        {withCode(s.slice(0, at))}
+        {withCode(s.slice(0, m.index))}
         {link}
-        {withCode(s.slice(at + all.length))}
+        {withCode(s.slice(m.index + all.length))}
       </>
     );
   };
@@ -78,7 +81,7 @@ export function DeepSection({
             <span className="dp-meta">Running · started {ago(running, now)}</span>
           ) : (
             <>
-              <span className="dp-meta">Reads the repo, runs the tests and checks what the PR assumes. About five minutes.</span>
+              <span className="dp-meta">Reads the repo, runs the tests and checks what the PR assumes</span>
               {run(error ? "Try again" : "Run deep review")}
             </>
           )}
@@ -87,8 +90,8 @@ export function DeepSection({
       </section>
     );
 
-  const shaky = deep.premises.filter((p) => p.verdict !== "holds");
-  const fine = deep.premises.filter((p) => p.verdict === "holds");
+  const fails = deep.premises.filter((p) => p.verdict !== "holds");
+  const holds = deep.premises.length - fails.length;
   return (
     <section className={cls("dp", running && "dp-busy")} aria-label="Deep review">
       <div className="dp-head">
@@ -106,110 +109,115 @@ export function DeepSection({
       <p className="dp-intent">
         {deep.intent_from === "missing" && <b className="dp-missing">Intent not stated · </b>}
         {withCode(deep.intent)}
-        {deep.intent_from === "inferred" && <span className="dp-faint"> · inferred</span>}
+        {deep.intent_from === "inferred" && <span className="dp-meta"> · inferred</span>}
       </p>
 
-      {deep.wrong.length > 0 && (
-        <div className="dp-part">
-          <h3>Wrong</h3>
-          <ul>
-            {deep.wrong.map((w) => (
-              <li key={w.what} className={cls("dp-wrong", w.severity === "blocker" && "dp-blocker")}>
+      {deep.picture && <Diagram graph={deep.picture.graph} title={deep.picture.title} caption={deep.picture.caption} />}
+
+      {(deep.wrong.length > 0 || deep.ask.length > 0 || fails.length > 0) && (
+        <ul className="dp-lines">
+          {deep.wrong.map((w, i) => (
+            <li key={w.what} className={cls("dp-line", w.severity === "blocker" ? "dp-blocker" : "dp-fix")}>
+              <span className="dp-mark" aria-hidden="true" />
+              <div>
                 <div className="dp-what">{withCode(w.what)}</div>
-                <div className="dp-why">{withCode(w.why)}</div>
-                {w.evidence.map((e) => (
-                  <div key={e} className="dp-ev">
-                    {linked(e)}
-                  </div>
-                ))}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {deep.ask.length > 0 && (
-        <div className="dp-part">
-          <h3>Only you can answer</h3>
-          <ul>
-            {deep.ask.map((a) => (
-              <li key={a.question}>
-                <div className="dp-what">{withCode(a.question)}</div>
-                <div className="dp-why">{withCode(a.why)}</div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {shaky.length > 0 && (
-        <div className="dp-part">
-          <h3>Premises that don't hold</h3>
-          <ul>
-            {shaky.map((p) => (
-              <li key={p.premise}>
+                <div className="dp-why">
+                  {withCode(w.why)}
+                  {w.evidence.length > 0 && (
+                    <>
+                      {" · "}
+                      <button
+                        type="button"
+                        className="dp-fold"
+                        aria-expanded={open === `w${i}`}
+                        onClick={() => {
+                          toggle(`w${i}`);
+                        }}
+                      >
+                        Evidence
+                      </button>
+                    </>
+                  )}
+                </div>
+                {open === `w${i}` &&
+                  w.evidence.map((e) => (
+                    <div key={e} className="dp-ev">
+                      {linked(e)}
+                    </div>
+                  ))}
+              </div>
+            </li>
+          ))}
+          {fails.map((p) => (
+            <li key={p.premise} className={cls("dp-line", p.verdict === "fails" ? "dp-fails" : "dp-unknown")}>
+              <span className="dp-mark" aria-hidden="true" />
+              <div>
                 <div className="dp-what">
-                  <span className={p.verdict === "fails" ? "dp-fails" : "dp-unknown"}>{p.verdict === "fails" ? "Fails" : "Unknown"}</span>{" "}
+                  {p.verdict === "fails" ? "Doesn't hold: " : "Unverified: "}
                   {withCode(p.premise)}
                 </div>
                 <div className="dp-ev">{linked(p.evidence)}</div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {(fine.length > 0 || deep.author_fixes.length > 0) && (
-        <div className="dp-folds">
-          {fine.length > 0 && (
-            <button
-              type="button"
-              className="dp-fold"
-              aria-expanded={holds}
-              onClick={() => {
-                setHolds(!holds);
-              }}
-            >
-              {fine.length === 1 ? "1 premise holds" : `${fine.length} premises hold`}
-            </button>
-          )}
-          {deep.author_fixes.length > 0 && (
-            <button
-              type="button"
-              className="dp-fold"
-              aria-expanded={fixes}
-              onClick={() => {
-                setFixes(!fixes);
-              }}
-            >
-              {deep.author_fixes.length} small fix{deep.author_fixes.length > 1 ? "es" : ""} for the author
-            </button>
-          )}
-        </div>
-      )}
-      {holds && (
-        <ul className="dp-list">
-          {fine.map((p) => (
-            <li key={p.premise}>
-              <div className="dp-what">{withCode(p.premise)}</div>
-              <div className="dp-ev">{linked(p.evidence)}</div>
+              </div>
+            </li>
+          ))}
+          {deep.ask.map((a) => (
+            <li key={a.question} className="dp-line dp-ask">
+              <span className="dp-mark" aria-hidden="true" />
+              <div>
+                <div className="dp-what">{withCode(a.question)}</div>
+                <div className="dp-why">{withCode(a.why)}</div>
+              </div>
             </li>
           ))}
         </ul>
       )}
-      {fixes && (
+
+      <div className="dp-foot">
+        {deep.checked.tests && <span>Tests: {withCode(deep.checked.tests)}</span>}
+        {holds > 0 && (
+          <button
+            type="button"
+            className="dp-fold"
+            aria-expanded={open === "holds"}
+            onClick={() => {
+              toggle("holds");
+            }}
+          >
+            {holds === 1 ? "1 premise holds" : `${holds} premises hold`}
+          </button>
+        )}
+        {deep.author_fixes.length > 0 && (
+          <button
+            type="button"
+            className="dp-fold"
+            aria-expanded={open === "fixes"}
+            onClick={() => {
+              toggle("fixes");
+            }}
+          >
+            {deep.author_fixes.length === 1 ? "1 small fix for the author" : `${deep.author_fixes.length} small fixes for the author`}
+          </button>
+        )}
+      </div>
+      {open === "holds" && (
+        <ul className="dp-list">
+          {deep.premises
+            .filter((p) => p.verdict === "holds")
+            .map((p) => (
+              <li key={p.premise}>
+                <div className="dp-what">{withCode(p.premise)}</div>
+                <div className="dp-ev">{linked(p.evidence)}</div>
+              </li>
+            ))}
+        </ul>
+      )}
+      {open === "fixes" && (
         <ul className="dp-list">
           {deep.author_fixes.map((f) => (
             <li key={f}>{linked(f)}</li>
           ))}
         </ul>
       )}
-
-      <p className="dp-foot">
-        {withCode(deep.checked.summary)} · Tests: {withCode(deep.checked.tests)}
-        {deep.checked.probes > 0 && ` · ${deep.checked.probes} probe${deep.checked.probes > 1 ? "s" : ""}`} ·{" "}
-        {Math.max(1, Math.round(deep.seconds / 60))} min
-      </p>
     </section>
   );
 }

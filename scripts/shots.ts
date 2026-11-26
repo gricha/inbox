@@ -2911,14 +2911,16 @@ const SHOTS: Shot[] = [
     name: "review-deep",
     go: async (page) => {
       await review("acme/api#4127")(page);
+      await page.locator(".rv-views .head-tab", { hasText: "Review" }).click();
       const deep = page.locator(".dp");
       if (!(await deep.count())) {
         failures.push("review-deep: no deep review");
         return;
       }
       if ((await deep.locator(".dp-lean").innerText()) !== "Fix first") failures.push("review-deep: the lean isn't Fix first");
-      if (!(await deep.locator(".dp-wrong").count()) || !(await deep.locator(".dp-part h3", { hasText: "Only you can answer" }).count()))
+      if (!(await deep.locator(".dp-fix, .dp-blocker").count()) || !(await deep.locator(".dp-ask").count()))
         failures.push("review-deep: what's wrong or what only you can answer is missing");
+      if (!(await deep.locator("figure, .diagram, svg").count())) failures.push("review-deep: no picture");
       if (!inOrder(await tops(page, [".rv-title", ".dp", ".rv-ai"])))
         failures.push("review-deep: it isn't between the title and the AI review");
       const link = deep.locator("button.dp-at").first();
@@ -2926,8 +2928,7 @@ const SHOTS: Shot[] = [
         failures.push("review-deep: no path:line opens the diff");
         return;
       }
-      await link.click();
-      await page.waitForTimeout(400);
+      await page.locator(".dp").scrollIntoViewIfNeeded();
     },
   },
   {
@@ -2936,6 +2937,7 @@ const SHOTS: Shot[] = [
     writes: true,
     go: async (page) => {
       await review("acme/web#2303")(page);
+      await page.locator(".rv-views .head-tab", { hasText: "Review" }).click();
       const run = page.locator(".dp-run", { hasText: "Run deep review" });
       if (!(await run.count())) {
         failures.push("review-deep-run: no Run deep review");

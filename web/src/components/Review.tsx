@@ -1118,21 +1118,23 @@ export function Review({
         <div className="rv-main" id="rv-panel" role="tabpanel" aria-label={talking ? "Conversation" : guiding ? "Review" : "Code changes"}>
           <div className="rv-top">
             <Head card={card} me={me} now={now} resolved={resolved?.line ?? null} row={row} ai={aiShown ? ai : null} />
-            <DeepSection
-              deep={view.deep}
-              running={
-                view.deep_running ??
-                (deepAsked && (view.deep?.at ?? null) === deepAsked.was && now - Date.parse(deepAsked.at) < 15_000 ? deepAsked.at : null)
-              }
-              error={view.deep_error}
-              stale={!!view.deep && view.deep.head_oid !== item.head_oid}
-              files={view.files}
-              repo={item.repo}
-              head={item.head_oid}
-              now={now}
-              onRun={runDeep}
-              onLine={toLine}
-            />
+            {!talking && walking && (
+              <DeepSection
+                deep={view.deep}
+                running={
+                  view.deep_running ??
+                  (deepAsked && (view.deep?.at ?? null) === deepAsked.was && now - Date.parse(deepAsked.at) < 15_000 ? deepAsked.at : null)
+                }
+                error={view.deep_error}
+                stale={!!view.deep && view.deep.head_oid !== item.head_oid}
+                files={view.files}
+                repo={item.repo}
+                head={item.head_oid}
+                now={now}
+                onRun={runDeep}
+                onLine={toLine}
+              />
+            )}
             {/* Yours gets no AI summary unless asked for, so its description's first paragraph says what it's about. */}
             {isMine && !ai && item.body && <p className="rv-summary rv-desc">{item.body.split("\n")[0]}</p>}
             {/* Your own PR gets no AI review unless one was asked for; More still asks. */}

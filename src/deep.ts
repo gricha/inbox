@@ -2,9 +2,10 @@
 // what the change rests on against the repo, runs its tests and probes behaviour, then keeps only what it proved, the
 // questions only a person can answer, and small fixes for the author. One prompt for every PR: only who reads it differs.
 import { Result } from "effect";
+import { parseDiagram } from "./diagram.ts";
 import { DeepAnswerSchema } from "./kv.ts";
 import { decode } from "./narrow.ts";
-import type { DeepReview, Item } from "./types.ts";
+import type { DeepReview, Item, ReviewDiagram } from "./types.ts";
 
 const READER = {
   author:
@@ -50,11 +51,25 @@ them only what needs a human.
    Leave out style preferences, anything you couldn't substantiate, and anything already settled in the PR's
    conversation. Empty lists are a good result when the change is sound.
 
+6. **Picture.** Draw one diagram that lets someone new to this code see how the change works and, if it's wrong, where it
+   breaks: the parts involved and how they connect, the changed ones marked. Pick the kind that shows it best (a flowchart
+   for structure and data flow, a sequence diagram for who calls whom and in what order, a state diagram for a
+   lifecycle). Name parts by what they are in this code. Its caption says, in one sentence, what to see in it. Grammar,
+   strict (anything else drops the diagram):
+   - \`flowchart LR\` or \`TB\`: nodes \`id["label"]\`, \`id[("store")]\`, \`id{"decision"}\`; edges \`a --> b\`, \`a -.-> b\`,
+     \`a -->|"label"| b\`; one level of \`subgraph id ["label"]\` … \`end\`; mark nodes \`:::new\`, \`:::changed\` or
+     \`:::removed\`.
+   - \`sequenceDiagram\`: \`participant X as Label\`; \`A->>B: text\`; \`A-->>B: text\` for a reply; \`Note over A: text\`.
+   - \`stateDiagram-v2\`: \`[*] --> A\`, \`A --> B : event\`, \`state "Label" as A\`.
+   - Ids: a letter then letters, digits or \`_\`, never \`end\`. Labels quoted, one line, at most 40 characters (48 in a
+     sequence). 3 to 12 nodes and at most 16 edges, or 3 to 6 participants and at most 14 messages. No HTML, no styling.
+
 ## Writing
 
 Plain and specific, one line per item. No adjectives, no restating the diff, no praise, no hedging. Evidence is a
 \`path:line\` at the PR head with a short quote, or a command and the line of its output that matters. Your \`lean\` is one
-of \`ship\`, \`fix first\` or \`rethink\`, from what you proved.`;
+of \`ship\`, \`fix first\` or \`rethink\`, from what you proved: never \`ship\` while a premise about necessity, safety
+or correctness fails; \`rethink\` when the change shouldn't exist as written.`;
 };
 
 const str = (max: number, description?: string) => ({ type: "string", maxLength: max, ...(description && { description }) });
@@ -88,9 +103,24 @@ export const DEEP_SCHEMA = obj({
     tests: str(120, "What ran and the result, or why none could."),
     probes: { type: "integer", minimum: 0 },
   }),
+  picture: obj({
+    title: str(60),
+    caption: str(160, "One sentence: what to see in it."),
+    source: str(2048, "Mermaid in the grammar the prompt gives."),
+  }),
 });
 
-type Answer = Omit<DeepReview, "head_oid" | "model" | "at" | "seconds">;
+type Answer = Omit<DeepReview, "head_oid" | "model" | "at" | "seconds" | "picture"> & {
+  picture: { title: string; caption: string; source: string };
+};
 
 // The agent's answer as a deep review, or why it isn't one.
 export const deepOf = (answer: unknown): Result.Result<Answer, string> => decode(DeepAnswerSchema, answer);
+
+// Its picture as the window draws it, or null when the grammar refused it (with why, for the log).
+export const pictureOf = (p: Answer["picture"]): { diagram: ReviewDiagram | null; refused: string | null } => {
+  const got = parseDiagram(p.source);
+  return got.ok
+    ? { diagram: { id: "deep", title: p.title.slice(0, 60), caption: p.caption.slice(0, 200), source: p.source, graph: got.graph }, refused: null }
+    : { diagram: null, refused: got.why };
+};

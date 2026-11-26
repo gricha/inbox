@@ -4225,6 +4225,12 @@ function reviewView(r: Rec, ahead = false): ReviewView {
   };
 }
 
+// A deep review's picture as the desk keeps one: parsed by the grammar, or none.
+function deepPicture(title: string, caption: string, source: string): DeepReview["picture"] {
+  const got = parseDiagram(source);
+  return got.ok ? { id: "deep", title, caption, source, graph: got.graph } : null;
+}
+
 // Deep reviews (src/deep.ts): the planner's written, any other one a clean pass a few seconds after it's asked for.
 const DEEP_RUNNING = new Map<string, string>();
 const DEEPS = new Map<string, DeepReview>([
@@ -4274,6 +4280,19 @@ const DEEPS = new Map<string, DeepReview>([
         tests: "pnpm test planner: 41 passed",
         probes: 1,
       },
+      picture: deepPicture(
+        "Where a partial result goes",
+        "The route marks a cut-short query partial in a header, and the SDK never reads it, so callers take partial rows as complete.",
+        `flowchart LR
+  caller["Callers"] --> sdk["SDK query()"]
+  sdk --> route["/v2/query route"]:::changed
+  route -->|"?budget="| plan["runPlan"]:::changed
+  plan -->|"batches"| stream["streamRows"]:::new
+  stream --> scan[("scan cursor")]
+  plan -->|"partial: true"| route
+  route -->|"X-Partial-Results"| sdk
+  sdk -.->|"body only"| caller`,
+      ),
       head_oid: "c41d9e2",
       model: "claude-opus-5-5",
       at: iso(0.5),
@@ -4871,6 +4890,7 @@ async function respond(req: MockRequest, url: URL): Promise<unknown> {
             ask: [],
             author_fixes: [],
             checked: { summary: "Read the diff and its callers", tests: "12 passed", probes: 0 },
+            picture: null,
             head_oid: itemOf(r).head_oid,
             model: "claude-opus-5-5",
             at: new Date(now()).toISOString(),

@@ -24,6 +24,11 @@ const ANSWER = {
   ask: [{ question: "Should the default budget apply to old callers?", why: "Their slow queries come back partial" }],
   author_fixes: ["Reject a non-numeric budget"],
   checked: { summary: "Read the diff and the SDK", tests: "41 passed", probes: 1 },
+  picture: {
+    title: "The budget",
+    caption: "Where the budget is read.",
+    source: 'flowchart LR\n  a["route"] --> b["plan"]\n  b --> c["stream"]',
+  },
 };
 
 // A claude that writes its arguments down and answers with `answer`, or holds while `hold` exists.
@@ -116,8 +121,15 @@ test("a deep review answers at once, runs on in the PR's checkout, and keeps wha
   assert.equal(v.deep_running, null);
   assert.equal(v.deep_error, null);
   assert.deepEqual(
-    { lean: v.deep?.lean, wrong: v.deep?.wrong.length, ask: v.deep?.ask.length, head: v.deep?.head_oid, model: v.deep?.model },
-    { lean: "fix first", wrong: 1, ask: 1, head: v.item.head_oid, model: "claude-opus-5-5" },
+    {
+      lean: v.deep?.lean,
+      wrong: v.deep?.wrong.length,
+      ask: v.deep?.ask.length,
+      head: v.deep?.head_oid,
+      model: v.deep?.model,
+      picture: v.deep?.picture?.graph.kind,
+    },
+    { lean: "fix first", wrong: 1, ask: 1, head: v.item.head_oid, model: "claude-opus-5-5", picture: "flow" },
   );
   assert.equal(fake.calls().length, 1, "one run for both asks");
   assert.ok(t.removed(), "its checkout is removed once it's done");

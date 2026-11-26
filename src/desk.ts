@@ -214,7 +214,7 @@ import {
   type Sorted,
 } from "./kv.ts";
 import { inQuietHours, notify } from "./notify.ts";
-import { DEEP_SCHEMA, deepOf, deepPrompt } from "./deep.ts";
+import { DEEP_SCHEMA, deepOf, deepPrompt, pictureOf } from "./deep.ts";
 import {
   agentDir,
   agentDown,
@@ -2625,7 +2625,9 @@ export class Desk {
         ? Effect.fail(new BadRequest({ message: `its answer didn't parse: ${got.failure}` }))
         : Effect.succeed(got.success);
       const seconds = Math.round((Date.now() - started) / 1000);
-      const review = { ...answer, head_oid: item.head_oid, model: out.model, at: this.now().toISOString(), seconds };
+      const picture = pictureOf(answer.picture);
+      if (picture.refused) this.log(`deep review of ${item.id}: its picture: ${picture.refused}: dropped`);
+      const review = { ...answer, picture: picture.diagram, head_oid: item.head_oid, model: out.model, at: this.now().toISOString(), seconds };
       this.store.putKvAt("deep:", item.id, { review, error: null });
       this.log(
         `deep review of ${item.id}: ${review.lean}, ${review.wrong.length} wrong, ${review.ask.length} to ask; tests: ${review.checked.tests}; ${seconds}s`,

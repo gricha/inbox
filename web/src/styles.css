@@ -7484,11 +7484,11 @@ a.rv-part-row:hover {
   color: var(--ink);
 }
 
-/* A deep review (DeepSection.tsx): one line a finding, evidence in mono with its path:line a link, colour only for the lean
-   and a blocker's rule. */
+/* A deep review (DeepSection.tsx): the lean in colour, one picture, then a line each with a dot that says what it is
+   (red: a blocker or a premise that fails; amber: a fix or one unverified; the accent: a question for you). */
 .dp {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin: 0;
   padding: 10px 0 12px;
   border-top: 1px solid var(--rule);
@@ -7529,8 +7529,7 @@ a.rv-part-row:hover {
   color: var(--red);
 }
 
-.dp-meta,
-.dp-faint {
+.dp-meta {
   color: var(--pencil);
 }
 
@@ -7567,13 +7566,6 @@ a.rv-part-row:hover {
   color: var(--red);
 }
 
-.dp-part h3 {
-  margin: 4px 0 2px;
-  color: var(--pencil);
-  font-size: var(--text-xs);
-  font-weight: 600;
-}
-
 .dp ul {
   display: grid;
   gap: 8px;
@@ -7582,13 +7574,41 @@ a.rv-part-row:hover {
   list-style: none;
 }
 
-.dp-wrong {
-  padding-left: 10px;
-  border-left: 2px solid var(--amber);
+.dp-line {
+  display: grid;
+  grid-template-columns: 8px 1fr;
+  gap: 10px;
+  align-items: start;
 }
 
-.dp-blocker {
-  border-left-color: var(--red);
+.dp-mark {
+  width: 8px;
+  height: 8px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+}
+
+.dp-blocker .dp-mark {
+  background: var(--red);
+}
+
+.dp-fix .dp-mark {
+  background: var(--amber);
+}
+
+.dp-fails .dp-mark {
+  border: 2px solid var(--red);
+  background: none;
+}
+
+.dp-unknown .dp-mark {
+  border: 2px solid var(--amber);
+  background: none;
+}
+
+.dp-ask .dp-mark {
+  background: var(--accent);
 }
 
 .dp-what {
@@ -7617,26 +7637,16 @@ a.rv-part-row:hover {
   cursor: pointer;
 }
 
-.dp-fails {
-  color: var(--red);
-  font-weight: 600;
-}
-
-.dp-unknown {
-  color: var(--amber);
-  font-weight: 600;
-}
-
-.dp-folds {
+.dp-foot {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
-}
-
-.dp-foot {
-  margin: 0;
   color: var(--pencil);
   font-size: var(--text-xs);
+}
+
+.dp-list {
+  padding-left: 18px !important;
 }
 
 .rv-ai {

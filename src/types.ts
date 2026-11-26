@@ -1177,6 +1177,7 @@ export interface DeepReview {
   ask: { question: string; why: string }[];
   author_fixes: string[];
   checked: { summary: string; tests: string; probes: number };
+  picture: ReviewDiagram | null; // how the change works and where it breaks, when the grammar took it (src/diagram.ts)
   head_oid: string; // the commit it read
   model: string;
   at: string;

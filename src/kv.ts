@@ -351,10 +351,14 @@ export const DeepAnswerSchema = Schema.Struct({
   ask: arrayOf(Schema.Struct({ question: Schema.String, why: Schema.String })),
   author_fixes: arrayOf(Schema.String),
   checked: Schema.Struct({ summary: Schema.String, tests: Schema.String, probes: Schema.Number }),
+  picture: Schema.Struct({ title: Schema.String, caption: Schema.String, source: Schema.String }),
 });
 const DeepReviewSchema = schemaOf<DeepReview>()(
   Schema.Struct({
     ...DeepAnswerSchema.fields,
+    picture: Schema.NullOr(
+      Schema.Struct({ id: Schema.String, title: Schema.String, caption: Schema.String, source: opt(Schema.String), graph: DiagramGraphSchema }),
+    ),
     head_oid: Schema.String,
     model: Schema.String,
     at: Schema.String,
