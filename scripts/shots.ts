@@ -2102,14 +2102,14 @@ const SHOTS: Shot[] = [
       if (await page.locator(".col .page-head").count()) failures.push("review: the review has a page head");
       const on = await sideOn(page);
       if (on !== "Inbox") failures.push(`review: the sidebar marks ${JSON.stringify(on)}`);
-      if (!(await page.locator(".rv-ai .rv-fold-body.shut").count())) failures.push("review: the AI review doesn't open folded");
+      // Its deep review replaces the AI review: no AI section, and the verdict is the deep review's lean, on its Review tab.
+      if (await page.locator(".rv-ai").count()) failures.push("review: the AI review shows beside the deep review");
       // Its bar leads, stuck at the top: the three views as pills, then what finishes it and More; the title under it.
       if (!inOrder(await tops(page, [".rv-bar", ".rv-title"])) || !(await page.locator(".rv-bar .rv-views .head-tab").count()))
         failures.push("review: the bar with its views isn't over the title");
       if (!(await page.locator(".rv-bar .rv-actions .act").count())) failures.push("review: the bar has no actions");
-      // The title, then its metadata with the verdict's tag, then the goal.
-      if (!inOrder(await tops(page, [".rv-title", ".rv-ref .rv-tag", ".rv-gist"])))
-        failures.push("review: the head isn't title, metadata with the verdict, then the goal");
+      // The title, then its metadata.
+      if (!inOrder(await tops(page, [".rv-title", ".rv-ref"]))) failures.push("review: the head isn't title, then metadata");
       await faces(page, "review", ".rv-ref .rv-by:has(.avatar), .cv-author");
     },
   },
@@ -2306,7 +2306,12 @@ const SHOTS: Shot[] = [
         return;
       }
       await besideOpen(page, "beside-review", "acme/api#4127");
-      if (!b?.sideInline) failures.push("beside-review: the review's sidebar isn't open beside the diff next to the list");
+      // The sidebar sits beside the diff only where the column has room for both (960px); else it folds behind its toggle.
+      const roomy = await page.evaluate<boolean>(`document.querySelector(".col").getBoundingClientRect().width >= 960`);
+      if (b?.sideInline !== roomy)
+        failures.push(
+          `beside-review: the review's sidebar is ${b?.sideInline ? "beside" : "folded over"} the diff in a ${roomy ? "roomy" : "narrow"} column`,
+        );
       // The Inbox beside it keeps the page's sections, Urgent first, a question's row leading it.
       const heads = await page.locator(".beside .group-head").count();
       const first = await page.locator(".beside .line .c-meta").first().textContent();
