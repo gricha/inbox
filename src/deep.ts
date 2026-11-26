@@ -48,7 +48,9 @@ every line you write must carry information they need.
    expensive mistakes are code that shouldn't exist and code built on a false belief about the system.
 4. **Context.** Read what the change touches and what touches it: callers and callees, the code it replaces, \`git log\`
    and \`git blame\` for why the current code is the way it is, and anything outside the checkout it depends on (a
-   dependency's code, a chart, a config elsewhere): fetch it and look rather than taking the author's word.
+   dependency's code, a chart, a config elsewhere): fetch it and look rather than taking the author's word. For another
+   repository (a deploy repo with the probe settings, a shared library), clone it shallowly under \`./.review-probe/\`
+   (\`gh repo clone owner/name ./.review-probe/name -- --depth 1\`) and read it; \`gh api\` isn't available.
 5. **Risk and blast radius.** If this is wrong in production, what breaks, for whom, how far it spreads (one endpoint, a
    service, every tenant, stored data), how soon anyone would notice, and how it's undone (a revert, a flag, or a data
    migration that can't be). Spend effort in proportion to how bad it would be if wrong times how unsure you are; little

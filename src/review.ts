@@ -756,7 +756,10 @@ const PROBE_DENY = [
   ...["review", "comment", "merge", "close", "edit", "create", "ready", "reopen", "checkout"].map((c) => `gh pr ${c}`),
   ...["comment", "create", "edit", "close"].map((c) => `gh issue ${c}`),
   "gh release",
-  "gh repo",
+  // A repo may be cloned and viewed, to read what the change depends on; none changed.
+  ...["create", "delete", "edit", "fork", "rename", "archive", "unarchive", "sync", "deploy-key", "autolink", "set-default"].map(
+    (c) => `gh repo ${c}`,
+  ),
   "gh workflow",
   "gh run",
   "gh secret",

@@ -162,6 +162,12 @@ test(
     for (const denied of ["Bash(git push:*)", "Bash(gh api:*)", "Bash(gh pr review:*)", "Bash(gh pr comment:*)", "Bash(gh pr merge:*)"])
       assert.ok(after("--disallowedTools").split(",").includes(denied), `${denied} is denied`);
     assert.ok(args.includes("--strict-mcp-config") && !args.includes("--mcp-config"), "none of your MCP servers");
+    // It may clone a repo the change depends on (a deploy config, a chart) and read it, but not change one.
+    const deny = after("--disallowedTools").split(",");
+    for (const read of ["Bash(gh repo clone:*)", "Bash(gh repo view:*)", "Bash(gh repo:*)"])
+      assert.ok(!deny.includes(read), `${read} is allowed`);
+    for (const write of ["create", "delete", "edit", "fork", "rename", "archive", "sync", "deploy-key", "autolink"])
+      assert.ok(deny.includes(`Bash(gh repo ${write}:*)`), `gh repo ${write} is denied`);
   },
 );
 
