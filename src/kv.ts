@@ -95,6 +95,7 @@ const ReviewNoteSchema = Schema.Struct({
   side: lineSide,
   body: Schema.String,
   flag: Schema.optionalKey(Schema.Literals(NOTE_KINDS)),
+  evidence: Schema.optionalKey(Schema.String),
 });
 const DiagramGraphSchema = Schema.Union([
   Schema.Struct({
@@ -152,6 +153,7 @@ export const AiReviewSchema = schemaOf<AiReview>()(
             body: Schema.String,
             check: Schema.String,
             note: opt(Schema.String),
+            asides: opt(arrayOf(Schema.Struct({ flag: Schema.Literals(NOTE_KINDS), body: Schema.String, evidence: Schema.String }))),
             diagram: opt(Schema.String),
             hunks: arrayOf(Schema.Struct({ id: Schema.String, path: Schema.String })),
           }),
@@ -346,6 +348,7 @@ export const DeepAnswerSchema = Schema.Struct({
   intent_from: Schema.Literals(["stated", "inferred", "missing"]),
   change: Schema.String,
   risk: Schema.String,
+  risk_level: Schema.Literals(["low", "medium", "high"]),
   lean: Schema.Literals(["ship", "fix first", "rethink"]),
   lean_why: Schema.String,
   caveat: Schema.String,

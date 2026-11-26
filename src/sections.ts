@@ -1,7 +1,7 @@
 // A review's reading order (src/review.ts's reviewOrder) as the stretches a page draws: by importance, the guided review's
 // steps, or traditional file order. The window's review (web/src/components/Review.tsx) and a rendered review document
 // (src/render.ts) both read it.
-import type { AiReview, HunkTag, ReviewFile, ReviewHunk, ReviewNote, ReviewOrder } from "./types.ts";
+import type { AiReview, HunkTag, ReviewFile, ReviewHunk, ReviewNote, ReviewOrder, StepAside } from "./types.ts";
 
 // The review's words for what it is.
 export const VERDICT = { look: "Look closely", skim: "Skim it", skip: "Skip it" };
@@ -121,6 +121,7 @@ export interface WalkStep {
   body: string;
   check: string;
   note: string; // block prose, or ""
+  asides: StepAside[]; // a deep review's findings here that name no line
   diagram: string; // the id of its diagram in ai.diagrams, or ""
 }
 
@@ -130,7 +131,7 @@ export function walk(o: ReviewOrder): { list: Section[]; rest: number; steps: Wa
   const steps = (o.steps ?? []).map((st) => {
     const at = list.length;
     grouped(st.hunks, list);
-    return { at, title: st.title, body: st.body, check: st.check, note: st.note ?? "", diagram: st.diagram ?? "" };
+    return { at, title: st.title, body: st.body, check: st.check, note: st.note ?? "", asides: st.asides ?? [], diagram: st.diagram ?? "" };
   });
   const beyond = list.length;
   grouped(o.beyond ?? [], list);

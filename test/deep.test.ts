@@ -21,6 +21,7 @@ const ANSWER = {
   intent_from: "stated",
   change: "Before, a query returned every row at the end; now it stops at a budget.",
   risk: "Every query caller; a revert undoes it.",
+  risk_level: "medium",
   lean: "fix first",
   lean_why: "`?budget=` isn't validated (The budget).",
   caveat: "",
@@ -191,6 +192,7 @@ test("a deep review's steps keep only this diff's hunks, become the Review tab's
     intent_from: "stated",
     change: "c",
     risk: "r",
+    risk_level: "low",
     lean: "fix first",
     lean_why: "w",
     caveat: "",
@@ -207,12 +209,14 @@ test("a deep review's steps keep only this diff's hunks, become the Review tab's
       title: "Core",
       body: "What it's for.",
       check: "",
-      note: "**Question:** Old callers change. Only new ones?",
+      asides: [{ flag: "question", body: "Old callers change. Only new ones?", evidence: "" }],
       diagram: "deep",
       hunks: [{ id: "h2", path: "src/b.ts" }],
     },
   ]);
-  assert.deepEqual(ai.notes, [{ path: "src/b.ts", line: 4, side: "new", body: "It hangs. Bound it. (probe: timed out)", flag: "blocker" }]);
+  assert.deepEqual(ai.notes, [
+    { path: "src/b.ts", line: 4, side: "new", body: "It hangs. Bound it.", flag: "blocker", evidence: "probe: timed out" },
+  ]);
   assert.deepEqual(
     ai.chunks?.ranked.map((c) => [c.id, c.level]),
     [["h2", "look"]],

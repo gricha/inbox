@@ -6668,19 +6668,13 @@ fieldset.au-field > legend {
 
 /* Beside the diff where the page's column has room for it (Review.tsx's ROOM), whatever narrows it: the window, the list
    beside the review, the chat. */
-@container pane (width >= 680px) {
-  .review.side-open {
-    grid-template-columns: minmax(0, 1fr) var(--rv-side-w-user, 240px);
-  }
-}
-
-@container pane (width >= 880px) {
+@container pane (width >= 960px) {
   .review.side-open {
     grid-template-columns: minmax(0, 1fr) var(--rv-side-w-user, 260px);
   }
 }
 
-@container pane (width >= 1000px) {
+@container pane (width >= 1100px) {
   .review.side-open {
     grid-template-columns: minmax(0, 1fr) var(--rv-side-w-user, 280px);
   }
@@ -6774,7 +6768,7 @@ fieldset.au-field > legend {
 }
 
 /* Narrower, it opens over the diff's right edge rather than squeezing it. */
-@container pane (width < 680px) {
+@container pane (width < 960px) {
   .rv-side {
     position: fixed;
     top: 52px;
@@ -7516,28 +7510,66 @@ a.rv-part-row:hover {
 }
 
 .dp-fit {
+  color: var(--ink-2);
+}
+
+/* The lean: its word in colour on a rule of the same colour, the line that decides it beside. */
+.dp-verdict {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 2px 12px;
+  margin: 6px 0 2px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--rule-strong);
+  border-radius: 0 6px 6px 0;
+  background: var(--paper);
   color: var(--ink);
 }
 
-.dp-lean-line {
-  color: var(--ink);
+.dp-verdict.dp-ship {
+  border-left-color: var(--green);
+}
+
+.dp-verdict.dp-fix-first {
+  border-left-color: var(--amber);
+}
+
+.dp-verdict.dp-rethink {
+  border-left-color: var(--red);
 }
 
 .dp-lean {
-  margin-right: 4px;
   font-weight: 600;
 }
 
-.dp-ship {
+.dp-ship .dp-lean {
   color: var(--green);
 }
 
-.dp-fix-first {
+.dp-fix-first .dp-lean {
   color: var(--amber);
 }
 
-.dp-rethink {
+.dp-rethink .dp-lean {
   color: var(--red);
+}
+
+/* Change, blast radius, what's unsettled: a label in pencil, its words beside. */
+.dp-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 4px 0 0;
+}
+
+.dp-facts dt {
+  color: var(--pencil);
+  font-size: var(--text-xs);
+  line-height: 1.9;
+}
+
+.dp-facts dd {
+  margin: 0;
 }
 
 .dp-head {
@@ -9077,6 +9109,34 @@ p.rv-next {
   color: var(--green);
 }
 
+/* What shows a deep review's note, behind its toggle: the command and its output, the quote. */
+.rv-ev-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.rv-ev-toggle:hover {
+  text-decoration: underline;
+}
+
+.rv-ev {
+  display: block;
+  margin-top: 6px;
+  color: var(--pencil);
+  font: var(--text-xs) / 1.5 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rv-step > .rv-note {
+  margin: 0 0 0 12px;
+}
+
 .rv-note-nit .rv-bug {
   color: var(--ink-2);
   font-weight: 500;
@@ -9126,6 +9186,58 @@ p.rv-next {
 
 .dg-sketch {
   min-height: 40px;
+}
+
+/* Enlarge, under the caption; the dialog it opens fills most of the window, the diagram laid out for it. */
+.dg-enlarge,
+.dg-close {
+  justify-self: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-ink);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.rv-step .dg-enlarge {
+  margin-left: 12px;
+}
+
+.dg-enlarge:hover,
+.dg-close:hover {
+  text-decoration: underline;
+}
+
+.dg-dialog {
+  width: min(1480px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  padding: 16px 24px 24px;
+  overflow: auto;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+}
+
+.dg-dialog::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+
+.dg-dialog[open] {
+  display: grid;
+  gap: 12px;
+}
+
+.dg-close {
+  justify-self: end;
+}
+
+.dg-big .dg-sketch-svg,
+.dg-big .dg-svg {
+  margin: 0 auto;
 }
 
 .dg-sketch-svg {

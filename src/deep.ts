@@ -70,7 +70,8 @@ The review replaces reading the diff cold: a short top, then the change in steps
 - **change:** how behaviour changes, before to after, in one or two sentences: what happens, to what, when.
 - **risk:** the blast radius in one or two sentences: the scope you can show (which service, which pods, which phase,
   which data) and the concrete consequence there if this is wrong. Name how it's undone only when that's harder than a
-  revert. Say plainly when it's small.
+  revert. Say plainly when it's small. **risk_level** grades it: \`low\` (contained, easy to undo), \`medium\` (one
+  service or a group of users, undone by a deploy), \`high\` (many users, stored data, security, or hard to undo).
 - **lean** and **lean_why:** \`ship\`, \`fix first\` or \`rethink\`, and the one line that decides it (the page links its step, so don't name it).
   Never \`ship\` while a premise about necessity, safety or correctness fails; \`rethink\` when the change
   shouldn't exist as written.
@@ -78,7 +79,8 @@ The review replaces reading the diff cold: a short top, then the change in steps
   evidence that would settle it; "" when there is none.
 - **steps:** the change in 2 to 6 steps, in the order that builds understanding (usually the core change first, then what
   calls it, then tests). Each names its hunks by id from the list below, has a title of at most four words, and \`why\`:
-  one sentence on the behaviour this code changes, or the concern in it. A routine step (a mechanical follow-up) gets a
+  one sentence on the behaviour this code changes, or the concern in it. List a step's hunks with the one that matters
+  most first; leave out a hunk that is only imports, wiring or formatting (it stays in Code changes). A routine step (a mechanical follow-up) gets a
   plain \`why\` and no notes. Leave out hunks not worth reading.
 - **notes**, inside the step they're about: what you found there, each once, in the one step it belongs to.
   - \`kind\`: \`blocker\` (shown, must change), \`issue\` (shown, should change), \`question\` (only a person can
@@ -140,6 +142,7 @@ export const DEEP_SCHEMA = obj({
   intent_from: { enum: ["stated", "inferred", "missing"] },
   change: str(300, "How behaviour changes, before to after."),
   risk: str(300, "The blast radius: what breaks in production if this is wrong, for whom, and how it's undone."),
+  risk_level: { enum: ["low", "medium", "high"] },
   lean: { enum: ["ship", "fix first", "rethink"] },
   lean_why: str(180, "The one line that decides it."),
   caveat: str(240, "One uncertainty about the whole change and what would settle it, or empty."),
@@ -207,7 +210,7 @@ const spotOf = (at: string, hunks: { path: string }[]) => {
   return m && file ? { path: file, line: Number(m[2]) } : null;
 };
 
-const noteText = (n: DeepNote) => [n.text, n.ask, n.evidence && `(${n.evidence})`].filter(Boolean).join(" ");
+const noteText = (n: DeepNote) => [n.text, n.ask].filter(Boolean).join(" ");
 
 // The review a deep review of this commit makes: its steps over the diff's hunks, the hunks no step names skipped; each finding a note on the line it names, labelled by its kind, or else in its step's own words; its
 // picture in the step it explains. The AI review's notes and concerns are left out, so the review has one voice.
@@ -219,7 +222,7 @@ export const deepGuide = (deep: DeepReview, files: ReviewFile[], ai: AiReview | 
   const notes: ReviewNote[] = deep.steps.flatMap((s) =>
     s.notes.flatMap((n) => {
       const spot = spotOf(n.at, hunks);
-      return spot ? [{ ...spot, side: "new" as const, body: noteText(n), flag: n.kind }] : [];
+      return spot ? [{ ...spot, side: "new" as const, body: noteText(n), flag: n.kind, ...(n.evidence && { evidence: n.evidence }) }] : [];
     }),
   );
   const base: AiReview = ai ?? {
@@ -235,6 +238,8 @@ export const deepGuide = (deep: DeepReview, files: ReviewFile[], ai: AiReview | 
   return {
     ...base,
     verdict: deep.lean === "ship" ? "skim" : "look",
+    risk: deep.risk_level,
+    risk_reasons: [{ factor: "reach", why: deep.risk }],
     summary: deep.goal,
     head_oid: deep.head_oid,
     concerns: [],
@@ -243,7 +248,10 @@ export const deepGuide = (deep: DeepReview, files: ReviewFile[], ai: AiReview | 
     improvements: [],
     diagrams: deep.picture ? [deep.picture] : [],
     chunks: {
-      ranked: hunks.filter((h) => named.has(h.id)).map((h) => ({ id: h.id, path: h.path, level: "look" as const, why: "" })),
+      ranked: [...named].flatMap((id) => {
+        const h = hunks.find((x) => x.id === id);
+        return h ? [{ id, path: h.path, level: "look" as const, why: "" }] : [];
+      }),
       unread: [],
       total: hunks.length,
     },
@@ -254,9 +262,7 @@ export const deepGuide = (deep: DeepReview, files: ReviewFile[], ai: AiReview | 
           title: s.title,
           body: s.why,
           check: "",
-          ...(loose.length > 0 && {
-            note: loose.map((n) => `**${n.kind[0]!.toUpperCase()}${n.kind.slice(1)}:** ${noteText(n)}`).join("\n\n"),
-          }),
+          ...(loose.length > 0 && { asides: loose.map((n) => ({ flag: n.kind, body: noteText(n), evidence: n.evidence })) }),
           ...(deep.picture?.step === k && { diagram: deep.picture.id }),
           hunks: s.hunks.map((id) => ({ id, path: path.get(id) ?? "" })),
         };

@@ -7,6 +7,7 @@ import { layout, svg, type Drawn, type Measure } from "../../../src/diagram-layo
 import type { Kid } from "../../../src/html.ts";
 import type { DiagramGraph } from "../../../src/types.ts";
 import { LayoutFailed, runUi } from "../api.ts";
+import { cls } from "../format.ts";
 import { useKeyed } from "../keyed.ts";
 import { loadSketchFont, Sketch, SKETCH_SHRINK, sketchMeasure } from "./Sketch.tsx";
 
@@ -24,7 +25,20 @@ const sketching = () => {
 
 const FONT = 12.5;
 
-export function Diagram({ graph, title = "", caption = "" }: { graph: DiagramGraph; title?: string; caption?: string }) {
+// Enlarge opens it in a dialog, laid out again for the window: a wide one's words stay readable.
+export function Diagram({
+  graph,
+  title = "",
+  caption = "",
+  big = false,
+}: {
+  graph: DiagramGraph;
+  title?: string;
+  caption?: string;
+  big?: boolean;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [enlarged, setEnlarged] = useState(false);
   const [drawn, setDrawn] = useState<Drawn | "failed" | null>(null);
   const [sketch, setSketch] = useState(sketching);
   const fig = useRef<HTMLElement>(null);
@@ -34,7 +48,7 @@ export function Diagram({ graph, title = "", caption = "" }: { graph: DiagramGra
   const shape = useMemo(() => JSON.stringify(graph), [graph]);
   useKeyed(`${sketch} ${shape}`, (signal) => {
     setDrawn(null);
-    const room = fig.current?.clientWidth ?? 0;
+    const room = big ? Math.min(innerWidth - 96, 1400) : (fig.current?.clientWidth ?? 0);
     runUi(
       laidOut(graph, sketch, room > 0 ? room : 720).pipe(
         Effect.match({
@@ -50,12 +64,45 @@ export function Diagram({ graph, title = "", caption = "" }: { graph: DiagramGra
   });
 
   return (
-    <figure className="dg" ref={fig}>
-      {(title || caption) && (
+    <figure className={cls("dg", big && "dg-big")} ref={fig}>
+      {(title || caption || !big) && (
         <figcaption className="dg-head">
           {title && <span className="dg-title">{title}</span>}
           {caption && <span className="dg-caption">{caption}</span>}
         </figcaption>
+      )}
+      {!big && drawn && drawn !== "failed" && (
+        <button
+          type="button"
+          className="dg-enlarge"
+          onClick={() => {
+            setEnlarged(true);
+            dialog.current?.showModal();
+          }}
+        >
+          Enlarge
+        </button>
+      )}
+      {!big && (
+        <dialog
+          ref={dialog}
+          className="dg-dialog"
+          aria-label={title || "Diagram"}
+          onClose={() => {
+            setEnlarged(false);
+          }}
+        >
+          <button
+            type="button"
+            className="dg-close"
+            onClick={() => {
+              dialog.current?.close();
+            }}
+          >
+            Close
+          </button>
+          {enlarged && <Diagram graph={graph} title={title} caption={caption} big />}
+        </dialog>
       )}
       {drawn === "failed" ? (
         <ul className="dg-text">

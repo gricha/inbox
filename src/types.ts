@@ -921,6 +921,7 @@ export interface ReviewNote {
   side: "new" | "old"; // old = a removed line, numbered in the old file
   body: string;
   flag?: NoteKind; // a deep review's: what it is, which its label says; none, the AI review's (a concern says Potential bug)
+  evidence?: string; // a deep review's: what shows it, behind a toggle
 }
 
 export const NOTE_KINDS = ["blocker", "issue", "question", "verified", "nit"] as const;
@@ -1011,7 +1012,22 @@ export interface ChunkRanking {
 // Claude's walk through the diff, in the order to understand it. Ids and paths as ChunkRanking keeps them, so a retargeted
 // base can't point a step at other code.
 export interface ReviewGuide {
-  steps: { title: string; body: string; check: string; note?: string; diagram?: string; hunks: { id: string; path: string }[] }[];
+  steps: {
+    title: string;
+    body: string;
+    check: string;
+    note?: string;
+    asides?: StepAside[];
+    diagram?: string;
+    hunks: { id: string; path: string }[];
+  }[];
+}
+
+// A deep review's finding in a step that names no line: drawn as a note under the step's words.
+export interface StepAside {
+  flag: NoteKind;
+  body: string;
+  evidence: string;
 }
 
 // One hunk of the diff in GET /api/review/:id, with what the AI review made of it.
@@ -1051,6 +1067,7 @@ interface ReviewStep {
   body: string;
   check: string; // what to verify here, or ""
   note?: string; // block prose: context no single line carries
+  asides?: StepAside[];
   diagram?: string; // the id of its diagram in ai.diagrams
   hunks: ReviewHunk[];
 }
@@ -1178,6 +1195,7 @@ export interface DeepReview {
   intent_from: "stated" | "inferred" | "missing";
   change: string; // how behaviour changes, before to after
   risk: string; // the blast radius: what breaks in production if it's wrong, for whom, how it's undone
+  risk_level: "low" | "medium" | "high"; // the sidebar's risk
   lean: "ship" | "fix first" | "rethink";
   lean_why: string; // the one line that decides it
   caveat: string; // one uncertainty about the whole change and what would settle it, or ""

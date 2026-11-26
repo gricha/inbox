@@ -4248,6 +4248,7 @@ const DEEPS = new Map<string, DeepReview>([
       intent_from: "stated",
       change:
         "Before, a query scanned to the end and returned every row at once. Now it stops at a time budget (2 s, or `?budget=` in ms) and returns the rows so far, marked partial.",
+      risk_level: "medium",
       risk: "Every `/v2/query` caller: with the 2 s default, slow queries that completed before come back partial. A revert undoes it; nothing is stored.",
       lean: "fix first",
       lean_why: "`?budget=` isn't checked: `budget=abc` turns the budget off and `budget=0` returns nothing, marked partial.",
@@ -4912,6 +4913,7 @@ async function respond(req: MockRequest, url: URL): Promise<unknown> {
             intent_from: r.seed.body ? "stated" : "inferred",
             change: "The new path runs where the old one did, with its callers unchanged.",
             risk: "Small: one code path, undone by a revert.",
+            risk_level: "low",
             lean: "ship",
             lean_why: "The tests pass and nothing in the repo already does this.",
             caveat: "",

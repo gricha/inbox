@@ -4,8 +4,8 @@ import { withCode } from "./Prose.tsx";
 
 const LEAN = { ship: "Ship", "fix first": "Fix first", rethink: "Rethink" } as const;
 
-// The review's top (src/deep.ts): the intent under its heading and how the PR fits it, the lean and the line that decides it with a link to its step, how
-// behaviour changes, its blast radius, and the one thing about the whole change it couldn't settle. Its findings are in the steps below.
+// The review's top (src/deep.ts): the intent under its heading and how the PR fits it; the lean, the line that decides it
+// and a link to its step; then how behaviour changes, its blast radius and what it couldn't settle. Findings are in the steps.
 export function DeepSection({
   deep,
   running,
@@ -58,32 +58,38 @@ export function DeepSection({
       </h2>
       <p className="dp-goal">{withCode(deep.goal)}</p>
       <p className="dp-fit">{withCode(deep.fit)}</p>
-      <p className="dp-lean-line">
-        <b className={cls("dp-lean", `dp-${deep.lean.replace(" ", "-")}`)}>{LEAN[deep.lean]}</b> {withCode(deep.lean_why)}
-        {deep.lean !== "ship" && deciding >= 0 && (
+      <div className={cls("dp-verdict", `dp-${deep.lean.replace(" ", "-")}`)}>
+        <b className="dp-lean">{LEAN[deep.lean]}</b>
+        <span>
+          {withCode(deep.lean_why)}
+          {deep.lean !== "ship" && deciding >= 0 && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="dp-run"
+                onClick={() => {
+                  onStep(deciding);
+                }}
+              >
+                See step {deciding + 1}
+              </button>
+            </>
+          )}
+        </span>
+      </div>
+      <dl className="dp-facts">
+        <dt>Change</dt>
+        <dd>{withCode(deep.change)}</dd>
+        <dt>Blast radius</dt>
+        <dd>{withCode(deep.risk)}</dd>
+        {deep.caveat && (
           <>
-            {" "}
-            <button
-              type="button"
-              className="dp-run"
-              onClick={() => {
-                onStep(deciding);
-              }}
-            >
-              Step {deciding + 1}
-            </button>
+            <dt>Not settled</dt>
+            <dd>{withCode(deep.caveat)}</dd>
           </>
         )}
-      </p>
-      <p className="dp-change">{withCode(deep.change)}</p>
-      <p className="dp-risk">
-        <span className="dp-meta">Blast radius:</span> {withCode(deep.risk)}
-      </p>
-      {deep.caveat && (
-        <p className="dp-caveat">
-          <span className="dp-meta">Not settled:</span> {withCode(deep.caveat)}
-        </p>
-      )}
+      </dl>
       <div className="dp-head">
         <span className="dp-meta">
           {running ? `Reviewing again · started ${ago(running, now)}` : stale ? "Of an earlier commit" : `Reviewed ${ago(deep.at, now)}`}

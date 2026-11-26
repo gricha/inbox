@@ -1970,6 +1970,7 @@ function walk(guide: ReviewGuide, shown: ReviewHunk[]): Pick<ReviewOrder, "steps
       body: st.body,
       check: st.check,
       ...(st.note && { note: st.note }),
+      ...(st.asides?.length && { asides: st.asides }),
       ...(st.diagram && { diagram: st.diagram }),
       hunks: st.hunks.flatMap((h) => byId.get(h.id) ?? []),
     }))

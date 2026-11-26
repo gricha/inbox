@@ -2745,7 +2745,7 @@ const SHOTS: Shot[] = [
         const b = document.querySelector('.review[aria-busy="true"] .rv-side-toggle');
         return b && { tag: b.tagName, text: b.textContent.trim(), icon: !!b.querySelector("svg"), label: b.getAttribute("aria-label") };
       })()`);
-      const roomy = await page.evaluate<boolean>(`document.querySelector(".col").getBoundingClientRect().width >= 680`);
+      const roomy = await page.evaluate<boolean>(`document.querySelector(".col").getBoundingClientRect().width >= 960`);
       if (roomy ? toggle !== null : toggle?.tag !== "BUTTON" || toggle.text || !toggle.icon || !toggle.label?.endsWith("checks and files"))
         failures.push(`review-loading: ${roomy ? "with room, " : ""}the sidebar's toggle is ${JSON.stringify(toggle)}`);
     },
@@ -2920,11 +2920,17 @@ const SHOTS: Shot[] = [
         failures.push("review-deep: it isn't between the title and its steps");
       if (await page.locator(".rv-ai").count()) failures.push("review-deep: the AI review's summary shows beside the deep review's");
       if (!(await page.locator(".rv-step figure, .rv-step svg").count())) failures.push("review-deep: no picture in a step");
+      // Enlarge opens the picture over the page; Esc closes it and leaves you on the review.
+      await page.locator(".rv-step .dg-enlarge").first().click();
+      if (!(await page.locator("dialog.dg-dialog[open] figure").count())) failures.push("review-deep: Enlarge opens no dialog");
+      await page.keyboard.press("Escape");
+      if (await page.locator("dialog.dg-dialog[open]").count()) failures.push("review-deep: Esc doesn't close the enlarged picture");
+      if (!(await page.locator(".dp").count())) failures.push("review-deep: Esc on the enlarged picture left the review");
       if (!(await page.locator(".rv-note-issue", { hasText: "Issue" }).count()))
         failures.push("review-deep: the issue isn't a labelled note on its line");
       if (!(await page.locator(".rv-note-question, .rv-step-note", { hasText: "Question" }).count()))
         failures.push("review-deep: no question in its step");
-      const to = deep.locator(".dp-run", { hasText: /^Step \d/ });
+      const to = deep.locator(".dp-run", { hasText: /^See step \d/ });
       if (!(await to.count())) {
         failures.push("review-deep: the lean doesn't link to its step");
         return;
@@ -3665,7 +3671,7 @@ const SHOTS: Shot[] = [
       // A PR in a stack with a conflict: every part, in order, a line each.
       // Open as it opens, beside the diff; folded only where it would lie over it.
       await review("acme/api#4154")(page);
-      const wide = await page.evaluate<boolean>(`document.querySelector(".col").getBoundingClientRect().width >= 680`);
+      const wide = await page.evaluate<boolean>(`document.querySelector(".col").getBoundingClientRect().width >= 960`);
       if (wide ? await toggle.count() : (await says()).label !== "Show the stack, checks and files")
         failures.push(`review-panel: in a stack, ${wide ? "with room there's a toggle" : "without room the toggle reads otherwise"}`);
       if (!wide) await toggle.click();

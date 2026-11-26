@@ -96,7 +96,7 @@ import { Splitter, type Width } from "./Splitter.tsx";
 // What sits under a line of the diff: an AI note (index: its place in reading order), a review thread, the comment you're
 // writing, or one you sent that the conversation doesn't show yet.
 type Meta =
-  | { kind: "note"; index: number; body: string; is?: NoteKind }
+  | { kind: "note"; index: number; body: string; is?: NoteKind; evidence?: string }
   | { kind: "look"; line: number; end: number; why: string }
   | { kind: "thread"; id: string }
   | { kind: "draft" }
@@ -138,7 +138,7 @@ const LINE = 96; // px below the window's top where "the section you're in" is r
 const REST = "Not worth reviewing"; // the fold's line
 const STACK_SHOWN = 4; // the PR below this one, this one and two above; the rest of a long stack is a click away
 const SIDE: Width = { key: "desk.review.side.width", cssVar: "--rv-side-w-user", min: 220, max: 0.45 };
-const ROOM = 680; // px of the page's column (styles.css's @container pane): narrower, the sidebar opens over the diff, folded
+const ROOM = 960; // px of the page's column (styles.css's @container pane): narrower, the sidebar opens over the diff, folded
 const ROW = 19; // px: .rv-diff's --diffs-line-height
 const pane = () => document.querySelector(".col");
 // The fractional width, as the container query reads it, so the two agree at the edge.
@@ -783,6 +783,7 @@ export function Review({
     if (e.key !== "Escape" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
     const t = e.target instanceof HTMLElement ? e.target : document.body;
     if (t.closest("input, textarea, select, [contenteditable='true']")) return;
+    if (document.querySelector("dialog[open]")) return; // an enlarged diagram closes first
     if (keysHeld()) {
       e.preventDefault();
       return;
@@ -1278,6 +1279,9 @@ export function Review({
                               </p>
                             )}
                             {steps[k]!.note && <p className="rv-step-body rv-step-note">{spans(unlinked(inline(steps[k]!.note)))}</p>}
+                            {steps[k]!.asides.map((a) => (
+                              <Note key={a.body} index={-1} body={a.body} bug={false} is={a.flag} evidence={a.evidence} />
+                            ))}
                             {figure(steps[k]!.diagram)}
                           </header>
                         )}
@@ -2443,7 +2447,13 @@ function SectionView({
         .map((n): DiffLineAnnotation<Meta> => ({
           side: sideOf(n.note.side),
           lineNumber: n.note.line,
-          metadata: { kind: "note", index: n.index, body: n.note.body, ...(n.note.flag && { is: n.note.flag }) },
+          metadata: {
+            kind: "note",
+            index: n.index,
+            body: n.note.body,
+            ...(n.note.flag && { is: n.note.flag }),
+            ...(n.note.evidence && { evidence: n.note.evidence }),
+          },
         })),
       ...threads.map((t): DiffLineAnnotation<Meta> => ({
         side: sideOf(t.side ?? "new"),
@@ -2574,7 +2584,9 @@ function SectionView({
       {!shut &&
         mine
           .filter((n) => !n.inline)
-          .map((n) => <Note key={n.index} index={n.index} body={n.note.body} bug={n.index < bugs} is={n.note.flag} />)}
+          .map((n) => (
+            <Note key={n.index} index={n.index} body={n.note.body} bug={n.index < bugs} is={n.note.flag} evidence={n.note.evidence} />
+          ))}
       {!shut && fileDiff && (
         <FileDiff<Meta>
           className="rv-diff"
@@ -2586,7 +2598,8 @@ function SectionView({
           lineAnnotations={annotations}
           renderAnnotation={(a) => {
             const m = a.metadata;
-            if (m.kind === "note") return <Note key={`n${m.index}`} index={m.index} body={m.body} bug={m.index < bugs} is={m.is} />;
+            if (m.kind === "note")
+              return <Note key={`n${m.index}`} index={m.index} body={m.body} bug={m.index < bugs} is={m.is} evidence={m.evidence} />;
             if (m.kind === "look") return <Look key={`l${m.line}`} line={m.line} end={m.end} why={m.why} />;
             if (m.kind === "draft") return composer(writing?.thread ? "Reply" : rangeLabel(writing?.at));
             if (m.kind === "sent") return <Yours key={`s${m.url}`} body={m.body} url={m.url} />;
@@ -2872,12 +2885,41 @@ function Look({ line, end, why }: { line: number; end: number; why: string }) {
 // The AI review's note on a line; a concern says so first: it's a potential bug, with what shows it and how to confirm it.
 // A deep review's says what it is: a blocker, an issue, a question for you, what it verified, or a nit.
 const NOTE_LABEL: Record<NoteKind, string> = { blocker: "Blocker", issue: "Issue", question: "Question", verified: "Verified", nit: "Nit" };
-function Note({ index, body, bug, is }: { index: number; body: string; bug: boolean; is?: NoteKind | undefined }) {
+function Note({
+  index,
+  body,
+  bug,
+  is,
+  evidence = "",
+}: {
+  index: number;
+  body: string;
+  bug: boolean;
+  is?: NoteKind | undefined;
+  evidence?: string | undefined;
+}) {
+  const [shown, setShown] = useState(false);
   const label = is ? NOTE_LABEL[is] : bug ? "Potential bug" : null;
   return (
     <div className={cls("rv-note", (is ? is === "blocker" || is === "issue" : bug) && "bug", is && `rv-note-${is}`)} data-note={index}>
       {label && <b className="rv-bug">{label}</b>}
       {spans(unlinked(inline(body)))}
+      {evidence && (
+        <>
+          {" "}
+          <button
+            type="button"
+            className="rv-ev-toggle"
+            aria-expanded={shown}
+            onClick={() => {
+              setShown(!shown);
+            }}
+          >
+            Evidence
+          </button>
+          {shown && <code className="rv-ev">{evidence}</code>}
+        </>
+      )}
     </div>
   );
 }

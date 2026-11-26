@@ -295,7 +295,7 @@ Esc goes back to the page it was opened from. A review has no page head: its own
 
 ### The review's sidebar
 
-Beside the diff while the page's column is 680px or wider (240px, 260px from 880px, 280px from 1000px), with no toggle; its left edge drags to resize it, and the width is kept per device. It scrolls with the page, and the steps or files stick under the review's bar. In a narrower column it lies over the diff and starts folded: one icon button at the review's top right shows and hides it ("Show checks and files", "Hide the stack, checks and files"), and it scrolls in itself. While the chat is open the chat takes its place; the same button brings the sidebar back and closes the chat.
+Beside the diff while the page's column is 960px or wider (260px, 280px from 1100px), with no toggle; its left edge drags to resize it, and the width is kept per device. It scrolls with the page, and the steps or files stick under the review's bar. In a narrower column it lies over the diff and starts folded: one icon button at the review's top right shows and hides it ("Show checks and files", "Hide the stack, checks and files"), and it scrolls in itself. While the chat is open the chat takes its place; the same button brings the sidebar back and closes the chat.
 
 Sections, each open: its name, where it stands in one line that reads first (red when a required check fails, amber for changes requested), then its rows.
 
