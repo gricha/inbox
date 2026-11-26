@@ -297,6 +297,7 @@ const reviewAs = (change: (v: ReviewView) => void) => async (page: Page) => {
     if (route.request().method() !== "GET") return route.fallback();
     const res = await route.fetch();
     const v = (await res.json()) as ReviewView;
+    v.deep = null; // these shots are the AI review's, which a deep review of the commit replaces
     change(v);
     await route.fulfill({ response: res, json: v });
   });
