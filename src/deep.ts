@@ -63,7 +63,8 @@ every line you write must carry information they need.
 The review replaces reading the diff cold: a short top, then the change in steps, each step's findings in it.
 
 - **goal:** the intent: what the author says this achieves, for someone who doesn't know this code, in one or two
-  sentences. It sits under the heading "Intent", so don't prefix it. Define a term the reader may not know in a few words
+  sentences. Lead with the outcome someone would notice (users, operators, other teams), then the author's cause for
+  it, attributed; leave out numbers you can't back. It sits under the heading "Intent", so don't prefix it. Define a term the reader may not know in a few words
   the first time it appears.
 - **fit:** how this PR serves that intent, in one sentence: whether it gets there, and where it falls short or does more
   than it needs to.
@@ -90,7 +91,7 @@ The review replaces reading the diff cold: a short top, then the change in steps
     or "". \`at\`: the \`path:line\` in the diff it's about, so it sits on that line, or "". \`evidence\`: the command and
     the line of output, or the quote, that shows it, short.
   - One note per problem: the test that would catch it, the question that bounds it and the evidence go in that one note,
-    not notes of their own. A premise you checked becomes a note only if it changes the decision; one that holds is a
+    never notes of their own (a missing test for a problem is not a second note in the tests' step). A premise you checked becomes a note only if it changes the decision; one that holds is a
     \`verified\` note only when the reader would otherwise worry about it. Don't say a note answers someone's comment: the
     reader sees both.
 - **picture:** one diagram, drawn in the step it explains (\`step\`, from 0), that shows how the change works and, if
@@ -111,7 +112,9 @@ The review replaces reading the diff cold: a short top, then the change in steps
 
 Lead with behaviour and consequence; use identifiers to locate code, not to explain it. Keep apart what you observed,
 what you infer and what the author claims, and say which is which (in the intent too: "the author says probes timed out
-at 5 s" when you didn't confirm it; a synthetic reproduction is called one). Claim only what your evidence shows: not "cannot",
+at 5 s" when you didn't confirm it; a synthetic reproduction is called one). State a consequence at the strength you showed it ("can delay liveness", not "fails liveness", when you saw a delay)
+and keep what you showed apart from what follows in production only under settings you didn't see. Claim only what your
+evidence shows: not "cannot",
 "nothing" or "never" when you checked one case. No adjectives, no restating the diff, no praise, no hedging, no filler. Say each fact once: \`change\` explains the mechanism,
 a step's \`why\` says only what that step adds, and the picture's caption says what to look at in it.
 Not: "The DB check has no bound shorter than 30s." But: "While the DB check was blocked, \`/health/live\` didn't answer
