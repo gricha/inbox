@@ -820,6 +820,7 @@ export interface Overview {
   focus: { now: number; today: number; new: number; asks: number; sessions: number };
   inflight: { total: number }; // your open PRs in Merging
   agent: boolean; // your agent is on (Settings, Agents): the window draws its Ask your agent entries
+  open_next: boolean; // queue.open_next: acting in a review opens the item after it
   ai_agent: AgentName; // who sorts and reviews (agent.harness), as the window names it
   rate_limit: { remaining: number; reset_at: string } | null;
   sentry?: { dsn: string; release: string | undefined } | null; // where the UI reports its errors: absent or null, nowhere
@@ -1146,7 +1147,8 @@ export interface ReviewView {
   ai_error: string | null; // the last failed attempt on this commit, or why AI reviews are paused
   generating: boolean; // its job is running
   ai_job: Job | null; // its AI review's job: running, or for this commit
-  approve: { ok: boolean; reason: string | null; approved?: true }; // reason: why not, e.g. "it's your PR"; approved: you approved its head
+  // reason: why not (e.g. "it's your PR"). approved: you approved its head. keeps: approving makes its merge yours, so it stays.
+  approve: { ok: boolean; reason: string | null; approved?: true; keeps?: true };
   activity: ActivityEvent[]; // the PR's last 8 events, newest first
   stack: Stack | null; // its stack, with it current
   checks: Checks | null; // its head commit's checks, one by one; null: none ran, or they couldn't be fetched

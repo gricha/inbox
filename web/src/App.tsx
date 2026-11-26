@@ -39,6 +39,7 @@ import {
   inboxCount,
   inquiryOf,
   navigable,
+  nextOf,
   pickRange,
   pickToggle,
   PAGE_GROUPS,
@@ -87,6 +88,18 @@ interface Toast {
   error?: boolean;
   undo?: boolean;
   busy?: boolean; // a write on its way to GitHub: a spinner until it lands
+}
+
+// The selection a leaving row handed on: to the row that took its place, or nobody.
+interface Moved {
+  from: string;
+  to: string | null;
+}
+
+// Where a review that gave way took you: the address, and the item it opened there.
+interface Took {
+  hash: string;
+  id: string;
 }
 
 const LEAVES = new Set<Action>(["done", "snooze", "mute"]);
@@ -680,7 +693,10 @@ export function App() {
         : [],
     [queueView],
   );
-  const cursor = useMemo(() => [...inquiries.map((q) => inquiryOf(q.id)), ...stops(page, leaving)], [inquiries, page, leaving]);
+  const cursor = useMemo(
+    () => [...inquiries.map((q) => inquiryOf(q.id)), ...sessions.map((s) => s.id), ...stops(page, leaving)],
+    [inquiries, sessions, page, leaving],
+  );
   const current = flat.find((c) => c.id === selected) ?? null;
   // The queue's view holds open questions only; an answered one's page still says whose it is and what it's about.
   const questionOf = (id: string) => view?.inquiries.find((q) => q.id === id) ?? (pageQuestion?.id === id ? pageQuestion : undefined);
@@ -692,6 +708,18 @@ export function App() {
   }, [lane, filter, me, backed.shown]);
   const laneRows = useMemo(() => laneShown?.rows ?? [], [laneShown]);
   const laneCur = laneRows.find((r) => r.card.id === laneSel) ?? null;
+  // The list's items in screen order, as ⌘] steps through them: Merging's PRs, or the questions, sessions and rows.
+  const itemOrder = useMemo(
+    () =>
+      laneList
+        ? laneRows.map((r) => r.card.id)
+        : [...inquiries.map((q) => inquiryOf(q.id)), ...sessions.map((s) => s.id), ...flat.map((c) => c.id)],
+    [laneList, laneRows, inquiries, sessions, flat],
+  );
+  const itemOrderRef = useRef(itemOrder);
+  itemOrderRef.current = itemOrder;
+  const openNextRef = useRef(false);
+  openNextRef.current = overview?.open_next ?? false;
   // Every card on the desk the client has, by id: a review opens on its row's card while the rest is on its way.
   const known = useMemo(() => {
     const m = new Map<string, Card>();
@@ -829,7 +857,7 @@ export function App() {
       document.querySelector(`.lane [data-id="${CSS.escape(laneCur.card.id)}"]`)?.scrollIntoView({ block: "nearest" });
   }, [onLane, laneCur]);
 
-  // Nothing is selected until you focus, right-click or open a row; a row that leaves takes its selection with it.
+  // Nothing is selected until you focus, right-click or open a row. A row that leaves by itself takes its selection with it.
   useEffect(() => {
     if (selected === null || cursor.includes(selected)) return;
     if (pending.current?.id === selected && Date.now() < pending.current.until) return; // an undo brings it back
@@ -915,30 +943,39 @@ export function App() {
     const leaves = LEAVES.has(action) && c.status === "active" && !c.resolved;
     // A move to another section is drawn there at once, where the desk puts it, as a drop is.
     const to = action === "urgent" || action === "standard" || action === "fyi" ? { id: c.id, section: action } : null;
-    return Effect.gen(function* () {
-      if (leaves) hide(c);
+    return Effect.suspend(() => {
+      const moved = leaves ? hide([c.id]) : null;
+      const there = leaves ? advance(c.id, itemOrder) : null;
       if (to) setDrops((x) => [...x.filter((y) => y.id !== c.id), to]);
-      const started = Date.now();
-      const res = yield* api.act(c.id, action, until);
-      if (to) yield* load();
-      undoSeq.current = res.undo_seq ? [res.undo_seq] : []; // before the animation, so a quick Undo undoes this action
-      undoWrite.current = null;
-      if (leaves) {
-        yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
-        gone.show(c.id, loadSeq.current);
-      }
-      const verb = action === "snooze" ? `Snoozed ${snoozeOptions(c).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
-      flash(`${verb}: ${shortRef(c)}`, false, true);
-    }).pipe(
-      Effect.catch(failed),
-      Effect.ensuring(
-        Effect.sync(() => {
-          if (leaves) unhide(c.id);
-          if (to) setDrops((x) => x.filter((y) => y !== to));
-          refresh(0);
-        }),
-      ),
-    );
+      return Effect.gen(function* () {
+        const started = Date.now();
+        const res = yield* api.act(c.id, action, until);
+        if (to) yield* load();
+        undoSeq.current = res.undo_seq ? [res.undo_seq] : []; // before the animation, so a quick Undo undoes this action
+        undoWrite.current = null;
+        if (leaves) {
+          yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
+          gone.show(c.id, loadSeq.current);
+        }
+        const verb = action === "snooze" ? `Snoozed ${snoozeOptions(c).find((o) => o.until === until)?.toast ?? ""}` : VERB[action];
+        flash(`${verb}: ${shortRef(c)}`, false, true);
+      }).pipe(
+        Effect.catch((e) =>
+          Effect.sync(() => {
+            putBack(moved);
+            comeBack(c.id, there);
+            flash(e.message, true);
+          }),
+        ),
+        Effect.ensuring(
+          Effect.sync(() => {
+            if (leaves) unhide(c.id);
+            if (to) setDrops((x) => x.filter((y) => y !== to));
+            refresh(0);
+          }),
+        ),
+      );
+    });
   }
 
   // A row you dragged, or moved up or down from its menu: drawn where you put it at once, then the desk's view read back;
@@ -985,7 +1022,7 @@ export function App() {
     const leaves = cs.filter((c) => LEAVES.has(action) && c.status === "active" && !c.resolved);
     return Effect.gen(function* () {
       setPicked([]);
-      leaves.forEach(hide);
+      const moved = leaves.length ? hide(leaves.map((c) => c.id)) : null;
       const started = Date.now();
       const results = yield* Effect.forEach(
         cs,
@@ -997,6 +1034,7 @@ export function App() {
         { concurrency: 4 },
       );
       const ok = results.filter((r) => r !== null);
+      if (moved && !ok.some((r) => r.c.id === moved.from)) putBack(moved);
       undoSeq.current = ok.flatMap((r) => (r.seq ? [r.seq] : []));
       undoWrite.current = null;
       yield* Effect.sleep(Math.max(0, 200 - (Date.now() - started)));
@@ -1023,9 +1061,8 @@ export function App() {
 
   // A session's triage: it fades off the list at once, and comes back if the desk refuses.
   function sessionAct(s: SessionCard, action: "done" | "snooze" | "mute", until = "tomorrow") {
-    if (selected === s.id) setSelected(null);
+    const moved = hide([s.id]);
     if (route.name === "session" && route.id === s.id) go({ name: "queue" });
-    setLeaving((x) => new Set(x).add(s.id));
     runUi(
       api.act(s.id, action, action === "snooze" ? until : undefined).pipe(
         Effect.tap((res) =>
@@ -1036,6 +1073,11 @@ export function App() {
             gone.show(s.id, loadSeq.current);
             const snoozed = SNOOZE.find((o) => o.until === until)?.toast.replace(/ \(or .*\)$/, "") ?? until;
             flash(`${action === "snooze" ? `Snoozed ${snoozed}` : VERB[action]}: ${s.name}`, false, true);
+          }),
+        ),
+        Effect.tapError(() =>
+          Effect.sync(() => {
+            putBack(moved);
           }),
         ),
         Effect.catch(failed),
@@ -1073,11 +1115,31 @@ export function App() {
     );
   }
 
-  // A row leaving the list: it fades out, and takes its selection with it.
-  function hide(c: Card) {
-    if (selected === c.id) setSelected(null);
-    if (expanded === c.id) setExpanded(null);
-    setLeaving((s) => new Set(s).add(c.id));
+  // Rows leaving the list fade out.
+  function fade(ids: string[]) {
+    setExpanded((e) => (e !== null && ids.includes(e) ? null : e));
+    setLeaving((s) => new Set([...s, ...ids]));
+  }
+
+  // Rows leaving the list: they fade out, and the selection moves on.
+  function hide(ids: string[]): Moved | null {
+    fade(ids);
+    return moveOff(ids);
+  }
+
+  // The selection on leaving rows moves to the row after them, focused if the list had the keyboard. Returns it for putBack.
+  function moveOff(ids: string[]): Moved | null {
+    if (selected === null || !ids.includes(selected)) return null;
+    const to = nextOf(itemOrder, selected, (x) => ids.includes(x));
+    setSelected(to);
+    const on = document.activeElement;
+    if (to && LIST_PAGES.has(route.name) && (!on || on === document.body || on.closest(".line[data-id], .ctx")))
+      document.querySelector<HTMLElement>(`.main .line[data-id="${CSS.escape(to)}"] .row-main`)?.focus({ preventScroll: true });
+    return { from: selected, to };
+  }
+
+  function putBack(m: Moved | null) {
+    if (m) setSelected((s) => (s === m.to ? m.from : s));
   }
 
   function unhide(id: string) {
@@ -1211,7 +1273,7 @@ export function App() {
   function answerInquiry(q: Inquiry, text: string, dismiss = false): Effect.Effect<boolean> {
     return Effect.suspend(() => {
       const id = inquiryOf(q.id);
-      if (selected === id) setSelected(null);
+      moveOff([id]);
       answered.show(q.id, true);
       return api.answerInquiry(q.id, dismiss ? { dismiss: true } : { text }).pipe(
         Effect.match({
@@ -1244,15 +1306,15 @@ export function App() {
     setActed(actedRef.current);
   }
 
-  // A write that finishes your part takes it off the list at once, with a spinner in the toast until GitHub has it; a
-  // refusal brings it back. A review stays open, saying what you did and where it went (`did`). `error` on what the write
-  // returns: done, but with something to say. True once GitHub has it.
+  // A write that finishes your part. From a list its row leaves at once, and from its review the next item opens (`next`).
+  // A refusal brings it back, and you back to it. True once GitHub has it.
   function finish(
     c: Card,
     sending: string,
     did: Acted,
     write: Effect.Effect<{ text: string; error?: boolean; undo?: boolean; stays?: boolean }, ApiError>,
-    shown = true, // false: the review says it only while sending (a comment), so what you'd do next is still there
+    // When the next item opens: at once, once GitHub has it (a write that may keep the item, `stays`), or never (a comment).
+    next: "now" | "after" | "never" = "now",
   ): Effect.Effect<boolean> {
     return Effect.suspend((): Effect.Effect<boolean> => {
       // Still sending from this review: a second press waits for it. Once it's done, the next write (Hand off after Approve) goes.
@@ -1265,22 +1327,43 @@ export function App() {
         markActed(c.id, to);
       };
       mark({ ...did, sending: true });
-      hide(c);
+      const around = itemOrder;
+      const inReview = routeRef.current.name === "review" && routeRef.current.id === c.id;
+      const leaves = c.status === "active" && !c.resolved; // a cleared item stays in the Archive
+      const there = next === "now" && leaves ? advance(c.id, around) : null;
+      // A review that gave way hands its selection to what it opened. One that stays keeps it until GitHub has the write.
+      const moved = !inReview ? hide([c.id]) : there ? { from: c.id, to: there.id } : null;
       flash(sending, false, false, 60_000, true);
       return write.pipe(
-        Effect.match({
-          onSuccess: (r) => {
-            // Still on your desk (ready with nobody asked to review it): it went nowhere, and its next step shows in place.
-            mark(r.stays || !shown ? before : { ...did, sending: false });
-            if (!r.stays) gone.show(c.id, loadSeq.current);
-            flash(r.text, r.error, r.undo);
-            return true;
-          },
-          onFailure: (e) => {
-            mark(before);
-            flash(e.message, true);
-            return false;
-          },
+        Effect.matchEffect({
+          onSuccess: (r) =>
+            Effect.gen(function* () {
+              // Still on your desk (ready with nobody asked to review it): it went nowhere, and its next step shows in place.
+              mark(r.stays || next === "never" ? before : { ...did, sending: false });
+              flash(r.text, r.error, r.undo);
+              if (r.stays) {
+                putBack(moved);
+                comeBack(c.id, there);
+                return true;
+              }
+              if (next === "after" && leaves) advance(c.id, around);
+              if (inReview) {
+                // This render is a write ago, so the selection moves on only if it's still on this row.
+                fade([c.id]);
+                setSelected((s) => (s === c.id ? nextOf(itemOrderRef.current, c.id, () => false) : s));
+                yield* Effect.sleep(200); // its row fades out
+              }
+              gone.show(c.id, loadSeq.current);
+              return true;
+            }),
+          onFailure: (e) =>
+            Effect.sync(() => {
+              mark(before);
+              putBack(moved);
+              comeBack(c.id, there);
+              flash(e.message, true);
+              return false;
+            }),
         }),
         Effect.ensuring(
           Effect.sync(() => {
@@ -1453,7 +1536,14 @@ export function App() {
         Effect.succeed({ text: `${e.message}. Ask ${names} on GitHub.`, error: true, stays: true }),
       ),
     );
-    return finish(c, `Marking ${shortRef(c)} ready for review…`, { what: "Marked ready for review", where: "archive" }, write);
+    // With nobody picked, it's the desk that knows whether anyone's asked to review it.
+    return finish(
+      c,
+      `Marking ${shortRef(c)} ready for review…`,
+      { what: "Marked ready for review", where: "archive" },
+      write,
+      picked.length ? "now" : "after",
+    );
   }
 
   function markReady(c: Card, picked: Reviewer[] = []) {
@@ -1511,13 +1601,13 @@ export function App() {
   // refusal keeps your words in it.
   function comment(c: Card, body: string): Effect.Effect<boolean> {
     const write = api.comment(c.id, body).pipe(Effect.as({ text: `Commented on ${shortRef(c)} on GitHub` }));
-    return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, write, false);
+    return finish(c, `Commenting on ${shortRef(c)}…`, { what: "Commented", where: "archive" }, write, "never");
   }
 
-  // Approve in a review: approved on GitHub, pinned to the commit the review showed. A merge that's now yours keeps its row.
-  function approve(c: Card, head: string) {
+  // Approve in a review, pinned to the commit it showed. `keeps`: approving makes the merge yours, so the review stays.
+  function approve(c: Card, head: string, keeps: boolean) {
     const write = api.approve(c.id, head).pipe(Effect.map((r) => ({ text: `Approved ${shortRef(c)} on GitHub`, stays: r.stays })));
-    runUi(finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, write));
+    runUi(finish(c, `Approving ${shortRef(c)}…`, { what: "Approved", where: "archive" }, write, keeps ? "after" : "now"));
   }
 
   // A button that opens its row's menu, at the button: an opened issue's Snooze, with Snooze open.
@@ -1741,19 +1831,24 @@ export function App() {
   const stepAt = useRef<string | null>(null);
   function stepTo(by: 1 | -1) {
     const shown = route.name === "review" || route.name === "session" ? route.id : route.name === "inquiry" ? inquiryOf(route.id) : null;
-    if (laneList) {
-      const at = laneRows.findIndex((r) => r.card.id === (shown ?? laneSel));
-      const to = laneRows[at < 0 ? (by > 0 ? 0 : laneRows.length - 1) : at + by];
-      if (to) go({ name: "review", id: to.card.id });
-      return;
-    }
-    const order = [...inquiries.map((q) => inquiryOf(q.id)), ...sessions.map((x) => x.id), ...flat.map((c) => c.id)];
     // An issue it opened in place beside a review is where it is, not the review still drawn.
     const last = stepAt.current;
-    const here = last !== null && (last === expanded || last === shown) ? last : (shown ?? expanded ?? selected);
-    const at = here === null ? -1 : order.indexOf(here);
-    const id = order[at < 0 ? (by > 0 ? 0 : order.length - 1) : at + by];
-    if (id === undefined) return;
+    const here = laneList
+      ? (shown ?? laneSel)
+      : last !== null && (last === expanded || last === shown)
+        ? last
+        : (shown ?? expanded ?? selected);
+    const at = here === null ? -1 : itemOrder.indexOf(here);
+    const id = itemOrder[at < 0 ? (by > 0 ? 0 : itemOrder.length - 1) : at + by];
+    if (id !== undefined) openAt(id);
+  }
+
+  // Opens an item as a click on its row would: a review, a question's or a session's page, or an issue in place on its list.
+  function openAt(id: string) {
+    if (laneList) {
+      go({ name: "review", id });
+      return;
+    }
     stepAt.current = id;
     const q = inquiries.find((x) => inquiryOf(x.id) === id);
     const s = sessions.find((x) => x.id === id);
@@ -1773,6 +1868,28 @@ export function App() {
       if (route.name === "review" || route.name === "inquiry") go({ name: listPage ?? "queue" });
       if (expanded !== c.id) toggle(c);
     }
+  }
+
+  // Opens the item that takes the open review's place, as ⌘] would, and returns where, so a refusal can come back.
+  function advance(id: string, around: string[]): Took | null {
+    const r = routeRef.current;
+    if (!openNextRef.current || r.name !== "review" || r.id !== id) return null; // off, or you went elsewhere meanwhile
+    const still = itemOrderRef.current;
+    const to = nextOf(around, id, (x) => !still.includes(x));
+    if (!to) return null;
+    // This may be the render you acted in, a write ago: its lists are the ones `around` came from, so they have `to`.
+    openAt(to);
+    return { hash: location.hash, id: to };
+  }
+
+  // A write refused or kept after its review gave way: back on its review, if you're still where advance() took you.
+  function comeBack(id: string, there: Took | null) {
+    if (there === null || location.hash !== there.hash) return;
+    const r = routeRef.current;
+    // An issue opens in place, so the list's address stays the same after you close it.
+    if (r.name !== "review" && r.name !== "inquiry" && r.name !== "session" && expandedRef.current !== there.id) return;
+    setSelected(id);
+    go({ name: "review", id });
   }
 
   // ↓ and ↑ on a list page move to the row after or before the focused one (else the selected one; with neither, the first or

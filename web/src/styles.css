@@ -8222,8 +8222,9 @@ ul.rv-status-why {
   -webkit-app-region: no-drag;
 }
 
-/* The bar is a page head like every other: on the chrome, its hairline under it, out to the window's edges however wide
-   (the column clips what reaches past them). */
+/* The bar is a page head like every other: on the chrome, its hairline under it, out to its column's edges (the bar sits
+   centred in the pane). No further: it drags the window as the bar does, Electron ignores the clip, and past the column
+   it would swallow the clicks on the buttons in the list beside. */
 .col:has(.rv-bar) {
   overflow-x: clip;
 }
@@ -8231,7 +8232,7 @@ ul.rv-status-why {
 .rv-bar::before {
   content: "";
   position: absolute;
-  inset: 0 -100vmax;
+  inset: 0 calc((100% - 100cqi) / 2);
   z-index: -1;
   border-bottom: 1px solid var(--rule);
   background: var(--chrome);

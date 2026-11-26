@@ -205,6 +205,10 @@ const rowMenuPick = async (page: Page, row: string, item: string) => {
   await page.locator(row).locator(".row-main").click({ button: "right" });
   await page.locator(".ctx-item", { hasText: item }).first().click();
 };
+// The Inbox's items in screen order, as ⌘] steps through them (notes aren't among them), and the one after `id`.
+const rowIds = (page: Page) =>
+  page.evaluate<string[]>(`[...document.querySelectorAll(".queue .line[data-id]:not(.memo)")].map((l) => l.dataset.id)`);
+const rowAfter = (ids: string[], id: string | null) => (id === null ? null : (ids[ids.indexOf(id) + 1] ?? null));
 // Where each selector's first match starts down the page, or -1 when there's none: read at once, never waited for.
 const tops = (page: Page, sels: string[]) =>
   page.evaluate<number[]>(`${JSON.stringify(sels)}.map((s) => document.querySelector(s)?.getBoundingClientRect().top ?? -1)`);
@@ -561,6 +565,15 @@ let reposWere: unknown = null; // the mock's own github.my_repos, which settings
 // A setting as the desk has it now, read past the window.
 const deskHas = (page: Page, key: string) =>
   page.evaluate<unknown>(`fetch("/api/settings").then((r) => r.json()).then((v) => v.values[${JSON.stringify(key)}])`);
+// Open the next item after you act in a review, set in the desk (it's off unless a shot turns it on), and the page reloaded
+// to read it.
+const openNext = async (page: Page, on: boolean) => {
+  const body = JSON.stringify({ set: { "queue.open_next": on } });
+  await page.evaluate(
+    `fetch("/api/settings", { method: "PUT", headers: { "content-type": "application/json" }, body: ${JSON.stringify(body)} })`,
+  );
+  await fresh(page);
+};
 // One step of settings-saves: `commit` on a setting's row (after `edit`, which may grow it), then the desk has `want`, "Saved"
 // showed in that row, the row kept its height (`still`: a reset can shrink a list back), and the line clears the hairline.
 const saveStep = async (
@@ -1306,6 +1319,9 @@ const SHOTS: Shot[] = [
         `[...document.querySelectorAll(".ctx > .ctx-group > .ctx-item, .ctx > .ctx-group > .ctx-subwrap > .ctx-item")].map((el) => (el.querySelector("span") ?? el).textContent.trim())`,
       );
       if (menu.join(" · ") !== "Done · Snooze · Kick") failures.push(`queue-session: a session's menu reads ${JSON.stringify(menu)}`);
+      // Right-clicked, it's selected, as any row is.
+      if (!(await page.locator(".line.session.sel", { hasText: "Migrate the job store" }).count()))
+        failures.push("queue-session: the session you right-clicked isn't filled");
       await page.keyboard.press("Escape");
       await page.locator(".line.session", { hasText: "Fix the flaky upload test" }).locator(".row-main").click();
       await page.waitForTimeout(200);
@@ -6966,22 +6982,53 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // Done in a row's menu: the row leaves and takes its fill with it; no neighbour is filled in its place. Held, so the mock
-    // keeps the row for the next size's shots.
-    name: "row-done-unselected",
+    // Done in a row's menu: the row leaves and hands its fill and the focus to the row after it. Held, so the mock keeps the
+    // row for the next size's shots.
+    name: "row-done-next",
     go: async (page) => {
       await page.route("**/api/act", async (route) => {
         if (field(route.request().postDataJSON(), "action") !== "done") await route.continue();
       });
       await at("#/")(page);
-      await rowMenuPick(page, ".queue .line:not(.inq) >> nth=1", "Done");
+      const row = ".queue .line:not(.inq, .session, .memo) >> nth=1";
+      const next = rowAfter(await rowIds(page), await page.locator(row).getAttribute("data-id"));
+      await rowMenuPick(page, row, "Done");
       await page.waitForTimeout(400);
-      if (await page.locator(".line.sel").count()) failures.push("row-done-unselected: a row is filled after the one you finished left");
+      const seen = await page.evaluate<{ filled: string[]; focused: string | null }>(`({
+        filled: [...document.querySelectorAll(".line.sel")].map((l) => l.dataset.id),
+        focused: document.activeElement?.closest(".line")?.dataset.id ?? null,
+      })`);
+      if (seen.filled.join() !== next || seen.focused !== next)
+        failures.push(`row-done-next: after Done, ${JSON.stringify(seen)} rather than ${next} filled and focused`);
     },
     // The reload drops the held write first: unrouting while it's held would let it through to the mock.
     after: async (page) => {
       await fresh(page);
       await unroute(page);
+    },
+  },
+  {
+    // The desk refuses a session's Done: it comes back, and so does its fill.
+    name: "session-done-refused",
+    go: async (page) => {
+      refusing.add("/api/act");
+      await page.route("**/api/act", async (route) => {
+        await page.waitForTimeout(300); // its fill moves on first
+        await route.fulfill({ status: 409, json: { error: "The session is running again", tag: "Conflict" } });
+      });
+      await at("#/")(page);
+      const row = ".queue .line.session >> nth=0";
+      const id = await page.locator(row).getAttribute("data-id");
+      await rowMenuPick(page, row, "Done");
+      await page.waitForTimeout(1200);
+      const filled = await page.evaluate<string[]>(`[...document.querySelectorAll(".line.sel")].map((l) => l.dataset.id)`);
+      if (filled.join() !== id)
+        failures.push(`session-done-refused: after the refusal, ${JSON.stringify(filled)} filled rather than ${id}`);
+    },
+    after: async (page) => {
+      refusing.delete("/api/act");
+      await unroute(page);
+      await fresh(page);
     },
   },
   {
@@ -7041,14 +7088,199 @@ const SHOTS: Shot[] = [
       await fresh(page);
     },
   },
-  // Approve at once: the review stays, its Approve now what you did, in the Archive, a spinner while GitHub (here never)
-  // answers. Last: its toast would sit over the next shot.
+  // With Open the next item on, Approve opens the item after it on the Inbox at once, the toast spinning while GitHub (here
+  // never) answers, and the PR keeps its row until then. The held request stays held (unrouting would let it through to the
+  // mock), and a reload drops it.
+  {
+    name: "review-approve-next",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      await openNext(page, true);
+      const next = rowAfter(await rowIds(page), id);
+      await page.route("**/approve", () => {});
+      await review(id, ['.rv-actions button:has-text("Approve")'])(page);
+      const hash = await page.evaluate<string>("location.hash");
+      if (!next || hash !== `#/review/${encodeURIComponent(next)}`)
+        failures.push(`review-approve-next: as you approve, ${hash} is open rather than ${next ?? "the next row"}'s review`);
+      // Beside it, where there's room, the PR you approved keeps its row until GitHub has the approval.
+      const beside = await page.locator(".beside").count();
+      if (beside && !(await page.locator(`.beside .line[data-id="${id}"]:not(.leaving)`).count()))
+        failures.push("review-approve-next: the PR you approved left the list before GitHub had the approval");
+    },
+    after: async (page) => {
+      await openNext(page, false);
+      await unroute(page);
+    },
+  },
+  // GitHub takes the approval after you went on from the item it opened: the list beside keeps the item you're on.
+  {
+    name: "review-approve-moved-on",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      const mod = process.platform === "darwin" ? "Meta" : "Control";
+      const answers: Route[] = [];
+      await page.route("**/approve", (route) => {
+        answers.push(route);
+      });
+      // Opened from its row, as a click opens it, so it's the row selected.
+      await openNext(page, true);
+      await page.locator(`.queue .line[data-id="${id}"] .row-main`).click();
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(900);
+      await page.locator('.rv-actions button:has-text("Approve")').click();
+      await page.waitForTimeout(400);
+      await page.keyboard.press(`${mod}+BracketRight`);
+      await page.waitForTimeout(400);
+      const on = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      for (const r of answers.splice(0)) await r.fulfill({ json: { ok: true, url: "", stays: false } });
+      await page.waitForTimeout(600);
+      await page.keyboard.press("Escape");
+      await page.waitForTimeout(400);
+      const sel = await page.evaluate<string | null>(`document.querySelector(".queue .line.sel")?.dataset.id ?? null`);
+      if (on !== `#/review/${sel}`) failures.push(`review-approve-moved-on: back from ${on}, the Inbox fills ${sel}`);
+    },
+    after: async (page) => {
+      await unroute(page);
+      await openNext(page, false);
+    },
+  },
+  // The approval opened the issue after it in place on the Inbox, and you closed that issue: a refusal leaves you on the list.
+  {
+    name: "review-approve-refused-closed",
+    go: async (page) => {
+      await openNext(page, true);
+      const ids = await rowIds(page);
+      const kinds = await page.evaluate<Record<string, string>>(`fetch("/api/queue").then((r) => r.json()).then((v) => {
+        const kinds = {};
+        const walk = (x) => {
+          if (Array.isArray(x)) x.forEach(walk);
+          else if (x && typeof x === "object") {
+            if (typeof x.id === "string" && typeof x.kind === "string") kinds[x.id] = x.kind;
+            Object.values(x).forEach(walk);
+          }
+        };
+        walk(v);
+        return kinds;
+      })`);
+      const id = ids.find((x, i) => kinds[x] === "pr" && kinds[ids[i + 1] ?? ""] === "issue");
+      const issue = rowAfter(ids, id ?? null);
+      if (!id || !issue) {
+        failures.push("review-approve-refused-closed: no PR on the Inbox has an issue after it");
+        return;
+      }
+      refusing.add("/approve");
+      await page.route("**/approve", async (route) => {
+        await page.waitForTimeout(1500); // you close the issue first
+        await route.fulfill({ status: 409, json: { error: "GitHub didn't take the approval: it has new commits", tag: "Conflict" } });
+      });
+      await page.locator(`.queue .line[data-id="${id}"] .row-main`).click();
+      await page.locator(".rv-diff").first().waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(900);
+      await page.locator('.rv-actions button:has-text("Approve")').click();
+      await page.waitForTimeout(400);
+      const opened = await page.locator(`.queue .line.open[data-id="${issue}"]`).count();
+      if (!opened) failures.push(`review-approve-refused-closed: approving ${id} didn't open ${issue} in place`);
+      await page.locator(`.queue .line[data-id="${issue}"] .row-main`).click();
+      await page.waitForTimeout(1800);
+      const hash = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (hash !== "#/") failures.push(`review-approve-refused-closed: after you closed ${issue}, the refusal took you to ${hash}`);
+    },
+    after: async (page) => {
+      refusing.delete("/approve");
+      await unroute(page);
+      await openNext(page, false);
+    },
+  },
+  // GitHub refuses the approval after the next item opened: you're back on the PR, and a bubble says why.
+  {
+    name: "review-approve-refused",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      await openNext(page, true);
+      refusing.add("/approve");
+      await page.route("**/approve", async (route) => {
+        await page.waitForTimeout(500); // the next item opens first
+        await route.fulfill({ status: 409, json: { error: "GitHub didn't take the approval: it has new commits", tag: "Conflict" } });
+      });
+      await review(id, ['.rv-actions button:has-text("Approve")'])(page);
+      await page.waitForTimeout(800);
+      const hash = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (hash !== `#/review/${id}`) failures.push(`review-approve-refused: after the refusal, ${hash} is open`);
+    },
+    after: async (page) => {
+      refusing.delete("/approve");
+      await unroute(page);
+      await openNext(page, false);
+    },
+  },
+  // Approving makes the merge yours: the review stays, for Hand off for merge, while GitHub (here never) answers.
+  {
+    name: "review-approve-keeps",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      await openNext(page, true);
+      await page.route("**/api/review/**", async (route) => {
+        if (route.request().method() !== "GET") return route.fallback();
+        const res = await route.fetch();
+        const v: unknown = await res.json();
+        if (isRecord(v)) Object.assign(v, { approve: { ok: true, reason: null, keeps: true } });
+        await route.fulfill({ response: res, json: v });
+      });
+      await page.route("**/approve", () => {});
+      await review(id, ['.rv-actions button:has-text("Approve")'])(page);
+      await page.waitForTimeout(300);
+      const hash = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (hash !== `#/review/${id}`) failures.push(`review-approve-keeps: approving a merge that's yours opened ${hash}`);
+    },
+    after: async (page) => {
+      await openNext(page, false);
+      await unroute(page);
+    },
+  },
+  // Request changes refused after the next item opened: back on the PR, its box open with what you wrote.
+  {
+    name: "review-request-changes-refused",
+    go: async (page) => {
+      const id = "acme/api#4127";
+      const words = "Cap the retries, and test the cap.";
+      await openNext(page, true);
+      refusing.add("/api/github");
+      await page.route("**/api/github", async (route) => {
+        await page.waitForTimeout(500); // the next item opens first
+        await route.fulfill({ status: 409, json: { error: "GitHub didn't take the review: it has new commits", tag: "Conflict" } });
+      });
+      await review(id, [MORE, '.more-pop .pop-item:has-text("Request changes")'])(page);
+      await page.keyboard.type(words);
+      await page.locator(".rv-changes .act.primary").click();
+      await page.waitForTimeout(250);
+      const away = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (away === `#/review/${id}`) failures.push("review-request-changes-refused: sending didn't open the next item");
+      await page.waitForTimeout(800);
+      const hash = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      const kept = await page
+        .locator(".rv-changes textarea")
+        .inputValue({ timeout: 5000 })
+        .catch(() => null);
+      if (hash !== `#/review/${id}` || kept !== words)
+        failures.push(`review-request-changes-refused: after the refusal, ${hash} with ${JSON.stringify(kept)} in the box`);
+    },
+    after: async (page) => {
+      refusing.delete("/api/github");
+      await unroute(page);
+      await openNext(page, false);
+    },
+  },
+  // Approve at once: as it opens, the review stays, its Approve now what you did, a spinner in the toast while GitHub (here
+  // never) answers. Last: its toast would sit over the next shot.
   {
     name: "review-approve",
     go: async (page) => {
+      const id = "acme/api#4127";
       await page.route("**/approve", () => {});
-      await review("acme/api#4127", ['.rv-actions button:has-text("Approve")'])(page);
+      await review(id, ['.rv-actions button:has-text("Approve")'])(page);
       await page.waitForTimeout(400); // past its row's fade and fold beside it
+      const hash = decodeURIComponent(await page.evaluate<string>("location.hash"));
+      if (hash !== `#/review/${id}`) failures.push(`review-approve: approving opened ${hash} with Open the next item off`);
       // Its toast centres on the page's column, beside the list as without it.
       const off = await page.evaluate<number | null>(`(() => {
         const t = document.querySelector(".toast")?.getBoundingClientRect(), c = document.querySelector(".col")?.getBoundingClientRect();

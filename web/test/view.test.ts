@@ -85,7 +85,7 @@ import {
 } from "../src/diffLines.ts";
 import { checkDot, checkGroups } from "../src/checks.ts";
 import { hashOf } from "../../src/links.ts";
-import { bulkMenu, fyiShown, logLine, pickRange, pickToggle } from "../src/groups.ts";
+import { bulkMenu, fyiShown, logLine, nextOf, pickRange, pickToggle } from "../src/groups.ts";
 import {
   filterOf,
   filterPeople,
@@ -1653,6 +1653,24 @@ test("shift-click picks the rows between the anchor and the click, either way; â
   assert.deepEqual(pickRange(order, "a", "gone"), []);
   assert.deepEqual(pickToggle(["a"], "c"), ["a", "c"]);
   assert.deepEqual(pickToggle(["a", "c"], "a"), ["c"]);
+});
+
+test("a row that leaves gives its place to the next row still on the list, else the one before it", () => {
+  const order = ["a", "b", "c", "d"];
+  const none = () => false;
+  assert.equal(nextOf(order, "b", none), "c");
+  assert.equal(nextOf(order, "d", none), "c", "the last row's place goes to the one before");
+  assert.equal(
+    nextOf(order, "a", (id) => id === "b" || id === "c"),
+    "d",
+    "rows leaving with it are skipped",
+  );
+  assert.equal(
+    nextOf(order, "c", (id) => id === "d"),
+    "b",
+  );
+  assert.equal(nextOf(["a"], "a", none), null, "the list's only row leaves none");
+  assert.equal(nextOf(order, "x", none), null, "a row that isn't on the list takes no place");
 });
 
 test("the menu of several picked rows offers only what all of them allow", () => {

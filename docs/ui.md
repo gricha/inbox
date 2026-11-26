@@ -25,8 +25,8 @@ The pages:
 - **Mouse first, plain words.** Every action is a button, a link or a row's right-click menu, named for what it does. No key in a label, placeholder or flash: a button's tooltip may name its own key, and holding ⌘ shows it as a chip by the button. Only platform keys work ([Keys](#keys)).
 - **Nothing selected on open.** A page opens with no row selected.
 - **One line per item, as a table.** No AI gist, verdict or chips on a row. A click opens the review, where all that is.
-- **What you do takes it off.** Approve, a comment, Ready for review, Request changes, Close, Merge and Hand off for merge each take the item off its list at once. It goes to the Archive (Merging for a hand-off). A toast spins until GitHub has it. If GitHub refuses, the item comes back and a bubble says why. Nothing asks for a second press.
-- **A review stays open after you act.** In place of the button it says what you did and where the item went ("✓ Approved · in Archive"), so you can read on or press Esc.
+- **What you do takes it off.** Approve, a comment, Ready for review, Request changes, Close, Merge and Hand off for merge each take the item off its list: at once from the list, once GitHub has it from the item's review. It goes to the Archive (Merging for a hand-off). A toast spins until GitHub has it. If GitHub refuses, the item comes back and a bubble says why. Nothing asks for a second press. The selection moves to the row after it at once (the one before it, at the list's end), and a refusal puts it back.
+- **A review stays open after you act.** In place of the button it says what you did and where the item went ("✓ Approved · in Archive"), so you can read on, comment or press Esc. With Settings → Inbox and notifications → Open the next item after you act in a review, Approve, Done or the like opens the item after it at once instead, as ⌘] would, and if GitHub refuses, you're back on the item, your words still there. A comment never moves on, so you can still approve, and nor does an approval that makes the merge yours (it stays for Hand off for merge).
 - **One name for the coordinator.** The window calls it _your agent_. "Coordinator" stays in code, settings keys, the skill and technical docs. Merging is `inflight` in code.
 - **Send talks to your agent.** A box that posts on GitHub says what it does there (Reply, Comment). Only the chat and an answer to an agent say Send.
 - **Calm.** Colour only where it carries information: "CI failing" red, "changes requested" and "merge conflict" amber, an AI review's risk (low green, medium amber, high red) and its verdict's tag in the same three. The one control to press in each place is filled with the accent; a row's call to action is tinted and fills under the pointer. Everything else on a row or an opened item is text. Sentence case, no all-caps, no monospace outside code. Details: [visual.md → The visual system](visual.md#the-visual-system).
@@ -521,6 +521,7 @@ No tabs. In Settings the sidebar lists its parts in place of the pages, under **
 
 - Move untouched items to FYI after (days).
 - Urgent from a score of (8), FYI up to a score of (3).
+- Open the next item after you act in a review (off): Approve, Done and the like open the item after it, as ⌘] would.
 - Notify me when something needs me.
 - Quiet hours: two times (in this computer's 12- or 24-hour clock) and a switch. Off saves `""` and greys the times, keeping them; on saves `19:00-09:00`. A time saves when you leave its field. The row greys while notifications are off.
 

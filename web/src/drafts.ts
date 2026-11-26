@@ -28,6 +28,16 @@ export function keepComment(pr: string, text: string): void {
   else comments.delete(pr);
 }
 
+// Request changes' words until GitHub has them: the next item opens as you send them, and a refusal brings you back to them.
+const changes = new Map<string, string>();
+
+export const keptChanges = (pr: string): string => changes.get(pr) ?? "";
+
+export function keepChanges(pr: string, text: string): void {
+  if (text.trim()) changes.set(pr, text);
+  else changes.delete(pr);
+}
+
 const sending = new Set<string>();
 const watchers = new Set<(pr: string) => void>();
 
