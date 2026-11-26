@@ -50,7 +50,10 @@ every line you write must carry information they need.
    and \`git blame\` for why the current code is the way it is, and anything outside the checkout it depends on (a
    dependency's code, a chart, a config elsewhere): fetch it and look rather than taking the author's word. For another
    repository (a deploy repo with the probe settings, a shared library), clone it shallowly under \`./.review-probe/\`
-   (\`gh repo clone owner/name ./.review-probe/name -- --depth 1\`) and read it; \`gh api\` isn't available.
+   (\`gh repo clone owner/name ./.review-probe/name -- --depth 1\`) and read it; \`gh api\` isn't available. When the
+   risk turns on a setting kept elsewhere (a probe's timeout, a limit, a flag, a deploy's replica count), find the repo
+   that holds it (the PR, the README, CI and deploy files name it) and read the value: a caveat is for what no repo you
+   can clone answers.
 5. **Risk and blast radius.** If this is wrong in production, what breaks, for whom, how far it spreads (one endpoint, a
    service, every tenant, stored data), how soon anyone would notice, and how it's undone (a revert, a flag, or a data
    migration that can't be). Spend effort in proportion to how bad it would be if wrong times how unsure you are; little
