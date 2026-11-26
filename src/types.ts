@@ -1651,7 +1651,7 @@ export type SessionTurn =
   | { who: "tools"; at: string; lines: string[]; images?: SessionImage[] }; // a run of tool calls, one line each
 // ask: the request it waits on while the desk runs it, which an answer names; without one, you answer with a message.
 export type SessionWait =
-  | { kind: "question"; question: string; options: { label: string; description: string }[]; ask?: string }
+  | { kind: "question"; question: string; options: { label: string; description: string }[]; pick?: string; ask?: string } // pick: the one it recommends
   | { kind: "permission"; tool: string; detail: string; ask?: string } // detail: the command, path or URL it asks to use, in full
   | { kind: "plan"; plan: string; ask?: string };
 export interface SessionView {

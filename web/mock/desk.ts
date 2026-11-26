@@ -2577,7 +2577,7 @@ const ALL_SESSIONS: SessionCard[] = [
     since: iso(0.3),
     excerpt: "Bash: Run the upload tests 20 times with retries off",
     resets_at: null,
-    alive: false, // the app closed it: the desk can carry it on
+    alive: true,
     actions: ["open"],
     open_url: "claude://claude.ai/epitaxy/local_5f1c2a90",
     attach: null,
@@ -2686,9 +2686,10 @@ const TALKS: Record<string, { turns: SessionTurn[]; waiting: SessionWait | null 
       kind: "question",
       question: "Group the changes by area or by PR?",
       options: [
-        { label: "By area", description: "API, web app, CLI: what most readers skim for" },
         { label: "By PR", description: "One line per PR in merge order, with its number" },
+        { label: "By area", description: "API, web app, CLI: what most readers skim for" },
       ],
+      pick: "By area",
     },
   },
 };
@@ -2751,13 +2752,7 @@ function sessionView(x: SessionCard): SessionView {
   const live = sessionLive.get(x.id);
   const card = replied ? null : { ...x, status: sessionTriage.get(x.id) ?? "active" };
   const limited = !!x.resets_at && Date.parse(x.resets_at) > now();
-  const why = live
-    ? null
-    : x.kind === "desktop" && x.alive
-      ? "Claude has it open: answer it there."
-      : limited
-        ? `It's rate limited until ${x.reason.slice(-5)}: answer it after that.`
-        : null;
+  const why = !live && limited ? `It's rate limited until ${x.reason.slice(-5)}: answer it after that.` : null;
   return {
     id: x.id,
     session_id: x.session_id,

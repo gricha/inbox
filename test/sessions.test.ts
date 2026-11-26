@@ -2,6 +2,7 @@
 // files (claude agents --json, transcripts, the desktop app's records) and codex-cli 0.154's state_5.sqlite and rollouts.
 import "./helpers/no-agent.ts";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -350,7 +351,10 @@ if (args[0] === "-p") {
   const prompt = fs.readFileSync(0, "utf8");
   log("asks", prompt);
   log("askArgs", args);
-  console.log(JSON.stringify({ type: "result", is_error: false, structured_output: { blocked: /Should I push/.test(prompt) } }));
+  const read = /Push to main or open a PR/.test(prompt)
+    ? { question: "Push to main or open a PR?", options: [{ label: "Open a PR", why: "CI runs first" }, { label: "Push to main", why: "Ships now" }], pick: "Open a PR" }
+    : { question: "", options: [], pick: "" };
+  console.log(JSON.stringify({ type: "result", is_error: false, structured_output: { blocked: /Should I push/.test(prompt), ...read } }));
   process.exit(0);
 }
 log("calls", { args, cwd: process.cwd() });
@@ -604,7 +608,7 @@ test(
     assert.deepEqual([flake.excerpt, flake.branch, flake.cwd, flake.alive], ["Bash: Push the branch", "feature/x", m.work, true]);
     assert.equal(q.sessions[1]!.excerpt, "Should I push to main?");
     assert.equal(q.sessions[2]!.open_url, "claude://claude.ai/epitaxy/local_abc");
-    assert.equal(m.asks().length, 2, "the model read the two questions: blocking and directional");
+    assert.equal(m.asks().length, 3, "the model read the two questions (blocking and directional) and the app's blocked turn's words");
     for (const args of m.askArgs())
       assert.deepEqual(
         [args[args.indexOf("--model") + 1], args[args.indexOf("--effort") + 1]],
@@ -619,7 +623,7 @@ test(
     assert.equal((await run(t.desk.overview())).focus.sessions, 5);
 
     await t.poll();
-    assert.equal(m.asks().length, 2, "asked once per message");
+    assert.equal(m.asks().length, 3, "asked once per message");
 
     // Moving on resolves it: the permission granted and the tool ran, the dead one finished, and the background one removed
     // (claude rm), which its job still names.
@@ -1021,13 +1025,22 @@ test(
 );
 
 test(
-  "a session the Claude app, a terminal or Codex holds says where to answer it, and refuses a message in those words",
+  "a session waiting on you in the Claude app or a terminal is yours to answer here: the desk stops that process and carries it on",
   posix,
   async (c) => {
     const m = machine(c);
     const t = await deskOn(c, m);
+    t.desk.sessions.guardMs = 60_000; // the test looks itself, below
     const l = lines(S.desk, m.work, Date.now());
-    const record = (o: Record<string, unknown>) => ({
+    // The app's process for it, idle at the end of its turn: a stand-in the desk can stop.
+    const app = spawn("sleep", ["60"], { stdio: "ignore" });
+    c.after(() => {
+      app.kill("SIGKILL");
+    });
+    const appRow = { pid: app.pid, cwd: m.work, kind: "interactive", sessionId: S.desk, status: "idle" };
+    m.agents([appRow]);
+    m.transcript(S.desk, [l.prompt("Ship it"), l.said("Tests pass. Push to main or open a PR? I'd open a PR so CI runs first.")]);
+    m.desktop({
       sessionId: "local_abc",
       cliSessionId: S.desk,
       title: "Deploy",
@@ -1035,57 +1048,63 @@ test(
       isArchived: false,
       lastActivityAt: Date.now(),
       lastTurnEdgeAt: 0,
-      postTurnSummary: { status_category: "blocked", status_detail: "Needs a token", summarizes_uuid: "x" },
-      ...o,
+      postTurnSummary: { status_category: "blocked", status_detail: "Asks push or PR", summarizes_uuid: "x" },
     });
-    const term = {
-      pid: process.pid,
-      cwd: m.work,
-      kind: "interactive",
-      sessionId: S.cli,
-      name: "term",
-      status: "waiting",
-      waitingFor: "permission prompt",
-    };
-    m.agents([term, { pid: process.pid, cwd: m.work, kind: "interactive", sessionId: S.desk, status: "idle" }]);
-    const tl = lines(S.cli, m.work, Date.now());
-    m.transcript(S.cli, [tl.prompt("Clean up"), tl.tool("t1", "Bash", { command: "rm -rf build", description: "Clean the build" })]);
-    m.transcript(S.desk, [l.prompt("go"), l.said("Blocked.")]);
-    m.desktop(record({}));
     await t.poll();
-    const open = await run(t.desk.sessionView(`session:${S.desk}`));
-    assert.deepEqual(
-      [open.can_reply, open.why_not, open.open, open.command],
-      [false, "Claude has it open: answer it there.", { label: "Open in Claude", url: "claude://claude.ai/epitaxy/local_abc" }, null],
-    );
-    assert.equal((await failure(t.desk.sendSession(`session:${S.desk}`, "ok"))).message, "Claude has it open: answer it there.");
-    const cli = await run(t.desk.sessionView(`session:${S.cli}`));
-    assert.deepEqual(
-      [cli.card?.reason, cli.waiting, cli.why_not, cli.open, cli.command],
-      [
-        "needs permission: Bash",
-        { kind: "permission", tool: "Bash", detail: "rm -rf build" },
-        "It runs in a terminal: answer it there.",
-        null,
-        null,
+    const id = `session:${S.desk}`;
+    const view = () => run(t.desk.sessionView(id));
+    const v = await view();
+    assert.deepEqual([v.can_reply, v.why_not, v.open?.url], [true, null, "claude://claude.ai/epitaxy/local_abc"]);
+    assert.deepEqual(v.waiting, {
+      kind: "question",
+      question: "Push to main or open a PR?",
+      options: [
+        { label: "Open a PR", description: "CI runs first" },
+        { label: "Push to main", description: "Ships now" },
       ],
-    );
-    // Closed in the app, it's the desk's to carry on.
-    m.agents([term]);
-    await t.poll();
-    assert.equal((await run(t.desk.sessionView(`session:${S.desk}`))).can_reply, true);
-    // The app opened it again between the page's read and your message: the look before starting says so.
-    m.agents([term, { pid: process.pid, cwd: m.work, kind: "interactive", sessionId: S.desk, status: "idle" }]);
-    assert.equal((await failure(t.desk.sendSession(`session:${S.desk}`, "ok"))).message, "Claude has it open: answer it there.");
-    m.agents([term]);
-    await run(t.desk.sendSession(`session:${S.desk}`, "Use the staging token"));
-    await until(
-      () => run(t.desk.sessionView(`session:${S.desk}`)),
-      (v) => lastSaid(v) === "On it: Use the staging token",
-    );
-    assert.equal((await failure(t.desk.sessionView("session:nope"))).message, 'no session "session:nope" needed you lately');
+      pick: "Open a PR",
+    });
+    // At work, it doesn't need you: left alone.
+    m.agents([{ ...appRow, status: "busy" }]);
+    assert.equal((await failure(t.desk.sendSession(id, "Open a PR"))).message, "It's working right now: it doesn't need you yet.");
+    assert.equal(app.exitCode === null && app.signalCode === null, true, "still running");
+    m.agents([appRow]);
+    await run(t.desk.sendSession(id, "Open a PR"));
+    assert.equal(app.signalCode, "SIGTERM", "the app's process stopped first");
+    await until(view, (x) => lastSaid(x) === "On it: Open a PR");
+    assert.ok(t.logged.some((x) => x.startsWith(`sessions: talking to ${S.desk} in ${m.work} (took it over from process ${app.pid})`)));
+    // The app started it again meanwhile: the desk lets go rather than be a second writer.
+    const back = spawn("sleep", ["60"], { stdio: "ignore" });
+    c.after(() => {
+      back.kill("SIGKILL");
+    });
+    m.agents([{ ...appRow, pid: back.pid }]);
+    await run(t.desk.sendSession(id, "Also tag it"));
+    const host = t.desk.sessions.hosts.get(id)!;
+    await new Promise((r) => {
+      setTimeout(r, 300);
+    });
+    // Only a take-over is guarded: this message went to the desk's own process, so nothing stops it.
+    assert.equal(host.closed, false);
+    await run(t.desk.sessions.guard(host));
+    assert.deepEqual([host.closed, host.error], [true, "Claude picked it up again: answer it there."]);
+    assert.equal((await view()).live, null);
   },
 );
+
+test("a terminal's and Codex's limits: Codex can't be written to, and a rate limit waits", posix, async (c) => {
+  const m = machine(c);
+  const t = await deskOn(c, m);
+  const now = t.desk.now().getTime();
+  const l = lines(S.bg, m.work, now);
+  m.agents([{ id: "bg01", cwd: m.work, kind: "background", startedAt: 1, sessionId: S.bg, name: "Migrate", state: "working" }]);
+  m.transcript(S.bg, [l.prompt("go"), l.apiError("rate_limit", 429, Math.floor((now + 90 * MIN) / 1000))]);
+  await t.poll();
+  const v = await run(t.desk.sessionView(`session:${S.bg}`));
+  assert.deepEqual([v.can_reply, v.why_not], [false, `It's rate limited until ${untilText(now + 90 * MIN, now)}: answer it after that.`]);
+  assert.equal((await failure(t.desk.sendSession(`session:${S.bg}`, "go on"))).message, v.why_not);
+  assert.equal((await failure(t.desk.sessionView("session:nope"))).message, 'no session "session:nope" needed you lately');
+});
 
 test("a turn's images show inline: a tool's screenshot and a file its words point to, and nothing else is served", posix, async (c) => {
   const m = machine(c);

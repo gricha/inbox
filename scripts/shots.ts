@@ -1333,7 +1333,7 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A session the Claude app closed, waiting on a permission: compact, its buttons in its head, its last turns (its tool calls
+    // A session waiting on a permission in the Claude app (the desk takes it over when you answer): compact, its buttons in its head, its last turns (its tool calls
     // a line a run, the chart it read inline), what it wants to run with Allow and Deny, and the box to write to it.
     name: "session-permission",
     go: async (page) => {
@@ -1397,8 +1397,8 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A terminal's session that asked a question: its answers one click each, the box takes your own answer; the turns before
-    // its last fourteen folded.
+    // A terminal's session that asked a question: its answers one click each, the one it recommends first and marked, the box
+    // for your own answer.
     name: "session-question",
     go: async (page) => {
       await at("#/session/session%3Ac47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63")(page);
@@ -1410,7 +1410,8 @@ const SHOTS: Shot[] = [
         head: [...document.querySelectorAll(".ses-acts .act")].map((b) => b.textContent.trim()),
       }))()`);
       if (p.ask !== "Group the changes by area or by PR?") failures.push(`session-question: it asks ${JSON.stringify(p.ask)}`);
-      if (p.options.join(" · ") !== "By area · By PR") failures.push(`session-question: its answers read ${JSON.stringify(p.options)}`);
+      if (p.options.join(" · ") !== "By areaits pick · By PR")
+        failures.push(`session-question: its answers read ${JSON.stringify(p.options)}`);
       if (p.box !== "Or answer in your own words") failures.push(`session-question: its box says ${JSON.stringify(p.box)}`);
       if (p.head.join(" · ") !== "Open in Claude · Copy resume command · Done")
         failures.push(`session-question: its head's buttons read ${JSON.stringify(p.head)}`);

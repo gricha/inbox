@@ -410,24 +410,29 @@ function Waiting({
         <p className="ses-ask">{w.question}</p>
         {w.options.length > 0 && (
           <ol className="inq-options">
-            {w.options.map((o) => (
-              <li key={o.label}>
-                <button
-                  type="button"
-                  className="inq-option"
-                  disabled={!can}
-                  onClick={() => {
-                    if (w.ask) answer(w.ask, { allow: true, answer: o.label });
-                    else send(o.label);
-                  }}
-                >
-                  <span className="inq-option-text">
-                    <span className="inq-option-answer">{o.label}</span>
-                    {o.description && <span className="inq-next">{o.description}</span>}
-                  </span>
-                </button>
-              </li>
-            ))}
+            {[...w.options]
+              .sort((a, b) => Number(b.label === w.pick) - Number(a.label === w.pick))
+              .map((o) => (
+                <li key={o.label}>
+                  <button
+                    type="button"
+                    className="inq-option"
+                    disabled={!can}
+                    onClick={() => {
+                      if (w.ask) answer(w.ask, { allow: true, answer: o.label });
+                      else send(o.label);
+                    }}
+                  >
+                    <span className="inq-option-text">
+                      <span className="inq-option-answer">
+                        {o.label}
+                        {o.label === w.pick && <span className="inq-pick">its pick</span>}
+                      </span>
+                      {o.description && <span className="inq-next">{o.description}</span>}
+                    </span>
+                  </button>
+                </li>
+              ))}
           </ol>
         )}
       </section>
