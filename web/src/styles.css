@@ -9105,6 +9105,19 @@ p.rv-next {
   color: var(--accent-ink);
 }
 
+/* What was verified and a nit weigh less than a finding: quieter and a step smaller, so the eye lands on what to act on. */
+.rv-note.rv-note-verified,
+.rv-note.rv-note-nit {
+  color: var(--pencil);
+  font-size: var(--text-sm);
+}
+
+/* A blocker or an issue reads in ink: it's what the review asks of you. */
+.rv-note.rv-note-blocker,
+.rv-note.rv-note-issue {
+  color: var(--ink);
+}
+
 .rv-note-verified .rv-bug {
   color: var(--green);
 }

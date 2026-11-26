@@ -7,7 +7,8 @@ import { parseDiagram } from "./diagram.ts";
 import { DeepAnswerSchema } from "./kv.ts";
 import { decode } from "./narrow.ts";
 import { hunksOf, type PrSaid } from "./review.ts";
-import type { AiReview, DeepNote, DeepReview, Item, ReviewFile, ReviewNote } from "./types.ts";
+import { onLines } from "./sections.ts";
+import type { AiReview, DeepNote, DeepReview, Item, NoteKind, ReviewFile, ReviewNote } from "./types.ts";
 
 const READER = {
   author:
@@ -215,14 +216,31 @@ const spotOf = (at: string, hunks: { path: string }[]) => {
 
 const noteText = (n: DeepNote) => [n.text, n.ask].filter(Boolean).join(" ");
 
+// What to spend attention on first: a blocker, then an issue, a question, what was verified, a nit.
+const WEIGHT: Record<NoteKind, number> = { blocker: 0, issue: 1, question: 2, verified: 3, nit: 4 };
+const byWeight = (ns: DeepNote[]) => ns.toSorted((a, b) => WEIGHT[a.kind] - WEIGHT[b.kind]);
+
 // The review a deep review of this commit makes: its steps over the diff's hunks, the hunks no step names skipped; each finding a note on the line it names, labelled by its kind, or else in its step's own words; its
 // picture in the step it explains. The AI review's notes and concerns are left out, so the review has one voice.
 // reviewOrder() draws it as the Review tab; the head reads its lean as the verdict.
 export const deepGuide = (deep: DeepReview, files: ReviewFile[], ai: AiReview | null): AiReview => {
   const hunks = hunksOf(files);
   const path = new Map(hunks.map((h) => [h.id, h.path]));
-  const named = new Set(deep.steps.flatMap((s) => s.hunks));
-  const notes: ReviewNote[] = deep.steps.flatMap((s) =>
+  // Each step's notes weightiest first, and its hunks led by the one whose note weighs most.
+  const steps = deep.steps.map((s) => {
+    const notes = byWeight(s.notes);
+    const weight = (id: string) => {
+      const h = hunks.find((x) => x.id === id);
+      const on = notes.find((n) => {
+        const spot = spotOf(n.at, hunks);
+        return !!h && !!spot && spot.path === h.path && onLines([h], { side: "new", line: spot.line });
+      });
+      return on ? WEIGHT[on.kind] : Object.keys(WEIGHT).length;
+    };
+    return { title: s.title, why: s.why, notes, hunks: s.hunks.toSorted((a, b) => weight(a) - weight(b)) };
+  });
+  const named = new Set(steps.flatMap((s) => s.hunks));
+  const notes: ReviewNote[] = steps.flatMap((s) =>
     s.notes.flatMap((n) => {
       const spot = spotOf(n.at, hunks);
       return spot ? [{ ...spot, side: "new" as const, body: noteText(n), flag: n.kind, ...(n.evidence && { evidence: n.evidence }) }] : [];
@@ -259,7 +277,8 @@ export const deepGuide = (deep: DeepReview, files: ReviewFile[], ai: AiReview | 
       total: hunks.length,
     },
     guide: {
-      steps: deep.steps.map((s, k) => {
+      steps: deep.steps.map((_, k) => {
+        const s = steps[k]!;
         const loose = s.notes.filter((n) => !spotOf(n.at, hunks));
         return {
           title: s.title,

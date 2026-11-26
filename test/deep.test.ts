@@ -227,4 +227,15 @@ test("a deep review's steps keep only this diff's hunks, become the Review tab's
     [["h2", "look"]],
     "a hunk no step names is skipped",
   );
+  // Weightiest first: the hunk with the blocker leads its step, and the blocker's note comes before the nit's.
+  const nit = { kind: "nit" as const, text: "Rename it.", ask: "", at: "a.ts:1", evidence: "" };
+  const both = deepGuide({ ...deep, steps: [{ title: "Both", why: "w", hunks: ["h1", "h2"], notes: [nit, blocker] }] }, files, null);
+  assert.deepEqual(
+    both.guide?.steps[0]?.hunks.map((h) => h.id),
+    ["h2", "h1"],
+  );
+  assert.deepEqual(
+    both.notes.map((n) => n.flag),
+    ["blocker", "nit"],
+  );
 });
