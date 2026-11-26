@@ -13,8 +13,8 @@ import { kill } from "../children.ts";
 import type { Core, Desk } from "../desk.ts";
 import { BadRequest, Conflict, NotFound, type CommandError, type UnsafeArgument } from "../errors.ts";
 import { SessionHost } from "./session-host.ts";
-import { elements, isRecord, jsonOf, num, str } from "../narrow.ts";
-import { runCommand } from "../review.ts";
+import { elements, field, isRecord, jsonOf, num, str } from "../narrow.ts";
+import { claudeSpawn, codexCommand, codexMissing, opencodeCommand, opencodeMissing, runCommand } from "../review.ts";
 import {
   isCoordinator,
   KICK,
@@ -43,6 +43,7 @@ const HEAD = 256 * 1024; // and from its start, for what you first asked
 const TURNS = 30; // turns a page shows; the rest of what it read fold
 const TURN_MAX = 4000; // characters of one turn's text
 const REPLY_MAX = 8000;
+const RESUME_TIMEOUT = 60 * 60_000; // a Codex or OpenCode turn the desk started on a message: it may fix and push in it
 const KEPT = 50; // sessions a page can still read after they stop needing you
 const GUARD = 4_000; // after taking one over, when the desk looks whether its app started it again
 
@@ -766,30 +767,66 @@ function desksOwn(cwd: string, name: string | undefined, home: string): boolean 
   return c === h || c.startsWith(h + path.sep) || cwd === home || cwd.startsWith(home + path.sep);
 }
 
-// The GitHub repo (owner/name) a directory is a clone or worktree of, from its git config's origin; null when it isn't one.
-const repos = new Map<string, string | null>();
-export function repoAt(cwd: string): string | null {
-  if (repos.has(cwd)) return repos.get(cwd)!;
+// A directory's git dirs: its own (a worktree's lives in its clone's .git/worktrees) and the clone's common one.
+function gitDirs(cwd: string): { own: string; common: string } | null {
   let dir = cwd;
   let git: string | null = null;
   while (!git) {
     const at = path.join(dir, ".git");
     if (fs.existsSync(at)) git = at;
-    else if (path.dirname(dir) === dir) break;
+    else if (path.dirname(dir) === dir) return null;
     else dir = path.dirname(dir);
   }
-  let common = git;
-  if (git && fs.statSync(git).isFile()) {
-    const gitdir = /^gitdir:\s*(.+)$/m.exec(readText(git) ?? "")?.[1]?.trim();
-    const worktree = gitdir ? path.resolve(path.dirname(git), gitdir) : null;
-    const up = worktree ? readText(path.join(worktree, "commondir"))?.trim() : null;
-    common = worktree ? (up ? path.resolve(worktree, up) : worktree) : null;
-  }
-  const config = common ? (readText(path.join(common, "config")) ?? "") : "";
+  if (!fs.statSync(git).isFile()) return { own: git, common: git };
+  const gitdir = /^gitdir:\s*(.+)$/m.exec(readText(git) ?? "")?.[1]?.trim();
+  if (!gitdir) return null;
+  const own = path.resolve(path.dirname(git), gitdir);
+  const up = readText(path.join(own, "commondir"))?.trim();
+  return { own, common: up ? path.resolve(own, up) : own };
+}
+
+// The GitHub repo (owner/name) a directory is a clone or worktree of, from its git config's origin; null when it isn't one.
+const repos = new Map<string, string | null>();
+export function repoAt(cwd: string): string | null {
+  if (repos.has(cwd)) return repos.get(cwd)!;
+  const dirs = gitDirs(cwd);
+  const config = dirs ? (readText(path.join(dirs.common, "config")) ?? "") : "";
   const origin = /\[remote "origin"\][^[]*?url\s*=\s*(\S+)/.exec(config)?.[1] ?? "";
   const repo = /github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/.exec(origin)?.[1] ?? null;
   repos.set(cwd, repo);
   return repo;
+}
+
+// The branch a directory has checked out now, or null (none, or a detached head).
+export function branchAt(cwd: string): string | null {
+  const dirs = gitDirs(cwd);
+  const head = dirs ? readText(path.join(dirs.own, "HEAD")) : null;
+  return /^ref:\s*refs\/heads\/(.+)$/m.exec(head ?? "")?.[1]?.trim() ?? null;
+}
+
+// A session that opened a PR, in whichever harness: what the desk tells its findings to.
+export interface Opener {
+  harness: "claude" | "codex" | "opencode";
+  id: string;
+  name: string;
+  cwd: string;
+}
+
+// How each harness takes a message as its session's next turn, the message on stdin: Claude Code's the desk runs itself.
+export const RESUME: Record<"codex" | "opencode", (id: string) => string[]> = {
+  codex: (id) => ["exec", "resume", id, "-"],
+  opencode: (id) => ["run", "--session", id],
+};
+
+// OpenCode's sessions as `opencode session list --format json` prints them, the newest first; null when it isn't a list.
+export function parseOpencodeSessions(out: string): { id: string; title: string; directory: string; updated: number }[] | null {
+  const list = jsonOf(out);
+  if (!Array.isArray(list)) return null;
+  return list.flatMap((x) => {
+    const id = str(field(x, "id"));
+    const directory = str(field(x, "directory"));
+    return id && directory ? [{ id, title: str(field(x, "title")) ?? id, directory, updated: num(field(x, "updated")) ?? 0 }] : [];
+  });
 }
 
 export class Sessions {
@@ -1118,10 +1155,54 @@ export class Sessions {
   // The Claude Code session working on a PR's branch in a clone of its repo, the latest one written to: what opened it.
   // Codex's can't be told anything from here.
   openedBy(repo: string, branch: string): Seen | null {
-    const on = [...this.recent.values()].filter(
-      (x) => x.kind !== "codex" && x.branch === branch && repoAt(x.cwd)?.toLowerCase() === repo.toLowerCase(),
-    );
+    const on = [...this.recent.values()].filter((x) => x.branch === branch && repoAt(x.cwd)?.toLowerCase() === repo.toLowerCase());
     return on.toSorted((a, b) => (b.written ?? 0) - (a.written ?? 0))[0] ?? null;
+  }
+
+  // The session that opened a PR, in any harness: Claude Code's or Codex's from the last pass, else OpenCode's, listed from
+  // your clone of its repo (OpenCode lists a project's sessions) and kept to the one whose directory is on its branch.
+  opener(repo: string, branch: string, clone: string | null): Effect.Effect<Opener | null> {
+    return Effect.gen({ self: this }, function* () {
+      const s = this.openedBy(repo, branch);
+      if (s) return { harness: s.kind === "codex" ? ("codex" as const) : ("claude" as const), id: s.session_id, name: s.name, cwd: s.cwd };
+      if (!clone) return null;
+      const command = opencodeCommand();
+      const spawnAs = yield* claudeSpawn(command, ["session", "list", "--format", "json", "-n", "30"]).pipe(Effect.option);
+      if (spawnAs._tag === "None") return null;
+      const out = yield* runCommand(spawnAs.value, { cwd: clone, timeout: 15_000, missing: opencodeMissing(command) }).pipe(
+        Effect.orElseSucceed(() => ""),
+      );
+      const on = (parseOpencodeSessions(out) ?? []).filter(
+        (x) => branchAt(x.directory) === branch && repoAt(x.directory)?.toLowerCase() === repo.toLowerCase(),
+      );
+      const o = on.toSorted((a, b) => b.updated - a.updated)[0];
+      return o ? { harness: "opencode" as const, id: o.id, name: o.title, cwd: o.directory } : null;
+    });
+  }
+
+  // A message as a session's next turn, in its own harness: Claude Code's as your replies go; Codex's and OpenCode's by their
+  // CLI's resume, run on in the background in the session's directory, its outcome logged.
+  tell(o: Opener, text: string): Effect.Effect<void, NotFound | Conflict | BadRequest | CommandError | UnsafeArgument> {
+    if (o.harness === "claude") return Effect.asVoid(this.send(SESSION_PREFIX + o.id, text));
+    const harness = o.harness;
+    const command = harness === "codex" ? codexCommand() : opencodeCommand();
+    const missing = harness === "codex" ? codexMissing(command) : opencodeMissing(command);
+    return Effect.gen({ self: this }, function* () {
+      const spawnAs = yield* claudeSpawn(command, RESUME[harness](o.id));
+      this.desk.runner.fork(
+        "sessions",
+        runCommand(spawnAs, { cwd: o.cwd, input: text, timeout: RESUME_TIMEOUT, missing }).pipe(
+          Effect.match({
+            onFailure: (e) => {
+              this.desk.log(`sessions: ${harness} ${o.id} didn't take its message: ${e.message}`);
+            },
+            onSuccess: () => {
+              this.desk.log(`sessions: ${harness} ${o.id} took its message`);
+            },
+          }),
+        ),
+      );
+    });
   }
 
   // A session's page: its card while it needs you, its last turns from its own transcript, what it waits on (asked of the

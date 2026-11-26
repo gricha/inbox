@@ -161,7 +161,6 @@ import {
   placeNotes,
   RANK,
   SECRET_SET,
-  SESSION_PREFIX,
   UNTIL,
   untilTime,
 } from "./types.ts";
@@ -2697,23 +2696,22 @@ export class Desk {
     );
   }
 
-  // Your draft's review found blockers or issues: they go back to the session that opened it, which fixes them and pushes,
-  // and the PR waits on Blocked meanwhile, not on your desk. A clean review, no session to tell, or SENDBACK_ROUNDS tries
-  // put it on your desk as any PR. Nothing here writes to GitHub.
-  private returnFindings(e: Entry, deep: DeepReview): Effect.Effect<void> {
+  // Your draft's review found blockers or issues (a deep review's, or an AI review's concerns): they go back to the session
+  // that opened it, in whichever harness, which fixes them and pushes, and the PR waits on Blocked meanwhile, not on your
+  // desk. A clean review, no session to tell, or SENDBACK_ROUNDS tries put it on your desk as any PR. Nothing here writes
+  // to GitHub.
+  private returnFindings(e: Entry, found: DeepNote[]): Effect.Effect<void> {
     return Effect.gen({ self: this }, function* () {
       const it = e.item;
       const was = this.store.kvAt("sentback:", it.id);
-      const found = deep.steps.flatMap((x) => x.notes).filter((n) => n.kind === "blocker" || n.kind === "issue");
       if (!found.length || !e.analysis.signals.me.author || !it.draft || !it.head_ref) {
         if (was) this.store.unset(`sentback:${it.id}`);
         return;
       }
       if ((was?.rounds ?? 0) >= SENDBACK_ROUNDS) return;
-      const s = this.sessions.openedBy(it.repo, it.head_ref);
+      const s = yield* this.sessions.opener(it.repo, it.head_ref, this.issues?.clone(it.repo) ?? null);
       if (!s) return;
-      const ref = SESSION_PREFIX + s.session_id;
-      const sent = yield* this.sessions.send(ref, sendBackText(it, this.me(), found)).pipe(
+      const sent = yield* this.sessions.tell(s, sendBackText(it, this.me(), found)).pipe(
         Effect.as(true),
         Effect.catch((err) =>
           Effect.sync(() => {
@@ -2726,13 +2724,13 @@ export class Desk {
       const rounds = (was?.rounds ?? 0) + 1;
       this.store.putKvAt("sentback:", it.id, {
         head: it.head_oid,
-        session: ref,
+        session: `${s.harness}:${s.id}`,
         name: s.name,
         issues: found.length,
         rounds,
         at: this.now().toISOString(),
       });
-      this.log(`review of ${it.id}: sent ${found.length} back to ${s.name} (${s.session_id}), round ${rounds}`);
+      this.log(`review of ${it.id}: sent ${found.length} back to ${s.name} (${s.harness} ${s.id}), round ${rounds}`);
       this.changed();
     });
   }
@@ -2856,10 +2854,11 @@ export class Desk {
         };
         const checkout = this.review.checkout?.bind(this.review);
         let written: AiReview;
+        let found: DeepNote[];
         if (checkout && this.deeply()) {
           const deep = yield* this.runDeep(e.item, e.analysis.signals.me.author, pr, own.own?.extra ?? "", checkout);
           written = { ...deepGuide(deep, pr.files, null), skill: own.hash };
-          yield* this.returnFindings(e, deep);
+          found = deep.steps.flatMap((x) => x.notes).filter((n) => n.kind === "blocker" || n.kind === "issue");
         } else {
           const code = checkout ? yield* checkout(e.item) : null;
           written = yield* this.review
@@ -2874,7 +2873,12 @@ export class Desk {
               this.yourMcp(),
             )
             .pipe(Effect.ensuring(code?.done ?? Effect.void));
+          // Its concerns are the first notes, each on its line: what it would send back.
+          found = written.notes
+            .slice(0, written.concerns.length)
+            .map((n) => ({ kind: "issue" as const, text: n.body, ask: "", at: `${n.path}:${n.line}`, evidence: "" }));
         }
+        yield* this.returnFindings(e, found);
         const doc = yield* this.writeDoc(e.item, pr.files, written);
         const ai = doc ? { ...written, doc } : written;
         this.store.set(`review:${id}`, ai);
