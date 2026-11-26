@@ -214,9 +214,11 @@ import {
   type Sorted,
 } from "./kv.ts";
 import { inQuietHours, notify } from "./notify.ts";
+import { DEEP_SCHEMA, deepOf, deepPrompt } from "./deep.ts";
 import {
   agentDir,
   agentDown,
+  askClaude,
   forgetCodexServers,
   forgetOpencodeServers,
   notLoggedIn,
@@ -2580,8 +2582,68 @@ export class Desk {
         merge: mergeLine(d.item),
         viewed: this.viewedOf(id),
         ...talk,
+        deep: this.store.kvAt("deep:", id)?.review ?? null,
+        deep_running: this.deeps.get(id) ?? null,
+        deep_error: this.deeps.has(id) ? null : (this.store.kvAt("deep:", id)?.error ?? null),
       };
     });
+  }
+
+  // ---------------------------------------------------------------- deep reviews (src/deep.ts)
+
+  private deeps = new Map<string, string>(); // running, by PR id: when each started
+
+  // POST /api/review/:id/deep: starts the PR's deep review unless one is running, and answers at once; it runs on.
+  deepReview(ref: string): Effect.Effect<{ ok: true; running: string }, RefError | BadRequest | Conflict> {
+    return Effect.gen({ self: this }, function* () {
+      const e = yield* this.pr(ref);
+      const id = e.item.id;
+      const checkout = this.review?.checkout?.bind(this.review);
+      if (!checkout) return yield* new Conflict({ message: "A deep review needs the PR's code, which this desk can't check out" });
+      if (this.agent() !== "claude-code")
+        return yield* new Conflict({ message: "Deep reviews run on Claude Code for now: Settings → Agent" });
+      const running = this.deeps.get(id);
+      if (running) return { ok: true as const, running };
+      const at = this.now().toISOString();
+      this.deeps.set(id, at);
+      this.runner.fork("deep review", this.runDeep(e.item, e.analysis.signals.me.author, checkout), id);
+      this.changed();
+      return { ok: true as const, running: at };
+    });
+  }
+
+  // In the PR's own checkout, with tests and probes; kept per PR with its commit, or its failure kept beside the last one.
+  private runDeep(item: Item, yours: boolean, checkout: (item: Item) => Effect.Effect<Checkout, NoCheckout>): Effect.Effect<void> {
+    const started = Date.now();
+    return Effect.gen({ self: this }, function* () {
+      const code = yield* checkout(item);
+      const out = yield* askClaude(deepPrompt(item, yours), { dir: code.dir, read: true, probe: true, schema: DEEP_SCHEMA }).pipe(
+        Effect.ensuring(code.done),
+      );
+      const got = deepOf(out.answer);
+      const answer = yield* Result.isFailure(got)
+        ? Effect.fail(new BadRequest({ message: `its answer didn't parse: ${got.failure}` }))
+        : Effect.succeed(got.success);
+      const seconds = Math.round((Date.now() - started) / 1000);
+      const review = { ...answer, head_oid: item.head_oid, model: out.model, at: this.now().toISOString(), seconds };
+      this.store.putKvAt("deep:", item.id, { review, error: null });
+      this.log(
+        `deep review of ${item.id}: ${review.lean}, ${review.wrong.length} wrong, ${review.ask.length} to ask; tests: ${review.checked.tests}; ${seconds}s`,
+      );
+    }).pipe(
+      Effect.catch((e) =>
+        Effect.sync(() => {
+          this.store.putKvAt("deep:", item.id, { review: this.store.kvAt("deep:", item.id)?.review ?? null, error: messageOf(e) });
+          this.log(`deep review of ${item.id} failed: ${messageOf(e)}`);
+        }),
+      ),
+      Effect.ensuring(
+        Effect.sync(() => {
+          this.deeps.delete(item.id);
+          this.changed();
+        }),
+      ),
+    );
   }
 
   // The marks (ReviewHunk.mark, ReviewRest.mark) you marked viewed on a PR, kept while it's on the desk.
