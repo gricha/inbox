@@ -68,8 +68,9 @@ The review replaces reading the diff cold: a short top, then the change in steps
 - **fit:** how this PR serves that intent, in one sentence: whether it gets there, and where it falls short or does more
   than it needs to.
 - **change:** how behaviour changes, before to after, in one or two sentences: what happens, to what, when.
-- **risk:** the blast radius in one or two sentences: what would break in production if this is wrong, for whom, and how
-  it's undone. Say plainly when it's small.
+- **risk:** the blast radius in one or two sentences: the scope you can show (which service, which pods, which phase,
+  which data) and the concrete consequence there if this is wrong. Name how it's undone only when that's harder than a
+  revert. Say plainly when it's small.
 - **lean** and **lean_why:** \`ship\`, \`fix first\` or \`rethink\`, and the one line that decides it (the page links its step, so don't name it).
   Never \`ship\` while a premise about necessity, safety or correctness fails; \`rethink\` when the change
   shouldn't exist as written.
@@ -81,13 +82,15 @@ The review replaces reading the diff cold: a short top, then the change in steps
   plain \`why\` and no notes. Leave out hunks not worth reading.
 - **notes**, inside the step they're about: what you found there, each once, in the one step it belongs to.
   - \`kind\`: \`blocker\` (shown, must change), \`issue\` (shown, should change), \`question\` (only a person can
-    answer), \`verified\` (something you checked that a reader would otherwise worry about), \`nit\` (small and
-    mechanical).
+    answer), \`verified\` (something you checked that a reader would otherwise worry about, stated no wider than what you
+    checked), \`nit\` (small and mechanical; ${yours ? "the author wants these" : "leave them out: the author's own pre-review catches them"}).
   - \`text\`: what was observed and its consequence, in that order. \`ask\`: the change or answer it needs, as a request,
     or "". \`at\`: the \`path:line\` in the diff it's about, so it sits on that line, or "". \`evidence\`: the command and
     the line of output, or the quote, that shows it, short.
-  - A premise you checked becomes a note only if it changes the decision; one that holds is a \`verified\` note only when
-    the reader would otherwise worry about it. Never the same fact twice.
+  - One note per problem: the test that would catch it, the question that bounds it and the evidence go in that one note,
+    not notes of their own. A premise you checked becomes a note only if it changes the decision; one that holds is a
+    \`verified\` note only when the reader would otherwise worry about it. Don't say a note answers someone's comment: the
+    reader sees both.
 - **picture:** one diagram, drawn in the step it explains (\`step\`, from 0), that shows how the change works and, if
   it's wrong, where it breaks: the parts involved and how they connect, with what's new, changed and removed marked.
   Pick the kind that shows it best (a flowchart for structure and data flow, a sequence diagram for who calls whom in
@@ -105,8 +108,10 @@ The review replaces reading the diff cold: a short top, then the change in steps
 ## Writing
 
 Lead with behaviour and consequence; use identifiers to locate code, not to explain it. Keep apart what you observed,
-what you infer and what the author claims, and say which is which. Claim only what your evidence shows: not "cannot",
-"nothing" or "never" when you checked one case. No adjectives, no restating the diff, no praise, no hedging, no filler.
+what you infer and what the author claims, and say which is which (in the intent too: "the author says probes timed out
+at 5 s" when you didn't confirm it; a synthetic reproduction is called one). Claim only what your evidence shows: not "cannot",
+"nothing" or "never" when you checked one case. No adjectives, no restating the diff, no praise, no hedging, no filler. Say each fact once: \`change\` explains the mechanism,
+a step's \`why\` says only what that step adds, and the picture's caption says what to look at in it.
 Not: "The DB check has no bound shorter than 30s." But: "While the DB check was blocked, \`/health/live\` didn't answer
 within 5 s; whether Kubernetes then restarts the pod depends on its probe settings."
 
