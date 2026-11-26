@@ -6,10 +6,13 @@ import { as } from "../usage.ts";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { Effect, Result } from "effect";
 import { alive, claude, halt, readTail, type Agent } from "../coordinator.ts";
+import { kill } from "../children.ts";
 import type { Core, Desk } from "../desk.ts";
-import { BadRequest, Conflict, NotFound, type CommandError } from "../errors.ts";
+import { BadRequest, Conflict, NotFound, type CommandError, type UnsafeArgument } from "../errors.ts";
+import { SessionHost } from "./session-host.ts";
 import { elements, isRecord, jsonOf, num, str } from "../narrow.ts";
 import { runCommand } from "../review.ts";
 import {
@@ -18,6 +21,7 @@ import {
   SESSION_PREFIX,
   type SessionAction,
   type SessionCard,
+  type SessionImage,
   type SessionKind,
   type SessionTurn,
   type SessionView,
@@ -367,24 +371,84 @@ export interface Talk {
 
 const cut = (text: string): string => (text.length > TURN_MAX ? `${text.slice(0, TURN_MAX - 1)}…` : text);
 
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp)$/i;
+// markdown's ![alt](path) to a local image file; a web image stays text, never fetched.
+const MD_IMAGE = /!\[([^\]]*)\]\(<?((?:file:\/\/|\/|~\/|\.{0,2}\/?)[^)\s>]+)>?\)/g;
+
+// The images a message's words point to, and its words without them.
+function imagesIn(text: string): { text: string; images: SessionImage[] } {
+  const images: SessionImage[] = [];
+  const left = text.replaceAll(MD_IMAGE, (whole, alt: string, src: string) => {
+    if (!IMAGE_FILE.test(src) || /^https?:/i.test(src)) return whole;
+    images.push({ alt, src: `file:${src}` });
+    return "";
+  });
+  return { text: left, images };
+}
+
 // Its turns in order: what you said, what it said (each run of messages one turn), and each run of tool calls as one line a call.
 class Turns {
   all: SessionTurn[] = [];
-  say(who: "you" | "agent", at: string, text: string) {
+  say(who: "you" | "agent", at: string, text: string, images: SessionImage[] = []) {
     const t = text.trim();
-    if (!t) return;
+    if (!t && !images.length) return;
     const last = this.all.at(-1);
-    if (last && last.who === who) last.text = cut(`${last.text}\n\n${t}`);
-    else this.all.push({ who, at, text: cut(t) });
+    if (last && last.who === who) {
+      if (t) last.text = cut(last.text ? `${last.text}\n\n${t}` : t);
+      if (images.length) last.images = [...(last.images ?? []), ...images];
+    } else this.all.push({ who, at, text: cut(t), ...(images.length && { images }) });
   }
   tool(at: string, line: string) {
     const last = this.all.at(-1);
     if (last?.who === "tools") last.lines.push(line);
     else this.all.push({ who: "tools", at, lines: [line] });
   }
+  // A tool's result's images: with its run of calls.
+  shown(at: string, images: SessionImage[]) {
+    const last = this.all.at(-1);
+    if (last?.who === "tools") last.images = [...(last.images ?? []), ...images];
+    else this.all.push({ who: "tools", at, lines: [], images });
+  }
   talk(pending: Talk["pending"]): Talk {
     return { turns: this.all.slice(-TURNS), earlier: Math.max(0, this.all.length - TURNS), pending };
   }
+}
+
+// A message's base64 images, each by its event and place: "block:<uuid>:<n>", numbered over its blocks and their content.
+function blockImages(uuid: string, bs: Record<string, unknown>[]): SessionImage[] {
+  const out: SessionImage[] = [];
+  let n = 0;
+  for (const b of bs)
+    for (const x of b.type === "tool_result" ? elements(b.content) : [b]) {
+      const o = obj(x);
+      if (o?.type !== "image") continue;
+      if (obj(o.source)?.type === "base64") out.push({ alt: "", src: `block:${uuid}:${n}` });
+      n++;
+    }
+  return out;
+}
+
+// The bytes of a transcript's image by its src's event and place, as blockImages numbers them.
+function blockImage(text: string, src: string): { type: string; data: Buffer } | null {
+  const m = /^block:([^:]+):(\d+)$/.exec(src);
+  if (!m) return null;
+  for (const line of text.split("\n")) {
+    if (!line.includes(m[1]!)) continue;
+    const e = obj(jsonOf(line));
+    if (str(e?.uuid) !== m[1]) continue;
+    let n = 0;
+    for (const b of blocks(obj(e?.message)))
+      for (const x of b.type === "tool_result" ? elements(b.content) : [b]) {
+        const o = obj(x);
+        if (o?.type !== "image") continue;
+        const source = obj(o.source);
+        if (n++ !== Number(m[2])) continue;
+        const type = str(source?.media_type) ?? "";
+        const data = str(source?.data);
+        return data && /^image\/(png|jpeg|gif|webp)$/.test(type) ? { type, data: Buffer.from(data, "base64") } : null;
+      }
+  }
+  return null;
 }
 
 // What you typed, not what Claude Code wraps around it (a command's output, a reminder, an interruption).
@@ -401,20 +465,29 @@ export function readTalk(text: string): Talk {
     if (e.type !== "user" && e.type !== "assistant") continue;
     const at = str(e.timestamp) ?? "";
     const m = obj(e.message);
+    const uuid = str(e.uuid) ?? "";
     if (e.type === "user") {
       if (typeof m?.content === "string") {
         if (yours(m.content)) turns.say("you", at, m.content);
-      } else
-        for (const b of blocks(m)) {
-          if (b.type === "tool_result" && str(b.tool_use_id)) pending.delete(str(b.tool_use_id)!);
-          if (b.type === "text" && str(b.text) && yours(str(b.text)!)) turns.say("you", at, str(b.text)!);
-        }
+      } else {
+        const bs = blocks(m);
+        const results = bs.filter((b) => b.type === "tool_result");
+        for (const b of results) if (str(b.tool_use_id)) pending.delete(str(b.tool_use_id)!);
+        const said = bs.flatMap((b) => (b.type === "text" && str(b.text) && yours(str(b.text)!) ? [str(b.text)!] : [])).join("\n\n");
+        const images = uuid ? blockImages(uuid, bs) : [];
+        if (results.length) {
+          if (images.length) turns.shown(at, images);
+        } else if (said || images.length) turns.say("you", at, said, images);
+      }
       lastWasCall = false;
       continue;
     }
     lastWasCall = false;
     for (const b of blocks(m)) {
-      if (b.type === "text" && str(b.text)) turns.say("agent", at, str(b.text)!);
+      if (b.type === "text" && str(b.text)) {
+        const { text: words, images } = imagesIn(str(b.text)!);
+        turns.say("agent", at, words, images);
+      }
       if (b.type === "tool_use" && str(b.id)) {
         const input = obj(b.input);
         const name = str(b.name) ?? "a tool";
@@ -451,9 +524,10 @@ export function readCodexTalk(text: string): Talk {
 }
 
 // What it waits on, from its last tool call: a question with its options, a plan, or (when it waits on a permission) the call.
-export function waitOf(pending: Talk["pending"], reason: string | null): SessionWait | null {
+export function waitOf(pending: Talk["pending"], reason: string | null, ask?: string): SessionWait | null {
   if (!pending) return null;
   const input = pending.input;
+  const asked = ask ? { ask } : {};
   if (pending.name === "AskUserQuestion") {
     const q = obj(elements(input?.questions)[0]);
     const question = str(q?.question);
@@ -462,27 +536,39 @@ export function waitOf(pending: Talk["pending"], reason: string | null): Session
       const label = str(obj(o)?.label);
       return label ? [{ label, description: str(obj(o)?.description) ?? "" }] : [];
     });
-    return { kind: "question", question, options };
+    return { kind: "question", question, options, ...asked };
   }
-  if (pending.name === "ExitPlanMode") return { kind: "plan", plan: cut(str(input?.plan) ?? "") };
-  if (reason && /^needs (permission|sandbox access)/.test(reason)) {
+  if (pending.name === "ExitPlanMode") return { kind: "plan", plan: cut(str(input?.plan) ?? ""), ...asked };
+  // "needs you" with a call left open: a background session that stopped on its permission prompt.
+  if (reason && /^needs (permission|sandbox access|you$)/.test(reason)) {
     const detail = ["command", "file_path", "path", "url", "pattern", "description"].map((k) => str(input?.[k])).find(Boolean);
-    return { kind: "permission", tool: pending.name, detail: cut(detail ?? "") };
+    return { kind: "permission", tool: pending.name, detail: cut(detail ?? ""), ...asked };
   }
   return null;
 }
 
+const IMAGE_TYPE: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+
+// A path a session's words name: file://, ~/, or relative to its folder.
+const localPath = (p: string, cwd: string): string =>
+  p.startsWith("file://") ? fileURLToPath(p) : p.startsWith("~/") ? path.join(os.homedir(), p.slice(2)) : path.resolve(cwd, p);
+
 const quoted = (p: string) => `'${p.replaceAll("'", `'\\''`)}'`;
 
 // Where to answer it when the desk can't carry it on itself; null when it can.
-function whyNot(s: Seen, c: SessionCard | null, now: number): string | null {
-  if (!c) return "It doesn't need you now.";
-  if (c.actions.includes("kick") || c.actions.includes("resume"))
-    return c.resets_at && Date.parse(c.resets_at) > now
-      ? `It's rate limited until ${untilText(Date.parse(c.resets_at), now)}: answer it after that.`
-      : null;
-  if (s.kind === "desktop") return "The Claude app runs it: answer it there.";
-  if (s.kind === "codex") return "Codex runs it: answer it there.";
+function whyNot(s: Seen, c: SessionCard | null, now: number, hosted: boolean): string | null {
+  if (hosted) return null;
+  if (s.kind === "codex") return "Codex runs it: answer it in Codex.";
+  if (c?.resets_at && Date.parse(c.resets_at) > now)
+    return `It's rate limited until ${untilText(Date.parse(c.resets_at), now)}: answer it after that.`;
+  if (!s.row?.pid || !s.row.status) return null;
+  if (s.kind === "desktop") return "Claude has it open: answer it there.";
   if (s.kind === "background") return "It's running: attach to it to answer.";
   return "It runs in a terminal: answer it there.";
 }
@@ -672,6 +758,7 @@ export class Sessions {
   asked = new Map<string, Asked>(); // the model's read, by session, for its last event
   askFailed = 0; // when a model call last failed: none again for a while
   records = new Map<string, { key: string; record: DesktopRecord | null }>(); // the desktop app's, by file
+  hosts = new Map<string, SessionHost>(); // the sessions the desk runs for you, by ref
   kept = new Map<string, Seen>(); // every session that needed you lately, as last read: its page reads on once it's answered
 
   constructor(desk: Host, at: Roots = roots()) {
@@ -696,6 +783,7 @@ export class Sessions {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    for (const h of this.hosts.values()) if (h.child) kill(h.child);
   }
 
   // The setting changed: on starts polling, off drops what it found.
@@ -830,6 +918,31 @@ export class Sessions {
       const next = new Map<string, Found>();
       let asks = 0;
       for (const s of seen) {
+        // One the desk runs: what it asks waits on you here; at work, it needs nobody.
+        const host = this.hosting(SESSION_PREFIX + s.session_id);
+        const asked = host?.asks[0];
+        if (asked) {
+          const reason =
+            asked.tool === "AskUserQuestion"
+              ? "asked a question"
+              : asked.tool === "ExitPlanMode"
+                ? "waiting on plan approval"
+                : `needs permission: ${asked.tool}`;
+          const excerpt = waitOf({ name: asked.tool, input: asked.input }, "needs permission");
+          next.set(SESSION_PREFIX + s.session_id, {
+            seen: s,
+            verdict: {
+              state: "blocked",
+              reason,
+              excerpt: oneLine(excerpt?.kind === "question" ? excerpt.question : excerpt?.kind === "permission" ? excerpt.detail : ""),
+              since: asked.at,
+              resets_at: null,
+              key: asked.id,
+            },
+          });
+          continue;
+        }
+        if (host?.busy) continue;
         const v = classify(s, now, this.desk.settings["sessions.quiet_minutes"] * 60_000);
         if (!v || ("ask" in v && !this.desk.settings["sessions.ask"])) continue;
         if ("state" in v) {
@@ -939,7 +1052,8 @@ export class Sessions {
     });
   }
 
-  // A session's page: its card while it needs you, its last turns from its own transcript, and how you can answer it.
+  // A session's page: its card while it needs you, its last turns from its own transcript, what it waits on (asked of the
+  // desk while the desk runs it), and how you can answer it.
   view(ref: string): Effect.Effect<SessionView, NotFound> {
     return Effect.suspend(() => {
       const f = this.found.get(ref);
@@ -954,9 +1068,11 @@ export class Sessions {
       const head = whole || !s.file ? null : readHead(s.file, HEAD);
       const first = head === null ? undefined : read(head).turns.flatMap((t) => (t.who === "you" ? [{ ...t, who: t.who }] : []))[0];
       const ask = first && !talk.turns.some((t) => t.at === first.at && t.who === "you") ? first : null;
-      const why = whyNot(s, card, now.getTime());
-      const running = !!s.row?.pid && !!s.row.status;
-      const url = card?.open_url ?? openUrl({ kind: s.kind, session_id: s.session_id, alive: running }, s.local_id);
+      const host = this.hosting(ref);
+      const why = whyNot(s, card, now.getTime(), !!host);
+      const running = !host && !!s.row?.pid && !!s.row.status;
+      const url = openUrl({ kind: s.kind, session_id: s.session_id, alive: running }, s.local_id);
+      const asked = host?.asks[0];
       return Effect.succeed({
         id: ref,
         session_id: s.session_id,
@@ -968,7 +1084,14 @@ export class Sessions {
         ask,
         turns: talk.turns,
         earlier: whole ? talk.earlier : Math.max(1, talk.earlier),
-        waiting: card ? waitOf(talk.pending, card.reason) : null,
+        waiting: asked
+          ? waitOf({ name: asked.tool, input: asked.input }, "needs permission", asked.id)
+          : host?.busy
+            ? null
+            : card
+              ? waitOf(talk.pending, card.reason)
+              : null,
+        live: host ? { busy: host.busy, saying: host.saying, error: host.error } : null,
         can_reply: why === null,
         why_not: why,
         open: url ? { label: s.kind === "codex" ? "Open in Codex" : "Open in Claude", url } : null,
@@ -976,6 +1099,123 @@ export class Sessions {
           card?.attach ??
           ((s.kind === "cli" || s.kind === "background") && !running ? `cd ${quoted(s.cwd)} && claude --resume ${s.session_id}` : null),
       });
+    });
+  }
+
+  // The desk's own process for it, while it runs.
+  hosting(ref: string): SessionHost | null {
+    const h = this.hosts.get(ref);
+    return h && !h.closed ? h : null;
+  }
+
+  // Your message, as its next turn: to the process the desk runs it in, started first where nothing else runs it. Never a
+  // second writer: one the Claude app, a terminal or a running background job holds says where to answer it instead.
+  // allow: you allowed the call it waited on when its process went: allowed when it asks for it again, so one click does it.
+  send(
+    ref: string,
+    text: string,
+    allow = false,
+  ): Effect.Effect<{ started: boolean }, NotFound | Conflict | BadRequest | CommandError | UnsafeArgument> {
+    return Effect.gen({ self: this }, function* () {
+      const said = text.trim();
+      if (!said) return yield* new BadRequest({ message: "write a message first" });
+      if (said.length > REPLY_MAX) return yield* new BadRequest({ message: `a message is at most ${REPLY_MAX} characters` });
+      const v = yield* this.view(ref);
+      const at = this.desk.now().toISOString();
+      const pending = allow ? this.pendingCall(ref) : null;
+      if (allow && !pending) return yield* new Conflict({ message: "it isn't waiting on a call any more" });
+      const live = this.hosting(ref);
+      if (live) {
+        if (pending) live.allowed = pending;
+        live.say(said);
+        this.desk.store.logWrite(ref, pending ? "allow" : "reply", at);
+        return { started: false };
+      }
+      if (v.why_not) return yield* new Conflict({ message: v.why_not });
+      const rows = parseAgents(yield* claude(["agents", "--json", "--all"])) ?? [];
+      const row = rows.find((r) => r.sessionId === v.session_id);
+      if (row?.pid && alive(row.pid))
+        return yield* new Conflict({
+          message: v.kind === "desktop" ? "Claude has it open: answer it there." : `It's running (process ${row.pid}): answer it there.`,
+        });
+      if (row?.id) yield* halt(stopOf(row));
+      const host = new SessionHost(
+        v.session_id,
+        v.cwd,
+        () => {
+          this.desk.changed();
+        },
+        () => {
+          this.desk.runner.fork("sessions", this.poll());
+        },
+      );
+      yield* host.start();
+      this.hosts.set(ref, host);
+      if (pending) host.allowed = pending;
+      host.say(said);
+      this.desk.store.logWrite(ref, pending ? "allow" : "reply", at);
+      this.desk.log(`sessions: talking to ${v.session_id} in ${v.cwd}`);
+      this.found.delete(ref); // it has a turn now; the next pass says how it goes
+      this.desk.changed();
+      return { started: true };
+    });
+  }
+
+  // The call its transcript ends waiting on, as the process will ask for it again.
+  pendingCall(ref: string): { tool: string; input: string } | null {
+    const s = this.found.get(ref)?.seen ?? this.kept.get(ref);
+    const text = s?.file && s.kind !== "codex" ? readTail(s.file, TALK) : null;
+    const p = text === null ? null : readTalk(text).pending;
+    return p ? { tool: p.name, input: JSON.stringify(p.input) } : null;
+  }
+
+  // Your answer to what it asked while the desk runs it: a permission allowed or denied, a question's pick, a plan approved.
+  answer(ref: string, ask: string, a: { allow: boolean; answer?: string; message?: string }): Effect.Effect<void, NotFound | Conflict> {
+    return Effect.suspend(() => {
+      const host = this.hosting(ref);
+      const asked = host?.asks.find((x) => x.id === ask);
+      if (!host || !asked) return Effect.fail(new Conflict({ message: "it isn't waiting on that any more" }));
+      const q = obj(elements(asked.input?.questions)[0]);
+      const input =
+        asked.tool === "AskUserQuestion" && a.answer && str(q?.question)
+          ? { ...asked.input, answers: { [str(q?.question)!]: a.answer } }
+          : asked.input;
+      const no = filled(a.message?.trim()) ?? (asked.tool === "ExitPlanMode" ? "Keep planning." : "No, don't.");
+      host.answer(ask, a.allow, input, no);
+      this.desk.store.logWrite(ref, a.allow ? "allow" : "deny", this.desk.now().toISOString());
+      return Effect.void;
+    });
+  }
+
+  // Let go of it, so the Claude app or a terminal can carry it on: its input ends and it exits.
+  release(ref: string): Effect.Effect<void> {
+    return Effect.suspend(() => {
+      const h = this.hosting(ref);
+      return h ? h.close() : Effect.void;
+    });
+  }
+
+  // An image a turn shows, by its src as the page has it: only one its read turns name, so nothing else is served.
+  image(ref: string, src: string): Effect.Effect<{ type: string; data: Buffer }, NotFound> {
+    return Effect.gen({ self: this }, function* () {
+      const v = yield* this.view(ref);
+      const s = this.found.get(ref)?.seen ?? this.kept.get(ref);
+      const named = [...(v.ask ? [v.ask] : []), ...v.turns].some((t) => t.images?.some((i) => i.src === src));
+      const none = new NotFound({ message: "no such image in this session" });
+      if (!named || !s?.file) return yield* none;
+      if (src.startsWith("block:")) {
+        const got = blockImage(readTail(s.file, TALK) ?? "", src);
+        return got ?? (yield* none);
+      }
+      const p = localPath(src.slice("file:".length), s.cwd);
+      const type = IMAGE_TYPE[path.extname(p).toLowerCase()];
+      const data = type
+        ? Result.getOrElse(
+            Result.try({ try: () => (fs.statSync(p).size <= 20 * 1024 * 1024 ? fs.readFileSync(p) : null), catch: () => null }),
+            () => null,
+          )
+        : null;
+      return data && type ? { type, data } : yield* none;
     });
   }
 
@@ -992,33 +1232,18 @@ export class Sessions {
     });
   }
 
-  // Your reply, as the session's next turn: where the desk can carry it on (no process runs it), else it says where to answer.
-  reply(
-    ref: string,
-    text: string,
-  ): Effect.Effect<{ args: string[]; note: string | null }, NotFound | Conflict | BadRequest | CommandError> {
-    return Effect.gen({ self: this }, function* () {
-      const said = text.trim();
-      if (!said) return yield* new BadRequest({ message: "write a reply first" });
-      if (said.length > REPLY_MAX) return yield* new BadRequest({ message: `a reply is at most ${REPLY_MAX} characters` });
-      const v = yield* this.view(ref);
-      if (!v.card || v.why_not) return yield* new Conflict({ message: v.why_not ?? `${v.name} doesn't need you now` });
-      return yield* this.carryOn(v.card, said, "reply");
-    });
-  }
-
   // Never while it runs, never before a rate limit resets: either would start a second writer of the same session or spend a
   // turn on nothing. Its process is looked up again first.
   carryOn(
     c: SessionCard,
     text: string,
-    verb: "kick" | "resume" | "reply",
+    verb: "kick" | "resume",
   ): Effect.Effect<{ args: string[]; note: string | null }, Conflict | CommandError> {
     return Effect.gen({ self: this }, function* () {
       const now = this.desk.now().getTime();
       if (c.resets_at && Date.parse(c.resets_at) > now)
         return yield* new Conflict({
-          message: `${c.name} is rate limited until ${untilText(Date.parse(c.resets_at), now)}; ${verb === "reply" ? "answer" : "kick"} it after that`,
+          message: `${c.name} is rate limited until ${untilText(Date.parse(c.resets_at), now)}; kick it after that`,
         });
       const rows = parseAgents(yield* claude(["agents", "--json", "--all"])) ?? [];
       const row = rows.find((r) => r.sessionId === c.session_id);
@@ -1027,13 +1252,11 @@ export class Sessions {
           message: `${c.name} is running (process ${row.pid}), so the desk won't start a second copy; open it instead`,
         });
       if (row?.id) yield* halt(stopOf(row));
-      // A reply that starts with a dash would read as a flag.
-      const args = ["--resume", c.session_id, "--bg", ...(text.startsWith("-") ? ["--"] : []), text];
+      const args = ["--resume", c.session_id, "--bg", text];
       const out = yield* claude(args, c.cwd);
       const note = /^note: .*/m.exec(out)?.[0] ?? null;
       this.desk.store.logWrite(c.id, verb, new Date(now).toISOString());
-      const did = verb === "kick" ? "kicked" : verb === "resume" ? "resumed" : "replied to";
-      this.desk.log(`sessions: ${did} ${c.session_id} in ${c.cwd}${note ? ` (${note})` : ""}`);
+      this.desk.log(`sessions: ${verb === "kick" ? "kicked" : "resumed"} ${c.session_id} in ${c.cwd}${note ? ` (${note})` : ""}`);
       this.found.delete(c.id); // it has a turn now; the next pass says how it goes
       this.desk.changed();
       this.desk.runner.fork("sessions", this.poll());

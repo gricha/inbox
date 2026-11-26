@@ -2109,15 +2109,25 @@ export function App() {
     act: sessionAct,
     start: sessionStart,
   };
-  // A session's page: your reply goes as its next turn, and it's off the list at once; a refusal is a bubble, and the page
+  // A session's page: your message or answer goes to it, and it's off the list at once; a refusal is a bubble, and the page
   // keeps your words.
   const sesPage: SessionPageCtx = {
-    reply: (v, text) =>
-      api.replySession(v.id, text).pipe(
+    send: (v, text, allow) =>
+      api.sendSession(v.id, text, allow).pipe(
         Effect.tap(() =>
           Effect.sync(() => {
             gone.show(v.id, loadSeq.current);
-            flash(`Sent to ${v.name}: it carries on in the background.`);
+            refresh(0);
+          }),
+        ),
+        Effect.as(true),
+        Effect.catch((e) => Effect.as(failed(e), false)),
+      ),
+    answer: (v, ask, a) =>
+      api.answerSession(v.id, ask, a).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            gone.show(v.id, loadSeq.current);
             refresh(0);
           }),
         ),

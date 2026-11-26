@@ -1576,11 +1576,20 @@ export interface SessionCard {
 
 // A session's page (GET /api/sessions/:id/view): its last turns, read from its own transcript; what it waits on; whether you
 // can answer it here. Its words are the agent's and yours: text only.
-export type SessionTurn = { who: "you" | "agent"; at: string; text: string } | { who: "tools"; at: string; lines: string[] }; // a run of tool calls, one line each
+// An image a turn shows: one in the transcript ("block:<event uuid>:<n>"), or a file its words point to with markdown's
+// ![alt](path) ("file:<path>"). GET /api/sessions/:id/image?src= serves only these.
+export interface SessionImage {
+  alt: string;
+  src: string;
+}
+export type SessionTurn =
+  | { who: "you" | "agent"; at: string; text: string; images?: SessionImage[] }
+  | { who: "tools"; at: string; lines: string[]; images?: SessionImage[] }; // a run of tool calls, one line each
+// ask: the request it waits on while the desk runs it, which an answer names; without one, you answer with a message.
 export type SessionWait =
-  | { kind: "question"; question: string; options: { label: string; description: string }[] }
-  | { kind: "permission"; tool: string; detail: string } // detail: the command, path or URL it asks to use, in full
-  | { kind: "plan"; plan: string };
+  | { kind: "question"; question: string; options: { label: string; description: string }[]; ask?: string }
+  | { kind: "permission"; tool: string; detail: string; ask?: string } // detail: the command, path or URL it asks to use, in full
+  | { kind: "plan"; plan: string; ask?: string };
 export interface SessionView {
   id: string;
   session_id: string;
@@ -1589,10 +1598,11 @@ export interface SessionView {
   cwd: string;
   branch: string | null;
   card: SessionCard | null; // null once it no longer needs you
-  ask: { who: "you"; at: string; text: string } | null; // what you first asked it, when the turns read start after it
+  ask: { who: "you"; at: string; text: string; images?: SessionImage[] } | null; // what you first asked it, when the turns read start after it
   turns: SessionTurn[]; // oldest first
   earlier: number; // turns before these; at least 1 when the read starts mid-session
   waiting: SessionWait | null;
+  live: { busy: boolean; saying: string; error: string | null } | null; // while the desk runs it: its turn as it goes
   can_reply: boolean;
   why_not: string | null; // when you can't answer it here: where to instead
   open: { label: string; url: string } | null; // Open in Claude (or Codex), which the desk's computer opens

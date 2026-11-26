@@ -2575,7 +2575,7 @@ const ALL_SESSIONS: SessionCard[] = [
     since: iso(0.3),
     excerpt: "Bash: Run the upload tests 20 times with retries off",
     resets_at: null,
-    alive: true,
+    alive: false, // the app closed it: the desk can carry it on
     actions: ["open"],
     open_url: "claude://claude.ai/epitaxy/local_5f1c2a90",
     attach: null,
@@ -2637,7 +2637,10 @@ const TALKS: Record<string, { turns: SessionTurn[]; waiting: SessionWait | null 
     turns: [
       you(1.1, "The upload test in api flakes about 1 in 10 on CI. Find out why and fix it; don't just bump the timeout."),
       agentSaid(1.05, "Looking at `test/upload.test.ts` and the retry wrapper it goes through."),
-      ran(1, "Read: test/upload.test.ts", "Read: src/upload/retry.ts", "Grep: withRetry", "Bash: Run the upload test once"),
+      {
+        ...ran(1, "Bash: Read the last week of CI runs of the upload test", "Read: test/upload.test.ts", "Read: src/upload/retry.ts"),
+        images: [{ alt: "The upload test's CI runs this week: 4 of 38 red", src: "block:mock-ci:0" }],
+      },
       agentSaid(
         0.5,
         "Found it: `withRetry` retries on any error, so a timeout in the first attempt starts a second upload while the first is still writing. The test then sees two parts and fails the size check.\n\nI changed the retry to skip `TimeoutError` and abort the first attempt before it retries. To check it holds, I want to run the test 20 times in a row with retries off.",
@@ -2689,15 +2692,67 @@ const TALKS: Record<string, { turns: SessionTurn[]; waiting: SessionWait | null 
 };
 const sessionSent = new Map<string, SessionTurn[]>(); // your replies, in its transcript a moment after you send them
 
+const sessionLive = new Map<string, { busy: boolean; saying: string }>(); // the sessions the desk runs for you
+
+// What each session answers once the desk carries it on, as its turn streams in.
+function answerOf(x: SessionCard, text: string, allow: boolean): { tools: string[]; text: string } {
+  if (x.id.startsWith("session:5f1c") && allow)
+    return {
+      tools: ["Bash: Run the upload tests 20 times with retries off"],
+      text: "All 20 runs passed with retries off, so the flake was the double upload. I pushed the fix to `fix/upload-flake`; CI is running.",
+    };
+  if (x.id.startsWith("session:c47b"))
+    return {
+      tools: ["Edit: docs/releases/4.2.md"],
+      text: `Done: ${text.replace(/\.$/, "")}. The export API leads the API section, and the draft is in \`docs/releases/4.2.md\`.`,
+    };
+  return { tools: [], text: `Okay. ${text}` };
+}
+
+// A turn the desk runs: your words in its transcript, its tool calls, then its answer word by word, then in its transcript.
+function hostTurn(x: SessionCard, text: string, allow: boolean) {
+  sessionReplied.add(x.id);
+  sessionLive.set(x.id, { busy: true, saying: "" });
+  const at = () => new Date(now()).toISOString();
+  const push = (t: SessionTurn) => {
+    sessionSent.set(x.id, [...(sessionSent.get(x.id) ?? []), t]);
+  };
+  const a = answerOf(x, text, allow);
+  const words = a.text.split(" ");
+  setTimeout(() => {
+    push({ who: "you", at: at(), text });
+  }, 300);
+  if (a.tools.length)
+    setTimeout(() => {
+      push({ who: "tools", at: at(), lines: a.tools });
+    }, 700);
+  for (const [i] of words.entries())
+    setTimeout(
+      () => {
+        sessionLive.set(x.id, { busy: true, saying: words.slice(0, i + 1).join(" ") });
+      },
+      1000 + i * 50,
+    );
+  setTimeout(
+    () => {
+      push({ who: "agent", at: at(), text: a.text });
+      sessionLive.set(x.id, { busy: false, saying: "" });
+      bump();
+    },
+    1200 + words.length * 50,
+  );
+}
+
 function sessionView(x: SessionCard): SessionView {
   const talk = TALKS[x.id] ?? { turns: [], waiting: null };
   const replied = sessionReplied.has(x.id);
+  const live = sessionLive.get(x.id);
   const card = replied ? null : { ...x, status: sessionTriage.get(x.id) ?? "active" };
   const limited = !!x.resets_at && Date.parse(x.resets_at) > now();
-  const why = replied
-    ? "It doesn\u2019t need you now."
-    : x.kind === "desktop"
-      ? "The Claude app runs it: answer it there."
+  const why = live
+    ? null
+    : x.kind === "desktop" && x.alive
+      ? "Claude has it open: answer it there."
       : limited
         ? `It's rate limited until ${x.reason.slice(-5)}: answer it after that.`
         : null;
@@ -2713,6 +2768,7 @@ function sessionView(x: SessionCard): SessionView {
     turns: [...talk.turns, ...(sessionSent.get(x.id) ?? [])],
     earlier: 0,
     waiting: replied ? null : talk.waiting,
+    live: live ? { ...live, error: null } : null,
     can_reply: why === null,
     why_not: why,
     open: x.open_url ? { label: "Open in Claude", url: x.open_url } : null,
@@ -4594,30 +4650,25 @@ async function respond(req: MockRequest, url: URL): Promise<unknown> {
       throw new HttpError(400, `unknown action ${String(body.action)}`);
     return act(resolve(String(body.id)), body.action, typeof body.until === "string" ? body.until : undefined);
   }
-  // A session's page, and your reply: refused where the desk refuses it; else off the Inbox at once, and in its transcript (its
-  // page) a moment later, then its answer.
-  const sessionPage = /^\/api\/sessions\/([^/]+)\/(view|reply)$/.exec(url.pathname);
+  // A session's page, your message and your answers: refused where the desk refuses them; else off the Inbox at once, and the
+  // desk's turn streams into its page.
+  const sessionPage = /^\/api\/sessions\/([^/]+)\/(view|message|answer)$/.exec(url.pathname);
   if (sessionPage) {
     const x = SESSIONS.find((y) => y.id === decodeURIComponent(sessionPage[1]!));
     if (!x) throw new HttpError(404, "no session needed you lately");
     if (sessionPage[2] === "view" && req.method === "GET") return sessionView(x);
-    if (sessionPage[2] === "reply" && req.method === "POST") {
+    if (sessionPage[2] === "message" && req.method === "POST") {
       const body = await readBody(req);
       const text = typeof body.text === "string" ? body.text.trim() : "";
-      if (!text) throw new HttpError(400, "write a reply first");
+      if (!text) throw new HttpError(400, "write a message first");
       const v = sessionView(x);
       if (!v.can_reply) throw new HttpError(409, v.why_not ?? "it can't be answered here");
-      sessionReplied.add(x.id);
+      const started = !sessionLive.has(x.id);
+      hostTurn(x, text, body.allow === true);
       bump();
-      setTimeout(() => {
-        sessionSent.set(x.id, [
-          ...(sessionSent.get(x.id) ?? []),
-          { who: "you", at: new Date(now()).toISOString(), text },
-          { who: "agent", at: new Date(now()).toISOString(), text: `On it: ${text}.` },
-        ]);
-      }, 1500);
-      return { ok: true, args: ["--resume", x.session_id, "--bg", text] };
+      return { ok: true, started };
     }
+    if (sessionPage[2] === "answer" && req.method === "POST") return { ok: true };
   }
   // A session's Kick and Open: the rate-limited one refuses as the desk does; nothing runs.
   const sessionAt = /^\/api\/sessions\/([^/]+)\/(kick|open)$/.exec(url.pathname);
@@ -5140,6 +5191,14 @@ async function respond(req: MockRequest, url: URL): Promise<unknown> {
   }
   if (route === "GET /api/omarchy") return null; // not an Omarchy machine: the shots answer for one
   if (route === "GET /api/mock/clock") return { t0: T0 };
+  // Every session as it started: nothing you sent, none run by the desk.
+  if (route === "POST /api/mock/sessions") {
+    sessionReplied.clear();
+    sessionSent.clear();
+    sessionLive.clear();
+    bump();
+    return { ok: true };
+  }
   if (route === "POST /api/mock/clock") {
     wound = Date.now() - T0;
     return { t0: T0 };
@@ -5171,6 +5230,9 @@ async function respond(req: MockRequest, url: URL): Promise<unknown> {
   throw new HttpError(404, "not found");
 }
 
+// The upload test's CI runs this week, one bar a run, red where it failed.
+const CI_CHART = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="140" viewBox="0 0 600 140"><rect width="600" height="140" fill="#f7f6fa"/><rect x="12" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="27" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="42" y="20" width="11" height="80" rx="2" fill="#d14b4b"/><rect x="57" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="72" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="87" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="102" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="117" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="132" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="147" y="20" width="11" height="80" rx="2" fill="#d14b4b"/><rect x="162" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="177" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="192" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="207" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="222" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="237" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="252" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="267" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="282" y="20" width="11" height="80" rx="2" fill="#d14b4b"/><rect x="297" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="312" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="327" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="342" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="357" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="372" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="387" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="402" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="417" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="432" y="20" width="11" height="80" rx="2" fill="#d14b4b"/><rect x="447" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="462" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="477" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="492" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="507" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="522" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="537" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="552" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><rect x="567" y="20" width="11" height="80" rx="2" fill="#3c9a6a"/><text x="12" y="126" font-family="system-ui" font-size="13" fill="#555">upload.test.ts on CI, last 7 days: 4 of 38 runs red</text></svg>`;
+
 export async function handle(req: MockRequest, res: MockResponse) {
   const url = new URL(req.url ?? "/", "http://mock");
   if (req.method === "GET" && url.pathname === "/api/events") {
@@ -5192,6 +5254,12 @@ export async function handle(req: MockRequest, res: MockResponse) {
     }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(await Effect.runPromise(renderDoc(r.doc, r.ai)));
+    return;
+  }
+  // A session's turn's image: the mock's one, the upload test's CI runs as a chart.
+  if (req.method === "GET" && /^\/api\/sessions\/[^/]+\/image$/.test(url.pathname)) {
+    res.writeHead(200, { "content-type": "image/svg+xml", "cache-control": "no-store" });
+    res.end(CI_CHART);
     return;
   }
   try {

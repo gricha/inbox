@@ -25,6 +25,7 @@ import {
   type Seen,
 } from "../src/connectors/sessions.ts";
 import { KICK, type SessionView } from "../src/types.ts";
+import { hostArgs } from "../src/connectors/session-host.ts";
 import { readTail } from "../src/coordinator.ts";
 import { createApp } from "../src/server.ts";
 import { setup, WINDOW_HEADERS } from "./helpers/desk.ts";
@@ -354,6 +355,51 @@ if (args[0] === "-p") {
 }
 log("calls", { args, cwd: process.cwd() });
 if (args[0] === "agents") process.stdout.write(fs.readFileSync(path.join(__dirname, "agents.json"), "utf8"));
+else if (args.includes("--input-format")) {
+  // A session the desk runs, as claude -p speaks stream-json: each message a turn written to its transcript; "run" asks
+  // permission for Bash, "ask" asks a question, and what the desk answered is logged.
+  const id = args[args.indexOf("--resume") + 1];
+  const file = path.join(__dirname, "..", ".claude", "projects", "-work", id + ".jsonl");
+  const out = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+  const ev = (o) => JSON.stringify({ isSidechain: false, uuid: "h" + Math.random(), timestamp: new Date().toISOString(), cwd: process.cwd(), sessionId: id, ...o });
+  const said = (text) => {
+    fs.appendFileSync(file, ev({ type: "assistant", message: { role: "assistant", content: [{ type: "text", text }], stop_reason: "end_turn" } }) + "\\n");
+    out({ type: "assistant", message: { content: [{ type: "text", text }] } });
+    out({ type: "result", is_error: false, result: text });
+  };
+  let waiting = null;
+  let rest = "";
+  process.stdin.setEncoding("utf8").on("data", (d) => {
+    const lines = (rest + d).split("\\n");
+    rest = lines.pop();
+    for (const l of lines) {
+      const e = JSON.parse(l);
+      if (e.type === "control_response") {
+        log("answers", e.response);
+        const r = e.response.response;
+        if (waiting === "q") said("You picked " + Object.values(r.updatedInput.answers)[0] + ".");
+        else said(r.behavior === "allow" ? "Ran it." : "Okay, not running it: " + r.message);
+        continue;
+      }
+      const text = e.message.content[0].text;
+      log("said", text);
+      fs.appendFileSync(file, ev({ type: "user", message: { role: "user", content: text } }) + "\\n");
+      if (/^(run|Go ahead)/.test(text)) {
+        waiting = "bash";
+        fs.appendFileSync(file, ev({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "npm test" } }], stop_reason: "tool_use" } }) + "\\n");
+        out({ type: "control_request", request_id: "req-bash", request: { subtype: "can_use_tool", tool_name: "Bash", input: { command: "npm test" } } });
+      } else if (/^ask/.test(text)) {
+        waiting = "q";
+        const input = { questions: [{ question: "Keep the old table?", options: [{ label: "Keep it" }, { label: "Drop it" }] }] };
+        out({ type: "control_request", request_id: "req-q", request: { subtype: "can_use_tool", tool_name: "AskUserQuestion", input } });
+      } else {
+        out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "On it" } } });
+        said("On it: " + text);
+      }
+    }
+  });
+  process.stdin.on("end", () => process.exit(0));
+}
 else if (args[0] === "--resume") {
   // As claude does: the resumed turn lands in the session's own transcript, your words then its answer.
   const file = path.join(__dirname, "..", ".claude", "projects", "-work", args[1] + ".jsonl");
@@ -409,6 +455,8 @@ else if (args[0] === "--resume") {
       fs.writeFileSync(path.join(desktop, "org", "acct", `${String(o.sessionId)}.json`), JSON.stringify(o));
     },
     calls: () => read("calls") as { args: string[]; cwd: string }[],
+    said: () => read("said") as string[],
+    answers: () => read("answers") as { request_id: string; response: Record<string, unknown> }[],
     asks: () => read("asks"),
     askArgs: () => read("askArgs") as string[][],
   };
@@ -822,8 +870,26 @@ test("a Codex thread's page reads its messages and tool calls, not the context C
   );
 });
 
+// Reads the page until `ok` holds (a hosted turn writes as it goes), or fails saying what it last read.
+async function until(read: () => Promise<SessionView>, ok: (v: SessionView) => boolean): Promise<SessionView> {
+  let v = await read();
+  for (let n = 0; n < 200 && !ok(v); n++) {
+    await new Promise((r) => {
+      setTimeout(r, 20);
+    });
+    v = await read();
+  }
+  assert.ok(ok(v), JSON.stringify({ turns: v.turns.slice(-3), live: v.live, waiting: v.waiting }));
+  return v;
+}
+
+const lastSaid = (v: SessionView) => {
+  const t = v.turns.at(-1);
+  return t && t.who !== "tools" ? t.text : null;
+};
+
 test(
-  "a reply from the window carries a stopped session on with your words: its own transcript has them and its answer",
+  "a message from the window runs the session in the desk: its turn comes back, and its permission prompts and questions wait on you",
   posix,
   async (c) => {
     const m = machine(c);
@@ -836,89 +902,143 @@ test(
     const app = createApp(t.desk, 47823);
     const id = encodeURIComponent(`session:${S.bg}`);
     const view = async () => (await (await app.request(`http://127.0.0.1:47823/api/sessions/${id}/view`)).json()) as SessionView;
-    const reply = (text: unknown, headers: Record<string, string> = WINDOW_HEADERS) =>
-      app.request(`http://127.0.0.1:47823/api/sessions/${id}/reply`, {
+    const post = (what: string, body: unknown, headers: Record<string, string> = WINDOW_HEADERS) =>
+      app.request(`http://127.0.0.1:47823/api/sessions/${id}/${what}`, {
         method: "POST",
         headers: { ...headers, "content-type": "application/json" },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify(body),
       });
 
     const before = await view();
     assert.deepEqual(
-      [before.card?.reason, before.waiting, before.can_reply, before.why_not, before.open, before.command],
+      [before.card?.reason, before.waiting?.kind, before.can_reply, before.live, before.open, before.command],
       [
         "asked a question",
-        {
-          kind: "question",
-          question: "Keep the old table?",
-          options: [
-            { label: "Keep it", description: "" },
-            { label: "Drop it", description: "" },
-          ],
-        },
+        "question",
         true,
         null,
         { label: "Open in Claude", url: `claude://resume?session=${S.bg}` },
         `cd '${m.work}' && claude --resume ${S.bg}`,
       ],
     );
-    assert.equal((await reply("Keep it", {})).status, 403, "an agent can't answer a session");
-    assert.equal((await reply("  ")).status, 400);
-    const calls = m.calls().length;
-    const res = await reply("Keep it");
-    assert.equal(res.status, 200);
+    assert.equal((await post("message", { text: "Keep it" }, {})).status, 403, "an agent can't write to a session");
+    assert.equal((await post("message", { text: "  " })).status, 400);
+
+    const res = await post("message", { text: "Keep it" });
+    assert.deepEqual(await res.json(), { ok: true, started: true });
+    assert.deepEqual((await run(t.desk.focus())).sessions, [], "off your Inbox while it works");
+    let v = await until(view, (x) => lastSaid(x) === "On it: Keep it" && x.live?.busy === false);
     assert.deepEqual(
       m
         .calls()
-        .slice(calls)
+        .filter((x) => x.args.includes("--input-format"))
         .map((x) => [x.args, x.cwd]),
+      [[hostArgs(S.bg), m.work]],
+      "its own session, resumed in its folder, nothing but the protocol's flags",
+    );
+    assert.deepEqual([v.can_reply, v.why_not, v.waiting], [true, null, null]);
+
+    // A permission: it waits on you, on the page and on your Inbox, until you allow it.
+    await post("message", { text: "run the tests" });
+    v = await until(view, (x) => x.waiting?.kind === "permission");
+    assert.deepEqual(v.waiting, { kind: "permission", tool: "Bash", detail: "npm test", ask: "req-bash" });
+    await t.poll();
+    assert.deepEqual(
+      (await run(t.desk.focus())).sessions.map((x) => [x.reason, x.excerpt]),
+      [["needs permission: Bash", "npm test"]],
+    );
+    assert.equal((await post("answer", { ask: "req-bash", allow: true }, {})).status, 403);
+    assert.equal((await post("answer", { ask: "req-bash", allow: true })).status, 200);
+    v = await until(view, (x) => lastSaid(x) === "Ran it.");
+    assert.equal((await post("answer", { ask: "req-bash", allow: true })).status, 409, "answered already");
+
+    // A question: your pick goes back as its answer.
+    await post("message", { text: "ask me" });
+    v = await until(view, (x) => x.waiting?.kind === "question");
+    assert.deepEqual(v.waiting, {
+      kind: "question",
+      question: "Keep the old table?",
+      options: [
+        { label: "Keep it", description: "" },
+        { label: "Drop it", description: "" },
+      ],
+      ask: "req-q",
+    });
+    await post("answer", { ask: "req-q", allow: true, answer: "Drop it" });
+    await until(view, (x) => lastSaid(x) === "You picked Drop it.");
+
+    await post("message", { text: "run them again" });
+    await until(view, (x) => x.waiting?.kind === "permission");
+    await post("answer", { ask: "req-bash", allow: false, message: "Not on main" });
+    await until(view, (x) => lastSaid(x) === "Okay, not running it: Not on main");
+    assert.deepEqual(
+      m.answers().map((x) => [x.request_id, x.response]),
       [
-        [["agents", "--json", "--all"], m.calls()[calls]!.cwd],
-        [["--resume", S.bg, "--bg", "Keep it"], m.work],
+        ["req-bash", { behavior: "allow", updatedInput: { command: "npm test" } }],
+        ["req-q", { behavior: "allow", updatedInput: { ...ask, answers: { "Keep the old table?": "Drop it" } } }],
+        ["req-bash", { behavior: "deny", message: "Not on main" }],
       ],
     );
+    assert.deepEqual(m.said(), ["Keep it", "run the tests", "ask me", "run them again"]);
     assert.deepEqual(
       t.desk.store.db
         .prepare("SELECT action FROM events WHERE item_id = ?")
         .all(`session:${S.bg}`)
         .map((x) => x.action),
-      ["reply"],
+      ["reply", "reply", "allow", "reply", "allow", "reply", "deny"],
     );
-    // Off your Inbox at once; its page reads on, from the transcript the resumed turn wrote.
-    assert.deepEqual((await run(t.desk.focus())).sessions, []);
-    const after = await view();
-    assert.deepEqual(
-      after.turns.slice(-2).map((x) => (x.who === "tools" ? x.lines : [x.who, x.text])),
-      [
-        ["you", "Keep it"],
-        ["agent", "On it: Keep it"],
-      ],
-    );
-    assert.deepEqual([after.card, after.can_reply, after.why_not], [null, false, "It doesn't need you now."]);
-    assert.equal((await reply("Again")).status, 409);
 
-    // A reply that starts with a dash isn't a flag.
-    const l2 = lines(S.dead, m.work, Date.now());
-    m.agents([{ id: "bg02", cwd: m.work, kind: "background", startedAt: 1, sessionId: S.dead, name: "Docs", state: "failed" }]);
-    m.transcript(S.dead, [l2.prompt("go"), l2.said("Failed.")]);
-    while (t.desk.sessions.polling)
-      await new Promise((r) => {
-        setTimeout(r, 10);
-      }); // the look the reply started
-    await t.poll();
-    const n = m.calls().length;
-    await run(t.desk.replySession(`session:${S.dead}`, "--force it"));
-    assert.deepEqual(m.calls().at(-1)?.args, ["--resume", S.dead, "--bg", "--", "--force it"]);
-    assert.ok(m.calls().length > n);
+    // Open in Claude: the desk lets go first, so the app is its one writer.
+    const host = t.desk.sessions.hosts.get(`session:${S.bg}`)!;
+    assert.equal((await post("open", {})).status, 200);
+    assert.deepEqual([host.closed, t.opened], [true, [`claude://resume?session=${S.bg}`]]);
+    assert.equal((await view()).live, null);
   },
 );
 
-test("a session the desk can't carry on says where to answer it, and refuses a reply in those words", posix, async (c) => {
-  const m = machine(c);
-  const t = await deskOn(c, m);
-  const l = lines(S.desk, m.work, Date.now());
-  m.agents([
-    {
+test(
+  "Allow on a call a stopped session waited on carries it on and allows that call, and only that one, when it asks again",
+  posix,
+  async (c) => {
+    const m = machine(c);
+    const t = await deskOn(c, m);
+    const l = lines(S.bg, m.work, Date.now());
+    m.agents([{ id: "bg01", cwd: m.work, kind: "background", startedAt: 1, sessionId: S.bg, name: "CI", state: "blocked" }]);
+    m.transcript(S.bg, [l.prompt("Fix CI"), l.tool("t0", "Bash", { command: "npm test" })]);
+    await t.poll();
+    const id = `session:${S.bg}`;
+    const view = () => run(t.desk.sessionView(id));
+    assert.equal((await view()).waiting?.kind, "permission");
+    await run(t.desk.sendSession(id, "Go ahead.", true));
+    await until(view, (v) => lastSaid(v) === "Ran it.");
+    assert.deepEqual(m.answers(), [
+      { subtype: "success", request_id: "req-bash", response: { behavior: "allow", updatedInput: { command: "npm test" } } },
+    ]);
+    // A call you didn't allow still asks.
+    await run(t.desk.sendSession(id, "run it once more"));
+    await until(view, (v) => v.waiting?.kind === "permission");
+  },
+);
+
+test(
+  "a session the Claude app, a terminal or Codex holds says where to answer it, and refuses a message in those words",
+  posix,
+  async (c) => {
+    const m = machine(c);
+    const t = await deskOn(c, m);
+    const l = lines(S.desk, m.work, Date.now());
+    const record = (o: Record<string, unknown>) => ({
+      sessionId: "local_abc",
+      cliSessionId: S.desk,
+      title: "Deploy",
+      cwd: m.work,
+      isArchived: false,
+      lastActivityAt: Date.now(),
+      lastTurnEdgeAt: 0,
+      postTurnSummary: { status_category: "blocked", status_detail: "Needs a token", summarizes_uuid: "x" },
+      ...o,
+    });
+    const term = {
       pid: process.pid,
       cwd: m.work,
       kind: "interactive",
@@ -926,40 +1046,99 @@ test("a session the desk can't carry on says where to answer it, and refuses a r
       name: "term",
       status: "waiting",
       waitingFor: "permission prompt",
+    };
+    m.agents([term, { pid: process.pid, cwd: m.work, kind: "interactive", sessionId: S.desk, status: "idle" }]);
+    const tl = lines(S.cli, m.work, Date.now());
+    m.transcript(S.cli, [tl.prompt("Clean up"), tl.tool("t1", "Bash", { command: "rm -rf build", description: "Clean the build" })]);
+    m.transcript(S.desk, [l.prompt("go"), l.said("Blocked.")]);
+    m.desktop(record({}));
+    await t.poll();
+    const open = await run(t.desk.sessionView(`session:${S.desk}`));
+    assert.deepEqual(
+      [open.can_reply, open.why_not, open.open, open.command],
+      [false, "Claude has it open: answer it there.", { label: "Open in Claude", url: "claude://claude.ai/epitaxy/local_abc" }, null],
+    );
+    assert.equal((await failure(t.desk.sendSession(`session:${S.desk}`, "ok"))).message, "Claude has it open: answer it there.");
+    const cli = await run(t.desk.sessionView(`session:${S.cli}`));
+    assert.deepEqual(
+      [cli.card?.reason, cli.waiting, cli.why_not, cli.open, cli.command],
+      [
+        "needs permission: Bash",
+        { kind: "permission", tool: "Bash", detail: "rm -rf build" },
+        "It runs in a terminal: answer it there.",
+        null,
+        null,
+      ],
+    );
+    // Closed in the app, it's the desk's to carry on.
+    m.agents([term]);
+    await t.poll();
+    assert.equal((await run(t.desk.sessionView(`session:${S.desk}`))).can_reply, true);
+    // The app opened it again between the page's read and your message: the look before starting says so.
+    m.agents([term, { pid: process.pid, cwd: m.work, kind: "interactive", sessionId: S.desk, status: "idle" }]);
+    assert.equal((await failure(t.desk.sendSession(`session:${S.desk}`, "ok"))).message, "Claude has it open: answer it there.");
+    m.agents([term]);
+    await run(t.desk.sendSession(`session:${S.desk}`, "Use the staging token"));
+    await until(
+      () => run(t.desk.sessionView(`session:${S.desk}`)),
+      (v) => lastSaid(v) === "On it: Use the staging token",
+    );
+    assert.equal((await failure(t.desk.sessionView("session:nope"))).message, 'no session "session:nope" needed you lately');
+  },
+);
+
+test("a turn's images show inline: a tool's screenshot and a file its words point to, and nothing else is served", posix, async (c) => {
+  const m = machine(c);
+  const t = await deskOn(c, m);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  fs.writeFileSync(path.join(m.work, "shot.png"), png);
+  fs.writeFileSync(path.join(m.work, "notes.txt"), "secret");
+  const l = lines(S.bg, m.work, Date.now());
+  const shot = JSON.stringify({
+    isSidechain: false,
+    uuid: "img-1",
+    timestamp: new Date().toISOString(),
+    type: "user",
+    message: {
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "t1",
+          content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: png.toString("base64") } }],
+        },
+      ],
     },
-  ]);
-  const tl = lines(S.cli, m.work, Date.now());
-  m.transcript(S.cli, [tl.prompt("Clean up"), tl.tool("t1", "Bash", { command: "rm -rf build", description: "Clean the build" })]);
-  m.transcript(S.desk, [l.prompt("go"), l.said("Blocked.")]);
-  m.desktop({
-    sessionId: "local_abc",
-    cliSessionId: S.desk,
-    title: "Deploy",
-    cwd: m.work,
-    isArchived: false,
-    lastActivityAt: Date.now(),
-    lastTurnEdgeAt: 0,
-    postTurnSummary: { status_category: "blocked", status_detail: "Needs a token", summarizes_uuid: "x" },
   });
+  m.agents([{ id: "bg01", cwd: m.work, kind: "background", startedAt: 1, sessionId: S.bg, name: "UI", state: "blocked" }]);
+  m.transcript(S.bg, [
+    l.prompt("Fix the header"),
+    l.tool("t1", "Screenshot", {}),
+    shot,
+    l.said("Here it is:\n\n![the header](shot.png)\n\nAnd [the notes](notes.txt). Look right?"),
+  ]);
   await t.poll();
-  const desk = await run(t.desk.sessionView(`session:${S.desk}`));
-  assert.deepEqual(
-    [desk.can_reply, desk.why_not, desk.open, desk.command],
-    [false, "The Claude app runs it: answer it there.", { label: "Open in Claude", url: "claude://claude.ai/epitaxy/local_abc" }, null],
-  );
-  assert.equal((await failure(t.desk.replySession(`session:${S.desk}`, "ok"))).message, "The Claude app runs it: answer it there.");
-  const term = await run(t.desk.sessionView(`session:${S.cli}`));
-  assert.deepEqual(
-    [term.card?.reason, term.waiting, term.why_not, term.open, term.command],
-    [
-      "needs permission: Bash",
-      { kind: "permission", tool: "Bash", detail: "rm -rf build" },
-      "It runs in a terminal: answer it there.",
-      null,
-      null,
-    ],
-  );
-  assert.equal((await failure(t.desk.sessionView("session:nope"))).message, 'no session "session:nope" needed you lately');
+  const id = `session:${S.bg}`;
+  const v = await run(t.desk.sessionView(id));
+  const [tools, said] = v.turns.slice(-2);
+  assert.deepEqual(tools?.images, [{ alt: "", src: "block:img-1:0" }]);
+  assert.deepEqual(said && said.who !== "tools" && [said.text, said.images], [
+    "Here it is:\n\n\n\nAnd [the notes](notes.txt). Look right?",
+    [{ alt: "the header", src: "file:shot.png" }],
+  ]);
+  const app = createApp(t.desk, 47823);
+  const get = (src: string) =>
+    app.request(`http://127.0.0.1:47823/api/sessions/${encodeURIComponent(id)}/image?src=${encodeURIComponent(src)}`);
+  for (const src of ["block:img-1:0", "file:shot.png"]) {
+    const r = await get(src);
+    assert.deepEqual(
+      [r.status, r.headers.get("content-type"), r.headers.get("content-security-policy")],
+      [200, "image/png", "default-src 'none'; sandbox; frame-ancestors 'none'"],
+    );
+    assert.deepEqual(Buffer.from(await r.arrayBuffer()), png);
+  }
+  for (const src of ["file:notes.txt", "file:/etc/hosts", "file:../shot.png", "block:img-1:1"])
+    assert.equal((await get(src)).status, 404, src);
 });
 
 test("a long session's page still says what you first asked, read from the transcript's start", posix, async (c) => {

@@ -323,7 +323,8 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
       // A review document's page runs nothing and asks for nothing; only the desk's window frames it (#/doc/<id>).
       const doc = DOC_PAGE.test(c.req.path);
       c.header("X-Frame-Options", doc ? "SAMEORIGIN" : "DENY");
-      c.header("Content-Security-Policy", doc ? `${DOC_CSP}; frame-ancestors 'self'` : "frame-ancestors 'none'");
+      const own = c.res.headers.get("Content-Security-Policy"); // a route's own (a session's image), kept
+      c.header("Content-Security-Policy", doc ? `${DOC_CSP}; frame-ancestors 'self'` : `${own ? `${own}; ` : ""}frame-ancestors 'none'`);
     }
   });
 
@@ -858,15 +859,45 @@ export function createApp(desk: Desk, port: number, remote: Remote = new Remote(
     return respond(c, kick, { log });
   });
   app.get("/api/sessions/:id/view", (c) => respond(c, desk.sessionView(c.req.param("id")), { log, read: true }));
-  app.post("/api/sessions/:id/reply", (c) => {
+  // Your message to it, and your answer to what it asks while the desk runs it.
+  app.post("/api/sessions/:id/message", (c) => {
+    const send = Effect.gen(function* () {
+      yield* hands(c, "write to a session in the desk's window");
+      const b = yield* bodyOf(c);
+      if (typeof b.text !== "string") return yield* new BadRequest({ message: "need { text }" });
+      return { ok: true, ...(yield* desk.sendSession(c.req.param("id"), b.text, b.allow === true)) };
+    });
+    return respond(c, send, { log });
+  });
+  app.post("/api/sessions/:id/answer", (c) => {
     const answer = Effect.gen(function* () {
       yield* hands(c, "answer a session in the desk's window");
       const b = yield* bodyOf(c);
-      if (typeof b.text !== "string") return yield* new BadRequest({ message: "need { text }" });
-      return { ok: true, ...(yield* desk.replySession(c.req.param("id"), b.text)) };
+      if (typeof b.ask !== "string" || typeof b.allow !== "boolean") return yield* new BadRequest({ message: "need { ask, allow }" });
+      yield* desk.answerSession(c.req.param("id"), b.ask, {
+        allow: b.allow,
+        ...(typeof b.answer === "string" && { answer: b.answer }),
+        ...(typeof b.message === "string" && { message: b.message }),
+      });
+      return { ok: true };
     });
     return respond(c, answer, { log });
   });
+  // An image a session's turn shows: as an image only, never a page of the desk's own.
+  app.get("/api/sessions/:id/image", (c) =>
+    respond(
+      c,
+      Effect.map(desk.sessionImage(c.req.param("id"), c.req.query("src") ?? ""), (img) =>
+        c.body(new Uint8Array(img.data), 200, {
+          "content-type": img.type,
+          "content-security-policy": "default-src 'none'; sandbox",
+          "x-content-type-options": "nosniff",
+          "cache-control": "private, max-age=3600",
+        }),
+      ),
+      { log, read: true },
+    ),
+  );
   app.post("/api/sessions/:id/open", (c) => {
     const open = Effect.gen(function* () {
       if (!fromDesk(c) || VIA.get(c.req.raw) === "phone") return yield* new Forbidden({ message: "open a session from the desk's window" });

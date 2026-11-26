@@ -1331,76 +1331,118 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    // A session waiting on a permission, which only the Claude app can grant: what it's doing, its last turns (its tool calls
-    // folded to a line), what it wants to run, where to answer it and Open in Claude.
+    // A session the Claude app closed, waiting on a permission: compact, its buttons in its head, its last turns (its tool calls
+    // a line a run, the chart it read inline), what it wants to run with Allow and Deny, and the box to write to it.
     name: "session-permission",
     go: async (page) => {
       await at("#/session/session%3A5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21")(page);
       await page.locator(".session-page .ses-turns").waitFor();
-      const p = await page.evaluate<{ head: string[]; turns: string[]; wait: string; note: string; acts: [string, boolean][] }>(`(() => {
+      await page.locator(".ses-images img").evaluate("(i) => i.decode()");
+      const p = await page.evaluate<{
+        head: string[];
+        turns: string[];
+        wait: string;
+        acts: string[];
+        head_acts: string[];
+        box: boolean;
+      }>(`(() => {
         const q = (s) => document.querySelector(s)?.textContent.trim() ?? "";
         return {
-          head: [q(".session-page .rv-by"), q(".session-page .rv-title"), q(".ses-why")],
-          turns: [...document.querySelectorAll(".ses-turn")].map((t) => t.classList.contains("ses-tools") ? "tools" : t.querySelector(".ses-who").textContent.trim()),
+          head: [q(".ses-where"), q(".ses-title"), q(".ses-state")],
+          turns: [...document.querySelectorAll(".ses-turn")].map((t) => t.classList.contains("ses-tools") ? (t.querySelector("img") ? "tools+image" : "tools") : t.classList.contains("ses-you") ? "you" : "agent"),
           wait: q(".ses-wait .inq-code"),
-          note: q(".ses-note"),
-          acts: [...document.querySelectorAll(".session-page .inq-write .act")].map((b) => [b.textContent.trim(), b.classList.contains("primary")]),
+          acts: [...document.querySelectorAll(".ses-wait .act")].map((b) => b.textContent.trim()),
+          head_acts: [...document.querySelectorAll(".ses-acts .act")].map((b) => b.textContent.trim()),
+          box: !!document.querySelector(".ses-compose textarea"),
         };
       })()`);
       if (p.head.join(" · ") !== "Desktop · api · fix/upload-flake · Fix the flaky upload test · Needs permission: Bash · 18m")
         failures.push(`session-permission: its head reads ${JSON.stringify(p.head)}`);
-      if (p.turns.join(" ") !== "You Claude tools Claude tools")
+      if (p.turns.join(" ") !== "you agent tools+image agent tools")
         failures.push(`session-permission: its turns read ${JSON.stringify(p.turns)}`);
       if (!p.wait.startsWith("for i in $(seq 20)"))
         failures.push(`session-permission: what it wants to run reads ${JSON.stringify(p.wait)}`);
-      if (p.note !== "The Claude app runs it: answer it there.")
-        failures.push(`session-permission: its note reads ${JSON.stringify(p.note)}`);
-      if (
-        JSON.stringify(p.acts) !==
-        JSON.stringify([
-          ["Open in Claude", true],
-          ["Done", false],
-        ])
-      )
-        failures.push(`session-permission: its buttons read ${JSON.stringify(p.acts)}`);
-      if (await page.locator(".session-page textarea").count()) failures.push("session-permission: it offers a reply box it can't send");
+      if (p.acts.join(" · ") !== "Allow · Deny") failures.push(`session-permission: its answers read ${JSON.stringify(p.acts)}`);
+      if (p.head_acts.join(" · ") !== "Open in Claude · Done")
+        failures.push(`session-permission: its head's buttons read ${JSON.stringify(p.head_acts)}`);
+      if (!p.box) failures.push("session-permission: no box to write to it");
     },
   },
   {
-    // A session that asked a question and has no process: its answers one click each, a box for your own, Send, Open in Claude
-    // and its resume command; the turns before its last eight folded.
+    // Allow: what you said shows at once, then its turn streams in (the mock writes it a word at a time), then it's its own.
+    name: "session-allow",
+    writes: true,
+    go: async (page) => {
+      await at("#/session/session%3A5f1c2a90-7d3e-4b8a-9c11-2e6f0a4b7d21")(page);
+      await page.locator(".ses-wait .act", { hasText: "Allow" }).click();
+      const mine = page.locator(".ses-you", { hasText: "Go ahead." });
+      await mine.waitFor({ timeout: 1000 }).catch(() => {});
+      if (!(await mine.count())) failures.push("session-allow: Allow doesn't show what it sent at once");
+      if (await page.locator(".ses-wait").count()) failures.push("session-allow: what it asked stays after you answered");
+      await page
+        .locator(".ses-streaming")
+        .waitFor({ timeout: 4000 })
+        .catch(() => failures.push("session-allow: its turn doesn't stream in"));
+      const done = page.locator(".ses-agent:not(.ses-streaming)", { hasText: "All 20 runs passed" });
+      await done.waitFor({ timeout: 8000 }).catch(() => failures.push("session-allow: its answer never lands"));
+      await page.waitForTimeout(300);
+      const state = await page.locator(".ses-state").textContent();
+      if (state?.trim() !== "Your turn") failures.push(`session-allow: once its turn ends the head reads ${JSON.stringify(state)}`);
+    },
+    after: async (page) => {
+      await fetch(`http://127.0.0.1:${MOCK}/api/mock/sessions`, { method: "POST" });
+      await fresh(page);
+    },
+  },
+  {
+    // A terminal's session that asked a question: its answers one click each, the box takes your own answer; the turns before
+    // its last fourteen folded.
     name: "session-question",
     go: async (page) => {
       await at("#/session/session%3Ac47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63")(page);
       await page.locator(".session-page .inq-options").waitFor();
-      const p = await page.evaluate<{ ask: string; options: string[]; earlier: string; acts: string[] }>(`(() => ({
-        ask: document.querySelector(".session-page .inq-answer > .ses-ask")?.textContent.trim() ?? "",
+      const p = await page.evaluate<{ ask: string; options: string[]; box: string; head: string[] }>(`(() => ({
+        ask: document.querySelector(".ses-wait .ses-ask")?.textContent.trim() ?? "",
         options: [...document.querySelectorAll(".session-page .inq-option-answer")].map((x) => x.textContent.trim()),
-        earlier: document.querySelector(".ses-earlier")?.textContent.trim() ?? "",
-        acts: [...document.querySelectorAll(".session-page .inq-write .act")].map((b) => b.textContent.trim()),
+        box: document.querySelector(".ses-compose textarea")?.getAttribute("placeholder") ?? "",
+        head: [...document.querySelectorAll(".ses-acts .act")].map((b) => b.textContent.trim()),
       }))()`);
       if (p.ask !== "Group the changes by area or by PR?") failures.push(`session-question: it asks ${JSON.stringify(p.ask)}`);
       if (p.options.join(" · ") !== "By area · By PR") failures.push(`session-question: its answers read ${JSON.stringify(p.options)}`);
-      if (p.earlier !== "3 earlier turns") failures.push(`session-question: the fold reads ${JSON.stringify(p.earlier)}`);
-      if (p.acts.join(" · ") !== "Send · Open in Claude · Copy resume command · Done")
-        failures.push(`session-question: its buttons read ${JSON.stringify(p.acts)}`);
+      if (p.box !== "Or answer in your own words") failures.push(`session-question: its box says ${JSON.stringify(p.box)}`);
+      if (p.head.join(" · ") !== "Open in Claude · Copy resume command · Done")
+        failures.push(`session-question: its head's buttons read ${JSON.stringify(p.head)}`);
     },
   },
   {
-    // Your reply shows at once, before the desk answers (it never does here), as your next turn, sending.
-    name: "session-reply-shows",
+    // A rate-limited session: no box, a line saying when, and its buttons.
+    name: "session-limited",
     go: async (page) => {
-      await page.route("**/reply", () => {});
+      await at("#/session/session%3Aa83e61d4-0b52-4f7c-8e3a-91c4d6b2f058")(page);
+      await page.locator(".session-page .ses-turns").waitFor();
+      const note = (await page.locator(".ses-note").textContent())?.trim() ?? "";
+      if (!/^It's rate limited until \d\d:\d\d: answer it after that\.$/.test(note))
+        failures.push(`session-limited: its note reads ${JSON.stringify(note)}`);
+      if (await page.locator(".ses-compose").count()) failures.push("session-limited: it offers a box it can't send");
+    },
+  },
+  {
+    // What you send shows at once, before the desk answers (it never does here), as your turn, sending.
+    name: "session-send-shows",
+    go: async (page) => {
+      await page.route("**/message", () => {});
       await at("#/session/session%3Ac47b9e12-3a6d-4f0e-b8d2-7e1a5c9f0b63")(page);
       const text = "By area, and put the export API first.";
-      await page.locator(".session-page textarea").fill(text);
-      await page.locator(".session-page .inq-write .act", { hasText: "Send" }).click();
+      await page.locator(".ses-compose textarea").fill(text);
+      await page.locator(".ses-compose textarea").press("Enter");
       const mine = page.locator(".ses-you", { hasText: text });
       await mine.waitFor({ timeout: 2000 }).catch(() => {});
-      if (!(await mine.count())) failures.push("session-reply-shows: the reply you sent isn't in its turns");
-      else if (!(await mine.locator(".busy").count())) failures.push("session-reply-shows: the reply you sent doesn't say it's sending");
-      if (await page.locator(".session-page .inq-options, .session-page textarea").count())
-        failures.push("session-reply-shows: answered, it still offers its answers and the box");
+      if (!(await mine.count())) failures.push("session-send-shows: what you sent isn't in its turns");
+      else if (!(await mine.locator(".busy").count())) failures.push("session-send-shows: what you sent doesn't say it's sending");
+      if (await page.locator(".session-page .inq-options").count())
+        failures.push("session-send-shows: answered, it still offers its answers");
+      if ((await page.locator(".ses-compose textarea").inputValue()) !== "")
+        failures.push("session-send-shows: the box keeps what you sent");
     },
     after: async (page) => {
       await unroute(page);

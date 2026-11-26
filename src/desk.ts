@@ -26,6 +26,7 @@ import {
   type GitHubError,
   type GitHubReadError,
   type GitHubWriteError,
+  type UnsafeArgument,
 } from "./errors.ts";
 import type { Checkout } from "./checkout.ts";
 import { Automations, canOf } from "./automations.ts";
@@ -3654,17 +3655,32 @@ export class Desk {
     return this.sessions.view(ref);
   }
 
-  // Your reply, from the desk's window or your paired phone: the session's next turn, where the desk can carry it on.
-  replySession(
+  // Your message, from the desk's window or your paired phone: the session's next turn, in the process the desk runs it in.
+  sendSession(
     ref: string,
     text: string,
-  ): Effect.Effect<{ args: string[]; note: string | null }, NotFound | Conflict | BadRequest | CommandError> {
-    return this.sessions.reply(ref, text);
+    allow = false,
+  ): Effect.Effect<{ started: boolean }, NotFound | Conflict | BadRequest | CommandError | UnsafeArgument> {
+    return this.sessions.send(ref, text, allow);
+  }
+
+  // Your answer to what a session the desk runs asks: a permission, a question's pick, a plan.
+  answerSession(
+    ref: string,
+    ask: string,
+    a: { allow: boolean; answer?: string; message?: string },
+  ): Effect.Effect<void, NotFound | Conflict> {
+    return this.sessions.answer(ref, ask, a);
+  }
+
+  sessionImage(ref: string, src: string): Effect.Effect<{ type: string; data: Buffer }, NotFound> {
+    return this.sessions.image(ref, src);
   }
 
   // Open: the desktop app's or Codex's own link, or the app's claude://resume for one no process runs; the desk's computer opens it.
   openSession(ref: string): Effect.Effect<{ url: string }, NotFound | Conflict | CommandError> {
     return Effect.gen({ self: this }, function* () {
+      yield* this.sessions.release(ref); // one writer: the desk lets go before the app takes it
       const v = yield* this.sessions.view(ref);
       if (!v.open) return yield* new Conflict({ message: `${v.name} has no link to open` });
       yield* this.opener(v.open.url);

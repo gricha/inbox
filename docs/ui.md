@@ -224,15 +224,14 @@ Your own Claude Code and Codex sessions on this computer that are blocked on you
 
 ## A session's page
 
-`#/session/<id>`. What a session is doing and why it waits, and your answer, without switching apps.
+`#/session/<id>`. The session as a chat: what it's doing, its conversation, and a box to write to it, without switching apps.
 
-- Its kind, folder and branch, its name as the title, then why it's here and for how long ("Needs permission: Bash · 18m").
-- Its last turns, read from its own transcript: what you said (set off by a rule), what it said (as prose), and each run of tool calls as one quiet line ("4 steps · Read, Grep, Bash", folded open on a click). Past eight turns, the rest fold under "N earlier turns". In a long session, what you first asked it comes first.
-- What it waits on: a question with its options as a table, one click each; the command or file a permission prompt is about; its plan, open.
-- **Your reply**, where the desk can carry it on (a background session or a terminal's with no process): a box, **Send** (or ⌘↵), and **Continue where it left off** for a stalled one. What you send shows at once as your turn, sending, and reads back every 3 seconds until its transcript has it; it leaves the Inbox at once. A refusal is a bubble and puts your words back in the box.
-- Where it can't (the Claude app or Codex runs it, a terminal still open, a rate limit not reset), one line says where to answer it instead, and there's no box. A permission prompt or a plan can only be answered where it waits.
-- **Open in Claude** (or **Open in Codex**) opens it there: the desktop app's own session, or the app takes in a Claude Code session no process runs. **Copy resume command** (`cd <folder> && claude --resume <id>`) or **Copy attach command** for a running background one. **Done** hides it until it moves on.
-- Once answered it stays readable here, saying it doesn't need you now. Esc goes back to the Inbox.
+- **Head**, compact: Session, its kind, folder and branch, with **Open in Claude** (or **Open in Codex**), **Copy resume command** (or **Copy attach command**) and **Done** at the right; its name; then its state ("Needs permission: Bash · 18m", "Working", "Your turn").
+- **Its turns**, from its own transcript: yours on a sheet at the right, its words as prose, each run of tool calls one pencil line ("3 steps · Bash, Read", open on a click), and the images it showed inline (a screenshot a tool returned, a file it pointed to with markdown's image syntax), each opening at full size. Past fourteen turns the rest fold under "N earlier turns"; in a long session what you first asked comes first. It opens at the newest turn and follows it while you're at the bottom.
+- **What it waits on**, after the last turn: a permission with what it wants to run, **Allow** and **Deny** (what you've written in the box says why); a question with its answers, one click each, and the box takes your own; a plan with **Approve** and **Keep planning**.
+- **The box**, held at the window's bottom: Enter sends, Shift+Enter is a new line. Your first message starts the session in the desk ([api.md → Sessions](api.md#sessions)); its turn streams in as it writes, then stays as its own. What you send shows at once as your turn, sending, until its transcript has it, and the session leaves the Inbox; a refusal is a bubble and puts your words back.
+- Where something else holds it (the Claude app has it open, a terminal, a running background job, Codex, a rate limit not reset), one line says where to answer it instead, and there's no box.
+- **Open in Claude** lets go of it first, so Claude carries on the same conversation. Esc goes back to the Inbox.
 
 ## An agent's question
 
