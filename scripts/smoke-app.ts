@@ -11,6 +11,7 @@ import { _electron } from "playwright-core";
 import { envVar, probeHealth } from "../electron/lib.ts";
 import { freePort } from "../electron/source.ts";
 import { defaultConfigText } from "../src/config.ts";
+import { isRecord } from "../src/narrow.ts";
 import type { DesktopBridge } from "../src/types.ts";
 
 const root = path.join(import.meta.dirname, "..");
@@ -24,6 +25,21 @@ const deskUrl = `http://localhost:${port}`;
 const step = (msg: string) => {
   console.log(`• ${msg}`);
 };
+// A desk's JSON, asked again when a kept-alive connection it had just closed resets: fetch's race, not the desk failing.
+const reset = (e: unknown) => isRecord(e) && isRecord(e.cause) && e.cause.code === "ECONNRESET";
+async function deskJson(url: string): Promise<unknown> {
+  for (let i = 0; ; i++) {
+    const got = await fetch(url).then(
+      async (r): Promise<{ ok: unknown } | null> => ({ ok: await r.json() }),
+      (e: unknown) => {
+        if (i < 2 && reset(e)) return null;
+        throw e instanceof Error ? e : new Error(String(e));
+      },
+    );
+    if (got) return got.ok;
+    await sleep(300);
+  }
+}
 // A home with no config.toml is a first run, whose setup page can cover the window midway through the checks.
 const config = path.join(home, "config.toml");
 fs.mkdirSync(home, { recursive: true });
@@ -35,12 +51,27 @@ delete env.DESK_DEV;
 step(`launching ${bin ?? "the app from the repo"} (home ${home}, port ${port})`);
 const app = await _electron.launch(bin ? { executablePath: bin, env, timeout: 60_000 } : { args: [root], env, timeout: 60_000 });
 const exited = new Promise<number | null>((resolve) => {
-  app.process().once("exit", (code) => {
+  app.process().once("exit", (code, sig) => {
+    // A run that fails says how the app went, not only that a page was gone.
+    if (!closing) step(`the app exited by itself (${code ?? sig})`);
     resolve(code);
   });
 });
+let closing = false;
+let output = "";
+const keep = (d: Buffer) => {
+  output = (output + d.toString()).slice(-4000);
+};
+app.process().stdout?.on("data", keep);
+app.process().stderr?.on("data", keep);
 try {
   const page = await app.firstWindow();
+  page.on("crash", () => {
+    step("the window's renderer crashed");
+  });
+  page.on("close", () => {
+    if (!closing) step(`the window closed by itself; the app's last output:\n${output}`);
+  });
   step("window open; waiting for the desk (a fresh home reads your GitHub context first, ~30 s)");
   await page.waitForURL((u) => u.href.startsWith(deskUrl), { timeout: 120_000 });
   await page.locator('.side a.side-item[aria-current="page"]', { hasText: "Inbox" }).waitFor({ timeout: 30_000 });
@@ -111,7 +142,7 @@ try {
     let o: Overview | null = null;
     for (let i = 0; i < 90 && !(o?.synced_at && !o.syncing); i++) {
       await sleep(2000);
-      o = (await (await fetch(`${deskUrl}/api/overview`)).json()) as Overview;
+      o = (await deskJson(`${deskUrl}/api/overview`)) as Overview | null;
     }
     assert.ok(o?.synced_at, "no finished GitHub sync after 3 minutes");
     assert.equal(o.sync_error, null, `sync failed: ${o.sync_error}`);
@@ -124,7 +155,7 @@ try {
       .first()
       .waitFor({ timeout: 90_000 })
       .catch(() => null);
-    const queue = (await (await fetch(`${deskUrl}/api/queue`)).json()) as { sections: Record<string, { id: string; kind: string }[]> };
+    const queue = (await deskJson(`${deskUrl}/api/queue`)) as { sections: Record<string, { id: string; kind: string }[]> };
     const prs = new Set(Object.values(queue.sections).flatMap((cards) => cards.filter((c) => c.kind === "pr").map((c) => c.id)));
     const shown = await page.evaluate<string[]>(`[...document.querySelectorAll(".queue [data-id]")].map((r) => r.dataset.id)`);
     const pr = shown.find((id) => prs.has(id));
@@ -146,6 +177,7 @@ try {
   await page.locator('.side nav[aria-label="Settings"] a.side-item[aria-current="page"]').waitFor({ timeout: 10_000 });
   step("Settings… opened #/settings");
 
+  closing = true;
   await app.close();
   const code = await exited;
   assert.equal(code, 0, `exit code ${code}`);
