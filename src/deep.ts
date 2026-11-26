@@ -60,8 +60,8 @@ The review replaces reading the diff cold: a short top, then the change in steps
 - **goal:** what the author says this achieves, as theirs ("The author's goal: …"), for someone who doesn't know this
   code. Define a term the reader may not know in a few words the first time it appears.
 - **change:** how behaviour changes, before to after, in one or two sentences: what happens, to what, when.
-- **lean** and **lean_why:** \`ship\`, \`fix first\` or \`rethink\`, and the one line that decides it, naming the step it
-  comes from. Never \`ship\` while a premise about necessity, safety or correctness fails; \`rethink\` when the change
+- **lean** and **lean_why:** \`ship\`, \`fix first\` or \`rethink\`, and the one line that decides it (the page links its step, so don't name it).
+  Never \`ship\` while a premise about necessity, safety or correctness fails; \`rethink\` when the change
   shouldn't exist as written.
 - **caveat:** at most one uncertainty about the whole change (say, whether its stated cause is the real one) and the
   evidence that would settle it; "" when there is none.
@@ -124,7 +124,7 @@ export const DEEP_SCHEMA = obj({
   intent_from: { enum: ["stated", "inferred", "missing"] },
   change: str(300, "How behaviour changes, before to after."),
   lean: { enum: ["ship", "fix first", "rethink"] },
-  lean_why: str(180, "The one line that decides it, naming its step."),
+  lean_why: str(180, "The one line that decides it."),
   caveat: str(240, "One uncertainty about the whole change and what would settle it, or empty."),
   steps: items(
     6,
