@@ -1033,7 +1033,7 @@ test(
     t.desk.sessions.guardMs = 60_000; // the test looks itself, below
     const l = lines(S.desk, m.work, Date.now());
     // The app's process for it, idle at the end of its turn: a stand-in the desk can stop.
-    const app = spawn("sleep", ["60"], { stdio: "ignore" });
+    const app = spawn("sleep", ["600"], { stdio: "ignore" });
     c.after(() => {
       app.kill("SIGKILL");
     });
@@ -1074,7 +1074,7 @@ test(
     await until(view, (x) => lastSaid(x) === "On it: Open a PR");
     assert.ok(t.logged.some((x) => x.startsWith(`sessions: talking to ${S.desk} in ${m.work} (took it over from process ${app.pid})`)));
     // The app started it again meanwhile: the desk lets go rather than be a second writer.
-    const back = spawn("sleep", ["60"], { stdio: "ignore" });
+    const back = spawn("sleep", ["600"], { stdio: "ignore" });
     c.after(() => {
       back.kill("SIGKILL");
     });
@@ -1086,6 +1086,7 @@ test(
     });
     // Only a take-over is guarded: this message went to the desk's own process, so nothing stops it.
     assert.equal(host.closed, false);
+    t.desk.sessions.guardMs = 0;
     await run(t.desk.sessions.guard(host));
     assert.deepEqual([host.closed, host.error], [true, "Claude picked it up again: answer it there."]);
     assert.equal((await view()).live, null);
