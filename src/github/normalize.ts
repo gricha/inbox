@@ -105,6 +105,7 @@ export const RAW_NODE = Schema.Struct({
   headRepository: Schema.optionalKey(Schema.NullOr(Schema.Struct({ nameWithOwner: Schema.String }))),
   reviewDecision: Schema.optionalKey(Schema.NullOr(Schema.String)),
   mergedBy: Schema.optionalKey(Schema.NullOr(Schema.Struct({ login: Schema.String }))),
+  autoMergeRequest: Schema.optionalKey(Schema.NullOr(Schema.Struct({ enabledAt: Schema.NullOr(Schema.String) }))),
   files: Schema.optionalKey(Schema.NullOr(conn(Schema.Struct({ path: Schema.String })))),
   mergeable: Schema.optionalKey(Schema.String),
   checks: Schema.optionalKey(
@@ -301,6 +302,7 @@ export function normalize(n: RawNode, now = new Date().toISOString()): Item {
     ...(optional.length > 0 && { checks_optional: optional }),
     ...(mergeMethod && { merge_method: mergeMethod }),
     ...(n.authorAssociation !== undefined && { author_can_merge: collaborator(n.authorAssociation) }),
+    ...(n.autoMergeRequest !== undefined && { auto_merge: n.autoMergeRequest !== null }),
     ...("viewerPermission" in n.repository && { can_merge: MERGERS.has(n.repository.viewerPermission ?? "") }),
     ...("viewerPermission" in n.repository && { maintains: MAINTAINERS.has(n.repository.viewerPermission ?? "") }),
     review_requests: (n.reviewRequests?.nodes ?? [])

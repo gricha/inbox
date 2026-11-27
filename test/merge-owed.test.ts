@@ -48,9 +48,21 @@ test("the merge is yours: approved by you, its author can't merge it, nobody hol
     false,
     "a teammate merges their own, even where you maintain",
   );
-  const bot = { author: "dependabot", author_can_merge: false, head_repo: "acme/api" };
+  const bot = { author: "dependabot", author_bot: true, author_can_merge: false, head_repo: "acme/api", requester: "" };
   assert.equal(mergeOwed(approvedByMe(1, { ...bot, maintains: true }), "me"), true, "a bot's branch in a repo you maintain");
-  assert.equal(mergeOwed(approvedByMe(1, { ...bot, maintains: false }), "me"), false, "a bot's branch where you only have write access");
+  // The bot pushed its own branch and never merges: a person who approved it has to, though they only have write access.
+  assert.equal(
+    mergeOwed(approvedByMe(1, { ...bot, maintains: false }), "me"),
+    true,
+    "a dependency bot's branch where you have write access",
+  );
+  assert.equal(
+    mergeOwed(approvedByMe(1, { ...bot, maintains: false, requester: "@dana" }), "me"),
+    false,
+    "a bot's opened for a teammate: theirs to merge",
+  );
+  assert.equal(mergeOwed(approvedByMe(1, { ...bot, auto_merge: true }), "me"), false, "auto-merge on: GitHub merges it");
+  assert.equal(mergeOwed(approvedByMe(1, { auto_merge: true }), "me"), false, "auto-merge on, from a fork too");
   assert.equal(mergeOwed(approvedByMe(1, { ...bot, maintains: true, review_decision: "none" }), "me"), true, "a repo that needs no review");
   assert.equal(mergeOwed(approvedByMe(1, { ...bot, maintains: true, author: "me" }), "me"), false, "your own isn't owed");
   const o = { mine: false, unasked: false, askedYou: false, waitingOn: [] };

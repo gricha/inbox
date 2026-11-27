@@ -79,6 +79,7 @@ export interface Item extends Head {
   merge_method?: "MERGE" | "SQUASH" | "REBASE"; // the repo's default merge method for you; PRs you authored only
   author_can_merge?: boolean; // its author has a say on the repo (OWNER, MEMBER or COLLABORATOR); PRs only, absent on items stored before it was fetched
   can_merge?: boolean; // you have write access to its repo; PRs only, absent on items stored before it was fetched
+  auto_merge?: boolean; // auto-merge is on: GitHub merges it once it's ready; PRs only, absent likewise
   maintains?: boolean; // you maintain or administer its repo: a PR its author can't merge is yours even from a branch in it (mergeOwed); PRs only, absent likewise
   review_requests: { reviewer: string; type: "user" | "team"; codeowner: boolean; bot?: boolean }[]; // team reviewer = slug; bot: a GitHub App
   review_requests_hidden?: number; // requests whose reviewer GitHub doesn't show you (a team you can't see): still someone asked
@@ -190,7 +191,7 @@ export interface Signals {
     requested_hours: number;
     reviewed: boolean;
     review_state: ReviewState | "none"; // your latest review
-    merge_owed: boolean; // mergeOwed(): you approved someone else's PR its author can't merge, from a fork or in a repo you maintain
+    merge_owed: boolean; // mergeOwed(): you approved someone else's PR its author can't merge: a fork's, a bot's for nobody, or in a repo you maintain
     reviewed_hours: number;
     pushed_since_review: boolean; // commits after your latest review
     commented: boolean;

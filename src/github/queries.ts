@@ -52,7 +52,7 @@ const REVIEWER = "__typename ... on User { login } ... on Team { slug } ... on B
 
 const PR = `${COMMON}
   isDraft body additions deletions changedFiles baseRefName baseRepository { defaultBranchRef { name } } headRefName headRepository { nameWithOwner }
-  reviewDecision authorAssociation mergedBy { login }
+  reviewDecision authorAssociation mergedBy { login } autoMergeRequest { enabledAt }
   repository { viewerPermission }
   files(first: 50) { nodes { path } }
   reviewRequests(first: 30) { nodes { asCodeOwner requestedReviewer { ${REVIEWER} } } }
