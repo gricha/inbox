@@ -282,6 +282,23 @@ test("a deep review's steps keep only this diff's hunks, become the Review tab's
     both.notes.map((n) => n.flag),
     ["blocker", "nit"],
   );
+  // A file's own hunks stay in line order, whatever its notes weigh: the diff can't draw a file backwards.
+  const two = [
+    {
+      path: "api.py",
+      previous_path: null,
+      status: "modified" as const,
+      additions: 2,
+      deletions: 0,
+      patch: "@@ -10,0 +11 @@\n+a\n@@ -30,0 +32 @@\n+b",
+    },
+  ];
+  const later = { kind: "issue" as const, text: "t", ask: "", at: "api.py:32", evidence: "" };
+  const g = deepGuide({ ...deep, steps: [{ title: "Docs", why: "w", hunks: ["h2", "h1"], notes: [later] }] }, two, null);
+  assert.deepEqual(
+    g.guide?.steps[0]?.hunks.map((h) => h.id),
+    ["h1", "h2"],
+  );
 });
 
 test("a deep review's grade is held to its own reasons: low with a data, security or irreversible consequence is medium", () => {

@@ -333,7 +333,18 @@ export const deepGuide = (deep: DeepReview, files: ReviewFile[], ai: AiReview | 
       });
       return on ? WEIGHT[on.kind] : Object.keys(WEIGHT).length;
     };
-    return { title: s.title, why: s.why, notes, hunks: s.hunks.toSorted((a, b) => weight(a) - weight(b)) };
+    // A file leads by its weightiest hunk; within it, hunks stay in line order, since the diff can't draw a file backwards.
+    const at = (id: string) => hunks.findIndex((x) => x.id === id);
+    const fileOf = (id: string) => path.get(id) ?? "";
+    const lead = new Map<string, number>();
+    for (const id of s.hunks) lead.set(fileOf(id), Math.min(lead.get(fileOf(id)) ?? Infinity, weight(id)));
+    const order = (id: string) => [lead.get(fileOf(id)) ?? Infinity, at(id)];
+    const sorted = s.hunks.toSorted((a, b) => {
+      const [wa, ia] = order(a);
+      const [wb, ib] = order(b);
+      return wa! - wb! || ia! - ib!;
+    });
+    return { title: s.title, why: s.why, notes, hunks: sorted };
   });
   const named = new Set(steps.flatMap((s) => s.hunks));
   const notes: ReviewNote[] = steps.flatMap((s) =>
