@@ -62,6 +62,7 @@ test("the merge is yours: approved by you, its author can't merge it, nobody hol
     "a bot's opened for a teammate: theirs to merge",
   );
   assert.equal(mergeOwed(approvedByMe(1, { ...bot, auto_merge: true }), "me"), false, "auto-merge on: GitHub merges it");
+  assert.equal(mergeOwed(approvedByMe(1, { ...bot, maintains: false }), "me", "@dana"), false, "the desk read it as opened for a teammate");
   assert.equal(mergeOwed(approvedByMe(1, { auto_merge: true }), "me"), false, "auto-merge on, from a fork too");
   assert.equal(mergeOwed(approvedByMe(1, { ...bot, maintains: true, review_decision: "none" }), "me"), true, "a repo that needs no review");
   assert.equal(mergeOwed(approvedByMe(1, { ...bot, maintains: true, author: "me" }), "me"), false, "your own isn't owed");

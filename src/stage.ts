@@ -31,10 +31,11 @@ export const reviewOptional = (it: Item): boolean =>
 // (auto-merge). In a repo you maintain that's any such PR; elsewhere one from a fork, or a bot's that nobody asked it to open
 // (a dependency bump): a branch in the repo itself was pushed by someone who can merge it, unless a bot pushed it, and a
 // bot never merges its own. Your approval must be your latest verdict, and nobody else may hold it.
-export function mergeOwed(it: Item, me: string): boolean {
+// `forWhom`: who the desk read a bot's PR as opened for (attributionOf()), when it has; else the PR's own line.
+export function mergeOwed(it: Item, me: string, forWhom = it.requester ?? ""): boolean {
   if (it.kind !== "pr" || it.state !== "open" || it.draft || it.can_merge === false || lc(it.author) === lc(me)) return false;
   if (it.author_can_merge !== false || it.auto_merge) return false;
-  const botsOwn = it.author_bot && !it.requester; // a bot's opened for nobody: nobody but a reviewer merges it
+  const botsOwn = it.author_bot && !forWhom; // a bot's opened for nobody: nobody but a reviewer merges it
   if (!it.maintains && !botsOwn && (it.head_repo === undefined || lc(it.head_repo) === lc(it.repo))) return false;
   const mine = it.reviews.findLast((r) => lc(r.author) === lc(me) && r.state !== "commented" && r.state !== "pending");
   return mine?.state === "approved" && !verdicts(it, it.author).changes_by.length && it.review_decision !== "required";

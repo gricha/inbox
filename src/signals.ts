@@ -389,7 +389,7 @@ export function analyze(item: Item, ctx: Context, cfg: Config, now: Date, read?:
       review_state: myReview?.state ?? "none",
       reviewed_hours: hours(myReview?.at ?? null),
       pushed_since_review: pushedSinceReview,
-      merge_owed: !yours && mergeOwed(item, ctx.me),
+      merge_owed: !yours && mergeOwed(item, ctx.me, attribution?.person),
       commented: item.comments.some((c) => isMe(c.author)) || myReviews.length > 0,
       last_action_hours: hours(lastAction),
       new_activity: Boolean(lastAction && others && others > lastAction),
