@@ -304,6 +304,8 @@ const LANDED = 3 * 24 * HOUR; // a PR in Merging that merged or closed stays the
 const RESOLVED_SHOWN = 24 * HOUR; // Resolved lists the last day
 const MAX_LINE = 300; // a hand-back's why, a note, a hand-off's why
 const UNASKED = "nobody's asked to review it: add reviewers";
+// Why a merge that's yours is on top of your desk whatever your rules say: its author can't merge it (mergeOwed()).
+const owedWhy = (author: string) => `yours to merge: ${author} can't`;
 const UNASKED_AFTER = 10 / 60; // hours: a workflow or CODEOWNERS asks someone within moments of a PR opening or going ready
 const MAX_FROM = 60; // which task sends it, as an inquiry's from
 const MAX_REPLY = 5_000;
@@ -1877,6 +1879,16 @@ export class Desk {
       if (quiet || ![...boards.values()].some((b) => b.result.placements.has(it.id))) continue;
       raise(it.id, UNASKED);
     }
+    // A merge that's yours (mergeOwed()) and ready, green with no conflict, needs you whatever your rules say: one they hide
+    // (a bot's PR, say) is on top of your desk. One that isn't ready stays where they put it.
+    for (const e of entries.values()) {
+      const it = e.item;
+      if (!e.analysis.signals.me.merge_owed || e.inflight || e.status !== "active" || e.resolved || needs.has(it.id)) continue;
+      if (it.ci !== "green" || it.mergeable === "conflict") continue;
+      const p = best.get(it.id);
+      if (p && p.bucket !== "hide") continue;
+      raise(it.id, owedWhy(it.author));
+    }
     // A waiting step is on no list: its chain's head carries it.
     for (const id of after.head.keys()) {
       best.delete(id);
@@ -2033,7 +2045,7 @@ export class Desk {
     const st = stage(it, me.author ? this.me() : it.author);
     // Back on top of your desk; your agent's hand-back says so where its stage would be, as no heading over its row does.
     const back = !e.inflight && snap.needs.has(it.id);
-    const handed = back && snap.needs.get(it.id) !== UNASKED;
+    const handed = back && snap.needs.get(it.id) !== UNASKED && snap.needs.get(it.id) !== owedWhy(it.author);
     const shown = handed
       ? "handed back"
       : e.rebasing
@@ -4060,7 +4072,9 @@ export class Desk {
   raised(snap: Snapshot, id: string): string | null {
     const need = snap.needs.get(id);
     if (need === undefined) return null;
-    return need === UNASKED ? "it's your ready PR nobody's asked to review" : "your agent handed it back to you";
+    if (need === UNASKED) return "it's your ready PR nobody's asked to review";
+    const it = snap.entries.get(id)?.item;
+    return it && need === owedWhy(it.author) ? "it's yours to merge, and nobody else will" : "your agent handed it back to you";
   }
 
   // A PR's pre-review starts as opening it would, not generate(): an agent may add many at once, and the pump keeps to review.at_once.

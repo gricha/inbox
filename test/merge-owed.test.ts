@@ -97,3 +97,32 @@ test("a merge you owe isn't resolved by your approval, Done puts it away, and it
   runSync(t.desk.act("api#66", "inflight"));
   assert.equal(card("api#66").inflight, true, "handed off: Merging has it");
 });
+
+test("a dependency bot's PR you approved and must merge is on your desk once it's ready, though the rules hide bot PRs", async (c) => {
+  const bump = approvedByMe(70, {
+    author: "dependabot",
+    author_bot: true,
+    head_repo: "acme/api",
+    requester: "",
+    maintains: false,
+    can_merge: true,
+  });
+  const red = approvedByMe(71, { ...bump, number: 71, id: "acme/api#71", url: "https://github.com/acme/api/pull/71", ci: "red" });
+  const writer = { ...refuseWrites(), approve: () => Effect.succeed({ url: "" }) };
+  const t = await setup([bump, red], { builtIns: true, desk: { writer } });
+  c.after(t.cleanup);
+  const route = t.gh.route;
+  t.gh.route = (q) => (q.includes("review-requested:@me") ? ["acme/api#70", "acme/api#71"] : route(q));
+  await run(t.desk.sync());
+  const q = await run(t.desk.queue());
+  const shown = [...q.inbox.urgent, ...q.inbox.standard, ...q.inbox.fyi];
+  const row = shown.find((x) => x.id === "acme/api#70");
+  assert.equal(row?.why, "yours to merge: dependabot can't", "a bot never merges its own: it's on your desk");
+  assert.equal(row?.cta, "handoff");
+  assert.notEqual(row?.stage, "handed back", "nobody handed it back");
+  assert.equal(
+    shown.some((x) => x.id === "acme/api#71"),
+    false,
+    "one that isn't ready stays where your rules put it",
+  );
+});
